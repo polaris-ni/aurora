@@ -49,14 +49,14 @@ struct ClipboardOffer {
 /// `ClipboardWriteFailed` | | 本平台无剪贴板实现 | `GeneralNotSupported` | |
 /// 图像尺寸超限或像素缓冲与维度不一致（调用方参数错） | `GeneralInvalidArgument` | | 可访问但当前没有文本 / 图像 |
 /// `Ok("")` / `Ok(空 Image)`——**空内容不是失败** |
-/// | 富格式：本平台没有该 MIME 的读写机制 | `ClipboardFormatUnsupported`（category platform、
-/// `retryable = false`——机制缺失是稳态，重试无益） |
+/// | 富格式：本平台没有该 MIME 的读写机制 | `ClipboardFormatUnsupported`（domain clipboard、kind
+/// unsupported、`retryable = false`——机制缺失是稳态，重试无益） |
 /// | 富格式：格式未写入 / 载荷里没有可落成文件的条目 | `Ok(空值)`——空内容同样不是失败 |
 /// | 惰性要约不合法（`formats` 为空或 `provide` 为空回调） | `GeneralInvalidArgument` |
-/// | 惰性提供：回调返回 `Error`，或回调为空而该格式被真正请求 | `ClipboardProviderFailed`（category
-/// platform、`retryable = false`——同一笔数据是否重试由应用决定，库不代做重试） |
-/// | 变更监听：本平台无监听机制（注册即失败，**不谎报**） | `ClipboardListenUnsupported`（category
-/// platform、`retryable = false`——机制缺失是稳态） |
+/// | 惰性提供：回调返回 `Error`，或回调为空而该格式被真正请求 | `ClipboardProviderFailed`（domain
+/// clipboard、kind io、`retryable = false`——同一笔数据是否重试由应用决定，库不代做重试） |
+/// | 变更监听：本平台无监听机制（注册即失败，**不谎报**） | `ClipboardListenUnsupported`（domain
+/// clipboard、kind unsupported、`retryable = false`——机制缺失是稳态） |
 ///
 /// 空文本与空图像是契约内的 no-op：不触碰剪贴板、保留既有内容，返回 `Ok`。富格式同口径：
 /// `set_payload` 写空字节、`set_files` 写空清单、`set_html` 写空串都为 no-op，保留既有内容。

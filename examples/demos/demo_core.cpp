@@ -122,7 +122,7 @@ auto demo_log_level(au::LogLevel level) -> void {
 auto demo_diagnostics() -> void {
     emit("\n--- Diagnostic collection and degradation (bridged to stderr, one JSON per line)---");
 
-    // 无 code → 退化为 Warning / General，桥接 WRN 级。
+    // 无 code → 退化为 Warning / General / Internal，桥接 WRN 级。
     au::Diagnostics::warn("Font family lacks the requested weight, fell back to Regular", "demo_core.cpp");
     // code 命中 errors.toml（severity=error）→ 桥接 ERR 级；降级语义 = 非法输入替换为安全默认值。
     au::Diagnostics::degraded("Layout constraint width is negative, clamped to 0", "demo_core.cpp",
@@ -131,7 +131,7 @@ auto demo_diagnostics() -> void {
     const auto recent = au::Diagnostics::get_last_diagnostics();
     emit("Diagnostics in the ring buffer: ", recent.size());
     for (const auto &item : recent) {
-        emit("  severity=", item.severity_str(), " category=", item.category_str(),
+        emit("  severity=", item.severity_str(), " domain=", item.domain_str(), " kind=", item.kind_str(),
              " code=", item.code.empty() ? std::string_view{"<empty>"} : std::string_view{item.code});
     }
     emit("Note: both diagnostics were emitted without aborting - degrade, not terminate, as designed.");

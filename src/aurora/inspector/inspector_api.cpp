@@ -272,7 +272,8 @@ auto Inspector::validate(const Node &root) -> std::vector<Diagnostic> {
     if (!result) {
         Diagnostic d;
         d.severity = ErrorSeverity::Error;
-        d.category = ErrorCategory::General;
+        d.domain = ErrorDomain::General;
+        d.kind = ErrorKind::Internal;
         d.message = result.error().message;
         d.where = result.error().where;
         d.code = result.error().code;

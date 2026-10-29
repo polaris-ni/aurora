@@ -203,7 +203,7 @@ class WebView : public Widget, public WebViewProps {
     auto detach_from_host() -> void;
 
     /// @brief 进入降级态并上报一次诊断（幂等：同一次挂载只报一条）。
-    /// @param code 冻结 slug（驱动 severity / category 表注入）。
+    /// @param code 冻结 slug（驱动 severity / domain / kind 表注入）。
     /// @param detail 人类可读的原因片段。
     auto enter_degraded(std::string_view code, std::string_view detail) -> void;
 

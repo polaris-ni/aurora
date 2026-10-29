@@ -49,7 +49,7 @@ auto make_detail(ErrorCode code, std::string text) -> Error {
 
 // `general-invalid-argument` 的表模板是「Invalid argument supplied」，没有 `{detail}` 槽位：这类错误走
 // 模板渲染等于把「哪一项不对」整段丢掉，而注册表拒绝入参时调用方唯一需要的就是那一段。故按覆盖 message
-// 的重载构造——severity/category/retryable 仍来自表，只有文本由调用方给全。
+// 的重载构造——severity/domain/kind/retryable 仍来自表，只有文本由调用方给全。
 auto make_invalid(std::string_view text) -> Error {
     return make_error(ErrorCode::GeneralInvalidArgument, std::string{text});
 }

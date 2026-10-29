@@ -22,6 +22,7 @@
 #include <iterator>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <unordered_set>
 #include <vector>
 
@@ -40,42 +41,154 @@ auto err(const std::string &msg) -> void { std::cerr << "[gen_error_codes] " << 
 struct ErrorEntry {
     std::string enum_name;
     std::string slug;
-    std::string category;
+    std::string domain;
+    std::string kind;
     std::string severity;
     bool retryable = false;
     std::string message;
     std::string hint;
 };
 
-// The order of category / severity is the underlying order of the generated enum; append new entries at the end.
+// The order of domain / kind / severity is the underlying order of the generated enums; append new values at the end.
 // constexpr std::array is used instead of C arrays: avoids C-style array warnings and satisfies constant global
 // naming and bounds checking. The AURORA_ prefix satisfies the global-constant naming rule (GlobalConstantPrefix).
-constexpr std::array<const char *, 11> AURORA_CATEGORIES = {
-    "general",    "layout",   "widget",  "render",     "io",         "validation",
-    "navigation", "platform", "runtime", "generation", "diagnostic",
+//
+// domain answers "which subsystem do I go look in", kind answers "what layer broke and what action follows". They are
+// orthogonal: the same domain spreads over several kinds and vice versa, so neither array may be derived from the
+// other. The declaration order of AURORA_DOMAINS is the order the generated enum (and therefore the toml entry order)
+// follows; the declaration order of AURORA_KINDS doubles as the classification priority: the first kind whose
+// description matches an error owns it, `internal` last as the fallback.
+constexpr std::array<const char *, 29> AURORA_DOMAINS = {
+    "general",
+    "layout",
+    "widget",
+    "render",
+    "navigation",
+    "validation",
+    "generation",
+    "runtime",
+    "io",
+    "json",
+    "compression",
+    "storage",
+    "i18n",
+    "prefs",
+    "icon",
+    "platform",
+    "window",
+    "dialog",
+    "clipboard",
+    "drag",
+    "menu",
+    "notification",
+    "recent-documents",
+    "webview",
+    "audio",
+    "cli",
+    "net",
+    "http",
+    "ws",
+};
+constexpr std::array<const char *, 12> AURORA_KINDS = {
+    "invalid",   "not-found", "unsupported", "unavailable", "denied", "conflict",
+    "exhausted", "timeout",   "cancelled",   "corrupt",     "io",     "internal",
 };
 constexpr std::array<const char *, 4> AURORA_SEVERITIES = {"info", "warning", "error", "fatal"};
 
 // Doc text emitted next to each enumerator (codespec/CODING_STANDARDS.md §13.5.2 requires one description per
-// enumerator). Kept parallel to the two arrays above: same order, same length, indexed by the same position.
-constexpr std::array<const char *, 11> AURORA_CATEGORY_DOC = {
-    "uncategorized error domain",
+// enumerator). Kept parallel to the value arrays above: same order, same length, indexed by the same position.
+constexpr std::array<const char *, 29> AURORA_DOMAIN_DOC = {
+    "cross-module fallback; no specific subsystem owns the error",
     "layout measurement and constraint errors",
     "widget contract and property errors",
     "painter, font and bitmap rendering errors",
-    "file and stream read/write errors",
-    "input and configuration validation errors",
     "page stack and routing errors",
-    "platform backend and OS integration errors",
-    "runtime environment and lifecycle state errors",
+    "input and configuration validation errors",
     "UI generation (generate_ui) errors",
-    "diagnostics, self-check and degradation errors",
+    "runtime environment and lifecycle state errors",
+    "file and byte-stream read/write errors (generic domain)",
+    "JSON parsing and serialization errors",
+    "compression codec encode/decode errors",
+    "key-value storage backend and record errors",
+    "localization message catalog errors",
+    "preference persistence errors",
+    "icon resource errors (semantic name, glyph, SVG)",
+    "platform backend and OS integration errors (generic domain)",
+    "window lifecycle errors (surface and device)",
+    "platform dialog creation errors",
+    "system clipboard errors",
+    "system drag-and-drop errors",
+    "native menu bar errors",
+    "system notification errors",
+    "system recent-documents projection errors",
+    "native web view interaction and snapshot errors",
+    "audio graph and device errors",
+    "command line argument parsing errors",
+    "network socket layer errors",
+    "HTTP client errors",
+    "WebSocket errors",
+};
+constexpr std::array<const char *, 12> AURORA_KIND_DOC = {
+    "argument or declaration is syntactically invalid or out of range",
+    "name is well formed but the registry, catalog or route table has no such entry",
+    "this build, platform or implementation lacks the capability or format",
+    "a dependency exists but is not usable right now (not ready, closed, removed, degraded fallback)",
+    "permission, policy or credential was refused",
+    "two individually valid declarations or states are mutually exclusive (cycle, duplicate name, replay)",
+    "a limit, capacity, depth, queue or chain length was reached",
+    "the operation did not complete within its deadline",
+    "the caller or the owner cancelled the operation",
+    "input or peer bytes do not match expected shape (parse, magic, version, truncation, protocol)",
+    "a low-level primitive action failed (write, send, recv, connect, listen, bind, system call)",
+    "an invariant broke, an unexpected exception escaped, or no other kind fits",
 };
 constexpr std::array<const char *, 4> AURORA_SEVERITY_DOC = {
     "reserved level; no codespec/errors.toml entry declares it",
     "degraded condition, logged as LogLevel::Warn",
     "failed operation, logged as LogLevel::Error",
     "reserved level; no codespec/errors.toml entry declares it",
+};
+
+// C++ enumerator names for the two kebab-case value lists, spelled out instead of derived by rule.
+// The mapping is not mechanical: `io` becomes `Io` as a domain but `IO` as a kind (the all-caps acronym was chosen
+// deliberately), `i18n` becomes `I18n`, `recent-documents` becomes `RecentDocuments`, `not-found` becomes `NotFound`.
+// A derivation function would bury the `IO` special case as implicit knowledge inside code; parallel arrays keep it
+// grep-able and reviewable, and mirror the DOC arrays' existing convention. capitalize() below therefore stays
+// reserved for ErrorSeverity, whose names are single-segment words with no per-case exceptions.
+constexpr std::array<const char *, 29> AURORA_DOMAIN_NAMES = {
+    "General",
+    "Layout",
+    "Widget",
+    "Render",
+    "Navigation",
+    "Validation",
+    "Generation",
+    "Runtime",
+    "Io",
+    "Json",
+    "Compression",
+    "Storage",
+    "I18n",
+    "Prefs",
+    "Icon",
+    "Platform",
+    "Window",
+    "Dialog",
+    "Clipboard",
+    "Drag",
+    "Menu",
+    "Notification",
+    "RecentDocuments",
+    "Webview",
+    "Audio",
+    "Cli",
+    "Net",
+    "Http",
+    "Ws",
+};
+constexpr std::array<const char *, 12> AURORA_KIND_NAMES = {
+    "Invalid",   "NotFound", "Unsupported", "Unavailable", "Denied", "Conflict",
+    "Exhausted", "Timeout",  "Cancelled",   "Corrupt",     "IO",     "Internal",
 };
 
 // trim / parse_kv / unquote are provided by toml_lines.h (shared with gen_debug_api).
@@ -107,7 +220,7 @@ auto cpp_escape(const std::string &s) -> std::string {
     return out;
 }
 
-// capitalize the first letter (category/severity are single-segment words)
+// capitalize the first letter (ErrorSeverity names are single-segment words, so no per-case exceptions apply)
 auto capitalize(const std::string &s) -> std::string {
     if (s.empty()) {
         return s;
@@ -117,6 +230,20 @@ auto capitalize(const std::string &s) -> std::string {
     return r;
 }
 
+// Locate a kebab value inside a parallel (values, names) pair and return its C++ enumerator name.
+// Returns an empty string when the value is absent, which the callers treat as a hard error: parse_toml rejects
+// such entries before any artifact is written, so the emitter paths are only reached with whitelisted values.
+template <std::size_t N>
+auto cpp_name_for(std::string_view value, const std::array<const char *, N> &values,
+                  const std::array<const char *, N> &names) -> std::string {
+    for (size_t i = 0; i < N; ++i) {
+        if (value == values.at(i)) {
+            return std::string(names.at(i));
+        }
+    }
+    return {};
+}
+
 // Write a parsed key/value into the corresponding ErrorEntry field (extracted to lower parse_toml cognitive
 // complexity).
 auto apply_field(ErrorEntry &e, const std::string &k, const std::string &v) -> void {
@@ -124,8 +251,10 @@ auto apply_field(ErrorEntry &e, const std::string &k, const std::string &v) -> v
         e.enum_name = unquote(v);
     } else if (k == "slug") {
         e.slug = unquote(v);
-    } else if (k == "category") {
-        e.category = unquote(v);
+    } else if (k == "domain") {
+        e.domain = unquote(v);
+    } else if (k == "kind") {
+        e.kind = unquote(v);
     } else if (k == "severity") {
         e.severity = unquote(v);
     } else if (k == "message") {
@@ -171,12 +300,32 @@ auto parse_toml(const std::string &path, std::vector<ErrorEntry> &out) -> bool {
             err("error entry missing enum/slug");
             return false;
         }
-        if (e.category.empty()) {
-            e.category = "general";
+        // domain / kind are hard requirements over a closed value set: an empty or off-list value aborts the run
+        // rather than defaulting. The retired `category` column silently fell back to "general" when omitted, which is
+        // exactly how entries accumulated labels nobody chose; a typo such as `timout` would likewise mint a bogus kind
+        // that no consumer can route on. Fail loudly, write no artifact.
+        if (e.domain.empty() || e.kind.empty()) {
+            err("error entry missing domain/kind: " + e.slug);
+            return false;
+        }
+        if (cpp_name_for(e.domain, AURORA_DOMAINS, AURORA_DOMAIN_NAMES).empty()) {
+            err("error domain is outside the declared list: " + e.domain + " (entry " + e.slug + ")");
+            return false;
+        }
+        if (cpp_name_for(e.kind, AURORA_KINDS, AURORA_KIND_NAMES).empty()) {
+            err("error kind is outside the declared list: " + e.kind + " (entry " + e.slug + ")");
+            return false;
         }
         if (e.severity.empty()) {
             e.severity = "error";
         }
+    }
+    // Zero-value invariant: `ErrorCode{}` is the default sentinel in Error::code_enum and Diagnostic::code_enum, so row
+    // 0 must stay GeneralUnknown. Once entries are ordered by domain that position becomes a property of the data
+    // rather than of history, so it needs a mechanical guard instead of author discipline.
+    if (out.empty() || out.front().enum_name != "GeneralUnknown" || out.front().slug != "general-unknown") {
+        err("first entry must be GeneralUnknown / general-unknown (ErrorCode{} is the default sentinel)");
+        return false;
     }
     // Uniqueness check: both slug and enum identifiers must be globally unique.
     // The ERROR_CATALOG describes slug as a "frozen external contract"; duplicate slugs make slug() lookup hit only
@@ -215,12 +364,23 @@ auto gen_header(const std::vector<ErrorEntry> &e) -> std::string {
          "/// @brief key-value table of error args (message template {key} rendered from it)\n"
          "using ErrorParams = std::unordered_map<std::string, std::string>;\n\n";
 
-    // ErrorCategory
-    o << "/// @brief error domain of a code; the declaration order is the underlying value order.\n"
-         "enum class ErrorCategory : std::uint8_t {\n";
-    for (size_t i = 0; i < std::size(AURORA_CATEGORIES); ++i) {
-        o << "    " << capitalize(AURORA_CATEGORIES.at(i)) << " = " << i << ",   ///< " << AURORA_CATEGORY_DOC.at(i)
-          << "\n";
+    // ErrorDomain / ErrorKind: two orthogonal axes - which subsystem owns it, and what kind of failure it is.
+    o << "/// @brief subsystem an error belongs to; answers \"where do I go look\". The declaration order is the\n"
+         "///        underlying value order and the codespec/errors.toml entry order.\n"
+         "enum class ErrorDomain : std::uint8_t {\n";
+    for (size_t i = 0; i < std::size(AURORA_DOMAINS); ++i) {
+        o << "    " << AURORA_DOMAIN_NAMES.at(i) << " = " << i << ",   ///< " << AURORA_DOMAIN_DOC.at(i) << "\n";
+    }
+    o << "};\n\n";
+
+    o << "/// @brief failure nature of an error; answers \"which layer broke and what action follows\". Orthogonal to\n"
+         "///        ErrorDomain: one domain spreads over several kinds and vice versa. The declaration order doubles\n"
+         "///        as the classification priority -- the first kind whose description matches owns the entry, with\n"
+         "///        Internal last as the fallback -- so a borderline call lands on a fixed rule rather than on the\n"
+         "///        judgement of whoever added the row.\n"
+         "enum class ErrorKind : std::uint8_t {\n";
+    for (size_t i = 0; i < std::size(AURORA_KINDS); ++i) {
+        o << "    " << AURORA_KIND_NAMES.at(i) << " = " << i << ",   ///< " << AURORA_KIND_DOC.at(i) << "\n";
     }
     o << "};\n\n";
 
@@ -255,7 +415,8 @@ auto gen_header(const std::vector<ErrorEntry> &e) -> std::string {
          "    ErrorCode code;                 ///< enumerator of this row\n"
          "    std::string_view ident;         ///< C++ identifier, e.g. \"NavDepthExceeded\" (debug use)\n"
          "    std::string_view slug;          ///< frozen external code, e.g. \"nav-depth-exceeded\"\n"
-         "    ErrorCategory category;         ///< error domain\n"
+         "    ErrorDomain domain;             ///< subsystem to look in\n"
+         "    ErrorKind kind;                 ///< nature of the failure\n"
          "    ErrorSeverity severity;         ///< declared severity\n"
          "    bool retryable;                 ///< whether re-running the operation may succeed\n"
          "    std::string_view message_tpl;   ///< contains {placeholder}\n"
@@ -269,12 +430,13 @@ auto gen_header(const std::vector<ErrorEntry> &e) -> std::string {
     o << "/// @brief one ErrorMeta row per codespec/errors.toml entry, indexed by ErrorCode's underlying value.\n"
          "inline constexpr std::array<ErrorMeta, "
       << e.size() << "> AURORA_ERROR_TABLE = {\n    {\n";
-    for (const auto &[enum_name, slug, category, severity, retryable, message, hint] : e) {
+    for (const auto &[enum_name, slug, domain, kind, severity, retryable, message, hint] : e) {
         o << "        {\n"
           << "            .code = ErrorCode::" << enum_name << ",\n"
           << "            .ident = \"" << cpp_escape(enum_name) << "\",\n"
           << "            .slug = \"" << cpp_escape(slug) << "\",\n"
-          << "            .category = ErrorCategory::" << capitalize(category) << ",\n"
+          << "            .domain = ErrorDomain::" << cpp_name_for(domain, AURORA_DOMAINS, AURORA_DOMAIN_NAMES) << ",\n"
+          << "            .kind = ErrorKind::" << cpp_name_for(kind, AURORA_KINDS, AURORA_KIND_NAMES) << ",\n"
           << "            .severity = ErrorSeverity::" << capitalize(severity) << ",\n"
           << "            .retryable = " << (retryable ? "true" : "false") << ",\n"
           << "            .message_tpl = \"" << cpp_escape(message) << "\",\n"
@@ -293,11 +455,17 @@ auto gen_header(const std::vector<ErrorEntry> &e) -> std::string {
          "constexpr auto slug(ErrorCode c) -> std::string_view {\n"
          "    return AURORA_ERROR_TABLE.at(static_cast<std::size_t>(c)).slug;\n"
          "}\n"
-         "/// @brief error domain of an error code.\n"
+         "/// @brief subsystem an error code belongs to.\n"
          "/// @param[in] c error code to look up.\n"
-         "/// @return declared category.\n"
-         "constexpr auto category(ErrorCode c) -> ErrorCategory {\n"
-         "    return AURORA_ERROR_TABLE.at(static_cast<std::size_t>(c)).category;\n"
+         "/// @return declared domain.\n"
+         "constexpr auto domain(ErrorCode c) -> ErrorDomain {\n"
+         "    return AURORA_ERROR_TABLE.at(static_cast<std::size_t>(c)).domain;\n"
+         "}\n"
+         "/// @brief failure nature of an error code.\n"
+         "/// @param[in] c error code to look up.\n"
+         "/// @return declared kind.\n"
+         "constexpr auto kind(ErrorCode c) -> ErrorKind {\n"
+         "    return AURORA_ERROR_TABLE.at(static_cast<std::size_t>(c)).kind;\n"
          "}\n"
          "/// @brief declared severity of an error code.\n"
          "/// @param[in] c error code to look up.\n"
@@ -324,14 +492,28 @@ auto gen_header(const std::vector<ErrorEntry> &e) -> std::string {
          "    return AURORA_ERROR_TABLE.at(static_cast<std::size_t>(c)).ident;\n"
          "}\n\n";
 
-    // to_string for category/severity (kebab)
+    // to_string for domain/kind/severity (kebab)
     o << "/// @brief kebab-case name of an error domain.\n"
-         "/// @param[in] c category to render.\n"
-         "/// @return declared category name, \"unknown\" for a value outside the enum.\n"
-         "constexpr auto to_string(ErrorCategory c) -> std::string_view {\n"
-         "    switch (c) {\n";
-    for (const auto *const i : AURORA_CATEGORIES) {
-        o << "        case ErrorCategory::" << capitalize(i) << ": return \"" << i << "\";\n";
+         "/// @param[in] d domain to render.\n"
+         "/// @return declared domain name, \"unknown\" for a value outside the enum.\n"
+         "constexpr auto to_string(ErrorDomain d) -> std::string_view {\n"
+         "    switch (d) {\n";
+    for (size_t i = 0; i < std::size(AURORA_DOMAINS); ++i) {
+        o << "        case ErrorDomain::" << AURORA_DOMAIN_NAMES.at(i) << ": return \"" << AURORA_DOMAINS.at(i)
+          << "\";\n";
+    }
+    o << "    }\n    return \"unknown\";\n}\n\n";
+
+    // `io` is both a domain and a kind; the two to_string overloads keep them apart by static type, and the JSON keys
+    // (domain / kind) keep them apart on the wire. domain="io" reads as the generic file/byte-stream domain,
+    // kind="io" as a failed low-level primitive -- the identical spelling is not a claim that one contains the other.
+    o << "/// @brief kebab-case name of an error kind.\n"
+         "/// @param[in] k kind to render.\n"
+         "/// @return declared kind name, \"unknown\" for a value outside the enum.\n"
+         "constexpr auto to_string(ErrorKind k) -> std::string_view {\n"
+         "    switch (k) {\n";
+    for (size_t i = 0; i < std::size(AURORA_KINDS); ++i) {
+        o << "        case ErrorKind::" << AURORA_KIND_NAMES.at(i) << ": return \"" << AURORA_KINDS.at(i) << "\";\n";
     }
     o << "    }\n    return \"unknown\";\n}\n\n";
 
@@ -380,13 +562,15 @@ auto gen_catalog(const std::vector<ErrorEntry> &e) -> std::string {
     o << "# Aurora Error Code Catalog (auto-generated)\n\n"
          "> Generated by `tools/gen/gen_error_codes.cpp` from `codespec/errors.toml`; **do not edit by hand**.\n"
          "> `slug` is the frozen external contract — cross-language/JSON/log consumers must use it; `enum` is the C++ "
-         "identifier and may be renamed freely.\n\n"
-         "| # | enum | slug | category | severity | retryable | message | hint |\n"
-         "|---|------|------|----------|----------|-----------|---------|------|\n";
+         "identifier and may be renamed freely.\n"
+         "> `domain` says which subsystem owns the code, `kind` says what broke there; the two columns are orthogonal, "
+         "so read them as a pair (`storage` + `io` means a failed low-level primitive inside the storage domain).\n\n"
+         "| # | enum | slug | domain | kind | severity | retryable | message | hint |\n"
+         "|---|------|------|--------|------|----------|-----------|---------|------|\n";
     for (size_t i = 0; i < e.size(); ++i) {
         const auto &x = e.at(i);
-        o << "| " << i << " | `" << x.enum_name << "` | `" << x.slug << "` | " << x.category << " | " << x.severity
-          << " | " << (x.retryable ? "true" : "false") << " | " << x.message << " | " << x.hint << " |\n";
+        o << "| " << i << " | `" << x.enum_name << "` | `" << x.slug << "` | " << x.domain << " | " << x.kind << " | "
+          << x.severity << " | " << (x.retryable ? "true" : "false") << " | " << x.message << " | " << x.hint << " |\n";
     }
     o << "\n<!-- count: total " << e.size() << " error codes -->\n";
     return o.str();
@@ -401,7 +585,8 @@ auto gen_api_json(const std::vector<ErrorEntry> &e) -> Json {
         Json o = Json::object();
         o.set("enum", x.enum_name);
         o.set("slug", x.slug);
-        o.set("category", x.category);
+        o.set("domain", x.domain);
+        o.set("kind", x.kind);
         o.set("severity", x.severity);
         o.set("retryable", Json{x.retryable});
         o.set("message", x.message);

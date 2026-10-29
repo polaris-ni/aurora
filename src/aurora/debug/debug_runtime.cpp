@@ -181,16 +181,11 @@ auto diagnostics() -> Json {
     for (const Diagnostic &d : ds) {
         Json e = Json::object();
         e.set("severity", std::string(d.severity_str()));
-        e.set("category", std::string(d.category_str()));
+        e.set("domain", std::string(d.domain_str()));
+        e.set("kind", std::string(d.kind_str()));
         e.set("message", d.message);
         e.set("where", d.where);
         e.set("code", d.code);
-        if (d.fix) {
-            Json f = Json::object();
-            f.set("code", d.fix->code);
-            f.set("description", d.fix->description);
-            e.set("fix", std::move(f));
-        }
         arr.push_back(std::move(e));
     }
     j.set("diagnostics", std::move(arr));

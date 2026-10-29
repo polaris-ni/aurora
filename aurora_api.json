@@ -5569,7 +5569,8 @@
     {
       "enum": "GeneralUnknown",
       "slug": "general-unknown",
-      "category": "general",
+      "domain": "general",
+      "kind": "internal",
       "severity": "error",
       "retryable": false,
       "message": "An unknown error occurred",
@@ -5578,7 +5579,8 @@
     {
       "enum": "GeneralInvalidArgument",
       "slug": "general-invalid-argument",
-      "category": "general",
+      "domain": "general",
+      "kind": "invalid",
       "severity": "error",
       "retryable": false,
       "message": "Invalid argument supplied",
@@ -5587,7 +5589,8 @@
     {
       "enum": "GeneralNotSupported",
       "slug": "general-not-supported",
-      "category": "general",
+      "domain": "general",
+      "kind": "unsupported",
       "severity": "error",
       "retryable": false,
       "message": "Operation not supported",
@@ -5596,7 +5599,8 @@
     {
       "enum": "LayoutNullChild",
       "slug": "layout-null-child",
-      "category": "layout",
+      "domain": "layout",
+      "kind": "invalid",
       "severity": "warning",
       "retryable": false,
       "message": "Layout child widget is null",
@@ -5605,7 +5609,8 @@
     {
       "enum": "LayoutDepthExceeded",
       "slug": "layout-depth-exceeded",
-      "category": "layout",
+      "domain": "layout",
+      "kind": "exhausted",
       "severity": "warning",
       "retryable": false,
       "message": "Layout tree depth exceeded the limit (default {max})",
@@ -5614,7 +5619,8 @@
     {
       "enum": "LayoutInvalidConstraints",
       "slug": "layout-invalid-constraints",
-      "category": "layout",
+      "domain": "layout",
+      "kind": "invalid",
       "severity": "warning",
       "retryable": false,
       "message": "Invalid constraints (e.g. min > max)",
@@ -5623,7 +5629,8 @@
     {
       "enum": "LayoutSizeOutOfConstraints",
       "slug": "layout-size-out-of-constraints",
-      "category": "layout",
+      "domain": "layout",
+      "kind": "invalid",
       "severity": "warning",
       "retryable": false,
       "message": "Computed size out of constraints range",
@@ -5632,7 +5639,8 @@
     {
       "enum": "WidgetUnknownType",
       "slug": "widget-unknown-type",
-      "category": "widget",
+      "domain": "widget",
+      "kind": "not-found",
       "severity": "warning",
       "retryable": false,
       "message": "Unregistered widget type '{type}' encountered during deserialization",
@@ -5641,7 +5649,8 @@
     {
       "enum": "WidgetInvalidProp",
       "slug": "widget-invalid-prop",
-      "category": "widget",
+      "domain": "widget",
+      "kind": "invalid",
       "severity": "warning",
       "retryable": false,
       "message": "Invalid property value: '{prop}'",
@@ -5650,7 +5659,8 @@
     {
       "enum": "WidgetPropConstraintViolated",
       "slug": "widget-prop-constraint-violated",
-      "category": "widget",
+      "domain": "widget",
+      "kind": "conflict",
       "severity": "warning",
       "retryable": false,
       "message": "Property constraint violated (mutually exclusive properties set together)",
@@ -5659,16 +5669,38 @@
     {
       "enum": "WidgetMissingRequiredProp",
       "slug": "widget-missing-required-prop",
-      "category": "widget",
+      "domain": "widget",
+      "kind": "invalid",
       "severity": "warning",
       "retryable": false,
       "message": "Missing required property '{prop}'",
       "hint": "Add the missing required property"
     },
     {
+      "enum": "WidgetDepthExceeded",
+      "slug": "widget-depth-exceeded",
+      "domain": "widget",
+      "kind": "exhausted",
+      "severity": "warning",
+      "retryable": false,
+      "message": "Widget tree depth exceeded the limit (default 64)",
+      "hint": "Usually caused by infinitely recursive Repeater / self-referencing Provider; check rebuild conditions or set_max_depth()"
+    },
+    {
+      "enum": "NotRestorable",
+      "slug": "not-restorable",
+      "domain": "widget",
+      "kind": "unsupported",
+      "severity": "warning",
+      "retryable": false,
+      "message": "Widget not restorable (skipped during serialization/deserialization)",
+      "hint": "Widgets relying on runtime callbacks such as Repeater / Canvas cannot be restored from JSON; use a named factory or State injection"
+    },
+    {
       "enum": "RenderFontLoadFailed",
       "slug": "render-font-load-failed",
-      "category": "render",
+      "domain": "render",
+      "kind": "io",
       "severity": "error",
       "retryable": false,
       "message": "Font load failed: '{path}'",
@@ -5677,7 +5709,8 @@
     {
       "enum": "RenderImageLoadFailed",
       "slug": "render-image-load-failed",
-      "category": "render",
+      "domain": "render",
+      "kind": "io",
       "severity": "error",
       "retryable": false,
       "message": "Image load failed: '{path}'",
@@ -5686,295 +5719,28 @@
     {
       "enum": "RenderInvalidColor",
       "slug": "render-invalid-color",
-      "category": "render",
+      "domain": "render",
+      "kind": "invalid",
       "severity": "error",
       "retryable": false,
       "message": "Invalid color value (e.g. component out of 0-255)",
       "hint": "Check the color component values"
     },
     {
-      "enum": "IOFileNotFound",
-      "slug": "io-file-not-found",
-      "category": "io",
-      "severity": "error",
-      "retryable": false,
-      "message": "File does not exist or cannot be opened: '{path}'",
-      "hint": "Check the file path and permissions"
-    },
-    {
-      "enum": "IOParseFailed",
-      "slug": "io-parse-failed",
-      "category": "io",
-      "severity": "error",
-      "retryable": false,
-      "message": "File parsing failed: '{detail}'",
-      "hint": "Check the file content format"
-    },
-    {
-      "enum": "IOImageDecodeFailed",
-      "slug": "io-image-decode-failed",
-      "category": "io",
-      "severity": "error",
-      "retryable": false,
-      "message": "Image decode failed",
-      "hint": "Check image file validity or use a supported format"
-    },
-    {
-      "enum": "IOImageInvalidDimensions",
-      "slug": "io-image-invalid-dimensions",
-      "category": "io",
-      "severity": "error",
-      "retryable": false,
-      "message": "Invalid image dimensions (width/height is 0 or exceeds the limit)",
-      "hint": "Check image dimensions or use a valid-size resource"
-    },
-    {
-      "enum": "IOImageEncodeFailed",
-      "slug": "io-image-encode-failed",
-      "category": "io",
-      "severity": "error",
-      "retryable": false,
-      "message": "Image encode failed",
-      "hint": "Check image pixel data validity or encoder options (quality/format)"
-    },
-    {
-      "enum": "ValidationFailed",
-      "slug": "validation-failed",
-      "category": "validation",
-      "severity": "warning",
-      "retryable": false,
-      "message": "Validation failed: '{detail}'",
-      "hint": "Check input data validity"
-    },
-    {
-      "enum": "ValidationSchemaMismatch",
-      "slug": "validation-schema-mismatch",
-      "category": "validation",
-      "severity": "warning",
-      "retryable": false,
-      "message": "Schema mismatch",
-      "hint": "Check data structure against the Schema definition"
-    },
-    {
-      "enum": "ValidationTreeTooDeep",
-      "slug": "validation-tree-too-deep",
-      "category": "validation",
-      "severity": "warning",
-      "retryable": false,
-      "message": "UI tree depth exceeded the limit (default {max})",
-      "hint": "Reduce nesting levels or split components"
-    },
-    {
-      "enum": "ValidationUnknownWidget",
-      "slug": "validation-unknown-widget",
-      "category": "validation",
-      "severity": "warning",
-      "retryable": false,
-      "message": "Unknown/unsupported widget type '{type}'",
-      "hint": "Use a known widget type or register a custom type"
-    },
-    {
-      "enum": "ValidationNullChild",
-      "slug": "validation-null-child",
-      "category": "validation",
-      "severity": "warning",
-      "retryable": false,
-      "message": "Child node is null",
-      "hint": "Provide a valid child node or remove the item"
-    },
-    {
-      "enum": "NavDepthExceeded",
-      "slug": "nav-depth-exceeded",
-      "category": "navigation",
-      "severity": "error",
-      "retryable": false,
-      "message": "Navigation stack depth exceeded the limit (default {max})",
-      "hint": "Check the Navigator push loop logic or call set_max_depth()"
-    },
-    {
-      "enum": "NavRouteNotFound",
-      "slug": "nav-route-not-found",
-      "category": "navigation",
-      "severity": "error",
-      "retryable": false,
-      "message": "Route not registered: '{route}'",
-      "hint": "Register the corresponding route or use the default route"
-    },
-    {
-      "enum": "PlatformUnavailable",
-      "slug": "platform-unavailable",
-      "category": "platform",
-      "severity": "error",
-      "retryable": false,
-      "message": "Platform feature unavailable: '{detail}'",
-      "hint": "Check the runtime environment or enable the corresponding backend"
-    },
-    {
-      "enum": "PlatformPermissionDenied",
-      "slug": "platform-permission-denied",
-      "category": "platform",
-      "severity": "error",
-      "retryable": false,
-      "message": "Insufficient permissions: '{detail}'",
-      "hint": "Check file/network permission settings"
-    },
-    {
-      "enum": "PlatformComInitFailed",
-      "slug": "platform-com-init-failed",
-      "category": "platform",
-      "severity": "error",
-      "retryable": false,
-      "message": "COM initialization failed",
-      "hint": "Initialize COM outside the GUI thread or check the runtime environment"
-    },
-    {
-      "enum": "PlatformDialogCreateFailed",
-      "slug": "platform-dialog-create-failed",
-      "category": "platform",
-      "severity": "error",
-      "retryable": false,
-      "message": "Platform dialog creation failed",
-      "hint": "Check the parent window handle or runtime environment"
-    },
-    {
-      "enum": "OsHotkeyRegisterFailed",
-      "slug": "os-hotkey-register-failed",
-      "category": "platform",
-      "severity": "error",
-      "retryable": false,
-      "message": "OS global hotkey registration failed: '{detail}'",
-      "hint": "The key combination may already be grabbed by another process, unsupported on this platform, or the platform backend is unavailable"
-    },
-    {
-      "enum": "NotificationPostFailed",
-      "slug": "notification-post-failed",
-      "category": "platform",
-      "severity": "error",
-      "retryable": false,
-      "message": "System notification could not be posted: '{detail}'",
-      "hint": "The desktop notification service may be unavailable, or the platform backend does not support notifications"
-    },
-    {
-      "enum": "RecentDocumentsProjectionUnsupported",
-      "slug": "recent-documents-projection-unsupported",
-      "category": "platform",
-      "severity": "error",
-      "retryable": false,
-      "message": "OS recent-documents projection is not supported on this platform",
-      "hint": "The platform offers no recent-documents mechanism (Linux) or its bridge is not wired; the in-app RecentDocuments list still works unchanged"
-    },
-    {
-      "enum": "NativeMenuUnsupported",
-      "slug": "native-menu-unsupported",
-      "category": "platform",
-      "severity": "error",
-      "retryable": false,
-      "message": "Native menu bar is not supported on this platform",
-      "hint": "The platform offers no OS-level menu bar mechanism (Linux/macOS/Wasm/Headless) or its bridge is not wired; fall back to the self-drawn MenuBar control"
-    },
-    {
-      "enum": "NativeMenuInstallFailed",
-      "slug": "native-menu-install-failed",
-      "category": "platform",
-      "severity": "error",
-      "retryable": false,
-      "message": "Native menu bar could not be installed: '{detail}'",
-      "hint": "The OS menu mechanism exists but the menu tree could not be attached to the window; check the window handle and menu model"
-    },
-    {
-      "enum": "RuntimeCoroutineException",
-      "slug": "runtime-coroutine-exception",
-      "category": "runtime",
-      "severity": "error",
-      "retryable": true,
-      "message": "Exception thrown during coroutine execution: '{detail}'",
-      "hint": "Check the coroutine body for exception catching or fix the logic"
-    },
-    {
-      "enum": "RuntimeAsyncException",
-      "slug": "runtime-async-exception",
-      "category": "runtime",
-      "severity": "error",
-      "retryable": true,
-      "message": "Exception thrown during async task execution: '{detail}'",
-      "hint": "Check the async callback for exception catching or fix the logic"
-    },
-    {
-      "enum": "RuntimeAsyncTimeout",
-      "slug": "async-timeout",
-      "category": "runtime",
-      "severity": "error",
-      "retryable": true,
-      "message": "Async task timed out (not completed within {ms}ms)",
-      "hint": "Increase the timeout threshold or optimize async task duration"
-    },
-    {
-      "enum": "GenerateUiEmpty",
-      "slug": "generation-ui-empty",
-      "category": "generation",
-      "severity": "error",
-      "retryable": false,
-      "message": "NL-to-UI generation result is empty (no valid widget)",
-      "hint": "Provide a more specific natural language description or constraints"
-    },
-    {
       "enum": "RendererUnavailable",
       "slug": "renderer-unavailable",
-      "category": "platform",
+      "domain": "render",
+      "kind": "unavailable",
       "severity": "error",
       "retryable": false,
       "message": "Requested render backend is unavailable",
       "hint": "Check the backend compile switch (AURORA_BACKEND_D3D11) or fall back to software rendering (RendererPreference::Auto/Software)"
     },
     {
-      "enum": "PrefsNotPersistent",
-      "slug": "prefs-not-persistent",
-      "category": "platform",
-      "severity": "error",
-      "retryable": false,
-      "message": "Preferences is in memory-only mode and cannot be persisted",
-      "hint": "Bind a config file path (Preferences(file)) to gain persistence"
-    },
-    {
-      "enum": "PrefsOpenFailed",
-      "slug": "prefs-open-failed",
-      "category": "platform",
-      "severity": "error",
-      "retryable": false,
-      "message": "Failed to open config file: '{path}'",
-      "hint": "Check the file path and read permissions"
-    },
-    {
-      "enum": "PrefsParseFailed",
-      "slug": "prefs-parse-failed",
-      "category": "platform",
-      "severity": "error",
-      "retryable": false,
-      "message": "Config file JSON parse failed: '{detail}'",
-      "hint": "Check JSON syntax (quotes/commas/brackets) and field types"
-    },
-    {
-      "enum": "PrefsWriteFailed",
-      "slug": "prefs-write-failed",
-      "category": "platform",
-      "severity": "error",
-      "retryable": false,
-      "message": "Config file write failed: '{detail}'",
-      "hint": "Check disk space, whether the directory exists, and target file permissions"
-    },
-    {
-      "enum": "WidgetDepthExceeded",
-      "slug": "widget-depth-exceeded",
-      "category": "widget",
-      "severity": "warning",
-      "retryable": false,
-      "message": "Widget tree depth exceeded the limit (default 64)",
-      "hint": "Usually caused by infinitely recursive Repeater / self-referencing Provider; check rebuild conditions or set_max_depth()"
-    },
-    {
       "enum": "RenderDegraded",
       "slug": "render-degraded",
-      "category": "render",
+      "domain": "render",
+      "kind": "unavailable",
       "severity": "warning",
       "retryable": false,
       "message": "Rendering degraded due to missing resources (e.g. font/image fallback)",
@@ -5983,34 +5749,178 @@
     {
       "enum": "FontMissing",
       "slug": "font-missing",
-      "category": "render",
+      "domain": "render",
+      "kind": "unavailable",
       "severity": "warning",
       "retryable": false,
       "message": "Requested font unavailable, fell back to built-in Bitmap font",
       "hint": "On non-Windows platforms the GDI font fallback chain may differ; ensure the font is registered or use the built-in font"
     },
     {
-      "enum": "SurfaceLost",
-      "slug": "surface-lost",
-      "category": "platform",
-      "severity": "warning",
+      "enum": "NavDepthExceeded",
+      "slug": "nav-depth-exceeded",
+      "domain": "navigation",
+      "kind": "exhausted",
+      "severity": "error",
       "retryable": false,
-      "message": "Surface lost (e.g. window destroyed/device reset)",
-      "hint": "Need to rebuild the Surface to continue rendering; in most cases the framework auto-recovers on next present"
+      "message": "Navigation stack depth exceeded the limit (default {max})",
+      "hint": "Check the Navigator push loop logic or call set_max_depth()"
     },
     {
-      "enum": "NotRestorable",
-      "slug": "not-restorable",
-      "category": "widget",
+      "enum": "NavRouteNotFound",
+      "slug": "nav-route-not-found",
+      "domain": "navigation",
+      "kind": "not-found",
+      "severity": "error",
+      "retryable": false,
+      "message": "Route not registered: '{route}'",
+      "hint": "Register the corresponding route or use the default route"
+    },
+    {
+      "enum": "ValidationFailed",
+      "slug": "validation-failed",
+      "domain": "validation",
+      "kind": "invalid",
       "severity": "warning",
       "retryable": false,
-      "message": "Widget not restorable (skipped during serialization/deserialization)",
-      "hint": "Widgets relying on runtime callbacks such as Repeater / Canvas cannot be restored from JSON; use a named factory or State injection"
+      "message": "Validation failed: '{detail}'",
+      "hint": "Check input data validity"
+    },
+    {
+      "enum": "ValidationSchemaMismatch",
+      "slug": "validation-schema-mismatch",
+      "domain": "validation",
+      "kind": "invalid",
+      "severity": "warning",
+      "retryable": false,
+      "message": "Schema mismatch",
+      "hint": "Check data structure against the Schema definition"
+    },
+    {
+      "enum": "ValidationTreeTooDeep",
+      "slug": "validation-tree-too-deep",
+      "domain": "validation",
+      "kind": "exhausted",
+      "severity": "warning",
+      "retryable": false,
+      "message": "UI tree depth exceeded the limit (default {max})",
+      "hint": "Reduce nesting levels or split components"
+    },
+    {
+      "enum": "ValidationUnknownWidget",
+      "slug": "validation-unknown-widget",
+      "domain": "validation",
+      "kind": "not-found",
+      "severity": "warning",
+      "retryable": false,
+      "message": "Unknown/unsupported widget type '{type}'",
+      "hint": "Use a known widget type or register a custom type"
+    },
+    {
+      "enum": "ValidationNullChild",
+      "slug": "validation-null-child",
+      "domain": "validation",
+      "kind": "invalid",
+      "severity": "warning",
+      "retryable": false,
+      "message": "Child node is null",
+      "hint": "Provide a valid child node or remove the item"
+    },
+    {
+      "enum": "GenerateUiEmpty",
+      "slug": "generation-ui-empty",
+      "domain": "generation",
+      "kind": "invalid",
+      "severity": "error",
+      "retryable": false,
+      "message": "NL-to-UI generation result is empty (no valid widget)",
+      "hint": "Provide a more specific natural language description or constraints"
+    },
+    {
+      "enum": "RuntimeCoroutineException",
+      "slug": "runtime-coroutine-exception",
+      "domain": "runtime",
+      "kind": "internal",
+      "severity": "error",
+      "retryable": true,
+      "message": "Exception thrown during coroutine execution: '{detail}'",
+      "hint": "Check the coroutine body for exception catching or fix the logic"
+    },
+    {
+      "enum": "RuntimeAsyncException",
+      "slug": "runtime-async-exception",
+      "domain": "runtime",
+      "kind": "internal",
+      "severity": "error",
+      "retryable": true,
+      "message": "Exception thrown during async task execution: '{detail}'",
+      "hint": "Check the async callback for exception catching or fix the logic"
+    },
+    {
+      "enum": "RuntimeAsyncTimeout",
+      "slug": "async-timeout",
+      "domain": "runtime",
+      "kind": "timeout",
+      "severity": "error",
+      "retryable": true,
+      "message": "Async task timed out (not completed within {ms}ms)",
+      "hint": "Increase the timeout threshold or optimize async task duration"
+    },
+    {
+      "enum": "IOFileNotFound",
+      "slug": "io-file-not-found",
+      "domain": "io",
+      "kind": "not-found",
+      "severity": "error",
+      "retryable": false,
+      "message": "File does not exist or cannot be opened: '{path}'",
+      "hint": "Check the file path and permissions"
+    },
+    {
+      "enum": "IOParseFailed",
+      "slug": "io-parse-failed",
+      "domain": "io",
+      "kind": "corrupt",
+      "severity": "error",
+      "retryable": false,
+      "message": "File parsing failed: '{detail}'",
+      "hint": "Check the file content format"
+    },
+    {
+      "enum": "IOImageDecodeFailed",
+      "slug": "io-image-decode-failed",
+      "domain": "io",
+      "kind": "corrupt",
+      "severity": "error",
+      "retryable": false,
+      "message": "Image decode failed",
+      "hint": "Check image file validity or use a supported format"
+    },
+    {
+      "enum": "IOImageInvalidDimensions",
+      "slug": "io-image-invalid-dimensions",
+      "domain": "io",
+      "kind": "invalid",
+      "severity": "error",
+      "retryable": false,
+      "message": "Invalid image dimensions (width/height is 0 or exceeds the limit)",
+      "hint": "Check image dimensions or use a valid-size resource"
+    },
+    {
+      "enum": "IOImageEncodeFailed",
+      "slug": "io-image-encode-failed",
+      "domain": "io",
+      "kind": "io",
+      "severity": "error",
+      "retryable": false,
+      "message": "Image encode failed",
+      "hint": "Check image pixel data validity or encoder options (quality/format)"
     },
     {
       "enum": "JsonParseError",
       "slug": "json-parse-error",
-      "category": "io",
+      "domain": "json",
+      "kind": "corrupt",
       "severity": "error",
       "retryable": false,
       "message": "JSON parse failed",
@@ -6019,7 +5929,8 @@
     {
       "enum": "JsonDepthExceeded",
       "slug": "json-depth-exceeded",
-      "category": "io",
+      "domain": "json",
+      "kind": "exhausted",
       "severity": "error",
       "retryable": false,
       "message": "JSON nesting depth exceeds the limit of {max} (line {line}, column {column})",
@@ -6028,7 +5939,8 @@
     {
       "enum": "JsonTypeMismatch",
       "slug": "json-type-mismatch",
-      "category": "io",
+      "domain": "json",
+      "kind": "invalid",
       "severity": "error",
       "retryable": false,
       "message": "JSON type mismatch: expected {expected}, got {actual}",
@@ -6037,7 +5949,8 @@
     {
       "enum": "JsonValueNotSerializable",
       "slug": "json-value-not-serializable",
-      "category": "io",
+      "domain": "json",
+      "kind": "invalid",
       "severity": "error",
       "retryable": false,
       "message": "Value cannot be serialized to JSON: {detail}",
@@ -6046,7 +5959,8 @@
     {
       "enum": "CompressionDataCorrupt",
       "slug": "compression-data-corrupt",
-      "category": "io",
+      "domain": "compression",
+      "kind": "corrupt",
       "severity": "error",
       "retryable": false,
       "message": "Compressed stream is corrupt or truncated: '{detail}'",
@@ -6055,7 +5969,8 @@
     {
       "enum": "CompressionOutputTooLarge",
       "slug": "compression-output-too-large",
-      "category": "io",
+      "domain": "compression",
+      "kind": "exhausted",
       "severity": "error",
       "retryable": false,
       "message": "Decompressed output exceeds the configured limit: '{detail}'",
@@ -6064,7 +5979,8 @@
     {
       "enum": "CompressionUnavailable",
       "slug": "compression-unavailable",
-      "category": "io",
+      "domain": "compression",
+      "kind": "unavailable",
       "severity": "error",
       "retryable": false,
       "message": "Compression operation unavailable: '{detail}'",
@@ -6073,7 +5989,8 @@
     {
       "enum": "StorageBackendUnavailable",
       "slug": "storage-backend-unavailable",
-      "category": "io",
+      "domain": "storage",
+      "kind": "unavailable",
       "severity": "error",
       "retryable": false,
       "message": "Storage backend unavailable (directory not writable or media open failed)",
@@ -6082,7 +5999,8 @@
     {
       "enum": "StorageRecordNotFound",
       "slug": "storage-record-not-found",
-      "category": "io",
+      "domain": "storage",
+      "kind": "not-found",
       "severity": "error",
       "retryable": false,
       "message": "Storage record does not exist",
@@ -6091,7 +6009,8 @@
     {
       "enum": "StorageRecordCorrupt",
       "slug": "storage-record-corrupt",
-      "category": "validation",
+      "domain": "storage",
+      "kind": "corrupt",
       "severity": "error",
       "retryable": false,
       "message": "Storage record corrupt (JSON parse failed or illegal structure)",
@@ -6100,7 +6019,8 @@
     {
       "enum": "StorageTypeMismatch",
       "slug": "storage-type-mismatch",
-      "category": "validation",
+      "domain": "storage",
+      "kind": "invalid",
       "severity": "error",
       "retryable": false,
       "message": "Typed read type mismatch",
@@ -6109,7 +6029,8 @@
     {
       "enum": "StorageEncodingMismatch",
       "slug": "storage-encoding-mismatch",
-      "category": "validation",
+      "domain": "storage",
+      "kind": "invalid",
       "severity": "error",
       "retryable": false,
       "message": "Serialized wire format mismatch",
@@ -6118,799 +6039,18 @@
     {
       "enum": "StorageIoError",
       "slug": "storage-io-error",
-      "category": "io",
+      "domain": "storage",
+      "kind": "io",
       "severity": "error",
       "retryable": false,
       "message": "Storage underlying I/O failed",
       "hint": "Check disk space/permissions; rename failure may be a cross-volume move, use a same-volume path"
     },
     {
-      "enum": "AudioGraphCycle",
-      "slug": "audio-graph-cycle",
-      "category": "validation",
-      "severity": "error",
-      "retryable": false,
-      "message": "Audio graph connection would create a cycle ({src} -> {dst})",
-      "hint": "Remove the back-edge; the audio graph must remain acyclic (DAG)"
-    },
-    {
-      "enum": "AudioEdgeNotFound",
-      "slug": "audio-edge-not-found",
-      "category": "validation",
-      "severity": "error",
-      "retryable": false,
-      "message": "Audio connection does not exist and cannot be disconnected",
-      "hint": "Connect the nodes first; connect() result is the authoritative edge state"
-    },
-    {
-      "enum": "AudioContextClosed",
-      "slug": "audio-context-closed",
-      "category": "runtime",
-      "severity": "error",
-      "retryable": false,
-      "message": "AudioContext is closed; audio operations are no longer available",
-      "hint": "Create a new AudioContext; close() is terminal"
-    },
-    {
-      "enum": "AudioParamInvalid",
-      "slug": "audio-param-invalid",
-      "category": "validation",
-      "severity": "error",
-      "retryable": false,
-      "message": "Invalid audio parameter automation ({reason})",
-      "hint": "Check times (non-negative, non-decreasing), exponential ramp must not cross zero, time_constant > 0"
-    },
-    {
-      "enum": "AudioBufferInvalid",
-      "slug": "audio-buffer-invalid",
-      "category": "validation",
-      "severity": "error",
-      "retryable": false,
-      "message": "Invalid audio buffer ({reason})",
-      "hint": "Ensure sample_rate > 0, channels in {1,2} and samples non-empty before playback"
-    },
-    {
-      "enum": "AudioDeviceUnavailable",
-      "slug": "audio-device-unavailable",
-      "category": "platform",
-      "severity": "warning",
-      "retryable": true,
-      "message": "Audio device unavailable ({reason}); running in silent mode",
-      "hint": "The audio graph keeps running and drops samples; build with AURORA_ENABLE_AUDIO and check the platform device"
-    },
-    {
-      "enum": "AudioRecordingFailed",
-      "slug": "audio-recording-failed",
-      "category": "io",
-      "severity": "error",
-      "retryable": true,
-      "message": "Audio recording failed: {reason}",
-      "hint": "Check the output path and permissions; capture device availability is reported separately as audio-device-unavailable"
-    },
-    {
-      "enum": "CliSpecInvalid",
-      "slug": "cli-spec-invalid",
-      "category": "validation",
-      "severity": "error",
-      "retryable": false,
-      "message": "Invalid command spec: {reason}",
-      "hint": "Fix the CommandSpec/OptionSchema declaration: names must be non-empty and unique, enum kinds must list choices"
-    },
-    {
-      "enum": "CliUnknownOption",
-      "slug": "cli-unknown-option",
-      "category": "validation",
-      "severity": "error",
-      "retryable": false,
-      "message": "Unknown option '{option}' for command '{command}'",
-      "hint": "Check the spelling, or run with --help to list the options accepted by this command"
-    },
-    {
-      "enum": "CliUnknownSubcommand",
-      "slug": "cli-unknown-subcommand",
-      "category": "validation",
-      "severity": "error",
-      "retryable": false,
-      "message": "Unknown subcommand '{subcommand}' for command '{command}'",
-      "hint": "Pick one of the subcommands listed in --help for this command"
-    },
-    {
-      "enum": "CliMissingSubcommand",
-      "slug": "cli-missing-subcommand",
-      "category": "validation",
-      "severity": "error",
-      "retryable": false,
-      "message": "Command '{command}' requires a subcommand",
-      "hint": "Pass one of the subcommands listed in --help before any options"
-    },
-    {
-      "enum": "CliMissingValue",
-      "slug": "cli-missing-value",
-      "category": "validation",
-      "severity": "error",
-      "retryable": false,
-      "message": "Option '{option}' requires a value",
-      "hint": "Pass the value inline as --name=value or as a following token; flags that take no value must be declared Bool with arity 0"
-    },
-    {
-      "enum": "CliInvalidValue",
-      "slug": "cli-invalid-value",
-      "category": "validation",
-      "severity": "error",
-      "retryable": false,
-      "message": "Value '{value}' is not a valid {kind} for option '{option}'",
-      "hint": "Check the literal syntax expected by the declared kind (see the value hint in --help)"
-    },
-    {
-      "enum": "CliChoiceInvalid",
-      "slug": "cli-choice-invalid",
-      "category": "validation",
-      "severity": "error",
-      "retryable": false,
-      "message": "Value '{value}' is not one of the allowed choices for option '{option}'",
-      "hint": "Choices are listed in the option's help entry; matching is case-sensitive"
-    },
-    {
-      "enum": "CliRangeViolated",
-      "slug": "cli-range-violated",
-      "category": "validation",
-      "severity": "error",
-      "retryable": false,
-      "message": "Value '{value}' for option '{option}' is outside [{min}, {max}]",
-      "hint": "Clamp or widen the bound declared on the option"
-    },
-    {
-      "enum": "CliArityViolated",
-      "slug": "cli-arity-violated",
-      "category": "validation",
-      "severity": "error",
-      "retryable": false,
-      "message": "Option '{option}' expects between {min} and {max} values, got {actual}",
-      "hint": "Adjust the number of repetitions/tokens, or relax the declared arity"
-    },
-    {
-      "enum": "CliMissingRequired",
-      "slug": "cli-missing-required",
-      "category": "validation",
-      "severity": "error",
-      "retryable": false,
-      "message": "Required option '{option}' is missing for command '{command}'",
-      "hint": "Pass the option, or declare a default_value so it becomes optional"
-    },
-    {
-      "enum": "CliTooManyPositionals",
-      "slug": "cli-too-many-positionals",
-      "category": "validation",
-      "severity": "error",
-      "retryable": false,
-      "message": "Too many positional arguments for command '{command}': unexpected extra '{value}'",
-      "hint": "Declare the extra slot in the positional schema, or pass it after '--' to treat it as trailing input"
-    },
-    {
-      "enum": "CliConflictViolated",
-      "slug": "cli-conflict-violated",
-      "category": "validation",
-      "severity": "error",
-      "retryable": false,
-      "message": "Options '{option}' and '{conflict}' cannot be used together",
-      "hint": "Drop one of the mutually exclusive options; the conflict group is declared on the option schema"
-    },
-    {
-      "enum": "ClipboardAccessFailed",
-      "slug": "clipboard-access-failed",
-      "category": "platform",
-      "severity": "error",
-      "retryable": true,
-      "message": "System clipboard is inaccessible: '{detail}'",
-      "hint": "Another thread/process may own the clipboard (retry once it is released), the OS helper may be missing (install xclip or xsel on Linux), or the stored payload failed validation"
-    },
-    {
-      "enum": "ClipboardWriteFailed",
-      "slug": "clipboard-write-failed",
-      "category": "platform",
-      "severity": "error",
-      "retryable": false,
-      "message": "Clipboard payload could not be committed: '{detail}'",
-      "hint": "The clipboard opened but its memory object was rejected (allocation/lock/SetClipboardData); free memory or retry the copy"
-    },
-    {
-      "enum": "NetRuntimeFailed",
-      "slug": "net-runtime-failed",
-      "category": "io",
-      "severity": "error",
-      "retryable": true,
-      "message": "Socket runtime initialization failed",
-      "hint": "Winsock startup was rejected (WSAStartup); check winsock DLL availability and version request, then retry"
-    },
-    {
-      "enum": "NetSocketFailed",
-      "slug": "net-socket-failed",
-      "category": "io",
-      "severity": "error",
-      "retryable": true,
-      "message": "Socket creation failed",
-      "hint": "socket() returned an error (fd limit / protocol unsupported); close unused sockets and retry"
-    },
-    {
-      "enum": "NetBindFailed",
-      "slug": "net-bind-failed",
-      "category": "io",
-      "severity": "error",
-      "retryable": true,
-      "message": "Socket bind on loopback failed",
-      "hint": "The port is taken or privileges are missing; pass port 0 to let the OS pick an ephemeral port"
-    },
-    {
-      "enum": "NetListenFailed",
-      "slug": "net-listen-failed",
-      "category": "io",
-      "severity": "error",
-      "retryable": true,
-      "message": "Socket listen failed",
-      "hint": "listen() rejected the bound socket (backlog out of range or socket already closed)"
-    },
-    {
-      "enum": "NetAcceptFailed",
-      "slug": "net-accept-failed",
-      "category": "io",
-      "severity": "error",
-      "retryable": true,
-      "message": "Socket accept failed",
-      "hint": "accept() returned an error (listener closed concurrently or fd limit); re-check the running flag before retrying"
-    },
-    {
-      "enum": "NetConnectFailed",
-      "slug": "net-connect-failed",
-      "category": "io",
-      "severity": "error",
-      "retryable": true,
-      "message": "Connect to loopback endpoint failed",
-      "hint": "No listener on 127.0.0.1:{port} (service not started) or the local firewall refused the loopback connect"
-    },
-    {
-      "enum": "NetTimeoutOptionFailed",
-      "slug": "net-timeout-option-failed",
-      "category": "io",
-      "severity": "error",
-      "retryable": false,
-      "message": "Socket timeout option could not be set",
-      "hint": "setsockopt(SO_RCVTIMEO/SO_SNDTIMEO) failed; do not continue into an unbounded wait, close and reopen the socket"
-    },
-    {
-      "enum": "NetWaitFailed",
-      "slug": "net-wait-failed",
-      "category": "io",
-      "severity": "error",
-      "retryable": true,
-      "message": "Socket readiness wait failed",
-      "hint": "select() returned an error (fd set invalid or interrupted); re-check the running flag before retrying"
-    },
-    {
-      "enum": "NetSendFailed",
-      "slug": "net-send-failed",
-      "category": "io",
-      "severity": "error",
-      "retryable": false,
-      "message": "Socket send failed",
-      "hint": "send() returned <= 0 mid-write (peer closed or timeout); the byte stream is no longer reliable"
-    },
-    {
-      "enum": "NetRecvFailed",
-      "slug": "net-recv-failed",
-      "category": "io",
-      "severity": "error",
-      "retryable": false,
-      "message": "Socket receive failed",
-      "hint": "recv() returned an error (peer reset or socket closed)"
-    },
-    {
-      "enum": "NetRecvTimeout",
-      "slug": "net-recv-timeout",
-      "category": "io",
-      "severity": "warning",
-      "retryable": true,
-      "message": "Socket receive timed out",
-      "hint": "SO_RCVTIMEO elapsed before any byte arrived; bytes already received may still be parseable, treat this as 'no more data now'"
-    },
-    {
-      "enum": "SystemDragNotSupported",
-      "slug": "system-drag-not-supported",
-      "category": "platform",
-      "severity": "error",
-      "retryable": false,
-      "message": "System drag-and-drop unavailable: '{detail}'",
-      "hint": "The platform/backend has no system drag-and-drop mechanism yet, or the capability bit is false; retrying cannot create the mechanism - fall back to a non-drag path (paste, file dialog)"
-    },
-    {
-      "enum": "SystemDragSessionFailed",
-      "slug": "system-drag-session-failed",
-      "category": "platform",
-      "severity": "error",
-      "retryable": false,
-      "message": "System drag-and-drop session failed: '{detail}'",
-      "hint": "The negotiation broke down or the source stopped providing data; treat the session as ended (action None) and surface a non-drag alternative"
-    },
-    {
-      "enum": "ClipboardFormatUnsupported",
-      "slug": "clipboard-format-unsupported",
-      "category": "platform",
-      "severity": "error",
-      "retryable": false,
-      "message": "Clipboard format unsupported on this platform: '{mime}'",
-      "hint": "This platform exposes no mechanism for the requested MIME type; query available_formats() first, or fall back to text/plain"
-    },
-    {
-      "enum": "NetEndpointInvalid",
-      "slug": "net-endpoint-invalid",
-      "category": "io",
-      "severity": "error",
-      "retryable": false,
-      "message": "Network endpoint is not a valid address: '{detail}'",
-      "hint": "Pass a bare IPv4/IPv6 address (IPv6 may be bracketed); keep the port in its own argument and use Endpoint::local for UnixSocket paths or named pipes"
-    },
-    {
-      "enum": "NetCancelled",
-      "slug": "net-cancelled",
-      "category": "io",
-      "severity": "info",
-      "retryable": true,
-      "message": "Network operation was cancelled",
-      "hint": "The caller cancelled this operation (or its owner went away); the completion still fires once with this code, so drop the result only if the owner is gone"
-    },
-    {
-      "enum": "NetPlatformUnavailable",
-      "slug": "net-platform-unavailable",
-      "category": "io",
-      "severity": "error",
-      "retryable": false,
-      "message": "This network capability is unavailable on the current platform",
-      "hint": "Query aurora::net::Engine::capabilities() before using it; this leg has no file-descriptor wait semantics (e.g. wasm), so there is no silent fallback by design. When a TLS backend factory reports it, the code names the configuration that backend cannot express (e.g. a system certificate store leg given an in-memory PEM identity): under the default candidate chain the next backend is tried, while an explicitly designated one (TlsContext::backend) returns it as-is"
-    },
-    {
-      "enum": "NetUrlInvalid",
-      "slug": "net-url-invalid",
-      "category": "io",
-      "severity": "error",
-      "retryable": false,
-      "message": "URL is not a valid absolute or resolvable reference: '{detail}'",
-      "hint": "Pass a complete URL with scheme (e.g. https://host/path) or a reference to resolve against a base URL; percent signs must introduce a two-hex-digit escape and IPv6 literals need brackets"
-    },
-    {
-      "enum": "NetProxyConfigInvalid",
-      "slug": "net-proxy-config-invalid",
-      "category": "io",
-      "severity": "error",
-      "retryable": false,
-      "message": "Proxy configuration is not valid: '{detail}'",
-      "hint": "Fix the value instead of ignoring it: a proxy URL is scheme://[user[:pass]@]host[:port] with no path, and a NO_PROXY entry is *, a domain, a domain with :port, or an IPv4/IPv6 CIDR; a malformed proxy setting must never fall back to a direct connection"
-    },
-    {
-      "enum": "NetProxyUnsupported",
-      "slug": "net-proxy-unsupported",
-      "category": "io",
-      "severity": "error",
-      "retryable": false,
-      "message": "This proxy protocol is not supported by the current build",
-      "hint": "Use http:// (HTTP/1.1 CONNECT), socks5:// or socks5h:// for the proxy itself; a TLS-protected proxy connection (https://) and SOCKS4 are not implemented, so do not silently downgrade to a plaintext proxy hop"
-    },
-    {
-      "enum": "NetProxyUnreachable",
-      "slug": "net-proxy-unreachable",
-      "category": "io",
-      "severity": "error",
-      "retryable": true,
-      "message": "Proxy tunnel could not be established: '{detail}'",
-      "hint": "The proxy answered (or refused) but no tunnel was built; connect never fell back to direct on purpose, so check the proxy host/port and its own uplink rather than the target host"
-    },
-    {
-      "enum": "NetProxyAuthRequired",
-      "slug": "net-proxy-auth-required",
-      "category": "io",
-      "severity": "error",
-      "retryable": false,
-      "message": "Proxy rejected the supplied credentials: '{detail}'",
-      "hint": "The proxy demanded authentication that was absent or refused: 407 on HTTP CONNECT, or a non-zero status on the SOCKS5 username/password subnegotiation; supply credentials in the proxy URL or re-authenticate once, do not retry blindly"
-    },
-    {
-      "enum": "NetProxyProtocol",
-      "slug": "net-proxy-protocol",
-      "category": "io",
-      "severity": "error",
-      "retryable": false,
-      "message": "Proxy handshake is not protocol-conformant: '{detail}'",
-      "hint": "The peer answered with bytes outside the CONNECT or SOCKS5 grammar (wrong version, missing status line, oversized header block); an HTTP hop is usually a captive portal or a plain HTTP server where a proxy port was expected"
-    },
-    {
-      "enum": "NetDnsFailed",
-      "slug": "net-dns-failed",
-      "category": "io",
-      "severity": "error",
-      "retryable": true,
-      "message": "Host name could not be resolved: '{detail}'",
-      "hint": "The resolver returned an error or an empty answer for that name; a numeric literal (IPv4 dotted form or bracketed IPv6) never reaches the resolver, so use one when DNS itself is the thing under test"
-    },
-    {
-      "enum": "NetProxyConfigUnreadable",
-      "slug": "net-proxy-config-unreadable",
-      "category": "io",
-      "severity": "error",
-      "retryable": true,
-      "message": "Operating-system proxy settings could not be read: '{detail}'",
-      "hint": "The channel exists on this platform but the read was refused (registry access, dynamic-store failure); this is distinct from a machine that simply has no proxy configured, and the library never treats the two as the same outcome"
-    },
-    {
-      "enum": "NetPolicyViolated",
-      "slug": "net-policy-violated",
-      "category": "io",
-      "severity": "error",
-      "retryable": false,
-      "message": "Network policy refused the request before any byte went out: '{detail}'",
-      "hint": "A declarative NetPolicy dimension (cleartext allow-list, TLS version floor, or require-proxy) rejected this target; the detail names the dimension and both sides of the conflict. Widen the policy, add the host to allow_cleartext_hosts, or raise the TLS context's floor to match the policy — the request itself is unchanged and retrying it as-is cannot succeed"
-    },
-    {
-      "enum": "NetOptionFailed",
-      "slug": "net-option-failed",
-      "category": "io",
-      "severity": "error",
-      "retryable": false,
-      "message": "Socket option or shutdown call failed: '{detail}'",
-      "hint": "setsockopt / getsockopt / shutdown returned an error (bad handle state, unsupported option, or the peer already reset the connection); the native code is in the message, check the option name and whether the socket is still connected"
-    },
-    {
-      "enum": "NetConnectTimeout",
-      "slug": "net-connect-timeout",
-      "category": "io",
-      "severity": "warning",
-      "retryable": true,
-      "message": "Connection attempt timed out: '{detail}'",
-      "hint": "The non-blocking connect did not produce a result within the configured deadline; a black-holed peer or an unreachable route looks identical to a slow one from here, so retry with a longer StreamOptions::connect_timeout or fall back to another candidate address"
-    },
-    {
-      "enum": "NetBufferLimit",
-      "slug": "net-buffer-limit",
-      "category": "io",
-      "severity": "warning",
-      "retryable": true,
-      "message": "Transfer buffer limit exceeded: '{detail}'",
-      "hint": "Backpressure fired: pending bytes reached the high-water mark, pending reads exceeded the read-buffer cap, or a framed message overflowed its limit; slow the producer down or raise the matching StreamOptions field rather than dropping data"
-    },
-    {
-      "enum": "NetFramerOverflow",
-      "slug": "net-framer-overflow",
-      "category": "io",
-      "severity": "error",
-      "retryable": false,
-      "message": "Framed message exceeds its configured limit: '{detail}'",
-      "hint": "The stream produced a single message larger than FrameOptions::max_frame_bytes, or a length prefix declaring more bytes than the limit allows; raise the limit only for a protocol that genuinely carries such frames, otherwise treat the stream as malformed and close it rather than resynchronising inside an oversized frame"
-    },
-    {
-      "enum": "NetFramerConfigInvalid",
-      "slug": "net-framer-config-invalid",
-      "category": "io",
-      "severity": "error",
-      "retryable": false,
-      "message": "Invalid framer configuration: '{detail}'",
-      "hint": "A Framer factory was given a limit of 0, an empty or oversized delimiter, or a length field width outside 1..8 bytes; framing must be configured before it is used, because a silent default here would either accept unbounded frames or split messages at the wrong place"
-    },
-    {
-      "enum": "NetOptionConflict",
-      "slug": "net-option-conflict",
-      "category": "io",
-      "severity": "error",
-      "retryable": false,
-      "message": "Socket option conflicts with the current configuration: '{detail}'",
-      "hint": "Two settings cannot both hold on one socket (a connected UDP socket receives only from its peer, so joining a multicast group there would configure a socket that can never receive the group); use a second socket for the other form rather than reordering the calls"
-    },
-    {
-      "enum": "NetTlsHandshakeFailed",
-      "slug": "net-tls-handshake-failed",
-      "category": "io",
-      "severity": "error",
-      "retryable": false,
-      "message": "TLS handshake failed: '{detail}'",
-      "hint": "The peer aborted or refused the negotiation (unsupported cipher suite, alert from the server, truncated handshake, or a plaintext endpoint answering on a TLS port); the transport is unusable after this and must be closed. Reproduce with the peer's TLS logs before changing TlsContext, because retrying the same parameters only reproduces the same alert"
-    },
-    {
-      "enum": "NetTlsCertRejected",
-      "slug": "net-tls-cert-rejected",
-      "category": "io",
-      "severity": "error",
-      "retryable": false,
-      "message": "TLS certificate rejected: '{detail}'",
-      "hint": "Chain verification failed (unknown issuer, expired or not-yet-valid leaf, hostname mismatch, or a policy constraint). Install the issuing CA into the trust root used by this TlsContext, or point TlsContext::add_trusted_certificate at the right PEM; do not reach for allow_insecure_certificate, which turns a real man-in-the-middle signal off for the whole transport"
-    },
-    {
-      "enum": "NetTlsVersionMismatch",
-      "slug": "net-tls-version-mismatch",
-      "category": "io",
-      "severity": "error",
-      "retryable": false,
-      "message": "TLS protocol version mismatch: '{detail}'",
-      "hint": "TlsContext::min_version rules out every version the peer is willing to speak (commonly a TLS 1.3-only floor against a 1.2 endpoint). Lower the floor deliberately and record why, rather than mirroring the peer automatically: the floor is the negotiated security baseline"
-    },
-    {
-      "enum": "NetTlsEngineUnavailable",
-      "slug": "net-tls-engine-unavailable",
-      "category": "io",
-      "severity": "error",
-      "retryable": false,
-      "message": "No TLS backend available: '{detail}'",
-      "hint": "Call aurora::net::available_tls_backends(): an empty list means this build compiled no TLS engine, so supply a provider through AURORA_NET_TLS_PROVIDERS=<static|shared>:<install root> or register a backend with aurora::net::register_tls_backend(). A non-empty list means the candidate chain matched nothing instead: check set_default_tls_backends() and TlsContext::backend, whose id must be one of the listed backends. Aurora never downgrades a TLS request to plaintext"
-    },
-    {
-      "enum": "NetTlsPinMismatch",
-      "slug": "net-tls-pin-mismatch",
-      "category": "io",
-      "severity": "error",
-      "retryable": false,
-      "message": "TLS certificate pin mismatch: '{detail}'",
-      "hint": "The peer's certificate does not carry any pinned public key, so the pinned identity changed (key rotation, reissued certificate, or an interception proxy). Update the pinned SPKI digests from an out-of-band source you trust and rotate them in lockstep with the service; never fall back to allow_insecure_certificate, which defeats the pin entirely"
-    },
-    {
-      "enum": "HttpRequestInvalid",
-      "slug": "http-request-invalid",
-      "category": "io",
-      "severity": "error",
-      "retryable": false,
-      "message": "HTTP request cannot be sent as written: '{detail}'",
-      "hint": "The request violates the message grammar before any byte is written (unknown method text, a header name outside the token charset, a header value containing CR or LF, or a target URL without a host). Fix the request at the call site; the peer never sees it, so retrying with the same fields reproduces the same rejection"
-    },
-    {
-      "enum": "HttpTimeout",
-      "slug": "http-timeout",
-      "category": "io",
-      "severity": "error",
-      "retryable": true,
-      "message": "HTTP request timed out: '{detail}'",
-      "hint": "The detail names which of the three stages expired (connect, read_idle or total), and they mean different things: connect says nothing answered, read_idle says the body stalled mid-flight, total says the whole exchange overran. Raise only the stage that fired - a blanket total budget turns slow-but-healthy transfers into failures"
-    },
-    {
-      "enum": "HttpRedirectLimit",
-      "slug": "http-redirect-limit",
-      "category": "io",
-      "severity": "error",
-      "retryable": false,
-      "message": "HTTP redirect chain exceeded the configured limit: '{detail}'",
-      "hint": "Either the peer is bouncing between targets or the limit is genuinely too small for this endpoint's chain. Inspect the Location sequence in the diagnostics before raising the limit, because following a cycle also leaks credentials to each hop it revisits"
-    },
-    {
-      "enum": "HttpBodyTooLarge",
-      "slug": "http-body-too-large",
-      "category": "io",
-      "severity": "error",
-      "retryable": false,
-      "message": "HTTP response body exceeds the configured limit: '{detail}'",
-      "hint": "The guard is what keeps a wrong URL (a video behind a shortened link) from exhausting memory. The detail says which ceiling was crossed: max_body_bytes bounds the bytes that arrived on the wire, max_decompressed_bytes bounds the transparently decompressed payload (the decompression-bomb guard). Raise the one that fired if the payload is legitimately large, or switch to open_stream so the body is delivered in bounded chunks instead of materialized"
-    },
-    {
-      "enum": "HttpCharsetUnsupported",
-      "slug": "http-charset-unsupported",
-      "category": "io",
-      "severity": "error",
-      "retryable": false,
-      "message": "HTTP response charset is not supported: '{detail}'",
-      "hint": "Response::text() decodes only UTF-8 and Latin-1 in this batch, so a body labelled with any other charset cannot be turned into text here. The undecoded bytes are always reachable through body(), so transcoding is the caller's to do; do not silently substitute U+FFFD or reinterpret the bytes as UTF-8, which would corrupt the payload"
-    },
-    {
-      "enum": "HttpProtocolError",
-      "slug": "http-protocol-error",
-      "category": "io",
-      "severity": "error",
-      "retryable": false,
-      "message": "HTTP peer violated the message grammar: '{detail}'",
-      "hint": "The response is not parseable as HTTP/1.1 (bad status line, a chunk size that is not hexadecimal, framing that declares both Content-Length and an unknown Transfer-Encoding, or a body longer than its declared length). Close the connection and re-issue on a fresh one, because the byte stream is now misaligned and no later response on it can be trusted"
-    },
-    {
-      "enum": "HttpContentEncodingUnsupported",
-      "slug": "http-content-encoding-unsupported",
-      "category": "io",
-      "severity": "error",
-      "retryable": false,
-      "message": "HTTP response content encoding is not supported: '{detail}'",
-      "hint": "The peer applied a content coding this client cannot undo - either the coding name is outside the advertised set (brotli and zstd are not built here) or the build was configured with AURORA_ENABLE_COMPRESSION=OFF, in which case no decoder exists and the request deliberately never advertised Accept-Encoding. Re-request with an encoding you can decode (Request::header sets Accept-Encoding; an identity body always arrives undecoded); never reinterpret the compressed bytes as text, which would hand the caller garbage"
-    },
-    {
-      "enum": "HttpBodyCorrupt",
-      "slug": "http-body-corrupt",
-      "category": "io",
-      "severity": "error",
-      "retryable": false,
-      "message": "HTTP response body cannot be decoded: '{detail}'",
-      "hint": "The message framed cleanly but its payload did not survive the declared content coding: the gzip/zlib/deflate stream is corrupt, truncated mid-symbol, or fails its trailing checksum. This is a data defect (at the peer, or in the encoding chain it declared), not a transport fault - the bytes arrived whole, so retrying the same target only re-fetches the same broken payload; check the declared Content-Encoding chain before suspecting the link"
-    },
-    {
-      "enum": "WebViewRuntimeMissing",
-      "slug": "webview-runtime-missing",
-      "category": "platform",
-      "severity": "warning",
-      "retryable": false,
-      "message": "No native web engine runtime available: '{detail}'",
-      "hint": "The WebView control degrades to a placeholder rectangle; install the platform runtime (WebView2 Runtime on Windows, libwebkit2gtk on Linux) to enable it"
-    },
-    {
-      "enum": "WebViewEngineInitFailed",
-      "slug": "webview-engine-init-failed",
-      "category": "platform",
-      "severity": "error",
-      "retryable": false,
-      "message": "Web engine initialization failed: '{detail}'",
-      "hint": "The engine runtime was found but could not be started; the control degrades to a placeholder - check the user data folder and display connection"
-    },
-    {
-      "enum": "WebViewNavigationFailed",
-      "slug": "webview-navigation-failed",
-      "category": "platform",
-      "severity": "error",
-      "retryable": true,
-      "message": "Web navigation failed for '{uri}': '{detail}'",
-      "hint": "Check the URI scheme and network reachability; custom schemes and file access must be enabled explicitly"
-    },
-    {
-      "enum": "WebViewScriptEvalFailed",
-      "slug": "webview-script-eval-failed",
-      "category": "platform",
-      "severity": "error",
-      "retryable": true,
-      "message": "Script evaluation failed: '{detail}'",
-      "hint": "The page may not have finished loading, or JavaScript is disabled on this control; retry after navigation completes"
-    },
-    {
-      "enum": "WebViewSnapshotUnsupported",
-      "slug": "webview-snapshot-unsupported",
-      "category": "platform",
-      "severity": "warning",
-      "retryable": false,
-      "message": "Snapshot mode unavailable: '{detail}'",
-      "hint": "Snapshot mode needs a live engine and, on Linux, an available GTK display connection; use Interactive mode on X11 or Windows instead"
-    },
-    {
-      "enum": "WebViewHostUnbound",
-      "slug": "webview-host-unbound",
-      "category": "platform",
-      "severity": "warning",
-      "retryable": false,
-      "message": "Web view not bound to a native host: '{detail}'",
-      "hint": "The control is rendering outside a window host (headless/offscreen) or was registered before the host installed its thread-local slot"
-    },
-    {
-      "enum": "WebViewUnsupportedMode",
-      "slug": "webview-unsupported-mode",
-      "category": "platform",
-      "severity": "warning",
-      "retryable": false,
-      "message": "Web view mode unsupported on this backend: '{detail}'",
-      "hint": "Interactive mode needs a native child surface; Wayland and headless backends cannot host one - switch to Snapshot mode or move the control"
-    },
-    {
-      "enum": "IconNameNotRegistered",
-      "slug": "icon-name-not-registered",
-      "category": "validation",
-      "severity": "error",
-      "retryable": false,
-      "message": "Icon name '{name}' is not registered: {detail}",
-      "hint": "Register the semantic name through IconRegistry before referencing it, or pick one of the registered names reported alongside this error"
-    },
-    {
-      "enum": "IconGlyphUnavailable",
-      "slug": "icon-glyph-unavailable",
-      "category": "widget",
-      "severity": "error",
-      "retryable": false,
-      "message": "Icon glyph unavailable: {detail}",
-      "hint": "Register the icon font through FontEngine::register_font (or register_font_from_memory) and make sure the code point exists in that face"
-    },
-    {
-      "enum": "IconSvgUnsupported",
-      "slug": "icon-svg-unsupported",
-      "category": "render",
-      "severity": "warning",
-      "retryable": false,
-      "message": "Icon SVG source uses unsupported features: {detail}",
-      "hint": "The built-in rasterizer covers an SVG subset only - simplify the source or rasterize it outside the library and supply the bitmap"
-    },
-    {
-      "enum": "HttpBodyNotReplayable",
-      "slug": "http-body-not-replayable",
-      "category": "io",
-      "severity": "error",
-      "retryable": false,
-      "message": "HTTP request body cannot be sent a second time: '{detail}'",
-      "hint": "A 307 or 308 redirect must replay the message body, and the streaming body said it cannot return to its starting point, so resending it would ship a half-consumed payload. Either hand the payload over as an in-memory body, or make the source restartable (re-open the file and reset its cursor); note that a body which cannot restart also opts this request out of the retry policy on purpose"
-    },
-    {
-      "enum": "WsClosed",
-      "slug": "ws-closed",
-      "category": "io",
-      "severity": "info",
-      "retryable": true,
-      "message": "WebSocket connection is closed: '{detail}'",
-      "hint": "The peer ran the close handshake, a pong deadline expired, or this side shut the handle down, so no further frame will be delivered. Reconnecting is a fresh connection with a fresh handshake, not a resume: application-level state the protocol carried (subprotocol, session identity, anything the server keyed on the old connection) has to be re-established by the caller"
-    },
-    {
-      "enum": "WsHandshakeRejected",
-      "slug": "ws-handshake-rejected",
-      "category": "io",
-      "severity": "error",
-      "retryable": false,
-      "message": "WebSocket upgrade was refused: '{detail}'",
-      "hint": "The peer did not answer the upgrade with 101 Switching Protocols, Sec-WebSocket-Accept did not match the key this side sent, or a required subprotocol went unchosen. This is a stable answer about the endpoint and the configuration, so retrying the same request reaches the same verdict: fix the URL, the subprotocol list, or the Origin the server expects"
-    },
-    {
-      "enum": "WsProtocolError",
-      "slug": "ws-protocol-error",
-      "category": "io",
-      "severity": "error",
-      "retryable": false,
-      "message": "WebSocket peer violated the frame grammar: '{detail}'",
-      "hint": "A frame was malformed, exceeded a configured frame or reassembled-message limit, carried a control frame that is not a complete message or whose payload is longer than 125 bytes, or held text that is not valid UTF-8. The byte stream is now misaligned, so the connection is dropped rather than continued: no later frame on it can be trusted"
-    },
-    {
-      "enum": "WsSendQueueFull",
-      "slug": "ws-send-queue-full",
-      "category": "io",
-      "severity": "warning",
-      "retryable": true,
-      "message": "WebSocket send queue is full: '{detail}'",
-      "hint": "The producer outran the wire: pending outgoing payload reached its byte cap or the queue its entry cap. This refuses only the message that hit the limit and leaves the connection open, on purpose - whether to keep buffering, drop, or close is the caller's decision. Slow the producer down or raise the matching WebSocketOptions field"
-    },
-    {
-      "enum": "ClipboardProviderFailed",
-      "slug": "clipboard-provider-failed",
-      "category": "platform",
-      "severity": "error",
-      "retryable": false,
-      "message": "Lazy clipboard provider failed for '{mime}': '{detail}'",
-      "hint": "The provide callback registered through the lazy offer returned an error, or was empty while the format was actually requested. The bytes could not be rendered on demand - fix the provider or supply the format eagerly; re-reading the same clipboard reproduces the same failure, so this is not a transient one"
-    },
-    {
-      "enum": "ClipboardListenUnsupported",
-      "slug": "clipboard-listen-unsupported",
-      "category": "platform",
-      "severity": "error",
-      "retryable": false,
-      "message": "This platform cannot listen for clipboard changes: '{detail}'",
-      "hint": "No clipboard-change listener mechanism exists here (the platform anchors are AddClipboardFormatListener on Win32, QClipboard::dataChanged, and GdkClipboard::changed; AppKit only exposes changeCount polling, which this library deliberately does not turn into a listener). The absence is stable, so retrying cannot create it - sample available_formats() at the moments that matter instead of registering a listener that would never fire"
-    },
-    {
-      "enum": "SystemDragReadFailed",
-      "slug": "system-drag-read-failed",
-      "category": "platform",
-      "severity": "error",
-      "retryable": true,
-      "message": "System drag payload read failed for '{mime}': '{detail}'",
-      "hint": "The source session went away, cancelled mid-transfer, or the bytes never arrived within the read deadline. Unlike a missing mechanism this is transient - the same format may well succeed on a second attempt - so surface the failure with a non-cursor fallback and let the control decide about retrying"
-    },
-    {
-      "enum": "SystemDragDecodeFailed",
-      "slug": "system-drag-decode-failed",
-      "category": "platform",
-      "severity": "error",
-      "retryable": false,
-      "message": "System drag payload could not be decoded as '{mime}': '{detail}'",
-      "hint": "The bytes arrived but do not form a valid payload for the declared MIME (for example image/png that no decoder accepts). The same bytes fail again - this is a data defect at the source, not a transient one; drop the payload and report it rather than retrying"
-    },
-    {
-      "enum": "SystemDragCancelled",
-      "slug": "system-drag-cancelled",
-      "category": "platform",
-      "severity": "info",
-      "retryable": false,
-      "message": "System drag session was cancelled: '{detail}'",
-      "hint": "The user pressed Esc, moved the pointer away, or the system ended the session. This is user intent, not a fault - do not route it into an error branch; the source data stays untouched and the control simply returns to its idle state"
-    },
-    {
-      "enum": "SystemDragMoveRollback",
-      "slug": "system-drag-move-rollback",
-      "category": "platform",
-      "severity": "error",
-      "retryable": true,
-      "message": "Move drop landed but the source could not delete its data: '{detail}'",
-      "hint": "The target received and stored the payload, but deleting the original failed (file locked, permission revoked). The target's copy stays authoritative - retry the deletion later instead of re-copying, and remember the contract: the source never deletes before the move confirmation arrives"
-    },
-    {
       "enum": "I18nBinMagicFailed",
       "slug": "i18n-bin-magic",
-      "category": "io",
+      "domain": "i18n",
+      "kind": "corrupt",
       "severity": "error",
       "retryable": false,
       "message": "Message catalog binary magic mismatch (expected AUM1)",
@@ -6919,7 +6059,8 @@
     {
       "enum": "I18nBinVersionUnsupported",
       "slug": "i18n-bin-version",
-      "category": "io",
+      "domain": "i18n",
+      "kind": "unsupported",
       "severity": "error",
       "retryable": false,
       "message": "Message catalog binary version {version} is not supported (expected 1)",
@@ -6928,7 +6069,8 @@
     {
       "enum": "I18nBinEndiannessInvalid",
       "slug": "i18n-bin-endianness",
-      "category": "io",
+      "domain": "i18n",
+      "kind": "corrupt",
       "severity": "error",
       "retryable": false,
       "message": "Message catalog binary is not little-endian (version field decoded as {version})",
@@ -6937,7 +6079,8 @@
     {
       "enum": "I18nBinTruncated",
       "slug": "i18n-bin-truncated",
-      "category": "io",
+      "domain": "i18n",
+      "kind": "corrupt",
       "severity": "error",
       "retryable": false,
       "message": "Message catalog binary truncated at offset {offset} (needed {needed} more bytes)",
@@ -6946,7 +6089,8 @@
     {
       "enum": "I18nIdOutOfRange",
       "slug": "i18n-id-out-of-range",
-      "category": "validation",
+      "domain": "i18n",
+      "kind": "invalid",
       "severity": "error",
       "retryable": false,
       "message": "Message id range [{base}, {end}) collides with the invalid-id sentinel or overflows",
@@ -6955,7 +6099,8 @@
     {
       "enum": "I18nVocabularyOverlap",
       "slug": "i18n-vocabulary-overlap",
-      "category": "validation",
+      "domain": "i18n",
+      "kind": "conflict",
       "severity": "error",
       "retryable": false,
       "message": "Vocabulary range [{base}, {end}) overlaps an already registered range",
@@ -6964,7 +6109,8 @@
     {
       "enum": "I18nNameDuplicate",
       "slug": "i18n-name-duplicate",
-      "category": "validation",
+      "domain": "i18n",
+      "kind": "conflict",
       "severity": "error",
       "retryable": false,
       "message": "Message name '{name}' is already registered by another vocabulary",
@@ -6973,11 +6119,1022 @@
     {
       "enum": "I18nUnknownName",
       "slug": "i18n-unknown-name",
-      "category": "validation",
+      "domain": "i18n",
+      "kind": "not-found",
       "severity": "error",
       "retryable": false,
       "message": "Unknown message name '{name}' (not in any registered vocabulary)",
       "hint": "add() resolves names through registered vocabularies. Load the vocabulary that owns the name first, or use the generated MessageId constant directly"
+    },
+    {
+      "enum": "PrefsNotPersistent",
+      "slug": "prefs-not-persistent",
+      "domain": "prefs",
+      "kind": "unsupported",
+      "severity": "error",
+      "retryable": false,
+      "message": "Preferences is in memory-only mode and cannot be persisted",
+      "hint": "Bind a config file path (Preferences(file)) to gain persistence"
+    },
+    {
+      "enum": "PrefsOpenFailed",
+      "slug": "prefs-open-failed",
+      "domain": "prefs",
+      "kind": "io",
+      "severity": "error",
+      "retryable": false,
+      "message": "Failed to open config file: '{path}'",
+      "hint": "Check the file path and read permissions"
+    },
+    {
+      "enum": "PrefsParseFailed",
+      "slug": "prefs-parse-failed",
+      "domain": "prefs",
+      "kind": "corrupt",
+      "severity": "error",
+      "retryable": false,
+      "message": "Config file JSON parse failed: '{detail}'",
+      "hint": "Check JSON syntax (quotes/commas/brackets) and field types"
+    },
+    {
+      "enum": "PrefsWriteFailed",
+      "slug": "prefs-write-failed",
+      "domain": "prefs",
+      "kind": "io",
+      "severity": "error",
+      "retryable": false,
+      "message": "Config file write failed: '{detail}'",
+      "hint": "Check disk space, whether the directory exists, and target file permissions"
+    },
+    {
+      "enum": "IconNameNotRegistered",
+      "slug": "icon-name-not-registered",
+      "domain": "icon",
+      "kind": "not-found",
+      "severity": "error",
+      "retryable": false,
+      "message": "Icon name '{name}' is not registered: {detail}",
+      "hint": "Register the semantic name through IconRegistry before referencing it, or pick one of the registered names reported alongside this error"
+    },
+    {
+      "enum": "IconGlyphUnavailable",
+      "slug": "icon-glyph-unavailable",
+      "domain": "icon",
+      "kind": "unavailable",
+      "severity": "error",
+      "retryable": false,
+      "message": "Icon glyph unavailable: {detail}",
+      "hint": "Register the icon font through FontEngine::register_font (or register_font_from_memory) and make sure the code point exists in that face"
+    },
+    {
+      "enum": "IconSvgUnsupported",
+      "slug": "icon-svg-unsupported",
+      "domain": "icon",
+      "kind": "unsupported",
+      "severity": "warning",
+      "retryable": false,
+      "message": "Icon SVG source uses unsupported features: {detail}",
+      "hint": "The built-in rasterizer covers an SVG subset only - simplify the source or rasterize it outside the library and supply the bitmap"
+    },
+    {
+      "enum": "PlatformUnavailable",
+      "slug": "platform-unavailable",
+      "domain": "platform",
+      "kind": "unavailable",
+      "severity": "error",
+      "retryable": false,
+      "message": "Platform feature unavailable: '{detail}'",
+      "hint": "Check the runtime environment or enable the corresponding backend"
+    },
+    {
+      "enum": "PlatformPermissionDenied",
+      "slug": "platform-permission-denied",
+      "domain": "platform",
+      "kind": "denied",
+      "severity": "error",
+      "retryable": false,
+      "message": "Insufficient permissions: '{detail}'",
+      "hint": "Check file/network permission settings"
+    },
+    {
+      "enum": "PlatformComInitFailed",
+      "slug": "platform-com-init-failed",
+      "domain": "platform",
+      "kind": "io",
+      "severity": "error",
+      "retryable": false,
+      "message": "COM initialization failed",
+      "hint": "Initialize COM outside the GUI thread or check the runtime environment"
+    },
+    {
+      "enum": "OsHotkeyRegisterFailed",
+      "slug": "os-hotkey-register-failed",
+      "domain": "platform",
+      "kind": "io",
+      "severity": "error",
+      "retryable": false,
+      "message": "OS global hotkey registration failed: '{detail}'",
+      "hint": "The key combination may already be grabbed by another process, unsupported on this platform, or the platform backend is unavailable"
+    },
+    {
+      "enum": "SurfaceLost",
+      "slug": "surface-lost",
+      "domain": "window",
+      "kind": "unavailable",
+      "severity": "warning",
+      "retryable": false,
+      "message": "Surface lost (e.g. window destroyed/device reset)",
+      "hint": "Need to rebuild the Surface to continue rendering; in most cases the framework auto-recovers on next present"
+    },
+    {
+      "enum": "PlatformDialogCreateFailed",
+      "slug": "platform-dialog-create-failed",
+      "domain": "dialog",
+      "kind": "io",
+      "severity": "error",
+      "retryable": false,
+      "message": "Platform dialog creation failed",
+      "hint": "Check the parent window handle or runtime environment"
+    },
+    {
+      "enum": "ClipboardAccessFailed",
+      "slug": "clipboard-access-failed",
+      "domain": "clipboard",
+      "kind": "unavailable",
+      "severity": "error",
+      "retryable": true,
+      "message": "System clipboard is inaccessible: '{detail}'",
+      "hint": "Another thread/process may own the clipboard (retry once it is released), the OS helper may be missing (install xclip or xsel on Linux), or the stored payload failed validation"
+    },
+    {
+      "enum": "ClipboardWriteFailed",
+      "slug": "clipboard-write-failed",
+      "domain": "clipboard",
+      "kind": "io",
+      "severity": "error",
+      "retryable": false,
+      "message": "Clipboard payload could not be committed: '{detail}'",
+      "hint": "The clipboard opened but its memory object was rejected (allocation/lock/SetClipboardData); free memory or retry the copy"
+    },
+    {
+      "enum": "ClipboardFormatUnsupported",
+      "slug": "clipboard-format-unsupported",
+      "domain": "clipboard",
+      "kind": "unsupported",
+      "severity": "error",
+      "retryable": false,
+      "message": "Clipboard format unsupported on this platform: '{mime}'",
+      "hint": "This platform exposes no mechanism for the requested MIME type; query available_formats() first, or fall back to text/plain"
+    },
+    {
+      "enum": "ClipboardProviderFailed",
+      "slug": "clipboard-provider-failed",
+      "domain": "clipboard",
+      "kind": "io",
+      "severity": "error",
+      "retryable": false,
+      "message": "Lazy clipboard provider failed for '{mime}': '{detail}'",
+      "hint": "The provide callback registered through the lazy offer returned an error, or was empty while the format was actually requested. The bytes could not be rendered on demand - fix the provider or supply the format eagerly; re-reading the same clipboard reproduces the same failure, so this is not a transient one"
+    },
+    {
+      "enum": "ClipboardListenUnsupported",
+      "slug": "clipboard-listen-unsupported",
+      "domain": "clipboard",
+      "kind": "unsupported",
+      "severity": "error",
+      "retryable": false,
+      "message": "This platform cannot listen for clipboard changes: '{detail}'",
+      "hint": "No clipboard-change listener mechanism exists here (the platform anchors are AddClipboardFormatListener on Win32, QClipboard::dataChanged, and GdkClipboard::changed; AppKit only exposes changeCount polling, which this library deliberately does not turn into a listener). The absence is stable, so retrying cannot create it - sample available_formats() at the moments that matter instead of registering a listener that would never fire"
+    },
+    {
+      "enum": "SystemDragNotSupported",
+      "slug": "system-drag-not-supported",
+      "domain": "drag",
+      "kind": "unsupported",
+      "severity": "error",
+      "retryable": false,
+      "message": "System drag-and-drop unavailable: '{detail}'",
+      "hint": "The platform/backend has no system drag-and-drop mechanism yet, or the capability bit is false; retrying cannot create the mechanism - fall back to a non-drag path (paste, file dialog)"
+    },
+    {
+      "enum": "SystemDragSessionFailed",
+      "slug": "system-drag-session-failed",
+      "domain": "drag",
+      "kind": "io",
+      "severity": "error",
+      "retryable": false,
+      "message": "System drag-and-drop session failed: '{detail}'",
+      "hint": "The negotiation broke down or the source stopped providing data; treat the session as ended (action None) and surface a non-drag alternative"
+    },
+    {
+      "enum": "SystemDragReadFailed",
+      "slug": "system-drag-read-failed",
+      "domain": "drag",
+      "kind": "io",
+      "severity": "error",
+      "retryable": true,
+      "message": "System drag payload read failed for '{mime}': '{detail}'",
+      "hint": "The source session went away, cancelled mid-transfer, or the bytes never arrived within the read deadline. Unlike a missing mechanism this is transient - the same format may well succeed on a second attempt - so surface the failure with a non-cursor fallback and let the control decide about retrying"
+    },
+    {
+      "enum": "SystemDragDecodeFailed",
+      "slug": "system-drag-decode-failed",
+      "domain": "drag",
+      "kind": "corrupt",
+      "severity": "error",
+      "retryable": false,
+      "message": "System drag payload could not be decoded as '{mime}': '{detail}'",
+      "hint": "The bytes arrived but do not form a valid payload for the declared MIME (for example image/png that no decoder accepts). The same bytes fail again - this is a data defect at the source, not a transient one; drop the payload and report it rather than retrying"
+    },
+    {
+      "enum": "SystemDragCancelled",
+      "slug": "system-drag-cancelled",
+      "domain": "drag",
+      "kind": "cancelled",
+      "severity": "info",
+      "retryable": false,
+      "message": "System drag session was cancelled: '{detail}'",
+      "hint": "The user pressed Esc, moved the pointer away, or the system ended the session. This is user intent, not a fault - do not route it into an error branch; the source data stays untouched and the control simply returns to its idle state"
+    },
+    {
+      "enum": "SystemDragMoveRollback",
+      "slug": "system-drag-move-rollback",
+      "domain": "drag",
+      "kind": "io",
+      "severity": "error",
+      "retryable": true,
+      "message": "Move drop landed but the source could not delete its data: '{detail}'",
+      "hint": "The target received and stored the payload, but deleting the original failed (file locked, permission revoked). The target's copy stays authoritative - retry the deletion later instead of re-copying, and remember the contract: the source never deletes before the move confirmation arrives"
+    },
+    {
+      "enum": "NativeMenuUnsupported",
+      "slug": "native-menu-unsupported",
+      "domain": "menu",
+      "kind": "unsupported",
+      "severity": "error",
+      "retryable": false,
+      "message": "Native menu bar is not supported on this platform",
+      "hint": "The platform offers no OS-level menu bar mechanism (Linux/macOS/Wasm/Headless) or its bridge is not wired; fall back to the self-drawn MenuBar control"
+    },
+    {
+      "enum": "NativeMenuInstallFailed",
+      "slug": "native-menu-install-failed",
+      "domain": "menu",
+      "kind": "io",
+      "severity": "error",
+      "retryable": false,
+      "message": "Native menu bar could not be installed: '{detail}'",
+      "hint": "The OS menu mechanism exists but the menu tree could not be attached to the window; check the window handle and menu model"
+    },
+    {
+      "enum": "NotificationPostFailed",
+      "slug": "notification-post-failed",
+      "domain": "notification",
+      "kind": "io",
+      "severity": "error",
+      "retryable": false,
+      "message": "System notification could not be posted: '{detail}'",
+      "hint": "The desktop notification service may be unavailable, or the platform backend does not support notifications"
+    },
+    {
+      "enum": "RecentDocumentsProjectionUnsupported",
+      "slug": "recent-documents-projection-unsupported",
+      "domain": "recent-documents",
+      "kind": "unsupported",
+      "severity": "error",
+      "retryable": false,
+      "message": "OS recent-documents projection is not supported on this platform",
+      "hint": "The platform offers no recent-documents mechanism (Linux) or its bridge is not wired; the in-app RecentDocuments list still works unchanged"
+    },
+    {
+      "enum": "WebViewRuntimeMissing",
+      "slug": "webview-runtime-missing",
+      "domain": "webview",
+      "kind": "unavailable",
+      "severity": "warning",
+      "retryable": false,
+      "message": "No native web engine runtime available: '{detail}'",
+      "hint": "The WebView control degrades to a placeholder rectangle; install the platform runtime (WebView2 Runtime on Windows, libwebkit2gtk on Linux) to enable it"
+    },
+    {
+      "enum": "WebViewEngineInitFailed",
+      "slug": "webview-engine-init-failed",
+      "domain": "webview",
+      "kind": "io",
+      "severity": "error",
+      "retryable": false,
+      "message": "Web engine initialization failed: '{detail}'",
+      "hint": "The engine runtime was found but could not be started; the control degrades to a placeholder - check the user data folder and display connection"
+    },
+    {
+      "enum": "WebViewNavigationFailed",
+      "slug": "webview-navigation-failed",
+      "domain": "webview",
+      "kind": "io",
+      "severity": "error",
+      "retryable": true,
+      "message": "Web navigation failed for '{uri}': '{detail}'",
+      "hint": "Check the URI scheme and network reachability; custom schemes and file access must be enabled explicitly"
+    },
+    {
+      "enum": "WebViewScriptEvalFailed",
+      "slug": "webview-script-eval-failed",
+      "domain": "webview",
+      "kind": "io",
+      "severity": "error",
+      "retryable": true,
+      "message": "Script evaluation failed: '{detail}'",
+      "hint": "The page may not have finished loading, or JavaScript is disabled on this control; retry after navigation completes"
+    },
+    {
+      "enum": "WebViewSnapshotUnsupported",
+      "slug": "webview-snapshot-unsupported",
+      "domain": "webview",
+      "kind": "unsupported",
+      "severity": "warning",
+      "retryable": false,
+      "message": "Snapshot mode unavailable: '{detail}'",
+      "hint": "Snapshot mode needs a live engine and, on Linux, an available GTK display connection; use Interactive mode on X11 or Windows instead"
+    },
+    {
+      "enum": "WebViewHostUnbound",
+      "slug": "webview-host-unbound",
+      "domain": "webview",
+      "kind": "unavailable",
+      "severity": "warning",
+      "retryable": false,
+      "message": "Web view not bound to a native host: '{detail}'",
+      "hint": "The control is rendering outside a window host (headless/offscreen) or was registered before the host installed its thread-local slot"
+    },
+    {
+      "enum": "WebViewUnsupportedMode",
+      "slug": "webview-unsupported-mode",
+      "domain": "webview",
+      "kind": "unsupported",
+      "severity": "warning",
+      "retryable": false,
+      "message": "Web view mode unsupported on this backend: '{detail}'",
+      "hint": "Interactive mode needs a native child surface; Wayland and headless backends cannot host one - switch to Snapshot mode or move the control"
+    },
+    {
+      "enum": "AudioGraphCycle",
+      "slug": "audio-graph-cycle",
+      "domain": "audio",
+      "kind": "conflict",
+      "severity": "error",
+      "retryable": false,
+      "message": "Audio graph connection would create a cycle ({src} -> {dst})",
+      "hint": "Remove the back-edge; the audio graph must remain acyclic (DAG)"
+    },
+    {
+      "enum": "AudioEdgeNotFound",
+      "slug": "audio-edge-not-found",
+      "domain": "audio",
+      "kind": "not-found",
+      "severity": "error",
+      "retryable": false,
+      "message": "Audio connection does not exist and cannot be disconnected",
+      "hint": "Connect the nodes first; connect() result is the authoritative edge state"
+    },
+    {
+      "enum": "AudioContextClosed",
+      "slug": "audio-context-closed",
+      "domain": "audio",
+      "kind": "unavailable",
+      "severity": "error",
+      "retryable": false,
+      "message": "AudioContext is closed; audio operations are no longer available",
+      "hint": "Create a new AudioContext; close() is terminal"
+    },
+    {
+      "enum": "AudioParamInvalid",
+      "slug": "audio-param-invalid",
+      "domain": "audio",
+      "kind": "invalid",
+      "severity": "error",
+      "retryable": false,
+      "message": "Invalid audio parameter automation ({reason})",
+      "hint": "Check times (non-negative, non-decreasing), exponential ramp must not cross zero, time_constant > 0"
+    },
+    {
+      "enum": "AudioBufferInvalid",
+      "slug": "audio-buffer-invalid",
+      "domain": "audio",
+      "kind": "invalid",
+      "severity": "error",
+      "retryable": false,
+      "message": "Invalid audio buffer ({reason})",
+      "hint": "Ensure sample_rate > 0, channels in {1,2} and samples non-empty before playback"
+    },
+    {
+      "enum": "AudioDeviceUnavailable",
+      "slug": "audio-device-unavailable",
+      "domain": "audio",
+      "kind": "unavailable",
+      "severity": "warning",
+      "retryable": true,
+      "message": "Audio device unavailable ({reason}); running in silent mode",
+      "hint": "The audio graph keeps running and drops samples; build with AURORA_ENABLE_AUDIO and check the platform device"
+    },
+    {
+      "enum": "AudioRecordingFailed",
+      "slug": "audio-recording-failed",
+      "domain": "audio",
+      "kind": "io",
+      "severity": "error",
+      "retryable": true,
+      "message": "Audio recording failed: {reason}",
+      "hint": "Check the output path and permissions; capture device availability is reported separately as audio-device-unavailable"
+    },
+    {
+      "enum": "CliSpecInvalid",
+      "slug": "cli-spec-invalid",
+      "domain": "cli",
+      "kind": "invalid",
+      "severity": "error",
+      "retryable": false,
+      "message": "Invalid command spec: {reason}",
+      "hint": "Fix the CommandSpec/OptionSchema declaration: names must be non-empty and unique, enum kinds must list choices"
+    },
+    {
+      "enum": "CliUnknownOption",
+      "slug": "cli-unknown-option",
+      "domain": "cli",
+      "kind": "not-found",
+      "severity": "error",
+      "retryable": false,
+      "message": "Unknown option '{option}' for command '{command}'",
+      "hint": "Check the spelling, or run with --help to list the options accepted by this command"
+    },
+    {
+      "enum": "CliUnknownSubcommand",
+      "slug": "cli-unknown-subcommand",
+      "domain": "cli",
+      "kind": "not-found",
+      "severity": "error",
+      "retryable": false,
+      "message": "Unknown subcommand '{subcommand}' for command '{command}'",
+      "hint": "Pick one of the subcommands listed in --help for this command"
+    },
+    {
+      "enum": "CliMissingSubcommand",
+      "slug": "cli-missing-subcommand",
+      "domain": "cli",
+      "kind": "invalid",
+      "severity": "error",
+      "retryable": false,
+      "message": "Command '{command}' requires a subcommand",
+      "hint": "Pass one of the subcommands listed in --help before any options"
+    },
+    {
+      "enum": "CliMissingValue",
+      "slug": "cli-missing-value",
+      "domain": "cli",
+      "kind": "invalid",
+      "severity": "error",
+      "retryable": false,
+      "message": "Option '{option}' requires a value",
+      "hint": "Pass the value inline as --name=value or as a following token; flags that take no value must be declared Bool with arity 0"
+    },
+    {
+      "enum": "CliInvalidValue",
+      "slug": "cli-invalid-value",
+      "domain": "cli",
+      "kind": "invalid",
+      "severity": "error",
+      "retryable": false,
+      "message": "Value '{value}' is not a valid {kind} for option '{option}'",
+      "hint": "Check the literal syntax expected by the declared kind (see the value hint in --help)"
+    },
+    {
+      "enum": "CliChoiceInvalid",
+      "slug": "cli-choice-invalid",
+      "domain": "cli",
+      "kind": "invalid",
+      "severity": "error",
+      "retryable": false,
+      "message": "Value '{value}' is not one of the allowed choices for option '{option}'",
+      "hint": "Choices are listed in the option's help entry; matching is case-sensitive"
+    },
+    {
+      "enum": "CliRangeViolated",
+      "slug": "cli-range-violated",
+      "domain": "cli",
+      "kind": "invalid",
+      "severity": "error",
+      "retryable": false,
+      "message": "Value '{value}' for option '{option}' is outside [{min}, {max}]",
+      "hint": "Clamp or widen the bound declared on the option"
+    },
+    {
+      "enum": "CliArityViolated",
+      "slug": "cli-arity-violated",
+      "domain": "cli",
+      "kind": "invalid",
+      "severity": "error",
+      "retryable": false,
+      "message": "Option '{option}' expects between {min} and {max} values, got {actual}",
+      "hint": "Adjust the number of repetitions/tokens, or relax the declared arity"
+    },
+    {
+      "enum": "CliMissingRequired",
+      "slug": "cli-missing-required",
+      "domain": "cli",
+      "kind": "invalid",
+      "severity": "error",
+      "retryable": false,
+      "message": "Required option '{option}' is missing for command '{command}'",
+      "hint": "Pass the option, or declare a default_value so it becomes optional"
+    },
+    {
+      "enum": "CliTooManyPositionals",
+      "slug": "cli-too-many-positionals",
+      "domain": "cli",
+      "kind": "invalid",
+      "severity": "error",
+      "retryable": false,
+      "message": "Too many positional arguments for command '{command}': unexpected extra '{value}'",
+      "hint": "Declare the extra slot in the positional schema, or pass it after '--' to treat it as trailing input"
+    },
+    {
+      "enum": "CliConflictViolated",
+      "slug": "cli-conflict-violated",
+      "domain": "cli",
+      "kind": "conflict",
+      "severity": "error",
+      "retryable": false,
+      "message": "Options '{option}' and '{conflict}' cannot be used together",
+      "hint": "Drop one of the mutually exclusive options; the conflict group is declared on the option schema"
+    },
+    {
+      "enum": "NetRuntimeFailed",
+      "slug": "net-runtime-failed",
+      "domain": "net",
+      "kind": "io",
+      "severity": "error",
+      "retryable": true,
+      "message": "Socket runtime initialization failed",
+      "hint": "Winsock startup was rejected (WSAStartup); check winsock DLL availability and version request, then retry"
+    },
+    {
+      "enum": "NetSocketFailed",
+      "slug": "net-socket-failed",
+      "domain": "net",
+      "kind": "io",
+      "severity": "error",
+      "retryable": true,
+      "message": "Socket creation failed",
+      "hint": "socket() returned an error (fd limit / protocol unsupported); close unused sockets and retry"
+    },
+    {
+      "enum": "NetBindFailed",
+      "slug": "net-bind-failed",
+      "domain": "net",
+      "kind": "io",
+      "severity": "error",
+      "retryable": true,
+      "message": "Socket bind on loopback failed",
+      "hint": "The port is taken or privileges are missing; pass port 0 to let the OS pick an ephemeral port"
+    },
+    {
+      "enum": "NetListenFailed",
+      "slug": "net-listen-failed",
+      "domain": "net",
+      "kind": "io",
+      "severity": "error",
+      "retryable": true,
+      "message": "Socket listen failed",
+      "hint": "listen() rejected the bound socket (backlog out of range or socket already closed)"
+    },
+    {
+      "enum": "NetAcceptFailed",
+      "slug": "net-accept-failed",
+      "domain": "net",
+      "kind": "io",
+      "severity": "error",
+      "retryable": true,
+      "message": "Socket accept failed",
+      "hint": "accept() returned an error (listener closed concurrently or fd limit); re-check the running flag before retrying"
+    },
+    {
+      "enum": "NetConnectFailed",
+      "slug": "net-connect-failed",
+      "domain": "net",
+      "kind": "io",
+      "severity": "error",
+      "retryable": true,
+      "message": "Connect to loopback endpoint failed",
+      "hint": "No listener on 127.0.0.1:{port} (service not started) or the local firewall refused the loopback connect"
+    },
+    {
+      "enum": "NetTimeoutOptionFailed",
+      "slug": "net-timeout-option-failed",
+      "domain": "net",
+      "kind": "io",
+      "severity": "error",
+      "retryable": false,
+      "message": "Socket timeout option could not be set",
+      "hint": "setsockopt(SO_RCVTIMEO/SO_SNDTIMEO) failed; do not continue into an unbounded wait, close and reopen the socket"
+    },
+    {
+      "enum": "NetWaitFailed",
+      "slug": "net-wait-failed",
+      "domain": "net",
+      "kind": "io",
+      "severity": "error",
+      "retryable": true,
+      "message": "Socket readiness wait failed",
+      "hint": "select() returned an error (fd set invalid or interrupted); re-check the running flag before retrying"
+    },
+    {
+      "enum": "NetSendFailed",
+      "slug": "net-send-failed",
+      "domain": "net",
+      "kind": "io",
+      "severity": "error",
+      "retryable": false,
+      "message": "Socket send failed",
+      "hint": "send() returned <= 0 mid-write (peer closed or timeout); the byte stream is no longer reliable"
+    },
+    {
+      "enum": "NetRecvFailed",
+      "slug": "net-recv-failed",
+      "domain": "net",
+      "kind": "io",
+      "severity": "error",
+      "retryable": false,
+      "message": "Socket receive failed",
+      "hint": "recv() returned an error (peer reset or socket closed)"
+    },
+    {
+      "enum": "NetRecvTimeout",
+      "slug": "net-recv-timeout",
+      "domain": "net",
+      "kind": "timeout",
+      "severity": "warning",
+      "retryable": true,
+      "message": "Socket receive timed out",
+      "hint": "SO_RCVTIMEO elapsed before any byte arrived; bytes already received may still be parseable, treat this as 'no more data now'"
+    },
+    {
+      "enum": "NetEndpointInvalid",
+      "slug": "net-endpoint-invalid",
+      "domain": "net",
+      "kind": "invalid",
+      "severity": "error",
+      "retryable": false,
+      "message": "Network endpoint is not a valid address: '{detail}'",
+      "hint": "Pass a bare IPv4/IPv6 address (IPv6 may be bracketed); keep the port in its own argument and use Endpoint::local for UnixSocket paths or named pipes"
+    },
+    {
+      "enum": "NetCancelled",
+      "slug": "net-cancelled",
+      "domain": "net",
+      "kind": "cancelled",
+      "severity": "info",
+      "retryable": true,
+      "message": "Network operation was cancelled",
+      "hint": "The caller cancelled this operation (or its owner went away); the completion still fires once with this code, so drop the result only if the owner is gone"
+    },
+    {
+      "enum": "NetPlatformUnavailable",
+      "slug": "net-platform-unavailable",
+      "domain": "net",
+      "kind": "unavailable",
+      "severity": "error",
+      "retryable": false,
+      "message": "This network capability is unavailable on the current platform",
+      "hint": "Query aurora::net::Engine::capabilities() before using it; this leg has no file-descriptor wait semantics (e.g. wasm), so there is no silent fallback by design. When a TLS backend factory reports it, the code names the configuration that backend cannot express (e.g. a system certificate store leg given an in-memory PEM identity): under the default candidate chain the next backend is tried, while an explicitly designated one (TlsContext::backend) returns it as-is"
+    },
+    {
+      "enum": "NetUrlInvalid",
+      "slug": "net-url-invalid",
+      "domain": "net",
+      "kind": "invalid",
+      "severity": "error",
+      "retryable": false,
+      "message": "URL is not a valid absolute or resolvable reference: '{detail}'",
+      "hint": "Pass a complete URL with scheme (e.g. https://host/path) or a reference to resolve against a base URL; percent signs must introduce a two-hex-digit escape and IPv6 literals need brackets"
+    },
+    {
+      "enum": "NetProxyConfigInvalid",
+      "slug": "net-proxy-config-invalid",
+      "domain": "net",
+      "kind": "invalid",
+      "severity": "error",
+      "retryable": false,
+      "message": "Proxy configuration is not valid: '{detail}'",
+      "hint": "Fix the value instead of ignoring it: a proxy URL is scheme://[user[:pass]@]host[:port] with no path, and a NO_PROXY entry is *, a domain, a domain with :port, or an IPv4/IPv6 CIDR; a malformed proxy setting must never fall back to a direct connection"
+    },
+    {
+      "enum": "NetProxyUnsupported",
+      "slug": "net-proxy-unsupported",
+      "domain": "net",
+      "kind": "unsupported",
+      "severity": "error",
+      "retryable": false,
+      "message": "This proxy protocol is not supported by the current build",
+      "hint": "Use http:// (HTTP/1.1 CONNECT), socks5:// or socks5h:// for the proxy itself; a TLS-protected proxy connection (https://) and SOCKS4 are not implemented, so do not silently downgrade to a plaintext proxy hop"
+    },
+    {
+      "enum": "NetProxyUnreachable",
+      "slug": "net-proxy-unreachable",
+      "domain": "net",
+      "kind": "io",
+      "severity": "error",
+      "retryable": true,
+      "message": "Proxy tunnel could not be established: '{detail}'",
+      "hint": "The proxy answered (or refused) but no tunnel was built; connect never fell back to direct on purpose, so check the proxy host/port and its own uplink rather than the target host"
+    },
+    {
+      "enum": "NetProxyAuthRequired",
+      "slug": "net-proxy-auth-required",
+      "domain": "net",
+      "kind": "denied",
+      "severity": "error",
+      "retryable": false,
+      "message": "Proxy rejected the supplied credentials: '{detail}'",
+      "hint": "The proxy demanded authentication that was absent or refused: 407 on HTTP CONNECT, or a non-zero status on the SOCKS5 username/password subnegotiation; supply credentials in the proxy URL or re-authenticate once, do not retry blindly"
+    },
+    {
+      "enum": "NetProxyProtocol",
+      "slug": "net-proxy-protocol",
+      "domain": "net",
+      "kind": "corrupt",
+      "severity": "error",
+      "retryable": false,
+      "message": "Proxy handshake is not protocol-conformant: '{detail}'",
+      "hint": "The peer answered with bytes outside the CONNECT or SOCKS5 grammar (wrong version, missing status line, oversized header block); an HTTP hop is usually a captive portal or a plain HTTP server where a proxy port was expected"
+    },
+    {
+      "enum": "NetDnsFailed",
+      "slug": "net-dns-failed",
+      "domain": "net",
+      "kind": "io",
+      "severity": "error",
+      "retryable": true,
+      "message": "Host name could not be resolved: '{detail}'",
+      "hint": "The resolver returned an error or an empty answer for that name; a numeric literal (IPv4 dotted form or bracketed IPv6) never reaches the resolver, so use one when DNS itself is the thing under test"
+    },
+    {
+      "enum": "NetProxyConfigUnreadable",
+      "slug": "net-proxy-config-unreadable",
+      "domain": "net",
+      "kind": "io",
+      "severity": "error",
+      "retryable": true,
+      "message": "Operating-system proxy settings could not be read: '{detail}'",
+      "hint": "The channel exists on this platform but the read was refused (registry access, dynamic-store failure); this is distinct from a machine that simply has no proxy configured, and the library never treats the two as the same outcome"
+    },
+    {
+      "enum": "NetPolicyViolated",
+      "slug": "net-policy-violated",
+      "domain": "net",
+      "kind": "denied",
+      "severity": "error",
+      "retryable": false,
+      "message": "Network policy refused the request before any byte went out: '{detail}'",
+      "hint": "A declarative NetPolicy dimension (cleartext allow-list, TLS version floor, or require-proxy) rejected this target; the detail names the dimension and both sides of the conflict. Widen the policy, add the host to allow_cleartext_hosts, or raise the TLS context's floor to match the policy — the request itself is unchanged and retrying it as-is cannot succeed"
+    },
+    {
+      "enum": "NetOptionFailed",
+      "slug": "net-option-failed",
+      "domain": "net",
+      "kind": "io",
+      "severity": "error",
+      "retryable": false,
+      "message": "Socket option or shutdown call failed: '{detail}'",
+      "hint": "setsockopt / getsockopt / shutdown returned an error (bad handle state, unsupported option, or the peer already reset the connection); the native code is in the message, check the option name and whether the socket is still connected"
+    },
+    {
+      "enum": "NetConnectTimeout",
+      "slug": "net-connect-timeout",
+      "domain": "net",
+      "kind": "timeout",
+      "severity": "warning",
+      "retryable": true,
+      "message": "Connection attempt timed out: '{detail}'",
+      "hint": "The non-blocking connect did not produce a result within the configured deadline; a black-holed peer or an unreachable route looks identical to a slow one from here, so retry with a longer StreamOptions::connect_timeout or fall back to another candidate address"
+    },
+    {
+      "enum": "NetBufferLimit",
+      "slug": "net-buffer-limit",
+      "domain": "net",
+      "kind": "exhausted",
+      "severity": "warning",
+      "retryable": true,
+      "message": "Transfer buffer limit exceeded: '{detail}'",
+      "hint": "Backpressure fired: pending bytes reached the high-water mark, pending reads exceeded the read-buffer cap, or a framed message overflowed its limit; slow the producer down or raise the matching StreamOptions field rather than dropping data"
+    },
+    {
+      "enum": "NetFramerOverflow",
+      "slug": "net-framer-overflow",
+      "domain": "net",
+      "kind": "exhausted",
+      "severity": "error",
+      "retryable": false,
+      "message": "Framed message exceeds its configured limit: '{detail}'",
+      "hint": "The stream produced a single message larger than FrameOptions::max_frame_bytes, or a length prefix declaring more bytes than the limit allows; raise the limit only for a protocol that genuinely carries such frames, otherwise treat the stream as malformed and close it rather than resynchronising inside an oversized frame"
+    },
+    {
+      "enum": "NetFramerConfigInvalid",
+      "slug": "net-framer-config-invalid",
+      "domain": "net",
+      "kind": "invalid",
+      "severity": "error",
+      "retryable": false,
+      "message": "Invalid framer configuration: '{detail}'",
+      "hint": "A Framer factory was given a limit of 0, an empty or oversized delimiter, or a length field width outside 1..8 bytes; framing must be configured before it is used, because a silent default here would either accept unbounded frames or split messages at the wrong place"
+    },
+    {
+      "enum": "NetOptionConflict",
+      "slug": "net-option-conflict",
+      "domain": "net",
+      "kind": "conflict",
+      "severity": "error",
+      "retryable": false,
+      "message": "Socket option conflicts with the current configuration: '{detail}'",
+      "hint": "Two settings cannot both hold on one socket (a connected UDP socket receives only from its peer, so joining a multicast group there would configure a socket that can never receive the group); use a second socket for the other form rather than reordering the calls"
+    },
+    {
+      "enum": "NetTlsHandshakeFailed",
+      "slug": "net-tls-handshake-failed",
+      "domain": "net",
+      "kind": "io",
+      "severity": "error",
+      "retryable": false,
+      "message": "TLS handshake failed: '{detail}'",
+      "hint": "The peer aborted or refused the negotiation (unsupported cipher suite, alert from the server, truncated handshake, or a plaintext endpoint answering on a TLS port); the transport is unusable after this and must be closed. Reproduce with the peer's TLS logs before changing TlsContext, because retrying the same parameters only reproduces the same alert"
+    },
+    {
+      "enum": "NetTlsCertRejected",
+      "slug": "net-tls-cert-rejected",
+      "domain": "net",
+      "kind": "denied",
+      "severity": "error",
+      "retryable": false,
+      "message": "TLS certificate rejected: '{detail}'",
+      "hint": "Chain verification failed (unknown issuer, expired or not-yet-valid leaf, hostname mismatch, or a policy constraint). Install the issuing CA into the trust root used by this TlsContext, or point TlsContext::add_trusted_certificate at the right PEM; do not reach for allow_insecure_certificate, which turns a real man-in-the-middle signal off for the whole transport"
+    },
+    {
+      "enum": "NetTlsVersionMismatch",
+      "slug": "net-tls-version-mismatch",
+      "domain": "net",
+      "kind": "conflict",
+      "severity": "error",
+      "retryable": false,
+      "message": "TLS protocol version mismatch: '{detail}'",
+      "hint": "TlsContext::min_version rules out every version the peer is willing to speak (commonly a TLS 1.3-only floor against a 1.2 endpoint). Lower the floor deliberately and record why, rather than mirroring the peer automatically: the floor is the negotiated security baseline"
+    },
+    {
+      "enum": "NetTlsEngineUnavailable",
+      "slug": "net-tls-engine-unavailable",
+      "domain": "net",
+      "kind": "unavailable",
+      "severity": "error",
+      "retryable": false,
+      "message": "No TLS backend available: '{detail}'",
+      "hint": "Call aurora::net::available_tls_backends(): an empty list means this build compiled no TLS engine, so supply a provider through AURORA_NET_TLS_PROVIDERS=<static|shared>:<install root> or register a backend with aurora::net::register_tls_backend(). A non-empty list means the candidate chain matched nothing instead: check set_default_tls_backends() and TlsContext::backend, whose id must be one of the listed backends. Aurora never downgrades a TLS request to plaintext"
+    },
+    {
+      "enum": "NetTlsPinMismatch",
+      "slug": "net-tls-pin-mismatch",
+      "domain": "net",
+      "kind": "denied",
+      "severity": "error",
+      "retryable": false,
+      "message": "TLS certificate pin mismatch: '{detail}'",
+      "hint": "The peer's certificate does not carry any pinned public key, so the pinned identity changed (key rotation, reissued certificate, or an interception proxy). Update the pinned SPKI digests from an out-of-band source you trust and rotate them in lockstep with the service; never fall back to allow_insecure_certificate, which defeats the pin entirely"
+    },
+    {
+      "enum": "HttpRequestInvalid",
+      "slug": "http-request-invalid",
+      "domain": "http",
+      "kind": "invalid",
+      "severity": "error",
+      "retryable": false,
+      "message": "HTTP request cannot be sent as written: '{detail}'",
+      "hint": "The request violates the message grammar before any byte is written (unknown method text, a header name outside the token charset, a header value containing CR or LF, or a target URL without a host). Fix the request at the call site; the peer never sees it, so retrying with the same fields reproduces the same rejection"
+    },
+    {
+      "enum": "HttpTimeout",
+      "slug": "http-timeout",
+      "domain": "http",
+      "kind": "timeout",
+      "severity": "error",
+      "retryable": true,
+      "message": "HTTP request timed out: '{detail}'",
+      "hint": "The detail names which of the three stages expired (connect, read_idle or total), and they mean different things: connect says nothing answered, read_idle says the body stalled mid-flight, total says the whole exchange overran. Raise only the stage that fired - a blanket total budget turns slow-but-healthy transfers into failures"
+    },
+    {
+      "enum": "HttpRedirectLimit",
+      "slug": "http-redirect-limit",
+      "domain": "http",
+      "kind": "exhausted",
+      "severity": "error",
+      "retryable": false,
+      "message": "HTTP redirect chain exceeded the configured limit: '{detail}'",
+      "hint": "Either the peer is bouncing between targets or the limit is genuinely too small for this endpoint's chain. Inspect the Location sequence in the diagnostics before raising the limit, because following a cycle also leaks credentials to each hop it revisits"
+    },
+    {
+      "enum": "HttpBodyTooLarge",
+      "slug": "http-body-too-large",
+      "domain": "http",
+      "kind": "exhausted",
+      "severity": "error",
+      "retryable": false,
+      "message": "HTTP response body exceeds the configured limit: '{detail}'",
+      "hint": "The guard is what keeps a wrong URL (a video behind a shortened link) from exhausting memory. The detail says which ceiling was crossed: max_body_bytes bounds the bytes that arrived on the wire, max_decompressed_bytes bounds the transparently decompressed payload (the decompression-bomb guard). Raise the one that fired if the payload is legitimately large, or switch to open_stream so the body is delivered in bounded chunks instead of materialized"
+    },
+    {
+      "enum": "HttpCharsetUnsupported",
+      "slug": "http-charset-unsupported",
+      "domain": "http",
+      "kind": "unsupported",
+      "severity": "error",
+      "retryable": false,
+      "message": "HTTP response charset is not supported: '{detail}'",
+      "hint": "Response::text() decodes only UTF-8 and Latin-1 in this batch, so a body labelled with any other charset cannot be turned into text here. The undecoded bytes are always reachable through body(), so transcoding is the caller's to do; do not silently substitute U+FFFD or reinterpret the bytes as UTF-8, which would corrupt the payload"
+    },
+    {
+      "enum": "HttpProtocolError",
+      "slug": "http-protocol-error",
+      "domain": "http",
+      "kind": "corrupt",
+      "severity": "error",
+      "retryable": false,
+      "message": "HTTP peer violated the message grammar: '{detail}'",
+      "hint": "The response is not parseable as HTTP/1.1 (bad status line, a chunk size that is not hexadecimal, framing that declares both Content-Length and an unknown Transfer-Encoding, or a body longer than its declared length). Close the connection and re-issue on a fresh one, because the byte stream is now misaligned and no later response on it can be trusted"
+    },
+    {
+      "enum": "HttpContentEncodingUnsupported",
+      "slug": "http-content-encoding-unsupported",
+      "domain": "http",
+      "kind": "unsupported",
+      "severity": "error",
+      "retryable": false,
+      "message": "HTTP response content encoding is not supported: '{detail}'",
+      "hint": "The peer applied a content coding this client cannot undo - either the coding name is outside the advertised set (brotli and zstd are not built here) or the build was configured with AURORA_ENABLE_COMPRESSION=OFF, in which case no decoder exists and the request deliberately never advertised Accept-Encoding. Re-request with an encoding you can decode (Request::header sets Accept-Encoding; an identity body always arrives undecoded); never reinterpret the compressed bytes as text, which would hand the caller garbage"
+    },
+    {
+      "enum": "HttpBodyCorrupt",
+      "slug": "http-body-corrupt",
+      "domain": "http",
+      "kind": "corrupt",
+      "severity": "error",
+      "retryable": false,
+      "message": "HTTP response body cannot be decoded: '{detail}'",
+      "hint": "The message framed cleanly but its payload did not survive the declared content coding: the gzip/zlib/deflate stream is corrupt, truncated mid-symbol, or fails its trailing checksum. This is a data defect (at the peer, or in the encoding chain it declared), not a transport fault - the bytes arrived whole, so retrying the same target only re-fetches the same broken payload; check the declared Content-Encoding chain before suspecting the link"
+    },
+    {
+      "enum": "HttpBodyNotReplayable",
+      "slug": "http-body-not-replayable",
+      "domain": "http",
+      "kind": "unsupported",
+      "severity": "error",
+      "retryable": false,
+      "message": "HTTP request body cannot be sent a second time: '{detail}'",
+      "hint": "A 307 or 308 redirect must replay the message body, and the streaming body said it cannot return to its starting point, so resending it would ship a half-consumed payload. Either hand the payload over as an in-memory body, or make the source restartable (re-open the file and reset its cursor); note that a body which cannot restart also opts this request out of the retry policy on purpose"
+    },
+    {
+      "enum": "WsClosed",
+      "slug": "ws-closed",
+      "domain": "ws",
+      "kind": "unavailable",
+      "severity": "info",
+      "retryable": true,
+      "message": "WebSocket connection is closed: '{detail}'",
+      "hint": "The peer ran the close handshake, a pong deadline expired, or this side shut the handle down, so no further frame will be delivered. Reconnecting is a fresh connection with a fresh handshake, not a resume: application-level state the protocol carried (subprotocol, session identity, anything the server keyed on the old connection) has to be re-established by the caller"
+    },
+    {
+      "enum": "WsHandshakeRejected",
+      "slug": "ws-handshake-rejected",
+      "domain": "ws",
+      "kind": "denied",
+      "severity": "error",
+      "retryable": false,
+      "message": "WebSocket upgrade was refused: '{detail}'",
+      "hint": "The peer did not answer the upgrade with 101 Switching Protocols, Sec-WebSocket-Accept did not match the key this side sent, or a required subprotocol went unchosen. This is a stable answer about the endpoint and the configuration, so retrying the same request reaches the same verdict: fix the URL, the subprotocol list, or the Origin the server expects"
+    },
+    {
+      "enum": "WsProtocolError",
+      "slug": "ws-protocol-error",
+      "domain": "ws",
+      "kind": "corrupt",
+      "severity": "error",
+      "retryable": false,
+      "message": "WebSocket peer violated the frame grammar: '{detail}'",
+      "hint": "A frame was malformed, exceeded a configured frame or reassembled-message limit, carried a control frame that is not a complete message or whose payload is longer than 125 bytes, or held text that is not valid UTF-8. The byte stream is now misaligned, so the connection is dropped rather than continued: no later frame on it can be trusted"
+    },
+    {
+      "enum": "WsSendQueueFull",
+      "slug": "ws-send-queue-full",
+      "domain": "ws",
+      "kind": "exhausted",
+      "severity": "warning",
+      "retryable": true,
+      "message": "WebSocket send queue is full: '{detail}'",
+      "hint": "The producer outran the wire: pending outgoing payload reached its byte cap or the queue its entry cap. This refuses only the message that hit the limit and leaves the connection open, on purpose - whether to keep buffering, drop, or close is the caller's decision. Slow the producer down or raise the matching WebSocketOptions field"
     }
   ],
   "debug": [

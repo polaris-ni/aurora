@@ -36,7 +36,8 @@ auto Error::to_json() const -> std::string {
     // 编译期枚举码 + 表驱动元数据
     out += ",\"code_enum\":" + jstr(std::string(to_string(code_enum)));
     out += ",\"severity\":" + jstr(std::string(to_string(severity)));
-    out += ",\"category\":" + jstr(std::string(to_string(category)));
+    out += ",\"domain\":" + jstr(std::string(to_string(domain)));
+    out += ",\"kind\":" + jstr(std::string(to_string(kind)));
     out += ",\"retryable\":" + std::string(retryable ? "true" : "false");
     out += '}';
     return out;

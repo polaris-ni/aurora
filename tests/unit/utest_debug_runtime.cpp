@@ -1,13 +1,14 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/debug/debug_runtime.h
 /// 测试说明: 覆盖运行时信息导出门面五项能力——widget_tree（委托 Inspector::tree_json_full 的
-/// 等价性与结构）、perf_snapshot / frame_phase_timeline（关键键与 limit 语义）、diagnostics、
-/// why_trace 快照形状，以及关闭态（未开 AURORA_ENABLE_DEBUG）统一返回
+/// 等价性与结构）、perf_snapshot / frame_phase_timeline（关键键与 limit 语义）、diagnostics（快照形状
+/// 与逐条 domain / kind 两轴键面）、why_trace 快照形状，以及关闭态（未开 AURORA_ENABLE_DEBUG）统一返回
 /// {"available":false,"reason":...} 的 disabled 语义。测试 TU 不写宏门控：
 /// 以 feature_flags().debug 运行时探测，探测失败即 SKIP/分支。
 
 #include <string>
 
+#include "aurora/core/diagnostics.h"
 #include "aurora/debug/debug_runtime.h"
 #include "aurora/debug/feature_flags.h"  // 运行时探测 AURORA_ENABLE_DEBUG 的归一化镜像
 #include "aurora/inspector/inspector_api.h"
@@ -124,6 +125,27 @@ AURORA_TEST_CASE(diagnostics_snapshot_shape) {
     AURORA_TEST_CHECK_TRUE(require_child(j, "diagnostics")->is_array());
     AURORA_TEST_CHECK_EQ(require_child(j, "diagnostics")->size(),
                          static_cast<std::size_t>(require_field<int>(j, "count")));
+
+    // 逐条键面与 Diagnostic::to_json_line() 同批改到两轴：domain / kind 恒在，旧单键类别与修复载荷键都不再出现。
+    // 按 code 定位本例自己发出的那条，不依赖环缓次序，也不受同进程其它用例留下的条目影响。
+    Diagnostics::warn("snapshot entry key surface", "utest_debug_runtime.cpp", "nav-depth-exceeded");
+    const Json after = diagnostics();
+    const auto *items = require_child(after, "diagnostics");
+    AURORA_TEST_CHECK_GT(items->size(), 0U);
+    const Json *entry = nullptr;
+    for (std::size_t i = 0; i < items->size(); ++i) {
+        const auto *item = require_child_at(*items, i);
+        if (require_field<std::string>(*item, "code") == "nav-depth-exceeded") {
+            entry = item;
+            break;
+        }
+    }
+    AURORA_TEST_REQUIRE(entry != nullptr);
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*entry, "severity"), "error");
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*entry, "domain"), "navigation");
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(*entry, "kind"), "exhausted");
+    AURORA_TEST_CHECK_TRUE(!entry->contains("category"));
+    AURORA_TEST_CHECK_TRUE(!entry->contains("fix"));
 }
 
 AURORA_TEST_CASE(why_trace_snapshot_shape) {

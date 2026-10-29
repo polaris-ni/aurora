@@ -500,7 +500,8 @@ AURORA_TEST_CASE(error_payload_carries_slug_and_machine_fields) {
     AURORA_TEST_REQUIRE_FALSE(parsed);
     const auto &error = parsed.error();
     AURORA_TEST_CHECK_EQ(error.code, "cli-choice-invalid");
-    AURORA_TEST_CHECK(error.category == au::ErrorCategory::Validation);
+    AURORA_TEST_CHECK(error.domain == au::ErrorDomain::Cli);
+    AURORA_TEST_CHECK(error.kind == au::ErrorKind::Invalid);
     AURORA_TEST_CHECK_THAT(error.to_json(), au::testing::matchers::has_substr("cli-choice-invalid"));
 }
 

@@ -81,7 +81,8 @@ AURORA_TEST_CASE(make_error_renders_template_and_fills_table_metadata) {
     AURORA_TEST_CHECK_STREQ(e.code, "nav-depth-exceeded");
     AURORA_TEST_CHECK(e.code_enum == ErrorCode::NavDepthExceeded);
     AURORA_TEST_CHECK(e.severity == ErrorSeverity::Error);
-    AURORA_TEST_CHECK(e.category == ErrorCategory::Navigation);
+    AURORA_TEST_CHECK(e.domain == ErrorDomain::Navigation);
+    AURORA_TEST_CHECK(e.kind == ErrorKind::Exhausted);
     AURORA_TEST_CHECK_EQ(e.retryable, false);
     AURORA_TEST_CHECK_STREQ(e.hint, std::string{aurora::hint_of(ErrorCode::NavDepthExceeded)});
 }
@@ -105,7 +106,7 @@ AURORA_TEST_CASE(make_error_hint_override_and_custom_message) {
 }
 
 AURORA_TEST_CASE(make_error_legacy_overload_sets_suggestion_docs_where) {
-    // 向后兼容重载：suggestion/docs/where 由调用方提供，slug/severity/category 仍来自表。
+    // 向后兼容重载：suggestion/docs/where 由调用方提供，slug/severity/domain/kind 仍来自表。
     const auto e = make_error(ErrorCode::IOFileNotFound, std::string{"cfg.json missing"}, std::string{"Check the path"},
                               std::string{"docs/io.md"}, std::string{"preferences.cpp:42"});
     AURORA_TEST_CHECK_STREQ(e.message, "cfg.json missing");
@@ -114,7 +115,11 @@ AURORA_TEST_CASE(make_error_legacy_overload_sets_suggestion_docs_where) {
     AURORA_TEST_CHECK_STREQ(e.where, "preferences.cpp:42");
     AURORA_TEST_CHECK_STREQ(e.code, "io-file-not-found");
     AURORA_TEST_CHECK(e.severity == ErrorSeverity::Error);
-    AURORA_TEST_CHECK(e.category == ErrorCategory::Io);
+    // 两轴正交的可观测样本：`ErrorDomain::Io` 答「文件与字节流子系统」，`ErrorKind::NotFound` 答「名字合法但
+    // 注册表里没有这一项」。注意 `io` 这枚拼写在两轴里都有（域=泛文件系统，性质=底层原语调用失败），
+    // 但各占一个 JSON 键、各自成表，靠枚举类型而不是字符串区分，所以拼写撞车不影响判定。
+    AURORA_TEST_CHECK(e.domain == ErrorDomain::Io);
+    AURORA_TEST_CHECK(e.kind == ErrorKind::NotFound);
 }
 
 AURORA_TEST_CASE(make_error_from_table_fills_frozen_slug_metadata) {
@@ -133,7 +138,11 @@ AURORA_TEST_CASE(error_default_construction_uses_neutral_metadata) {
     AURORA_TEST_CHECK(d.message.empty());
     AURORA_TEST_CHECK(d.code_enum == ErrorCode::GeneralUnknown);
     AURORA_TEST_CHECK(d.severity == ErrorSeverity::Error);
-    AURORA_TEST_CHECK(d.category == ErrorCategory::General);
+    // 缺省组合恒等于零值哨兵那一行的表元数据：默认构造不引入第三种 (domain, kind) 组合。
+    AURORA_TEST_CHECK(d.domain == ErrorDomain::General);
+    AURORA_TEST_CHECK(d.kind == ErrorKind::Internal);
+    AURORA_TEST_CHECK_EQ(d.domain, aurora::domain(ErrorCode::GeneralUnknown));
+    AURORA_TEST_CHECK_EQ(d.kind, aurora::kind(ErrorCode::GeneralUnknown));
     AURORA_TEST_CHECK_EQ(d.retryable, false);
 }
 
@@ -147,8 +156,11 @@ AURORA_TEST_CASE(error_to_json_shape_and_escaping) {
     AURORA_TEST_CHECK_THAT(json, m::has_substr(R"("where":"a\\b")"));  // 反斜杠被转义
     AURORA_TEST_CHECK_THAT(json, m::has_substr(R"("code_enum":"IOFileNotFound")"));
     AURORA_TEST_CHECK_THAT(json, m::has_substr(R"("severity":"error")"));
-    AURORA_TEST_CHECK_THAT(json, m::has_substr(R"("category":"io")"));
+    AURORA_TEST_CHECK_THAT(json, m::has_substr(R"("domain":"io")"));
+    AURORA_TEST_CHECK_THAT(json, m::has_substr(R"("kind":"not-found")"));
     AURORA_TEST_CHECK_THAT(json, m::has_substr(R"("retryable":false)"));
+    // 旧的单一 category 键已删：拆成 domain/kind 两键后不再有合并输出。
+    AURORA_TEST_CHECK_THAT(json, m::negated(m::has_substr(R"("category")")));
 }
 
 }  // namespace aurora::test_cases::utest_result
