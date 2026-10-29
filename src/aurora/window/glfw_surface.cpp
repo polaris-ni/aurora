@@ -14,7 +14,9 @@
 #elif defined(AURORA_PLATFORM_MACOS)
 // macOS 无 <GL/gl.h>：GL 头位于 OpenGL.framework（GL 1.1 立即模式子集仍在，本文件仅用之）。
 // Apple 自 10.14 起将整个 OpenGL 标记 deprecated，须在包含前定义厂商宏消噪（宏名为厂商规定）。
-#define GL_SILENCE_DEPRECATION 1  // NOLINT(*-identifier-naming)
+// `macro-usage` 建议换 constexpr，但 GLFW 判的是「该宏是否已定义」，常量无法满足，故同厂商命名
+// 一并豁免。
+#define GL_SILENCE_DEPRECATION 1  // NOLINT(*-identifier-naming,*-macro-usage)
 #include <OpenGL/gl.h>
 #else
 #include <GL/gl.h>
@@ -138,6 +140,10 @@ auto glfw_release() -> void {
 }  // namespace
 
 // pimpl：全部 GLFW/OpenGL 状态与回调都在这里；公共头仅持有 unique_ptr<Impl>。
+// 成员按语义分组排布（窗口句柄 → 尺寸/缩放 → 渲染态 → 回调 → 窗口状态位），按对齐重排虽可收回
+// 填充，但打散分组且每窗口仅一份实例，收益不在一次分配的零头里，故不作优化目标（同一处置见
+// src/aurora/window/wayland_surface.cpp 与 include/aurora/window/window.h）。
+// NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding)
 struct GlfwSurface::Impl {
     GLFWwindow *window = nullptr;
     /// 逻辑尺寸（dp）——对外 `size()` 的值，由帧缓冲物理像素除以 `scale` 得。

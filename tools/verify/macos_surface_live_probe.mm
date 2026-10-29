@@ -48,6 +48,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -57,7 +58,11 @@ namespace {
 
 using aurora::Color;
 
+// 探针的通过 / 失败计数：匿名命名空间内的进程私有记账（无跨 TU 可见性、无初始化顺序
+// 问题），就地豁免非 const 全局（同 x11_csd_live_probe 的探针记账口径）。
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 int g_checks = 0;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 int g_failures = 0;
 
 auto check(bool ok, const std::string &name, const std::string &detail = {}) -> void {
@@ -72,24 +77,30 @@ auto fmt_float(float v) -> std::string {
     return aurora_verify::format_int(static_cast<long long>(std::lround(static_cast<double>(v))));
 }
 
-auto fmt_size(aurora::Size s) -> std::string {
-    return fmt_float(s.width) + "x" + fmt_float(s.height);
-}
+auto fmt_size(aurora::Size s) -> std::string { return fmt_float(s.width) + "x" + fmt_float(s.height); }
 
-auto fmt_point(aurora::Point p) -> std::string {
-    return "(" + fmt_float(p.x) + "," + fmt_float(p.y) + ")";
-}
+auto fmt_point(aurora::Point p) -> std::string { return "(" + fmt_float(p.x) + "," + fmt_float(p.y) + ")"; }
 
 auto nearly(float a, float b) -> bool { return std::fabs(a - b) <= 1.0F; }
 
-auto pixel_is(const std::uint8_t *pixels, int width, int x, int y, Color expected) -> bool {
-    if (pixels == nullptr || width <= 0) {
+/// @brief 取帧缓冲 (x, y) 处的 RGBA 并与 expected 比；坐标越界判不符，绝不越读。
+/// @param frame 整帧字节（`Painter` 缓冲的视图，空视图 = 数据不可用）。
+/// @param width 帧缓冲宽（像素）。
+/// @param x 列坐标。
+/// @param y 行坐标。
+/// @param expected 期望颜色。
+/// @return 四通道全等时为 true。
+auto pixel_is(std::span<const std::uint8_t> frame, int width, int x, int y, Color expected) -> bool {
+    if (frame.empty() || width <= 0 || x < 0 || y < 0) {
         return false;
     }
-    const std::size_t index =
-        (static_cast<std::size_t>(y) * static_cast<std::size_t>(width) + static_cast<std::size_t>(x)) * 4U;
-    return pixels[index + 0U] == expected.r && pixels[index + 1U] == expected.g &&
-           pixels[index + 2U] == expected.b && pixels[index + 3U] == expected.a;
+    const std::size_t offset =
+        ((static_cast<std::size_t>(y) * static_cast<std::size_t>(width)) + static_cast<std::size_t>(x)) * 4U;
+    if (offset + 4U > frame.size()) {
+        return false;
+    }
+    const std::span<const std::uint8_t> rgba = frame.subspan(offset, 4);
+    return rgba[0] == expected.r && rgba[1] == expected.g && rgba[2] == expected.b && rgba[3] == expected.a;
 }
 
 /// 把 nsappearance 设为指定外观并返回原值（调用方负责恢复）。
@@ -102,6 +113,8 @@ auto set_app_appearance(NSAppearance *appearance) -> NSAppearance * {
 
 }  // namespace
 
+// 入口不吞异常：探针的失败以未捕获异常落到非零退出码，捕获反而把它压成 0（与既有探针同口径）。
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
     @autoreleasepool {
         AURORA_LOG_RAW("verify", "aurora_verify_macos_surface\n");
@@ -127,9 +140,9 @@ auto main() -> int {
 
         check(surface.native_handle() != nullptr, "native NSWindow handle",
               aurora_verify::format_handle(surface.native_handle()));
-        NSWindow *window = (__bridge NSWindow *)surface.native_handle();
+        auto *window = (__bridge NSWindow *)surface.native_handle();
         check(window != nil, "native_handle bridges to NSWindow");
-        check([window isVisible], "window is visible after creation");
+        check([window isVisible] != 0, "window is visible after creation");
         check(nearly(surface.size().width, 360.0F) && nearly(surface.size().height, 240.0F), "initial logical size",
               fmt_size(surface.size()));
 
@@ -149,13 +162,12 @@ auto main() -> int {
                                            .size = aurora::Size{.width = 16.0F, .height = 16.0F}},
                               Color::red());
             auto present1 = surface.present();
-            check(present1.ok() && present1.value(), "present #1",
-                  present1 ? "" : present1.error().message);
+            check(present1.ok() && present1.value(), "present #1", present1 ? "" : present1.error().message);
         }
         const aurora::Size fb1 = surface.framebuffer_size();
         const aurora::Size expect1{.width = 360.0F * scale, .height = 240.0F * scale};
-        check(nearly(fb1.width, expect1.width) && nearly(fb1.height, expect1.height),
-              "framebuffer = logical x scale", fmt_size(fb1) + " vs " + fmt_size(expect1));
+        check(nearly(fb1.width, expect1.width) && nearly(fb1.height, expect1.height), "framebuffer = logical x scale",
+              fmt_size(fb1) + " vs " + fmt_size(expect1));
         check(surface.frame_count() == 1, "frame_count after first present",
               aurora_verify::format_int(surface.frame_count()));
 
@@ -163,9 +175,13 @@ auto main() -> int {
         check(pixels != nullptr, "painter data available after begin_frame");
         const int fbw = static_cast<int>(std::lround(static_cast<double>(fb1.width)));
         const int fbh = static_cast<int>(std::lround(static_cast<double>(fb1.height)));
+        // 「指针 + 字节数」的帧缓冲视图（数据不可见时长度取 0，判据自会判不符而不越读）。
+        const std::size_t row_bytes = static_cast<std::size_t>(fbw) * 4U;
+        const std::size_t frame_bytes = (pixels != nullptr) ? row_bytes * static_cast<std::size_t>(fbh) : 0U;
+        const std::span<const std::uint8_t> frame(pixels, frame_bytes);
         const Color clear = surface.clear_color();
-        check(pixel_is(pixels, fbw, 0, 0, Color::red()), "red rect pixel at (0,0)");
-        check(pixel_is(pixels, fbw, fbw - 1, fbh - 1, clear), "clear color at bottom-right",
+        check(pixel_is(frame, fbw, 0, 0, Color::red()), "red rect pixel at (0,0)");
+        check(pixel_is(frame, fbw, fbw - 1, fbh - 1, clear), "clear color at bottom-right",
               "rgba(" + aurora_verify::format_int(clear.r) + "," + aurora_verify::format_int(clear.g) + "," +
                   aurora_verify::format_int(clear.b) + "," + aurora_verify::format_int(clear.a) + ")");
 
@@ -178,8 +194,8 @@ auto main() -> int {
         auto present2 = surface.present();
         check(present2.ok() && present2.value(), "present #2");
         const aurora::Size fb2 = surface.framebuffer_size();
-        check(nearly(fb2.width, 420.0F * scale) && nearly(fb2.height, 300.0F * scale),
-              "framebuffer follows set_size", fmt_size(fb2));
+        check(nearly(fb2.width, 420.0F * scale) && nearly(fb2.height, 300.0F * scale), "framebuffer follows set_size",
+              fmt_size(fb2));
         check(surface.frame_count() == 2, "frame_count after second present",
               aurora_verify::format_int(surface.frame_count()));
 
@@ -199,8 +215,8 @@ auto main() -> int {
         for (const auto &d : displays) {
             if (d.id == wid) {
                 id_seen = true;
-                const float cx = pos.x + surface.size().width * scale * 0.5F;
-                const float cy = pos.y + surface.size().height * scale * 0.5F;
+                const float cx = pos.x + (surface.size().width * scale * 0.5F);
+                const float cy = pos.y + (surface.size().height * scale * 0.5F);
                 const aurora::Display under = aurora::app::display_containing(aurora::Point{.x = cx, .y = cy});
                 check(under.id == wid, "display_containing(window center) == display_id",
                       aurora_verify::format_int(under.id) + " vs " + aurora_verify::format_int(wid));
@@ -213,8 +229,7 @@ auto main() -> int {
         // ---- OS 明暗偏好：NSApp 外观切换后实时跟随 ----
         const aurora::ColorScheme initial = aurora::os_color_scheme();
         check(initial == aurora::ColorScheme::Dark || initial == aurora::ColorScheme::Light,
-              "os_color_scheme returns Light/Dark",
-              initial == aurora::ColorScheme::Dark ? "Dark" : "Light");
+              "os_color_scheme returns Light/Dark", initial == aurora::ColorScheme::Dark ? "Dark" : "Light");
         NSAppearance *saved = set_app_appearance([NSAppearance appearanceNamed:NSAppearanceNameDarkAqua]);
         check(aurora::os_color_scheme() == aurora::ColorScheme::Dark, "os_color_scheme follows DarkAqua");
         set_app_appearance([NSAppearance appearanceNamed:NSAppearanceNameAqua]);

@@ -56,7 +56,7 @@ auto menu_state() -> MenuBridgeState & {
     if (state == nullptr) {
         return;
     }
-    NSMenuItem *item = (NSMenuItem *)sender;
+    auto *item = static_cast<NSMenuItem *>(sender);
     // 可勾选项就地翻转显示态（与 Win32 菜单项的默认行为一致）；命令状态仍以应用侧为准，
     // 重装菜单时模型里的 checked 会覆盖这次翻转。
     if ([item tag] != 0) {
@@ -64,14 +64,16 @@ auto menu_state() -> MenuBridgeState & {
     }
     NSString *model_id = [item representedObject];
     const char *utf8 = (model_id != nil) ? [model_id UTF8String] : nullptr;
-    if (utf8 == nullptr || utf8[0] == '\0') {
+    // 先落成 std::string 再判空：空串判据用 `empty()`，不去下标裸 C 指针。
+    const std::string clicked_id = (utf8 != nullptr) ? std::string{utf8} : std::string{};
+    if (clicked_id.empty()) {
         // 空 id 项照常建出、照常显示，但原生路径跨重建只能靠稳定 id 路由点击——空 id 路由不了。
         // 不静默丢弃、不伪造 id，只留诊断（与门面 route_click 的口径一致）。
         AURORA_LOG_WARN("native-menu-bar", "menu item clicked but its id is empty; click ignored");
         return;
     }
     if (state->on_click) {
-        state->on_click(std::string(utf8));  // 按模型 id 回投（桥不知命令语义，只透传标识）
+        state->on_click(clicked_id);  // 按模型 id 回投（桥不知命令语义，只透传标识）
     }
 }
 
@@ -112,6 +114,9 @@ auto install_backend(const std::vector<menu_bar_translate::FlatMenuItem> &items,
             target->owner = &self;
             self.target = target;  // 进程内一份，随状态长存（NSMenuItem.target 不持有 target）
         }
+        // 菜单标题不参与渲染（主菜单栏取 `title` 只用于菜单自身标识），取应用名而非用户可见
+        // 文案，故不接本地化目录（同一处置见 src/aurora/app/detail/macos_tray.cpp）。
+        // NOLINTNEXTLINE(clang-analyzer-optin.osx.cocoa.localizability.NonLocalizedStringChecker)
         NSMenu *menu = [[NSMenu alloc] initWithTitle:@"Aurora"];
         if (menu == nil) {
             return make_error(ErrorCode::NativeMenuInstallFailed, "native-menu-bar: NSMenu allocation failed");
@@ -198,14 +203,18 @@ auto is_installed_backend() -> bool { return menu_state().installed; }
 
 auto macos_menu_bar_ensure_registered() -> bool {
     // 进程级一次性登记：NSMenu 是应用级对象，通路不随窗口销毁而注销。
-    static const bool registered = []() -> bool {
+    // 登记位取「函数局部 bool + 访问前判」形态（同 `x11_drag` 的 `backend_registered` 口径），
+    // 而非 lambda 初始化的 `static const bool`：后者会被 naming 检查归入静态常量（要求全大写），
+    // 且登记抛出时 lambda 把失败态粘在 static 上，本形态下次调用可重试。
+    static bool registered = false;
+    if (!registered) {
         menu_bar_translate::register_menu_bar_backend(menu_bar_translate::MenuBarBackend{
             .install = &install_backend,
             .uninstall = &uninstall_backend,
             .is_installed = &is_installed_backend,
         });
-        return true;
-    }();
+        registered = true;
+    }
     return registered;
 }
 

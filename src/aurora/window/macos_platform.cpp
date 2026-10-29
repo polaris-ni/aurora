@@ -32,7 +32,7 @@ auto macos_os_color_scheme() -> ColorScheme {
         if (best == nil) {
             return ColorScheme::Unspecified;
         }
-        return [best isEqualToString:NSAppearanceNameDarkAqua] ? ColorScheme::Dark : ColorScheme::Light;
+        return ([best isEqualToString:NSAppearanceNameDarkAqua] != 0) ? ColorScheme::Dark : ColorScheme::Light;
     }
 }
 

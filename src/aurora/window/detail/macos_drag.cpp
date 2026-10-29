@@ -340,7 +340,7 @@ auto MacOSDragBridge::Impl::uninstall() -> void {
         auto *ns_view = static_cast<NSView *>(view);
         // `unregisterDraggedTypes` 的可用性按运行期探测（保守侧：老系统没有该 selector 时
         // 不注销——视图随窗口销毁，登记自然失效，不谎报已注销）。
-        if ([ns_view respondsToSelector:@selector(unregisterDraggedTypes)]) {
+        if ([ns_view respondsToSelector:@selector(unregisterDraggedTypes)] != 0) {
             [ns_view unregisterDraggedTypes];
         }
     }

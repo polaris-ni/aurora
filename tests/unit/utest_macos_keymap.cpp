@@ -12,6 +12,7 @@
 #include "aurora/core/platform.h"  // 守卫求值前必须先有平台宏（TU 自包含，不依赖 PCH 伞头带入）
 #if defined(AURORA_PLATFORM_MACOS) && defined(AURORA_BACKEND_MACOS)
 #include <cstdint>
+#include <span>
 
 #include "aurora/window/detail/macos_keymap.h"
 #endif
@@ -34,10 +35,11 @@ struct KeyEntry {
 };
 
 /// @brief 逐项比对一张表；失败时套件只报告用例失败，表内容在源码里即判据。
-auto check_table(const KeyEntry *entries, std::size_t count) -> void {
-    for (std::size_t i = 0; i < count; ++i) {
-        AURORA_TEST_CHECK_EQ(static_cast<int>(macos_keycode_to_keycode(entries[i].native)),
-                             static_cast<int>(entries[i].expected));
+/// @param entries 对照表（数组自动退化为 span，长度随视图带入，不做裸下标）。
+auto check_table(std::span<const KeyEntry> entries) -> void {
+    for (const auto &entry : entries) {
+        AURORA_TEST_CHECK_EQ(static_cast<int>(macos_keycode_to_keycode(entry.native)),
+                             static_cast<int>(entry.expected));
     }
 }
 
@@ -75,93 +77,113 @@ AURORA_TEST_CASE(macos_modifiers_map_each_flag_to_its_own_bit) {
 }
 
 AURORA_TEST_CASE(macos_modifiers_combine_without_crosstalk) {
-    constexpr auto kShift = aurora::detail::AURORA_MACOS_MOD_SHIFT;
-    constexpr auto kCtrl = aurora::detail::AURORA_MACOS_MOD_CONTROL;
-    constexpr auto kAlt = aurora::detail::AURORA_MACOS_MOD_OPTION;
-    constexpr auto kMeta = aurora::detail::AURORA_MACOS_MOD_COMMAND;
-    check_mods(macos_modifiers_from_flags(kShift | kCtrl), ModifierKey::Shift | ModifierKey::Control);
-    check_mods(macos_modifiers_from_flags(kMeta | kAlt), ModifierKey::Meta | ModifierKey::Alt);
-    check_mods(macos_modifiers_from_flags(kCtrl | kAlt | kShift),
+    constexpr auto shift = aurora::detail::AURORA_MACOS_MOD_SHIFT;
+    constexpr auto ctrl = aurora::detail::AURORA_MACOS_MOD_CONTROL;
+    constexpr auto alt = aurora::detail::AURORA_MACOS_MOD_OPTION;
+    constexpr auto meta = aurora::detail::AURORA_MACOS_MOD_COMMAND;
+    check_mods(macos_modifiers_from_flags(shift | ctrl), ModifierKey::Shift | ModifierKey::Control);
+    check_mods(macos_modifiers_from_flags(meta | alt), ModifierKey::Meta | ModifierKey::Alt);
+    check_mods(macos_modifiers_from_flags(ctrl | alt | shift),
                ModifierKey::Control | ModifierKey::Alt | ModifierKey::Shift);
-    check_mods(macos_modifiers_from_flags(kShift | kCtrl | kAlt | kMeta),
+    check_mods(macos_modifiers_from_flags(shift | ctrl | alt | meta),
                ModifierKey::Shift | ModifierKey::Control | ModifierKey::Alt | ModifierKey::Meta);
 }
 
 AURORA_TEST_CASE(macos_letter_keys_map_to_their_physical_positions) {
     // 美式布局的物理键位（NSEvent.keyCode 按位置而非字符），逐个钉死。
     constexpr KeyEntry entries[] = {
-        {0, KeyCode::A},  {11, KeyCode::B}, {8, KeyCode::C},  {2, KeyCode::D},  {14, KeyCode::E}, {3, KeyCode::F},
-        {5, KeyCode::G},  {4, KeyCode::H},  {34, KeyCode::I}, {38, KeyCode::J}, {40, KeyCode::K}, {37, KeyCode::L},
-        {46, KeyCode::M}, {45, KeyCode::N}, {31, KeyCode::O}, {35, KeyCode::P}, {12, KeyCode::Q}, {15, KeyCode::R},
-        {1, KeyCode::S},  {17, KeyCode::T}, {32, KeyCode::U}, {9, KeyCode::V},  {13, KeyCode::W}, {7, KeyCode::X},
-        {16, KeyCode::Y}, {6, KeyCode::Z},
+        {.native = 0, .expected = KeyCode::A},  {.native = 11, .expected = KeyCode::B},
+        {.native = 8, .expected = KeyCode::C},  {.native = 2, .expected = KeyCode::D},
+        {.native = 14, .expected = KeyCode::E}, {.native = 3, .expected = KeyCode::F},
+        {.native = 5, .expected = KeyCode::G},  {.native = 4, .expected = KeyCode::H},
+        {.native = 34, .expected = KeyCode::I}, {.native = 38, .expected = KeyCode::J},
+        {.native = 40, .expected = KeyCode::K}, {.native = 37, .expected = KeyCode::L},
+        {.native = 46, .expected = KeyCode::M}, {.native = 45, .expected = KeyCode::N},
+        {.native = 31, .expected = KeyCode::O}, {.native = 35, .expected = KeyCode::P},
+        {.native = 12, .expected = KeyCode::Q}, {.native = 15, .expected = KeyCode::R},
+        {.native = 1, .expected = KeyCode::S},  {.native = 17, .expected = KeyCode::T},
+        {.native = 32, .expected = KeyCode::U}, {.native = 9, .expected = KeyCode::V},
+        {.native = 13, .expected = KeyCode::W}, {.native = 7, .expected = KeyCode::X},
+        {.native = 16, .expected = KeyCode::Y}, {.native = 6, .expected = KeyCode::Z},
     };
-    check_table(entries, sizeof(entries) / sizeof(entries[0]));
+    check_table(entries);
 }
 
 AURORA_TEST_CASE(macos_digit_row_maps_in_layout_order) {
     // 数字行在 ANSI 布局里 1..9 的键码不连续（5/6、7/8 互换），逐项写死。
     constexpr KeyEntry entries[] = {
-        {18, KeyCode::D1}, {19, KeyCode::D2}, {20, KeyCode::D3}, {21, KeyCode::D4}, {23, KeyCode::D5},
-        {22, KeyCode::D6}, {26, KeyCode::D7}, {28, KeyCode::D8}, {25, KeyCode::D9}, {29, KeyCode::D0},
+        {.native = 18, .expected = KeyCode::D1}, {.native = 19, .expected = KeyCode::D2},
+        {.native = 20, .expected = KeyCode::D3}, {.native = 21, .expected = KeyCode::D4},
+        {.native = 23, .expected = KeyCode::D5}, {.native = 22, .expected = KeyCode::D6},
+        {.native = 26, .expected = KeyCode::D7}, {.native = 28, .expected = KeyCode::D8},
+        {.native = 25, .expected = KeyCode::D9}, {.native = 29, .expected = KeyCode::D0},
     };
-    check_table(entries, sizeof(entries) / sizeof(entries[0]));
+    check_table(entries);
 }
 
 AURORA_TEST_CASE(macos_punctuation_and_editing_keys) {
     constexpr KeyEntry entries[] = {
-        {24, KeyCode::Equal},   {27, KeyCode::Minus},     {30, KeyCode::RightBracket}, {33, KeyCode::LeftBracket},
-        {39, KeyCode::Quote},   {41, KeyCode::Semicolon}, {42, KeyCode::Backslash},    {43, KeyCode::Comma},
-        {44, KeyCode::Slash},   {47, KeyCode::Period},    {50, KeyCode::Backquote},    {36, KeyCode::Enter},
-        {48, KeyCode::Tab},     {49, KeyCode::Space},     {51, KeyCode::Backspace},    {53, KeyCode::Escape},
-        {117, KeyCode::Delete},
+        {.native = 24, .expected = KeyCode::Equal},        {.native = 27, .expected = KeyCode::Minus},
+        {.native = 30, .expected = KeyCode::RightBracket}, {.native = 33, .expected = KeyCode::LeftBracket},
+        {.native = 39, .expected = KeyCode::Quote},        {.native = 41, .expected = KeyCode::Semicolon},
+        {.native = 42, .expected = KeyCode::Backslash},    {.native = 43, .expected = KeyCode::Comma},
+        {.native = 44, .expected = KeyCode::Slash},        {.native = 47, .expected = KeyCode::Period},
+        {.native = 50, .expected = KeyCode::Backquote},    {.native = 36, .expected = KeyCode::Enter},
+        {.native = 48, .expected = KeyCode::Tab},          {.native = 49, .expected = KeyCode::Space},
+        {.native = 51, .expected = KeyCode::Backspace},    {.native = 53, .expected = KeyCode::Escape},
+        {.native = 117, .expected = KeyCode::Delete},
     };
-    check_table(entries, sizeof(entries) / sizeof(entries[0]));
+    check_table(entries);
 }
 
 AURORA_TEST_CASE(macos_navigation_and_function_keys) {
     constexpr KeyEntry entries[] = {
-        {123, KeyCode::ArrowLeft}, {124, KeyCode::ArrowRight}, {125, KeyCode::ArrowDown}, {126, KeyCode::ArrowUp},
-        {115, KeyCode::Home},      {119, KeyCode::End},        {116, KeyCode::PageUp},    {121, KeyCode::PageDown},
-        {122, KeyCode::F1},        {120, KeyCode::F2},         {99, KeyCode::F3},         {118, KeyCode::F4},
-        {96, KeyCode::F5},         {97, KeyCode::F6},          {98, KeyCode::F7},         {100, KeyCode::F8},
-        {101, KeyCode::F9},        {109, KeyCode::F10},        {103, KeyCode::F11},       {111, KeyCode::F12},
+        {.native = 123, .expected = KeyCode::ArrowLeft}, {.native = 124, .expected = KeyCode::ArrowRight},
+        {.native = 125, .expected = KeyCode::ArrowDown}, {.native = 126, .expected = KeyCode::ArrowUp},
+        {.native = 115, .expected = KeyCode::Home},      {.native = 119, .expected = KeyCode::End},
+        {.native = 116, .expected = KeyCode::PageUp},    {.native = 121, .expected = KeyCode::PageDown},
+        {.native = 122, .expected = KeyCode::F1},        {.native = 120, .expected = KeyCode::F2},
+        {.native = 99, .expected = KeyCode::F3},         {.native = 118, .expected = KeyCode::F4},
+        {.native = 96, .expected = KeyCode::F5},         {.native = 97, .expected = KeyCode::F6},
+        {.native = 98, .expected = KeyCode::F7},         {.native = 100, .expected = KeyCode::F8},
+        {.native = 101, .expected = KeyCode::F9},        {.native = 109, .expected = KeyCode::F10},
+        {.native = 103, .expected = KeyCode::F11},       {.native = 111, .expected = KeyCode::F12},
     };
-    check_table(entries, sizeof(entries) / sizeof(entries[0]));
+    check_table(entries);
 }
 
 AURORA_TEST_CASE(macos_modifier_keys_map_to_left_right_merged_codes) {
     constexpr KeyEntry entries[] = {
-        {54, KeyCode::Meta},    {55, KeyCode::Meta},  // Command 左/右
-        {56, KeyCode::Shift},   {60, KeyCode::Shift},  // Shift 左/右
-        {58, KeyCode::Alt},     {61, KeyCode::Alt},  // Option 左/右
-        {59, KeyCode::Control}, {62, KeyCode::Control},  // Control 左/右
+        {.native = 54, .expected = KeyCode::Meta},    {.native = 55, .expected = KeyCode::Meta},  // Command 左/右
+        {.native = 56, .expected = KeyCode::Shift},   {.native = 60, .expected = KeyCode::Shift},  // Shift 左/右
+        {.native = 58, .expected = KeyCode::Alt},     {.native = 61, .expected = KeyCode::Alt},  // Option 左/右
+        {.native = 59, .expected = KeyCode::Control}, {.native = 62, .expected = KeyCode::Control},  // Control 左/右
     };
-    check_table(entries, sizeof(entries) / sizeof(entries[0]));
+    check_table(entries);
 }
 
 AURORA_TEST_CASE(macos_keypad_maps_to_kp_codes_with_documented_merges) {
     constexpr KeyEntry entries[] = {
-        {82, KeyCode::KP_0},
-        {83, KeyCode::KP_1},
-        {84, KeyCode::KP_2},
-        {85, KeyCode::KP_3},
-        {86, KeyCode::KP_4},
-        {87, KeyCode::KP_5},
-        {88, KeyCode::KP_6},
-        {89, KeyCode::KP_7},
-        {91, KeyCode::KP_8},
-        {92, KeyCode::KP_9},
-        {65, KeyCode::KP_Decimal},
-        {67, KeyCode::KP_Multiply},
-        {69, KeyCode::KP_Add},
-        {75, KeyCode::KP_Divide},
-        {78, KeyCode::KP_Subtract},
+        {.native = 82, .expected = KeyCode::KP_0},
+        {.native = 83, .expected = KeyCode::KP_1},
+        {.native = 84, .expected = KeyCode::KP_2},
+        {.native = 85, .expected = KeyCode::KP_3},
+        {.native = 86, .expected = KeyCode::KP_4},
+        {.native = 87, .expected = KeyCode::KP_5},
+        {.native = 88, .expected = KeyCode::KP_6},
+        {.native = 89, .expected = KeyCode::KP_7},
+        {.native = 91, .expected = KeyCode::KP_8},
+        {.native = 92, .expected = KeyCode::KP_9},
+        {.native = 65, .expected = KeyCode::KP_Decimal},
+        {.native = 67, .expected = KeyCode::KP_Multiply},
+        {.native = 69, .expected = KeyCode::KP_Add},
+        {.native = 75, .expected = KeyCode::KP_Divide},
+        {.native = 78, .expected = KeyCode::KP_Subtract},
         // 并档口径：小键盘回车并入 Enter，小键盘等号并入主键盘 Equal（框架未单列 KP_Equal）。
-        {76, KeyCode::Enter},
-        {81, KeyCode::Equal},
+        {.native = 76, .expected = KeyCode::Enter},
+        {.native = 81, .expected = KeyCode::Equal},
     };
-    check_table(entries, sizeof(entries) / sizeof(entries[0]));
+    check_table(entries);
 }
 
 AURORA_TEST_CASE(macos_unmapped_keys_are_unknown_not_guesswork) {

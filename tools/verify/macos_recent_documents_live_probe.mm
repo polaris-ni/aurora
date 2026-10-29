@@ -45,17 +45,22 @@
 
 #import <AppKit/AppKit.h>
 
+#include <unistd.h>
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <string>
-#include <unistd.h>
 #include <vector>
 
 #include "verify_print.h"
 
 namespace {
 
+// 探针的通过 / 失败计数：匿名命名空间内的进程私有记账（无跨 TU 可见性、无初始化顺序
+// 问题），就地豁免非 const 全局（同 x11_csd_live_probe 的探针记账口径）。
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 int g_checks = 0;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 int g_failures = 0;
 
 auto check(bool ok, const std::string &name, const std::string &detail = {}) -> void {
@@ -70,6 +75,9 @@ auto check(bool ok, const std::string &name, const std::string &detail = {}) -> 
 auto recent_names() -> std::vector<std::string> {
     std::vector<std::string> names;
     NSDocumentController *controller = [NSDocumentController sharedDocumentController];
+    // Objective-C fast enumeration 的循环变量由运行期逐次写入，`init-variables` 只认 C++ 的声明式
+    // 初始化，故此处恒报「未初始化」——它是语言形态差异，不是漏初始化（同后端实现口径）。
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     for (NSURL *url in [controller recentDocumentURLs]) {
         NSString *name = [url lastPathComponent];
         const char *utf8 = name != nil ? [name UTF8String] : nullptr;
@@ -81,16 +89,13 @@ auto recent_names() -> std::vector<std::string> {
 }
 
 auto contains(const std::vector<std::string> &haystack, const std::string &needle) -> bool {
-    for (const auto &item : haystack) {
-        if (item == needle) {
-            return true;
-        }
-    }
-    return false;
+    return std::find(haystack.begin(), haystack.end(), needle) != haystack.end();
 }
 
 }  // namespace
 
+// 入口不吞异常：探针的失败以未捕获异常落到非零退出码，捕获反而把它压成 0（与既有探针同口径）。
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
     @autoreleasepool {
         AURORA_LOG_RAW("verify", "aurora_verify_macos_recent_documents\n");
@@ -103,7 +108,7 @@ auto main() -> int {
         }
         if ([[NSBundle mainBundle] bundleIdentifier] == nil) {
             AURORA_LOG_RAW("verify", "ENV-UNAVAILABLE: not running from an app bundle; "
-                           "NSDocumentController does not record recent documents for bare executables\n");
+                                     "NSDocumentController does not record recent documents for bare executables\n");
             return 2;
         }
 

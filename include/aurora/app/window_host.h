@@ -38,6 +38,10 @@ namespace aurora {
 /// @note Thread: main-thread only
 /// @note Side-effects: none (rendering happens in render_frame)
 /// @note Rebuildable: no
+/// 成员声明序即**销毁序**（见 `window_` / `scene_` 的声明注释），按对齐重排会直接改动回收顺序；
+/// 每窗口一份实例、填充字节不在一次分配的零头里，故 Padding 告警不作优化目标（同一处置见
+/// include/aurora/window/window.h 与 src/aurora/window/wayland_surface.cpp）。
+/// NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding)
 class WindowHost {
   public:
     /// @brief 构造一个窗口宿主。

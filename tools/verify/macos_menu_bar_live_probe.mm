@@ -47,7 +47,11 @@
 
 namespace {
 
+// 探针的通过 / 失败计数：匿名命名空间内的进程私有记账（无跨 TU 可见性、无初始化顺序
+// 问题），就地豁免非 const 全局（同 x11_csd_live_probe 的探针记账口径）。
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 int g_checks = 0;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 int g_failures = 0;
 
 auto check(bool ok, const std::string &name, const std::string &detail = {}) -> void {
@@ -67,6 +71,8 @@ auto equal_text(NSString *text, const std::string &expected) -> bool { return ut
 
 }  // namespace
 
+// 入口不吞异常：探针的失败以未捕获异常落到非零退出码，捕获反而把它压成 0（与既有探针同口径）。
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
     @autoreleasepool {
         NSApplication *app = [NSApplication sharedApplication];
@@ -83,15 +89,14 @@ auto main() -> int {
 
         aurora::CommandRegistry registry;
         std::vector<std::string> invoked;
-        registry.add(aurora::Command{.id = "file.open",
-                                     .title = "Open",
-                                     .action = [&invoked]() -> void { invoked.push_back("file.open"); }});
-        registry.add(aurora::Command{.id = "view.checked",
-                                     .title = "Checked",
-                                     .action = [&invoked]() -> void { invoked.push_back("view.checked"); }});
-        registry.add(aurora::Command{.id = "file.nested",
-                                     .title = "Nested",
-                                     .action = [&invoked]() -> void { invoked.push_back("file.nested"); }});
+        registry.add(aurora::Command{
+            .id = "file.open", .title = "Open", .action = [&invoked]() -> void { invoked.emplace_back("file.open"); }});
+        registry.add(aurora::Command{.id = "view.checked", .title = "Checked", .action = [&invoked]() -> void {
+                                         invoked.emplace_back("view.checked");
+                                     }});
+        registry.add(aurora::Command{.id = "file.nested", .title = "Nested", .action = [&invoked]() -> void {
+                                         invoked.emplace_back("file.nested");
+                                     }});
 
         auto &bar = aurora::NativeMenuBar::instance();
         bar.uninstall();  // 起点清零
@@ -139,9 +144,9 @@ auto main() -> int {
 
         if (file_menu != nil && [file_menu numberOfItems] == 6) {
             NSMenuItem *open_item = [file_menu itemAtIndex:0];
-            check(equal_text([open_item title], std::string{"Open\tCtrl+O"}),
+            check(equal_text([open_item title], std::string { "Open\tCtrl+O" }),
                   "shortcut text is appended after a tab");
-            check([[file_menu itemAtIndex:1] isSeparatorItem], "separator maps to NSMenuItem separator");
+            check([[file_menu itemAtIndex:1] isSeparatorItem] != 0, "separator maps to NSMenuItem separator");
             check([[file_menu itemAtIndex:2] state] == NSControlStateValueOn, "checked state is mapped");
             check([[file_menu itemAtIndex:2] tag] != 0, "checkable item is flagged for in-place toggle");
             check([[file_menu itemAtIndex:3] isEnabled] == NO, "disabled item is greyed out");
@@ -173,15 +178,15 @@ auto main() -> int {
         edit.children.push_back(undo);
         check(bar.install({edit}).ok(), "re-install replaces the menu tree");
         NSMenu *replaced = [NSApp mainMenu];
-        check(replaced != nil && [replaced numberOfItems] == 1 &&
-                  equal_text([[replaced itemAtIndex:0] title], "Edit"),
+        check(replaced != nil && [replaced numberOfItems] == 1 && equal_text([[replaced itemAtIndex:0] title], "Edit"),
               "replacement tree is visible");
 
         bar.uninstall();
         check(!bar.is_installed() && !aurora::detail::macos_menu_bar_is_installed(), "uninstall clears install state");
 
-        AURORA_LOG_RAW("verify", "\n", g_failures == 0 ? "ALL PASS" : "FAILURES", " (", aurora_verify::format_int(g_checks),
-                       " checks, ", aurora_verify::format_int(g_failures), " failed)\n");
+        AURORA_LOG_RAW("verify", "\n", g_failures == 0 ? "ALL PASS" : "FAILURES", " (",
+                       aurora_verify::format_int(g_checks), " checks, ", aurora_verify::format_int(g_failures),
+                       " failed)\n");
     }
     return g_failures == 0 ? 0 : 1;
 }

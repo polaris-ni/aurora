@@ -52,7 +52,11 @@
 
 namespace {
 
+// 探针的通过 / 失败计数：匿名命名空间内的进程私有记账（无跨 TU 可见性、无初始化顺序
+// 问题），就地豁免非 const 全局（同 x11_csd_live_probe 的探针记账口径）。
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 int g_checks = 0;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 int g_failures = 0;
 
 auto check(bool ok, const std::string &name, const std::string &detail = {}) -> void {
@@ -73,13 +77,16 @@ auto contains(const std::vector<std::string> &formats, const std::string &mime) 
 
 }  // namespace
 
+// 入口不吞异常：探针的失败以未捕获异常落到非零退出码，捕获反而把它压成 0（与既有探针同口径）。
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
     @autoreleasepool {
         const auto saved = aurora::Clipboard::get_text();
         const std::string restore_text = saved.ok() ? saved.value() : std::string{};
 
         // ---- 原始载荷：标准 MIME 往返 ----
-        const auto set_plain = aurora::Clipboard::set_payload(std::string{aurora::AURORA_MIME_TEXT_PLAIN}, bytes_of("aurora"));
+        const auto set_plain =
+            aurora::Clipboard::set_payload(std::string{aurora::AURORA_MIME_TEXT_PLAIN}, bytes_of("aurora"));
         check(set_plain.ok() && set_plain.value(), "set_payload(text/plain) succeeds");
         const auto get_plain = aurora::Clipboard::get_payload(std::string{aurora::AURORA_MIME_TEXT_PLAIN});
         check(get_plain.ok() && text_of(get_plain.value()) == "aurora", "get_payload(text/plain) round-trips");
@@ -102,8 +109,9 @@ auto main() -> int {
         const auto got_html = aurora::Clipboard::get_html();
         check(got_html.ok() && got_html.value() == html, "get_html round-trips");
         const auto formats_after_html = aurora::Clipboard::available_formats();
-        check(formats_after_html.ok() && contains(formats_after_html.value(), std::string{aurora::AURORA_MIME_TEXT_HTML}),
-              "available_formats lists text/html");
+        check(
+            formats_after_html.ok() && contains(formats_after_html.value(), std::string{aurora::AURORA_MIME_TEXT_HTML}),
+            "available_formats lists text/html");
 
         // ---- 自定义 MIME ----
         const std::string custom_mime = "application/x-aurora-probe";
@@ -117,8 +125,12 @@ auto main() -> int {
         std::filesystem::create_directories(temp_dir);
         const auto file_a = temp_dir / "a.txt";
         const auto file_b = temp_dir / "b.txt";
-        { std::ofstream(file_a) << "a"; }
-        { std::ofstream(file_b) << "b"; }
+        {
+            std::ofstream(file_a) << "a";
+        }
+        {
+            std::ofstream(file_b) << "b";
+        }
         const std::vector<std::string> files{file_a.string(), file_b.string()};
         check(aurora::Clipboard::set_files(files).ok(), "set_files succeeds");
         const auto got_files = aurora::Clipboard::get_files();
@@ -157,7 +169,8 @@ auto main() -> int {
         check(aurora::Clipboard::set_payload(std::string{aurora::AURORA_MIME_TEXT_PLAIN}, bytes_of("direct")).ok(),
               "a direct write supersedes the lazy offer");
         check(!aurora::detail::macos_clipboard_has_offer(), "superseded offer is no longer reported");
-        check(ownership_lost == 1, "ownership-lost callback fired once", "count=" + aurora_verify::format_int(ownership_lost));
+        check(ownership_lost == 1, "ownership-lost callback fired once",
+              "count=" + aurora_verify::format_int(ownership_lost));
 
         // ---- 无变更监听的如实申报 ----
         const auto listener = aurora::Clipboard::on_change([]() -> void {});

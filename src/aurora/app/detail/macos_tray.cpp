@@ -38,7 +38,15 @@ struct TrayState {
     bool visible = false;  ///< 库内可见性（与 `NSStatusItem.visible` 同步）
 };
 
-auto ns_string(const std::string &text) -> NSString * { return [NSString stringWithUTF8String:text.c_str()]; }
+/// @brief `std::string`（UTF-8）→ `NSString`；空串与非法 UTF-8 都回空串而非 nil。
+/// @param text UTF-8 文本。
+/// @return 自动释放的 `NSString`（恒非 nil）。
+/// @note 本 TU 的 AppKit 入参（`initWithContentsOfFile:` / `initWithTitle:`）都要求非空实参，
+/// 故在唯一的转换点兜底，不在每个调用点重复判。
+auto ns_string(const std::string &text) -> NSString * {
+    NSString *value = [NSString stringWithUTF8String:text.c_str()];
+    return value != nil ? value : @"";
+}
 
 auto to_std(NSString *text) -> std::string {
     const char *utf8 = text != nil ? [text UTF8String] : nullptr;
@@ -89,32 +97,39 @@ auto live_tray_bridges() -> std::vector<MacOSTrayBridge *> { return live_registr
 }  // namespace aurora::detail
 
 // 状态按钮 / 菜单项的 ObjC 接收者（target-action）。
-@interface AuroraTrayTarget : NSObject
-// 桥状态（`aurora::detail::TrayState *`，不持有）。
-@property(nonatomic, assign) void *owner;
+// 桥状态以 `@public` 裸成员传入（同 `macos_menu_bar` 的 `AuroraMacMenuTarget` 口径）：用
+// `@property` 会综合出一个前导下划线的实例变量，与本库「成员 lower_case + 尾下划线」冲突。
+@interface AuroraTrayTarget : NSObject {
+  @public
+    void *owner;  ///< `aurora::detail::TrayState *`（不持有）
+}
+// 无菜单时点击状态按钮；sender（状态按钮）未使用。
+- (void)activate:(id)sender;
+// 点击菜单叶子项；sender 的 `tag` 是扁平索引。
+- (void)menuItemClicked:(NSMenuItem *)sender;
 @end
 
 @implementation AuroraTrayTarget
 // 无菜单时点击状态按钮；sender（状态按钮）未使用。
 - (void)activate:(id)sender {
     (void)sender;
-    aurora::detail::fire_activate(self.owner);
+    aurora::detail::fire_activate(owner);
 }
 
 // 点击菜单叶子项；sender 的 `tag` 是扁平索引。
 - (void)menuItemClicked:(NSMenuItem *)sender {
-    aurora::detail::fire_menu(self.owner, static_cast<long>(sender.tag));
+    aurora::detail::fire_menu(owner, static_cast<long>(sender.tag));
 }
 @end
 
 namespace aurora::detail {
 
-MacOSTrayBridge::MacOSTrayBridge(std::string title, const std::string &icon_path) {
+MacOSTrayBridge::MacOSTrayBridge(const std::string &title, const std::string &icon_path) {
     @autoreleasepool {
         auto *state = new TrayState();
         state->item = [[[NSStatusBar systemStatusBar] statusItemWithLength:NSVariableStatusItemLength] retain];
         state->target = [[AuroraTrayTarget alloc] init];
-        static_cast<AuroraTrayTarget *>(state->target).owner = state;
+        static_cast<AuroraTrayTarget *>(state->target)->owner = state;
         if (state->item != nil) {
             state->item.button.target = state->target;
             state->item.button.action = @selector(activate:);
@@ -222,6 +237,9 @@ void MacOSTrayBridge::set_menu(const std::vector<MenuItem> &items) {
             return;
         }
 
+        // 状态项菜单的 title 不参与渲染（NSStatusItem 只画按钮，菜单标题无处显示），取应用名而
+        // 非用户可见文案，故不接本地化目录。
+        // NOLINTNEXTLINE(clang-analyzer-optin.osx.cocoa.localizability.NonLocalizedStringChecker)
         NSMenu *menu = [[NSMenu alloc] initWithTitle:@"Aurora"];
         // 关闭自动启用：NSMenu 默认按 responder 链重算 enabled，会覆盖声明式 `MenuItem::enabled`。
         menu.autoenablesItems = NO;

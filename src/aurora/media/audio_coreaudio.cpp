@@ -213,8 +213,8 @@ struct CoreAudioDeviceBackend::Impl {
     auto teardown_locked() -> void {
         armed.store(false, std::memory_order_release);  // 先关闸：在飞回调此后只丢块不再写
         if (queue != nullptr) {
-            AudioQueueStop(queue, true);  // 同步：返回时队列已停、在飞回调已尽
-            AudioQueueDispose(queue, true);  // 同步：缓冲随句柄回收，buffers 集体失效
+            AudioQueueStop(queue, 1U);  // 同步：返回时队列已停、在飞回调已尽
+            AudioQueueDispose(queue, 1U);  // 同步：缓冲随句柄回收，buffers 集体失效
             queue = nullptr;
         }
         buffers.clear();
@@ -222,7 +222,7 @@ struct CoreAudioDeviceBackend::Impl {
 
     /// @brief 队列是否真在跑（IsRunning 兜底：设备被拔且默认设备未变时事件不到）。
     /// @return 队列存在且 IsRunning 为真值；句柄为空视为「需要重建」。
-    auto is_running_locked() -> bool {
+    auto is_running_locked() const -> bool {
         if (queue == nullptr) {
             return false;
         }
@@ -286,7 +286,8 @@ struct CoreAudioDeviceBackend::Impl {
     /// @param 属性地址数组未使用。
     /// @param client Impl 地址（CoreAudio 的 clientData 在**形参末位**，与 AudioQueue 回调相反）。
     /// @return noErr（本回调不消费属性，无需返回具体状态）。
-    static auto on_device_changed(AudioObjectID, UInt32, const AudioObjectPropertyAddress[], void *client) -> OSStatus {
+    static auto on_device_changed(AudioObjectID /*device*/, UInt32 /*address_count*/,
+                                  const AudioObjectPropertyAddress /*addresses*/[], void *client) -> OSStatus {
         auto *impl = static_cast<Impl *>(client);
         if (impl != nullptr) {
             impl->reroute.store(true, std::memory_order_release);
@@ -305,7 +306,7 @@ auto CoreAudioDeviceBackend::start(RenderFn render_block) -> bool {
     if (impl_->running.load(std::memory_order_acquire)) {
         return false;
     }
-    std::lock_guard<std::mutex> lock(impl_->mutex);
+    std::scoped_lock lock(impl_->mutex);
     impl_->render = std::move(render_block);  // 必须先于建队列：Start 后回调可立即到达
     if (!impl_->create_locked()) {
         impl_->render = nullptr;
@@ -403,6 +404,9 @@ struct CoreAudioCaptureBackend::Impl {
         const auto *list = reinterpret_cast<const AudioBufferList *>(raw.data());
         UInt32 found_channels = 0U;
         for (UInt32 index = 0U; index < list->mNumberBuffers; ++index) {
+            // `AudioBufferList` 是 C 柔性数组尾结构：`mBuffers` 既非容器也无 .at()/span 可换，
+            // 边界就是上面的 mNumberBuffers 循环条件（系统契约保证两者一致）。
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index)
             found_channels += list->mBuffers[index].mNumberChannels;
         }
         if (found_channels == 0U) {
@@ -465,8 +469,8 @@ struct CoreAudioCaptureBackend::Impl {
     auto teardown_locked() -> void {
         armed.store(false, std::memory_order_release);  // 先关闸：在飞回调此后只丢包
         if (queue != nullptr) {
-            AudioQueueStop(queue, true);
-            AudioQueueDispose(queue, true);
+            AudioQueueStop(queue, 1U);
+            AudioQueueDispose(queue, 1U);
             queue = nullptr;
         }
         buffers.clear();
@@ -509,8 +513,9 @@ struct CoreAudioCaptureBackend::Impl {
     /// @param 首帧时间戳未使用（本后端不外露采集时钟）。
     /// @param 包描述数未使用（线性 PCM 恒 0）。
     /// @param 包描述数组未使用（同上）。
-    static auto on_capture(void *client, AudioQueueRef in_queue, AudioQueueBufferRef buffer, const AudioTimeStamp *,
-                           UInt32, const AudioStreamPacketDescription *) -> void {
+    static auto on_capture(void *client, AudioQueueRef in_queue, AudioQueueBufferRef buffer,
+                           const AudioTimeStamp /*timestamp*/ *, UInt32 /*number_packet_descriptions*/,
+                           const AudioStreamPacketDescription /*packet_descriptions*/ *) -> void {
         auto *impl = static_cast<Impl *>(client);
         if (impl == nullptr || in_queue == nullptr || buffer == nullptr) {
             return;
@@ -536,8 +541,8 @@ struct CoreAudioCaptureBackend::Impl {
     /// @param 属性地址数组未使用。
     /// @param client Impl 地址（同渲染端：clientData 在形参末位）。
     /// @return noErr。
-    static auto on_input_device_changed(AudioObjectID, UInt32, const AudioObjectPropertyAddress[], void *client)
-        -> OSStatus {
+    static auto on_input_device_changed(AudioObjectID /*device*/, UInt32 /*address_count*/,
+                                        const AudioObjectPropertyAddress /*addresses*/[], void *client) -> OSStatus {
         auto *impl = static_cast<Impl *>(client);
         if (impl != nullptr) {
             impl->stale.store(true, std::memory_order_release);
@@ -562,7 +567,7 @@ auto CoreAudioCaptureBackend::start(CaptureFn on_pcm) -> bool {
     impl_->capture = std::move(on_pcm);
     impl_->device_failed.store(false, std::memory_order_relaxed);  // 重开清旧败
     impl_->stale.store(false, std::memory_order_relaxed);
-    std::lock_guard<std::mutex> lock(impl_->mutex);
+    std::scoped_lock lock(impl_->mutex);
     if (!impl_->create_locked()) {
         impl_->teardown_locked();
         impl_->capture = nullptr;

@@ -49,7 +49,11 @@
 
 namespace {
 
+// 探针的通过 / 失败计数：匿名命名空间内的进程私有记账（无跨 TU 可见性、无初始化顺序
+// 问题），就地豁免非 const 全局（同 x11_csd_live_probe 的探针记账口径）。
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 int g_checks = 0;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 int g_failures = 0;
 
 auto check(bool ok, const std::string &name, const std::string &detail = {}) -> void {
@@ -81,6 +85,8 @@ auto synthesize_press(std::uint32_t id) -> bool {
 
 }  // namespace
 
+// 入口不吞异常：探针的失败以未捕获异常落到非零退出码，捕获反而把它压成 0（与既有探针同口径）。
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
     @autoreleasepool {
         AURORA_LOG_RAW("verify", "aurora_verify_macos_hotkey\n");
@@ -100,8 +106,7 @@ auto main() -> int {
         bool fired = false;
         const aurora::KeyCombo first{aurora::ModifierKey::Control | aurora::ModifierKey::Alt, aurora::KeyCode::K};
         const auto handle = registry.add(first, [&fired]() -> void { fired = true; });
-        check(handle.ok(), "add(Ctrl+Alt+K) returns Ok",
-              handle.ok() ? std::string{} : handle.error().code);
+        check(handle.ok(), "add(Ctrl+Alt+K) returns Ok", handle.ok() ? std::string{} : handle.error().code);
         check(handle.ok() && handle.value().id != 0U, "handle carries a nonzero id");
         check(registry.count() == 1, "registered count is 1", aurora_verify::format_uint(registry.count()));
 
@@ -109,8 +114,8 @@ auto main() -> int {
         check(!duplicate.ok() && duplicate.error().code_enum == aurora::ErrorCode::OsHotkeyRegisterFailed,
               "duplicate combination is rejected");
 
-        const auto no_key = registry.add(aurora::KeyCombo{aurora::ModifierKey::Control, aurora::KeyCode::Unknown},
-                                         []() -> void {});
+        const auto no_key =
+            registry.add(aurora::KeyCombo{aurora::ModifierKey::Control, aurora::KeyCode::Unknown}, []() -> void {});
         check(!no_key.ok() && no_key.error().code_enum == aurora::ErrorCode::OsHotkeyRegisterFailed,
               "combination without a primary key is rejected");
 

@@ -18,6 +18,8 @@
 
 #import <AppKit/AppKit.h>
 
+#include <utility>  // std::cmp_equal（有符号 display_id 与无符号 NSScreenNumber 的比较）
+
 namespace aurora::app {
 
 namespace {
@@ -116,7 +118,9 @@ auto move_window_to_display(Window &win, int display_id) -> void {
         for (NSUInteger i = 0; screens != nil && i < [screens count]; ++i) {
             NSScreen *screen = [screens objectAtIndex:i];
             NSNumber *number = [[screen deviceDescription] objectForKey:@"NSScreenNumber"];
-            if (number != nil && static_cast<int>([number unsignedIntValue]) == display_id) {
+            // `NSScreenNumber` 是无符号 `CGDirectDisplayID`、`display_id` 有符号：按值比较而非
+            // 折位比较，负 id 不再回绕成某个大键码而误命中。
+            if ((number != nil) && std::cmp_equal([number unsignedIntValue], display_id)) {
                 target = screen;
                 break;
             }

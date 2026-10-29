@@ -32,7 +32,7 @@ class MacOSTrayBridge {
     /// @brief 创建状态项并应用初始标题 / 图标。
     /// @param title 悬浮提示文字（状态按钮 tooltip）。
     /// @param icon_path 图标文件路径；空串回退应用图标。
-    MacOSTrayBridge(std::string title, const std::string &icon_path);
+    MacOSTrayBridge(const std::string &title, const std::string &icon_path);
     /// @brief 移除状态项并释放 AppKit 对象。
     ~MacOSTrayBridge();
     /// @brief 禁止拷贝（状态项为唯一所有权资源）。
@@ -40,6 +40,11 @@ class MacOSTrayBridge {
     /// @brief 禁止拷贝赋值（同拷贝构造）。
     /// @return 恒不返回（已 delete）。
     auto operator=(const MacOSTrayBridge &) -> MacOSTrayBridge & = delete;
+    /// @brief 禁止移动（`state_` 裸句柄的唯一性由存活登记表保证，移走会让 target 指空）。
+    MacOSTrayBridge(MacOSTrayBridge &&) = delete;
+    /// @brief 禁止移动赋值（同移动构造）。
+    /// @return 恒不返回（已 delete）。
+    auto operator=(MacOSTrayBridge &&) -> MacOSTrayBridge & = delete;
 
     /// @brief 更新悬浮提示文字。
     /// @param title 新文字。

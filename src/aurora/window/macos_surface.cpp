@@ -73,8 +73,8 @@ using aurora::TextInputEvent;
   @public
     aurora::MacOSSurface::Impl *impl;
 }
-// 以 Impl 回指构造（视图不拥有 Impl）；frame 为初始内容区，impl_ 为所属 Surface 的状态。
-- (id)initWithFrame:(NSRect)frame impl:(aurora::MacOSSurface::Impl *)impl_;
+// 以 Impl 回指构造（视图不拥有 Impl）；frame 为初始内容区，state 为所属 Surface 的状态。
+- (id)initWithFrame:(NSRect)frame impl:(aurora::MacOSSurface::Impl *)state;
 @end
 
 // 窗口委托：关闭闸门与状态变化 → Impl 上报。
@@ -82,8 +82,8 @@ using aurora::TextInputEvent;
   @public
     aurora::MacOSSurface::Impl *impl;
 }
-// 以 Impl 回指构造（委托不拥有 Impl）；impl_ 为所属 Surface 的状态。
-- (id)initWithImpl:(aurora::MacOSSurface::Impl *)impl_;
+// 以 Impl 回指构造（委托不拥有 Impl）；state 为所属 Surface 的状态。
+- (id)initWithImpl:(aurora::MacOSSurface::Impl *)state;
 @end
 
 // 无边框窗口仍需可成为 key/main window（NSWindow 默认对 borderless 返回 NO）。
@@ -124,14 +124,14 @@ struct MacOSSurface::Impl {
 
     /// @brief 把事件交给宿主派发器（未注册时静默丢弃）。
     /// @param e 待派发事件（派发器可写 `is_handled`）。
-    auto emit(Event &e) -> void {
+    auto emit(Event &e) const -> void {
         if (event_handler != nullptr) {
             event_handler(e);
         }
     }
 
     /// @brief 请求宿主同步补一帧（窗口几何/DPI 变化时调用；未接线时为空操作）。
-    auto request_present() -> void {
+    auto request_present() const -> void {
         if (owner != nullptr && owner->present_request_) {
             owner->present_request_();
         }
@@ -159,9 +159,9 @@ struct MacOSSurface::Impl {
         if (window == nil) {
             return;
         }
-        const bool minimized = [window isMiniaturized];
+        const bool minimized = [window isMiniaturized] != 0;
         const bool fullscreen = ([window styleMask] & NSWindowStyleMaskFullScreen) != 0;
-        const bool zoomed = !fullscreen && [window isZoomed];
+        const bool zoomed = !fullscreen && ([window isZoomed] != 0);
         const WindowMode mode = compute_window_mode(minimized, zoomed, fullscreen);
         if (mode != last_mode) {
             last_mode = mode;
@@ -176,7 +176,7 @@ struct MacOSSurface::Impl {
         if (window == nil) {
             return;
         }
-        const WindowState state = compute_window_state([window isMiniaturized], active);
+        const WindowState state = compute_window_state([window isMiniaturized] != 0, active);
         if (state != last_state) {
             last_state = state;
             if (owner != nullptr) {
@@ -348,7 +348,7 @@ struct MacOSSurface::Impl {
 
     /// @brief 激活本应用（兼容新旧 SDK：`activate` 仅在 macOS 14+ 可用）。
     static auto activate_app() -> void {
-        if ([NSApp respondsToSelector:@selector(activate)]) {
+        if ([NSApp respondsToSelector:@selector(activate)] != 0) {
             [NSApp performSelector:@selector(activate)];
         } else {
 // 旧 SDK 的唯一入口；新版 SDK 上该调用虽弃用但仍在运行时有效。
@@ -425,6 +425,9 @@ auto ns_to_utf16(NSString *s) -> std::u16string {
     std::u16string out(len, u'\0');
     if (len > 0) {
         static_assert(sizeof(unichar) == sizeof(char16_t), "unichar must be 16-bit");
+        // `getCharacters:` 只收 `void *` 缓冲，`char16_t *` → `unichar *` 无公共转换路径，
+        // reinterpret_cast 是唯一写法（宽度由上面的 static_assert 保证）。
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
         [s getCharacters:reinterpret_cast<unichar *>(out.data()) range:NSMakeRange(0, len)];
     }
     return out;
@@ -487,10 +490,10 @@ auto dispatch_mouse(aurora::MacOSSurface::Impl *impl, NSEvent *event, MouseActio
 
 @implementation AuroraMacSurfaceView
 
-- (id)initWithFrame:(NSRect)frame impl:(aurora::MacOSSurface::Impl *)impl_ {
+- (id)initWithFrame:(NSRect)frame impl:(aurora::MacOSSurface::Impl *)state {
     self = [super initWithFrame:frame];
     if (self != nil) {
-        impl = impl_;
+        impl = state;
     }
     return self;
 }
@@ -522,8 +525,8 @@ auto dispatch_mouse(aurora::MacOSSurface::Impl *impl, NSEvent *event, MouseActio
 
 // ---- 绘制 ----
 
-- (void)drawRect:(NSRect)dirtyRect {
-    (void)dirtyRect;
+- (void)drawRect:(NSRect)dirty_rect {
+    (void)dirty_rect;
     NSGraphicsContext *gc = [NSGraphicsContext currentContext];
     if (gc == nil || impl == nullptr) {
         return;
@@ -605,7 +608,7 @@ auto dispatch_mouse(aurora::MacOSSurface::Impl *impl, NSEvent *event, MouseActio
     const NSPoint p = [self convertPoint:[event locationInWindow] fromView:nil];
     CGFloat dx = [event scrollingDeltaX];
     CGFloat dy = [event scrollingDeltaY];
-    if ([event hasPreciseScrollingDeltas]) {
+    if ([event hasPreciseScrollingDeltas] != 0) {
         // 精确设备（触控板/妙控鼠标）的增量以像素计：折算到与滚轮同量级的「行」。
         // 与 GLFW 的 Cocoa 后端同系数（0.1），使同一台机器上两个后端的滚动手感一致。
         dx *= 0.1;
@@ -626,7 +629,7 @@ auto dispatch_mouse(aurora::MacOSSurface::Impl *impl, NSEvent *event, MouseActio
     if (impl == nullptr) {
         return;
     }
-    const std::uint64_t flags = static_cast<std::uint64_t>([event modifierFlags]);
+    const auto flags = static_cast<std::uint64_t>([event modifierFlags]);
     impl->modifiers = aurora::detail::macos_modifiers_from_flags(flags);
     KeyEvent e;
     e.key = static_cast<int>(aurora::detail::macos_keycode_to_keycode([event keyCode]));
@@ -643,7 +646,7 @@ auto dispatch_mouse(aurora::MacOSSurface::Impl *impl, NSEvent *event, MouseActio
     if (impl == nullptr) {
         return;
     }
-    const std::uint64_t flags = static_cast<std::uint64_t>([event modifierFlags]);
+    const auto flags = static_cast<std::uint64_t>([event modifierFlags]);
     impl->modifiers = aurora::detail::macos_modifiers_from_flags(flags);
     KeyEvent e;
     e.key = static_cast<int>(aurora::detail::macos_keycode_to_keycode([event keyCode]));
@@ -656,7 +659,7 @@ auto dispatch_mouse(aurora::MacOSSurface::Impl *impl, NSEvent *event, MouseActio
     if (impl == nullptr) {
         return;
     }
-    const std::uint64_t flags = static_cast<std::uint64_t>([event modifierFlags]);
+    const auto flags = static_cast<std::uint64_t>([event modifierFlags]);
     impl->modifiers = aurora::detail::macos_modifiers_from_flags(flags);
     const KeyCode key = aurora::detail::macos_keycode_to_keycode([event keyCode]);
     ModifierKey bit = ModifierKey::None;
@@ -686,13 +689,13 @@ auto dispatch_mouse(aurora::MacOSSurface::Impl *impl, NSEvent *event, MouseActio
 
 // ---- NSTextInputClient（文本输入与 IME）----
 
-- (void)insertText:(id)string replacementRange:(NSRange)replacementRange {
-    (void)replacementRange;  // 框架侧文本状态由控件维护；替换范围交由控件的选区语义处理
+- (void)insertText:(id)string replacementRange:(NSRange)replacement_range {
+    (void)replacement_range;  // 框架侧文本状态由控件维护；替换范围交由控件的选区语义处理
     if (impl == nullptr) {
         return;
     }
-    NSString *text =
-        [string isKindOfClass:[NSAttributedString class]] ? [(NSAttributedString *)string string] : (NSString *)string;
+    NSString *text = ([string isKindOfClass:[NSAttributedString class]] != 0) ? [(NSAttributedString *)string string]
+                                                                              : (NSString *)string;
     const std::string utf8 = aurora::ns_to_utf8(text);
     if (utf8.empty()) {
         return;
@@ -715,13 +718,13 @@ auto dispatch_mouse(aurora::MacOSSurface::Impl *impl, NSEvent *event, MouseActio
     [self insertText:string replacementRange:NSMakeRange(NSNotFound, 0)];
 }
 
-- (void)setMarkedText:(id)string selectedRange:(NSRange)selectedRange replacementRange:(NSRange)replacementRange {
-    (void)replacementRange;
+- (void)setMarkedText:(id)string selectedRange:(NSRange)selected_range replacementRange:(NSRange)replacement_range {
+    (void)replacement_range;
     if (impl == nullptr) {
         return;
     }
-    NSString *text =
-        [string isKindOfClass:[NSAttributedString class]] ? [(NSAttributedString *)string string] : (NSString *)string;
+    NSString *text = ([string isKindOfClass:[NSAttributedString class]] != 0) ? [(NSAttributedString *)string string]
+                                                                              : (NSString *)string;
     const std::u16string u16 = aurora::ns_to_utf16(text);
     if (u16.empty()) {
         impl->marked = false;
@@ -732,8 +735,9 @@ auto dispatch_mouse(aurora::MacOSSurface::Impl *impl, NSEvent *event, MouseActio
     }
     // 已选区间标注为「待转换段」：折算层把连续目标段映射到 sel_start/sel_end 码点区间。
     std::vector<std::uint8_t> attrs(u16.size(), 0U);
-    const NSUInteger sel_begin = selectedRange.location == NSNotFound ? 0 : selectedRange.location;
-    const NSUInteger sel_end = selectedRange.location == NSNotFound ? 0 : selectedRange.location + selectedRange.length;
+    const NSUInteger sel_begin = selected_range.location == NSNotFound ? 0 : selected_range.location;
+    const NSUInteger sel_end =
+        selected_range.location == NSNotFound ? 0 : selected_range.location + selected_range.length;
     const NSUInteger clamped_begin = std::min<NSUInteger>(sel_begin, u16.size());
     const NSUInteger clamped_end = std::min<NSUInteger>(sel_end, u16.size());
     for (NSUInteger i = clamped_begin; i < clamped_end; ++i) {
@@ -756,7 +760,7 @@ auto dispatch_mouse(aurora::MacOSSurface::Impl *impl, NSEvent *event, MouseActio
 }
 
 - (BOOL)hasMarkedText {
-    return impl != nullptr && impl->marked;
+    return static_cast<BOOL>(impl != nullptr && impl->marked);
 }
 
 - (NSRange)markedRange {
@@ -771,9 +775,9 @@ auto dispatch_mouse(aurora::MacOSSurface::Impl *impl, NSEvent *event, MouseActio
     return NSMakeRange(NSNotFound, 0);
 }
 
-- (NSAttributedString *)attributedSubstringForProposedRange:(NSRange)range actualRange:(NSRangePointer)actualRange {
+- (NSAttributedString *)attributedSubstringForProposedRange:(NSRange)range actualRange:(NSRangePointer)actual_range {
     (void)range;
-    (void)actualRange;
+    (void)actual_range;
     return nil;
 }
 
@@ -785,10 +789,10 @@ auto dispatch_mouse(aurora::MacOSSurface::Impl *impl, NSEvent *event, MouseActio
     (void)selector;  // 无原生文本视图：命令已由 KeyEvent 通道交给控件，此处静默防系统提示音
 }
 
-- (NSRect)firstRectForCharacterRange:(NSRange)range actualRange:(NSRangePointer)actualRange {
+- (NSRect)firstRectForCharacterRange:(NSRange)range actualRange:(NSRangePointer)actual_range {
     (void)range;
-    if (actualRange != nullptr) {
-        *actualRange = NSMakeRange(NSNotFound, 0);
+    if (actual_range != nullptr) {
+        *actual_range = NSMakeRange(NSNotFound, 0);
     }
     if (impl == nullptr) {
         return NSZeroRect;
@@ -856,10 +860,10 @@ auto dispatch_mouse(aurora::MacOSSurface::Impl *impl, NSEvent *event, MouseActio
 
 @implementation AuroraMacWindowDelegate
 
-- (id)initWithImpl:(aurora::MacOSSurface::Impl *)impl_ {
+- (id)initWithImpl:(aurora::MacOSSurface::Impl *)state {
     self = [super init];
     if (self != nil) {
-        impl = impl_;
+        impl = state;
     }
     return self;
 }
@@ -1048,8 +1052,9 @@ auto MacOSSurface::present() -> Result<bool> {
     }
     // 零拷贝包装：CGImage 直接引用 Painter 缓冲（下一次 begin_frame 换址前先释放本图像）。
     const std::size_t byte_count = static_cast<std::size_t>(pw) * static_cast<std::size_t>(ph) * 4U;
-    CGDataProviderRef provider =
-        CGDataProviderCreateWithData(nullptr, const_cast<std::uint8_t *>(pixels), byte_count, nullptr);
+    // `CGDataProviderCreateWithData` 的 data 形参本就是 `const void *`：直接交只读指针，
+    // 不靠 const_cast 兜（零拷贝语义不变，缓冲生命周期由本类的 image 释放点保证）。
+    CGDataProviderRef provider = CGDataProviderCreateWithData(nullptr, pixels, byte_count, nullptr);
     if (provider == nullptr) {
         return Result<bool>{
             make_error(ErrorCode::GeneralUnknown, "macos present: CGDataProviderCreateWithData failed")};
@@ -1087,7 +1092,7 @@ auto MacOSSurface::size() const -> Size {
 
 auto MacOSSurface::scale_factor() const -> float {
     if (impl_ && impl_->window != nil) {
-        const float s = static_cast<float>([impl_->window backingScaleFactor]);
+        const auto s = static_cast<float>([impl_->window backingScaleFactor]);
         return s > 0.0F ? s : 1.0F;
     }
     return 1.0F;
@@ -1211,7 +1216,7 @@ auto MacOSSurface::position() const -> Point {
         return Point{.x = 0.0F, .y = 0.0F};
     }
     const NSRect frame = [impl_->window frame];
-    const CGFloat scale = static_cast<CGFloat>(scale_factor());
+    const auto scale = static_cast<CGFloat>(scale_factor());
     const CGFloat top = primary_screen_height_points() - (frame.origin.y + frame.size.height);
     return Point{.x = static_cast<float>(frame.origin.x * scale), .y = static_cast<float>(top * scale)};
 }
@@ -1233,7 +1238,7 @@ auto MacOSSurface::minimize() -> void {
     if (!impl_ || impl_->window == nil) {
         return;
     }
-    if (![impl_->window isMiniaturized]) {
+    if ([impl_->window isMiniaturized] == 0) {
         [impl_->window miniaturize:nil];
     }
 }
@@ -1267,8 +1272,8 @@ auto MacOSSurface::set_window_mode(WindowMode m) -> void {
     }
     NSWindow *window = impl_->window;
     const bool fullscreen = ([window styleMask] & NSWindowStyleMaskFullScreen) != 0;
-    const bool minimized = [window isMiniaturized];
-    const bool zoomed = !fullscreen && [window isZoomed];
+    const bool minimized = [window isMiniaturized] != 0;
+    const bool zoomed = !fullscreen && ([window isZoomed] != 0);
 
     switch (m) {
         case WindowMode::FullScreen:
@@ -1349,7 +1354,7 @@ auto MacOSSurface::set_owner(const Surface *owner_surface) -> void {
         new_owner = (NSWindow *)owner_surface->native_handle();
     }
     if (impl_->owner_window != nil) {
-        [(NSWindow *)impl_->owner_window removeChildWindow:impl_->window];
+        [impl_->owner_window removeChildWindow:impl_->window];
         impl_->owner_window = nil;
     }
     if (new_owner != nil && new_owner != impl_->window) {

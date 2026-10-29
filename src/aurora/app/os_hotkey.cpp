@@ -191,14 +191,14 @@ struct TestBackendState {
 
 #ifdef AURORA_PLATFORM_MACOS
 /// @brief 无法映射到 Carbon 虚拟键码时的哨兵值（Carbon 键码是 UInt16 空间）。
-constexpr std::uint32_t kInvalidMacVirtualKey = 0xFFFFFFFFU;
+constexpr std::uint32_t AURORA_INVALID_MAC_VIRTUAL_KEY = 0xFFFFFFFFU;
 
 /// @brief `KeyCode` → Carbon 虚拟键码（`kVK_*`）的反向映射。
 ///
 /// 与 `window/detail/macos_keymap.h` 的正向表逐键互逆（同一批物理键位；该头是 Surface 事件
 /// 翻译用的，不能在这里反向遍历）。未收录的主键（媒体键、F13+ 等）返回哨兵值。
 /// @param key 逻辑键码。
-/// @return Carbon 虚拟键码；无法映射（含 `Unknown` 与修饰键）时为 `kInvalidMacVirtualKey`。
+/// @return Carbon 虚拟键码；无法映射（含 `Unknown` 与修饰键）时为 `AURORA_INVALID_MAC_VIRTUAL_KEY`。
 [[nodiscard]] auto to_macos_virtual_key(KeyCode key) -> std::uint32_t {
     if ((key >= KeyCode::A) && (key <= KeyCode::Z)) {
         switch (key) {
@@ -370,7 +370,7 @@ constexpr std::uint32_t kInvalidMacVirtualKey = 0xFFFFFFFFU;
             return kVK_ANSI_KeypadMinus;
         default:
             // 修饰键（Shift/Control/Alt/Meta）不能作热键主键；未知键不猜近义键。
-            return kInvalidMacVirtualKey;
+            return AURORA_INVALID_MAC_VIRTUAL_KEY;
     }
 }
 
@@ -436,7 +436,7 @@ auto ensure_mac_hotkey_handler() -> void {
     }
     static EventHandlerUPP handler_upp = nullptr;
     handler_upp = NewEventHandlerUPP(&mac_hotkey_event_handler);
-    const EventTypeSpec type{kEventClassKeyboard, kEventHotKeyPressed};
+    const EventTypeSpec type{.eventClass = kEventClassKeyboard, .eventKind = kEventHotKeyPressed};
     EventHandlerRef handler_ref = nullptr;
     const OSStatus status = InstallApplicationEventHandler(handler_upp, 1, &type, nullptr, &handler_ref);
     if (status != noErr) {
@@ -512,7 +512,7 @@ auto OsHotkeyRegistry::Impl::on_hotkey(std::uint32_t id) -> bool {
 auto OsHotkeyRegistry::Impl::register_native(std::uint32_t id, const KeyCombo &combo) -> bool {
 #ifdef AURORA_PLATFORM_MACOS
     const std::uint32_t virtual_key = to_macos_virtual_key(combo.key);
-    if (virtual_key == kInvalidMacVirtualKey) {
+    if (virtual_key == AURORA_INVALID_MAC_VIRTUAL_KEY) {
         return false;
     }
     ensure_mac_hotkey_handler();

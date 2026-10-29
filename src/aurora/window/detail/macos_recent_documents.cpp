@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <ranges>
 #include <string>
 #include <utility>
 #include <vector>
@@ -53,8 +54,11 @@ auto make_url(const std::string &path) -> NSURL * {
 /// @brief 该 URL 是否已在 `recentDocumentURLs` 中（按解析符号链接后的规范路径比较）。
 auto is_listed(NSDocumentController *controller, NSURL *url) -> bool {
     NSURL *wanted = [url URLByResolvingSymlinksInPath];
+    // Objective-C fast enumeration 的循环变量由运行期逐次写入，`init-variables` 只认 C++ 的
+    // 声明式初始化，故此处恒报「未初始化」——它是语言形态差异，不是漏初始化。
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     for (NSURL *listed in [controller recentDocumentURLs]) {
-        if ([[listed URLByResolvingSymlinksInPath] isEqual:wanted]) {
+        if ([[listed URLByResolvingSymlinksInPath] isEqual:wanted] != 0) {
             return true;
         }
     }
@@ -86,8 +90,8 @@ auto project_backend(const std::vector<std::string> &plan) -> Result<void> {
             urls.push_back(url);
         }
         // 逆序投递：每次调用把该条放到 MRU 最前，故最后投计划首条（最新）。
-        for (auto it = urls.rbegin(); it != urls.rend(); ++it) {
-            [controller noteNewRecentDocumentURL:*it];
+        for (auto &url : std::views::reverse(urls)) {
+            [controller noteNewRecentDocumentURL:url];
         }
         for (NSURL *url : urls) {
             if (!is_listed(controller, url)) {

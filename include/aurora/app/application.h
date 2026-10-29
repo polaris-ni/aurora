@@ -71,6 +71,11 @@ class AudioContext;  // 前置声明：应用级默认音频上下文（仅作 s
 /// @note Thread: main-thread only
 /// @note Side-effects: paints (run loop renders frames)
 /// @note Rebuildable: no
+/// 成员按**生命周期分组**排布（信号 → 宿主与派发 → 总线/上下文 → 循环与状态），重排虽可收回
+/// 填充字节，但会改动构造/析构顺序；本类为进程级单实例，填充不构成内存压力，故不作优化目标
+/// （同一处置见 include/aurora/window/window.h 与 src/aurora/window/wayland_surface.cpp 的
+/// Padding 豁免）。
+/// NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding)
 class Application {
   public:
     /// @brief 无头便捷构造：登记一个**无 OS 窗口的宿主**，仅用于 render_to_png / 程序化派发。

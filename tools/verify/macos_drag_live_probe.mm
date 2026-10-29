@@ -317,15 +317,15 @@ auto leg_view(BridgeUnderTest &uut, Ledger &ledger) -> void {
     }
     check([uut.view isFlipped] == YES,
           "destination view is flipped (view y grows downward, same as X11/Win32 client area)", ledger);
-    const bool five = [uut.view respondsToSelector:@selector(draggingEntered:)] &&
-                      [uut.view respondsToSelector:@selector(draggingUpdated:)] &&
-                      [uut.view respondsToSelector:@selector(draggingExited:)] &&
-                      [uut.view respondsToSelector:@selector(prepareForDragOperation:)] &&
-                      [uut.view respondsToSelector:@selector(performDragOperation:)];
+    const bool five = ([uut.view respondsToSelector:@selector(draggingEntered:)] != 0) &&
+                      ([uut.view respondsToSelector:@selector(draggingUpdated:)] != 0) &&
+                      ([uut.view respondsToSelector:@selector(draggingExited:)] != 0) &&
+                      ([uut.view respondsToSelector:@selector(prepareForDragOperation:)] != 0) &&
+                      ([uut.view respondsToSelector:@selector(performDragOperation:)] != 0);
     check(five, "destination view implements the five NSDraggingDestination methods", ledger);
     check(uut.bridge->install(), "bridge installs on the destination view", ledger);
 
-    if (![uut.view respondsToSelector:@selector(registeredDraggedTypes)]) {
+    if ([uut.view respondsToSelector:@selector(registeredDraggedTypes)] == 0) {
         pending("registered dragged types read back from AppKit", ledger,
                 "NSView.registeredDraggedTypes unavailable on this system");
         return;
@@ -334,7 +334,7 @@ auto leg_view(BridgeUnderTest &uut, Ledger &ledger) -> void {
     // 在老 SDK 上是**编译错误**（不是运行期缺席），而 `respondsToSelector` 只能探运行期。KVC 两侧
     // 都能编译，取回失败按 PENDING 处理（不把 SDK 老当判定失败）。
     const id recorded_any = [uut.view valueForKey:@"registeredDraggedTypes"];
-    if (recorded_any == nil || ![recorded_any isKindOfClass:[NSArray class]]) {
+    if (recorded_any == nil || ([recorded_any isKindOfClass:[NSArray class]] == 0)) {
         pending("registered dragged types read back from AppKit", ledger,
                 "NSView.registeredDraggedTypes returned nothing readable");
         return;
@@ -344,7 +344,7 @@ auto leg_view(BridgeUnderTest &uut, Ledger &ledger) -> void {
     bool all = static_cast<std::size_t>(recorded.count) == reg.size();
     for (std::size_t i = 0; all && i < reg.size(); ++i) {
         NSString *want = [NSString stringWithUTF8String:reg[i].c_str()];
-        all = [recorded containsObject:want];
+        all = ([recorded containsObject:want] != 0);
     }
     check(all, "registered dragged types read back from AppKit match the registry", ledger,
           "recorded=" + std::to_string(static_cast<int>(recorded.count)) + " registry=" + std::to_string(reg.size()));
@@ -473,8 +473,8 @@ auto leg_reject(BridgeUnderTest &uut, NSPasteboard *board, Ledger &ledger) -> vo
           "op=" + std::to_string(static_cast<unsigned long>(entered)));
     const BOOL gate = [(id<NSDraggingDestination>)uut.view prepareForDragOperation:(id)info];
     check(gate == NO, "prepareForDragOperation returns NO (AppKit must not call perform)", ledger);
-    check(count_phase(target, SystemDropPhase::Drop) == drop_before,
-          "no Drop is dispatched on the rejected session", ledger);
+    check(count_phase(target, SystemDropPhase::Drop) == drop_before, "no Drop is dispatched on the rejected session",
+          ledger);
     [(id<NSDraggingDestination>)uut.view draggingExited:(id)info];
     target.accept = DragAction::Copy;
 }
@@ -522,7 +522,7 @@ auto leg_drag_out(BridgeUnderTest &uut, Ledger &ledger) -> void {
         if (probe_window != nil) {
             NSView *host = [[NSView alloc] initWithFrame:NSMakeRect(0.0, 0.0, 480.0, 360.0)];
             [probe_window setContentView:host];
-            ok = ([host window] != nil);
+            ok = static_cast<BOOL>([host window] != nil);
             [probe_window close];
         }
     } @catch (NSException *exception) {
@@ -662,7 +662,7 @@ auto main(int argc, char **argv) -> int {
             return 2;
         }
         const BOOL wrote = [board setString:probe_text forType:@"public.utf8-plain-text"];
-        if (!wrote) {
+        if (wrote == 0) {
             note("pasteboard write failed (no pasteboard server in this session)");
             return 2;
         }

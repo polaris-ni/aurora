@@ -26,10 +26,10 @@
 namespace {
 
 // `Notification::tag` 在 `NSUserNotification.userInfo` 里的键。
-NSString *const kAuroraNotificationTagKey = @"x-aurora-notification-tag";
+NSString *const AURORA_NOTIFICATION_TAG_KEY = @"x-aurora-notification-tag";
 
 // 空 tag 的稳定占位标识（与 Win32 后端的默认动作键同值，便于跨平台归因）。
-NSString *const kAuroraNotificationDefaultIdentifier = @"x-aurora-default-action";
+NSString *const AURORA_NOTIFICATION_DEFAULT_IDENTIFIER = @"x-aurora-default-action";
 
 /// @brief `std::string`（UTF-8）→ `NSString`；空串得到空串而不是 nil。
 /// @param text UTF-8 文本。
@@ -64,8 +64,8 @@ auto ns_string(const std::string &text) -> NSString * { return [NSString stringW
        didActivateNotification:(NSUserNotification *)notification {
     (void)center;
     NSString *tag = nil;
-    id recorded = notification.userInfo[kAuroraNotificationTagKey];
-    if ([recorded isKindOfClass:[NSString class]]) {
+    id recorded = notification.userInfo[AURORA_NOTIFICATION_TAG_KEY];
+    if ([recorded isKindOfClass:[NSString class]] != 0) {
         tag = static_cast<NSString *>(recorded);
     }
     // 非本后端投递的通知（没有 userInfo 标签）退回 identifier；两者皆空时回传空串。
@@ -86,8 +86,19 @@ namespace {
 /// @param identifier 待查标识。
 /// @return 收录时为 true。
 auto is_delivered(NSUserNotificationCenter *center, NSString *identifier) -> bool {
+    // Objective-C fast enumeration 的循环变量由运行期逐次写入，`init-variables` 只认 C++ 的
+    // 声明式初始化，故此处恒报「未初始化」——它是语言形态差异，不是漏初始化。
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     for (NSUserNotification *existing in [center deliveredNotifications]) {
-        if ([[existing identifier] isEqualToString:identifier]) {
+        // 列表项按语言约定可为 nil（系统实现不保证），解引用前先判掉：既是空指针防护，
+        // 也让 nullability 分析知道 receiver 非空。
+        if (existing == nil) {
+            continue;
+        }
+        // `NSUserNotification::identifier` 是 nullable 属性，`isEqualToString:` 要求非空实参：
+        // 先取进局部并判掉 nil，未标识的项本就匹配不上任何标识。
+        NSString *recorded = [existing identifier];
+        if ((recorded != nil) && ([identifier isEqualToString:recorded] != 0)) {
             return true;
         }
     }
@@ -122,13 +133,16 @@ auto macos_post_notification(const Notification &notification) -> Result<void> {
         }
 
         NSString *identifier =
-            notification.tag.empty() ? kAuroraNotificationDefaultIdentifier : ns_string(notification.tag);
+            notification.tag.empty() ? AURORA_NOTIFICATION_DEFAULT_IDENTIFIER : ns_string(notification.tag);
         NSUserNotification *item = [[NSUserNotification alloc] init];
         item.identifier = identifier;
         item.title = ns_string(notification.title);
         item.informativeText = ns_string(notification.body);
         // tag 原样放进 userInfo（含空串）：激活回调按调用方语义回传，占位标识只用于系统去重。
-        item.userInfo = @{kAuroraNotificationTagKey : ns_string(notification.tag)};
+        // 字典字面量塞 nil 会抛 `attempt to insert nil object`（当场崩），而 `stringWithUTF8String:`
+        // 对非法 UTF-8 返回 nil：兜成空 tag，语义与「调用方传了空串」一致。
+        NSString *tag_info = ns_string(notification.tag);
+        item.userInfo = @{AURORA_NOTIFICATION_TAG_KEY : (tag_info != nil) ? tag_info : @""};
         // Low 不出声；Normal / Critical 用系统默认提示音（对应 Windows 的「静音」两档与 XDG urgency）。
         if (notification.urgency != NotificationUrgency::Low) {
             item.soundName = NSUserNotificationDefaultSoundName;

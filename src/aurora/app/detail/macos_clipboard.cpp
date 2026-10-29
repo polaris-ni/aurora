@@ -13,6 +13,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -82,22 +83,22 @@ namespace {
     if (type == nil) {
         return std::nullopt;
     }
-    if ([type isEqualToString:NSPasteboardTypeString]) {
+    if ([type isEqualToString:NSPasteboardTypeString] != 0) {
         return std::string{AURORA_MIME_TEXT_PLAIN};
     }
-    if ([type isEqualToString:NSPasteboardTypePNG]) {
+    if ([type isEqualToString:NSPasteboardTypePNG] != 0) {
         return std::string{AURORA_MIME_IMAGE_PNG};
     }
-    if ([type isEqualToString:NSPasteboardTypeHTML]) {
+    if ([type isEqualToString:NSPasteboardTypeHTML] != 0) {
         return std::string{AURORA_MIME_TEXT_HTML};
     }
     // 文件清单在 pasteboard 上的三种历史形态统一折算为 uri-list（本库消费方只认这一档）。
-    if ([type isEqualToString:@"text/uri-list"] || [type isEqualToString:NSPasteboardTypeFileURL] ||
-        [type isEqualToString:@"NSFilenamesPboardType"]) {
+    if (([type isEqualToString:@"text/uri-list"] != 0) || ([type isEqualToString:NSPasteboardTypeFileURL] != 0) ||
+        ([type isEqualToString:@"NSFilenamesPboardType"] != 0)) {
         return std::string{AURORA_MIME_URI_LIST};
     }
     // 自定义 MIME 以字面量作 type：含 "/" 的非 UTI 串按 MIME 交回（UTI 不含斜杠）。
-    if ([type containsString:@"/"]) {
+    if ([type containsString:@"/"] != 0) {
         return to_utf8(type);
     }
     return std::nullopt;
@@ -171,7 +172,7 @@ auto discard_offer() -> void {
     state->offer = aurora::ClipboardOffer{};
     ++state->generation;  // 后续迟到回调一律丢弃
     // 所有权已易主：如实通知应用。AppKit 不保证回调线程，统一折回主线程（框架的回调契约）。
-    if ([NSThread isMainThread]) {
+    if ([NSThread isMainThread] != 0) {
         aurora::clipboard::detail::fire_ownership_lost();
     } else {
         dispatch_async(dispatch_get_main_queue(), ^{
@@ -221,8 +222,13 @@ auto platform_get_payload(const std::string &mime) -> Result<std::vector<std::ui
         if (data == nil) {
             return std::vector<std::uint8_t>{};  // 无该格式 = Ok(空字节)，不是失败
         }
-        const auto *begin = static_cast<const std::uint8_t *>([data bytes]);
-        return std::vector<std::uint8_t>(begin, begin + static_cast<std::size_t>([data length]));
+        const auto size = static_cast<std::size_t>([data length]);
+        if (size == 0) {
+            return std::vector<std::uint8_t>{};  // 零字节载荷：`[data bytes]` 此时可为 NULL，不进视图
+        }
+        // 「缓冲区 + 长度」以 std::span 表达，再由视图两端构造 vector——避免裸指针算术（库内同口径）。
+        const std::span<const std::uint8_t> payload(static_cast<const std::uint8_t *>([data bytes]), size);
+        return std::vector<std::uint8_t>(payload.begin(), payload.end());
     }
 }
 
@@ -267,6 +273,9 @@ auto platform_get_files() -> Result<std::vector<std::string>> {
                                                                NSPasteboardURLReadingFileURLsOnlyKey : @YES
                                                            }];
         std::vector<std::string> paths;
+        // Objective-C fast enumeration 的循环变量由运行期逐次写入，`init-variables` 只认 C++ 的
+        // 声明式初始化，故此处恒报「未初始化」——它是语言形态差异，不是漏初始化。
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         for (NSURL *url in urls) {
             if ([url isFileURL] == NO) {
                 continue;
@@ -361,6 +370,8 @@ auto platform_available_formats() -> Result<std::vector<std::string>> {
     @autoreleasepool {
         NSPasteboard *pasteboard = [NSPasteboard generalPasteboard];
         std::vector<std::string> formats;
+        // 同上：fast enumeration 的循环变量由运行期逐次写入，不是漏初始化。
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         for (NSString *type in [pasteboard types]) {
             const auto mime = mime_of_type(type);
             if (!mime) {
@@ -392,10 +403,14 @@ auto install_platform_backend() -> void {
 
 auto macos_clipboard_ensure_registered() -> bool {
     // 进程级一次性登记：NSPasteboard 是应用级资源，与窗口宿主无关。
-    static const bool registered = []() -> bool {
+    // 登记位取「函数局部 bool + 访问前判」形态（同 `macos_menu_bar_ensure_registered` 的口径），
+    // 而非 lambda 初始化的 `static const bool`：后者会被 naming 检查归入静态常量（要求全大写），
+    // 且登记抛出时 lambda 把失败态粘在 static 上，本形态下次调用可重试。
+    static bool registered = false;
+    if (!registered) {
         install_platform_backend();
-        return true;
-    }();
+        registered = true;
+    }
     return registered;
 }
 

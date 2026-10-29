@@ -44,8 +44,8 @@
 
 #import <AppKit/AppKit.h>
 
-#include <string>
 #include <unistd.h>
+#include <string>
 
 #include "verify_print.h"
 
@@ -55,7 +55,11 @@
 
 namespace {
 
+// 探针的通过 / 失败计数：匿名命名空间内的进程私有记账（无跨 TU 可见性、无初始化顺序
+// 问题），就地豁免非 const 全局（同 x11_csd_live_probe 的探针记账口径）。
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 int g_checks = 0;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 int g_failures = 0;
 
 auto check(bool ok, const std::string &name, const std::string &detail = {}) -> void {
@@ -67,11 +71,9 @@ auto check(bool ok, const std::string &name, const std::string &detail = {}) -> 
 }
 
 /// @brief 空 tag 的占位标识（与后端实现同值；探针按系统可见结果核对）。
-NSString *const kDefaultIdentifier = @"x-aurora-default-action";
+NSString *const AURORA_DEFAULT_IDENTIFIER = @"x-aurora-default-action";
 
-auto ns_string(const std::string &text) -> NSString * {
-    return [NSString stringWithUTF8String:text.c_str()];
-}
+auto ns_string(const std::string &text) -> NSString * { return [NSString stringWithUTF8String:text.c_str()]; }
 
 auto to_std(NSString *text) -> std::string {
     const char *utf8 = text != nil ? [text UTF8String] : nullptr;
@@ -80,8 +82,13 @@ auto to_std(NSString *text) -> std::string {
 
 /// @brief 在系统已投递列表中按标识取条目（独立取证，不经库内记账）。
 auto delivered_item(NSString *identifier) -> NSUserNotification * {
-    for (NSUserNotification *item in [[NSUserNotificationCenter defaultUserNotificationCenter] deliveredNotifications]) {
-        if ([[item identifier] isEqualToString:identifier]) {
+    // Objective-C fast enumeration 的循环变量由运行期逐次写入，`init-variables` 只认 C++ 的声明式
+    // 初始化，故此处恒报「未初始化」——它是语言形态差异，不是漏初始化（同后端实现口径）。
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    for (NSUserNotification *item in
+         [[NSUserNotificationCenter defaultUserNotificationCenter] deliveredNotifications]) {
+        NSString *recorded = [item identifier];  // nullable 属性，isEqualToString: 要求非空实参
+        if ((recorded != nil) && ([identifier isEqualToString:recorded] != 0)) {
             return item;
         }
     }
@@ -91,8 +98,12 @@ auto delivered_item(NSString *identifier) -> NSUserNotification * {
 /// @brief 同一标识在系统列表中的条数（验原位替换用）。
 auto delivered_count(NSString *identifier) -> std::size_t {
     std::size_t count = 0;
-    for (NSUserNotification *item in [[NSUserNotificationCenter defaultUserNotificationCenter] deliveredNotifications]) {
-        if ([[item identifier] isEqualToString:identifier]) {
+    // 同上：fast enumeration 的循环变量由运行期逐次写入，不是漏初始化。
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    for (NSUserNotification *item in
+         [[NSUserNotificationCenter defaultUserNotificationCenter] deliveredNotifications]) {
+        NSString *recorded = [item identifier];  // nullable 属性，isEqualToString: 要求非空实参
+        if ((recorded != nil) && ([identifier isEqualToString:recorded] != 0)) {
             ++count;
         }
     }
@@ -101,11 +112,19 @@ auto delivered_count(NSString *identifier) -> std::size_t {
 
 /// @brief 清掉本探针留下的通知条目（标识前缀 + 空 tag 占位）。
 auto cleanup_delivered(NSString *prefix) -> void {
+    if (prefix == nil) {
+        return;  // 前缀串不可用（`stringWithUTF8String:` 对非法 UTF-8 返回 nil）：不清任何条目
+    }
     NSUserNotificationCenter *center = [NSUserNotificationCenter defaultUserNotificationCenter];
     NSArray<NSUserNotification *> *snapshot = [[center deliveredNotifications] copy];
+    // 同上：fast enumeration 的循环变量由运行期逐次写入，不是漏初始化。
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     for (NSUserNotification *item in snapshot) {
         NSString *identifier = [item identifier];
-        if ([identifier hasPrefix:prefix] || [identifier isEqualToString:kDefaultIdentifier]) {
+        if (identifier == nil) {
+            continue;  // 未标识的条目不属于本探针，无从按前缀 / 占位标识认领
+        }
+        if (([identifier hasPrefix:prefix] != 0) || ([identifier isEqualToString:AURORA_DEFAULT_IDENTIFIER] != 0)) {
             [center removeDeliveredNotification:item];
         }
     }
@@ -113,6 +132,8 @@ auto cleanup_delivered(NSString *prefix) -> void {
 
 }  // namespace
 
+// 入口不吞异常：探针的失败以未捕获异常落到非零退出码，捕获反而把它压成 0（与既有探针同口径）。
+// NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
     @autoreleasepool {
         AURORA_LOG_RAW("verify", "aurora_verify_macos_notification\n");
@@ -128,8 +149,7 @@ auto main() -> int {
             const auto result = aurora::NotificationCenter::notify(bare);
             check(!result.ok(), "bare executable reports a structured failure");
             check(!result.ok() && result.error().code_enum == aurora::ErrorCode::NotificationPostFailed,
-                  "failure code is NotificationPostFailed",
-                  result.ok() ? std::string{} : result.error().code);
+                  "failure code is NotificationPostFailed", result.ok() ? std::string{} : result.error().code);
             AURORA_LOG_RAW("verify", "PENDING: run the bundled executable for real delivery checks\n");
             return 3;
         }
@@ -197,7 +217,7 @@ auto main() -> int {
         untagged.body = "empty tag";
         const auto untagged_result = aurora::NotificationCenter::notify(untagged);
         check(untagged_result.ok(), "empty-tag notify() returns Ok");
-        NSUserNotification *untagged_item = delivered_item(kDefaultIdentifier);
+        NSUserNotification *untagged_item = delivered_item(AURORA_DEFAULT_IDENTIFIER);
         check(untagged_item != nil, "empty tag uses the stable placeholder identifier");
 
         // ---- 激活接线（合成 delegate 回调）----
@@ -208,8 +228,9 @@ auto main() -> int {
             activated = std::move(tag);
         });
         id<NSUserNotificationCenterDelegate> delegate = [center delegate];
-        const bool can_activate = delegate != nil &&
-                                  [delegate respondsToSelector:@selector(userNotificationCenter:didActivateNotification:)];
+        const bool can_activate =
+            delegate != nil &&
+            ([delegate respondsToSelector:@selector(userNotificationCenter:didActivateNotification:)] != 0);
         check(can_activate, "notification delegate is installed");
         if (can_activate && main_item != nil) {
             [delegate userNotificationCenter:center didActivateNotification:delivered_item(main_id)];
@@ -218,7 +239,7 @@ auto main() -> int {
         check(activated == first.tag, "callback receives the original tag", activated);
 
         if (can_activate && untagged_item != nil) {
-            [delegate userNotificationCenter:center didActivateNotification:delivered_item(kDefaultIdentifier)];
+            [delegate userNotificationCenter:center didActivateNotification:delivered_item(AURORA_DEFAULT_IDENTIFIER)];
         }
         check(activations == 2 && activated.empty(), "empty tag activates with an empty string");
         aurora::NotificationCenter::set_on_notification_activated(nullptr);
@@ -231,7 +252,7 @@ auto main() -> int {
         cleanup_delivered(ns_prefix);
         check(delivered_item(main_id) == nil && delivered_item(ns_string(quiet.tag)) == nil,
               "probe notifications are removed");
-        check(delivered_item(kDefaultIdentifier) == nil, "placeholder notification is removed");
+        check(delivered_item(AURORA_DEFAULT_IDENTIFIER) == nil, "placeholder notification is removed");
 
         AURORA_LOG_RAW("verify", "----------------------------------------\n");
         AURORA_LOG_RAW("verify", aurora_verify::format_int(g_checks - g_failures), "/",
