@@ -403,6 +403,10 @@ class DragToDismiss {
     /// @return 内部识别器拖动中时为 true。
     [[nodiscard]] auto is_dragging() const -> bool { return recognizer_.is_dragging(); }
 
+    /// @brief 消除主轴（构造时注入，运行期不变）。
+    /// @return 跟手位移与松手飞行所沿的轴；消费者据此把 `progress` 折算到对应坐标分量。
+    [[nodiscard]] auto axis() const -> DragAxis { return axis_; }
+
     /// @brief 识别器 slop 注入（测试用；常规消费者直接用默认 8dp）。
     /// @param slop_dp [in] 新的起拖阈值（逻辑 dp）。
     auto recognizer_slop_for_test(double slop_dp) -> void { recognizer_.slop = slop_dp; }

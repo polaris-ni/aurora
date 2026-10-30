@@ -126,7 +126,7 @@ class Dismissible : public SingleChild {
         // 首次布局后按主轴向尺寸校准行程（同步给 DragToDismiss，跟手 1:1 与 paint 平移共用同值）。
         if (!travel_calibrated_) {
             travel_calibrated_ = true;
-            const float axis_size = (dtd_axis_ == DragAxis::Horizontal) ? self.width : self.height;
+            const float axis_size = (dtd_.axis() == DragAxis::Horizontal) ? self.width : self.height;
             if (axis_size > 0.0F) {
                 travel_distance = static_cast<double>(axis_size);
                 dtd_.set_travel(travel_distance);
@@ -146,8 +146,8 @@ class Dismissible : public SingleChild {
         }
         // 位移 + 渐隐（progress 1 → 0.5 透明度）：paint 期平移，不动布局盒。
         const auto shift = static_cast<float>(progress * travel_distance);
-        const Rect shifted{.origin = Point{.x = bounds.origin.x + (dtd_axis_ == DragAxis::Horizontal ? shift : 0.0F),
-                                           .y = bounds.origin.y + (dtd_axis_ == DragAxis::Vertical ? shift : 0.0F)},
+        const Rect shifted{.origin = Point{.x = bounds.origin.x + (dtd_.axis() == DragAxis::Horizontal ? shift : 0.0F),
+                                           .y = bounds.origin.y + (dtd_.axis() == DragAxis::Vertical ? shift : 0.0F)},
                            .size = bounds.size};
         const auto alpha = static_cast<float>(1.0 - (0.5 * progress));
         const double prev_alpha = p.global_alpha();
@@ -201,7 +201,6 @@ class Dismissible : public SingleChild {
         // 无 Container 祖先（如直接作为根）：静默保持终态。
     }
 
-    DragAxis dtd_axis_ = DragAxis::Horizontal;
     DragToDismiss dtd_;
     std::function<void()> on_dismissed_;
     std::optional<std::chrono::steady_clock::time_point> last_tick_;

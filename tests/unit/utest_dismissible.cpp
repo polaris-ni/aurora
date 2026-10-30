@@ -8,6 +8,8 @@
 /// 另含 DragToDismiss 收口到公共弹簧后的控件侧回归：全局时间缩放 1.0 → 2.0 时 spring 段到位
 /// 帧数减半（弹簧为指数衰减，故取上下界）而终值不变；0.0 档冻结时时间轴不推进、
 /// 按帧重绘请求数为 0、在途标志保留，解冻后自驱续跑到同一终值。
+/// 主轴贯通回归：构造轴决定行程标定的尺寸（竖向取高、横向取宽）、跟手取哪个坐标分量、绘制平移落在
+/// 哪条轴（由记录绘制盒的子控件断言），另一轴向的分量一律不参与。
 
 #include <chrono>
 #include <memory>
@@ -58,6 +60,28 @@ auto fixed_box() -> Node {
     t->height(aurora::px(50.0F));
     return Node{t};
 }
+
+/// 记录自身被绘制时收到的盒：位移落在 x 还是 y 只能由子侧的绘制盒判定（父侧 paint 平移不动布局盒）。
+class ProbeBox final : public Text {
+  public:
+    /// @brief 构造 100x50 的探针盒（尺寸与 `fixed_box()` 同，保证行程标定可精确预期）。
+    ProbeBox() : Text(".") {
+        width(aurora::px(100.0F));
+        height(aurora::px(50.0F));
+    }
+
+    Rect seen{};  ///< 最近一次 on_paint 收到的绘制盒（初始为原点零盒 = 从未绘制）
+
+  protected:
+    /// @brief 记下盒后照常绘制（不改绘制内容，只取几何）。
+    /// @param p 绘制器。
+    /// @param bounds 本次绘制盒。
+    /// @param ctx 构建上下文。
+    auto on_paint(aurora::Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
+        seen = bounds;
+        Text::on_paint(p, bounds, ctx);
+    }
+};
 
 /// 双列定宽测试容器：每个子项约束固定 100x50，横排累加（布局完全确定，便于命中与行程校准）。
 class TestRow final : public aurora::Container {
@@ -333,10 +357,59 @@ AURORA_TEST_CASE(dismissible_paint_progress_zero_and_in_flight) {
     AURORA_TEST_CHECK_NEAR(dis->progress(), 0.5, 1e-9);
     dis->paint(painter, Rect{.origin = Point{}, .size = dis->size()}, ctx);
 
-    // 垂直轴构造：同一绘制路径的轴分支（shift 只作用于 y）。
+    // 垂直轴构造的静止态绘制：仅覆盖「progress 为 0 时走无位移分支」；轴方向的断言见下一条用例。
     Dismissible vertical{fixed_box(), DragAxis::Vertical};
     vertical.layout(Constraints{.min = Size{}, .max = Size{.width = 400.0F, .height = 100.0F}}, ctx);
     vertical.paint(painter, Rect{.origin = Point{}, .size = vertical.size()}, ctx);
+}
+
+// @brief 主轴贯通：竖向构造的行程标定、跟手取分量、绘制平移三条路径都按构造轴走（缺陷回归）。
+//        此前 `Dismissible` 复制了一份轴字段却从未赋值，竖向请求表现为「拖得动、裁决对，但位移画在
+//        水平轴、行程按宽度折算」，故这里逐条钉住轴向：行程取高、横向拖不给进度、位移只落 y。
+AURORA_TEST_CASE(dismissible_axis_routes_travel_progress_and_paint_offset) {
+    Painter painter;
+    constexpr BuildContext ctx;
+
+    // ---- 竖向：行程按高度标定，位移只落 y ----
+    const auto v_probe = std::make_shared<ProbeBox>();
+    Dismissible vertical{Node{v_probe}, DragAxis::Vertical};
+    const Rect v_box{.origin = Point{.x = 4.0F, .y = 6.0F}, .size = Size{.width = 100.0F, .height = 50.0F}};
+    vertical.layout(Constraints{.min = Size{}, .max = Size{.width = 100.0F, .height = 50.0F}}, ctx);
+    AURORA_TEST_CHECK_NEAR(vertical.travel_distance, 50.0, 1e-9);  // 主轴向 = 高，不是宽 100
+
+    EventDispatcher dispatcher;
+    // 纯横向拖动：识别器已起拖（50dp > slop），但主轴取 y 分量 → 进度恒 0。
+    MouseEvent vh_press = make_mouse(MouseAction::Press, Point{.x = 10.0F, .y = 10.0F});
+    (void)dispatcher.dispatch_mouse(vertical, vh_press);
+    MouseEvent vh_move = make_mouse(MouseAction::Move, Point{.x = 60.0F, .y = 10.0F});
+    (void)dispatcher.dispatch_mouse(vertical, vh_move);
+    AURORA_TEST_CHECK_NEAR(vertical.progress(), 0.0, 1e-9);
+
+    // 纵向拖 25dp → progress = 25 / 50 = 0.5，绘制盒下移 25、x 保持不变。
+    MouseEvent v_press = make_mouse(MouseAction::Press, Point{.x = 10.0F, .y = 10.0F});
+    (void)dispatcher.dispatch_mouse(vertical, v_press);
+    MouseEvent v_move = make_mouse(MouseAction::Move, Point{.x = 10.0F, .y = 35.0F});
+    (void)dispatcher.dispatch_mouse(vertical, v_move);
+    AURORA_TEST_CHECK_NEAR(vertical.progress(), 0.5, 1e-9);
+    vertical.paint(painter, v_box, ctx);
+    AURORA_TEST_CHECK_NEAR(v_probe->seen.origin.x, v_box.origin.x, 1e-6);
+    AURORA_TEST_CHECK_NEAR(v_probe->seen.origin.y, v_box.origin.y + 25.0F, 1e-6);
+
+    // ---- 横向：行程按宽度标定，位移只落 x ----
+    const auto h_probe = std::make_shared<ProbeBox>();
+    Dismissible horizontal{Node{h_probe}, DragAxis::Horizontal};
+    const Rect h_box{.origin = Point{.x = 4.0F, .y = 6.0F}, .size = Size{.width = 100.0F, .height = 50.0F}};
+    horizontal.layout(Constraints{.min = Size{}, .max = Size{.width = 100.0F, .height = 50.0F}}, ctx);
+    AURORA_TEST_CHECK_NEAR(horizontal.travel_distance, 100.0, 1e-9);  // 主轴向 = 宽
+
+    MouseEvent h_press = make_mouse(MouseAction::Press, Point{.x = 10.0F, .y = 10.0F});
+    (void)dispatcher.dispatch_mouse(horizontal, h_press);
+    MouseEvent h_move = make_mouse(MouseAction::Move, Point{.x = 60.0F, .y = 10.0F});
+    (void)dispatcher.dispatch_mouse(horizontal, h_move);
+    AURORA_TEST_CHECK_NEAR(horizontal.progress(), 0.5, 1e-9);  // 50 / 100
+    horizontal.paint(painter, h_box, ctx);
+    AURORA_TEST_CHECK_NEAR(h_probe->seen.origin.x, h_box.origin.x + 50.0F, 1e-6);
+    AURORA_TEST_CHECK_NEAR(h_probe->seen.origin.y, h_box.origin.y, 1e-6);
 }
 
 // ---- 触摸路径 + 无 Container 祖先的静默摘除 ----
