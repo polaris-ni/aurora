@@ -112,7 +112,7 @@ class ThreadPool {
     [[nodiscard]] auto is_deferred() const -> bool { return deferred_; }
 
     /// @brief 可中断的带时限等待：在内部互斥上 `cv_.wait_for(lock, d, [this]{ return stop_; })`。
-    /// @detail 供 `Task<T>::with_timeout` 的非 deferred 分支等场景使用——超时看守原本是
+    /// @details 供 `Task<T>::with_timeout` 的非 deferred 分支等场景使用——超时看守原本是
     ///         `std::this_thread::sleep_for(d)` 的裸睡眠，进程退出时线程池析构置 `stop_=true` +
     ///         `notify_all()` 无法唤醒它，导致析构 `join` 卡满整个超时窗口（实测 `default_pool`
     ///         单例析构让 `utest_net_http_binding` 进程退出静默 30s）。改为可中断等待后，析构的

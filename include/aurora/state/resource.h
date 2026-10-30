@@ -413,7 +413,7 @@ class StreamCore : public std::enable_shared_from_this<StreamCore<T>> {
 }  // namespace detail
 
 /// @brief 一次性异步作业的三态响应式绑定（需求 SPEC.FEAT.NET.DECLARATIVE-BINDING.001，
-/// 语义详见 [`02-state.md`](../../specification/02-state.md) §5.4）。
+/// 语义详见 specification/02-state.md §5.4）。
 ///
 /// 三态 `Loading / Ready(T) / Failed(Error)` 全在一个可订阅信号里：widget 读取任一 getter 即
 /// 登记依赖，作业落定只重跑读它的组件。句柄可自由拷贝，全部拷贝共享同一内核；与宿主卸载 /
@@ -511,7 +511,7 @@ class Resource {
 };
 
 /// @brief 持续数据流的三态响应式绑定（`Resource<T>` 的同族，语义详见
-/// [`02-state.md`](../../specification/02-state.md) §5.4）。
+/// specification/02-state.md §5.4）。
 ///
 /// 一次性资源装不下「一条接一条来」的语义，故本类型把写入端与读取端分开：写入端（逐条事件
 /// 的生产者、分块产出的后台作业）`push()`，读取端像普通信号一样读 `items()`。

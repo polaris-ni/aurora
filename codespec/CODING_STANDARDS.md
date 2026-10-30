@@ -838,7 +838,8 @@ au::Button(au::ButtonProps{ .label = "OK" });
 - **`#` 开头的字面串必须加反引号或转义**（`docs` 目标执法）：Doxygen 把 `#Word` 读成**显式链接请求**，于是 `#include`、`#ifdef`、色值 `#E01B24` 这类写法报 `explicit link request to 'include' could not be resolved`（色值还会把后面的中文一并吸进链接名）。写 `` `#include` `` 或 `\#include` 即消。
 - **反斜杠字面串要写双份**：散文里出现 `\uXXXX` 会被当命令解析，报 `Found unknown command '\uXXXX'`；要表达 JSON 转义序列本身，写 `\\uXXXX`。
 - **`@file` 只出现在文件级块**：成员 / 函数注释里提一句「见本头的 `@file` 级注释」会被当真命令读取，报 `the name '…' supplied as the argument in the \file statement is not an input file`。指代文件级说明一律改写成文字（「本头顶部的文件级注释」）。
-- **反引号跨度的内容不要以 `.` 开头且紧贴前文**：`` （`.surface()`） ``、`` ：`.background` `` 这类形态会让 Doxygen 的 Markdown 转换产出不成对的 `<tt>`，报 `found </tt> tag without matching <tt>`（实测：去掉跨度起始的点、或让开引号前留一个空格，均可消除）。成员名写作 `Type.field` 或 `field()` 比 `.field` 更明确。
+- **反引号跨度的内容不要以 `.` 开头且紧贴前文**：`` （`.surface()`） ``、`` ：`.background` `` 这类形态会让 Doxygen 的 Markdown 转换产出不成对的 `<tt>`，报 `found </tt> tag without matching <tt>`（实测：去掉跨度起始的点、或让开引号前留一个空格，均可消除）。成员名写作 `Type.field` 或 `field()` 比 `.field` 更明确。同一告警在 `::` 开头且跨度内还含冒号的形态上复现（IPv6 内嵌地址 `::ffff:127.0.0.1`），而只写回环本机地址那一枚 `::1` 不复现——触发点不止「首字符是点」，遇到时按最小 fixture 实测（§13.8）定位，把前导冒号留在跨度外即可消。
+- **内联码里含 `*/` 要改用 `<code>` 标签**（`docs` 目标执法）：`` `bytes */1234` `` 这类跨度里出现注释结束标记时，Doxygen 在扫描阶段就把 `*/` 当作当前 `///` 块所继承的 C 块注释的结尾，报 `Found end of C comment inside a '`' block without matching start of the comment`——且它出现在文档构建按 warning 终止的配置里会直接掐断整轮生成。两种改写经实测取舍：拆成多段跨度（`` `bytes ` `` + `` `1234` ``）渲染成带空格的碎片、丢原文；HTML `<code>bytes */1234</code>` 渲染保留原文（星号的十进制数字实体在 code span 内不解码，文档面会显示成字面实体串，不可用）。故此类一律写 `<code>`。
 - **散文里不得出现裸的命令行令牌**：`@param`、`@brief`、`@note` 这类字面串写进描述正文时，Doxygen 照样把它解析成**真命令**，于是该行之后的内容被归进这条命令的参数，文档结构错位。指代命令一律加反引号（`` `@param` ``）或写中文（「形参说明行」）。
 - **装饰线不要用 `====` / `----` 纯符号行**：Markdown 解析会把它们读成 setext 标题或分隔线，把上一行正文吸进标题层；分节请写 `/// @name 分节名` 或直接用文字。
 - **`@ref` / 链接目标必须可达**：指向头文件、类或函数的显式链接写法要能在文档站内解析，断链即 `docs` 目标红灯（`Referenced ... not existing`）。宁可不写链接、只留仓库相对路径文字，也不要留悬空 `@ref`。
