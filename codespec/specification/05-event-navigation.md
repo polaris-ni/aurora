@@ -531,20 +531,22 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 
 | 类型 | 说明 | 头文件 |
 |:---|:---|:---|
-| `AnimationController` | 驱动一条归一化进度（0→1）。`forward(from = -1)` 正向、`reverse()` 反向、`reset(t = 0)` 复位、`value()` 取进度。时长在构造 `AnimationController(duration_seconds, value)` 时确定，**无 `set_duration`** | `animator.h` |
+| `AnimationController` | 驱动一条归一化进度（0→1）。`forward(from = -1)` 正向、`reverse()` 反向、`reset(t = 0)` 复位、`stop()` 静止、`value()` 取进度、`set_progress(t)` 外部定位（不改状态语义，见 §6.2）、`repeat(count = -1, alternate = false)` 进入循环模式（只登记模式、不起播）、`mode()` / `is_repeating()` 读端点行为。时长在构造 `AnimationController(duration_seconds, value)` 时确定，**无 `set_duration`** | `animator.h` |
 | `AnimationStatus` | 动画状态枚举 `Dismissed`（进度 0）/ `Forward`（正向播放中）/ `Reverse`（反向播放中）/ `Completed`（进度 1）。`AnimationController::status()` 与 `AnimatedValue::status()` 均提供状态查询；其中 `is_completed()` 两者都有，而 `is_dismissed()` / `is_animating()` 仅属 `AnimationController`（`AnimatedValue` 只暴露 `status()` 与 `is_completed()`） | `animator.h` |
+| `PlaybackMode` | 端点行为枚举 `Once`（到端点即钳制并置对应终态，缺省）/ `Repeat`（到端点按 `repeat` 的次数与方向规则续播）。与 `AnimationStatus` 是两个正交轴：前者说「到端点怎么办」，后者说「现在往哪走 / 停在哪」 | `animator.h` |
 | `Tween<T>` | 补间函数。`Tween<T>(a, b, curve)`，`value(t)` 按曲线在 a→b 间插值；支持 `int` / `float` / `Size` / `Point` / `Color` 等 | `timeline.h` |
-| `Keyframes<T>` | 关键帧序列。`Keyframes<T>(stops)`，每帧 `Stop{time, value}`，**插值严格线性**；`value(t)` 在分段间插值 | `timeline.h` |
+| `Keyframes<T>` | 关键帧序列。`Keyframes<T>(stops)`，每帧 `Stop{time, value, curve}`；**第 *i* 个 `Stop` 的 `curve` 整形它向后的那一段**（`[stop_i, stop_{i+1}]`），缺省线性 ⇒ 既有 `Stop{time, value}` 写法逐位不变。末个 `Stop` 的曲线不参与求值。`value(t)` 按段插值，零宽段取该段起点值 | `timeline.h` |
 | `Curve` / `Curves` | 缓动曲线。`Curves::linear()` / `ease_in()` / `ease_out()` / `ease_in_out()` / `ease_in_out_cubic()` 等（无 `steps` 工厂） | `easing.h` |
 | `SpringDescription` | 弹簧物理参数（`stiffness` / `damping` / `mass`），配合 `SpringSimulation` 用于物理感动画 | `spring.h` |
-| `Animator` | 帧循环驱动器 | `animator.h` |
+| `Animator` | 帧循环驱动器：`drive` / `bind` 登记控制器，`tick(dt)` 每帧推进并按绑定写回 `State`，`add_binding(fn)` 追加无归属帧回调，`add_frame_binding(fn, owner)` 追加**带帧步长且按控制器归属可注销**的帧回调，`remove(c)` 注销控制器及其绑定，`has_active()` 供帧调度决策，`set_time_scale` / `time_scale()` 是应用内全局时间缩放入口（见 §6.2） | `animator.h` |
 | `AnimatedValue<T>` | 「`State<T>` + `Tween` + 控制器」三合一句柄 | `animator.h` |
+| `SpringAnimation` | 弹簧到 `State<double>` 的即插**驱动**封装：自持模拟时间轴、逐帧写目标、`is_settled` 后定格并停帧。`animate_to(target, spring, initial_velocity = 0.0, tolerance = 0.01)` 起播、`tick(raw_dt)` 自驱、`attach(Animator&)` 接入帧循环、`on_settled(cb)`、`set_range(lo, hi)`、`is_running()` / `target()` / `clock()`。`SpringSimulation` 仍是纯求解器，本类型只补驱动层 | `spring.h` |
 | `TweenAnimation<T>` | 自包含动画值：拥有自己的 `State<T>`，可独立推进。`animate_to(target, duration_s[, curve])` 起步、`tick(dt)` 每帧推进、`get()` 取当前值、`is_animating()`、`as_signal()` 交出内部 `State<T>` 供响应式绑定 | `animator.h` |
 | `TimelineInterval` | 归一化子区间 [begin, end]（对应 Flutter `Interval`）；`contains(t)` 判归属，`local(t)` 把总进度映射为区间局部进度（区间外夹取端点：t ≤ begin → 0，t ≥ end → 1） | `timeline.h` |
 | `TimelineSpec` / `TimelineResolved` | 时间轴构建器与求值结果（纯值）：`sequence()` / `parallel()` / `staggered(item, gap, count)` 组合子方法链声明子段，`add(时长秒)` / `add(子组)` 追加；`build()` 展开为槽位区间表 + 总时长。见 §6.6 | `timeline.h` |
 | `TimelinePlayer` | 时间轴播放器：单主控制器驱动全部轨道（槽位 + `Tween<T>` + 目标 `State<T>`）；`forward` / `reverse` / `stop` 中断续播，`track<T>` 类型安全绑轨，`attach(Animator)` 接入帧循环。见 §6.6 | `animator.h` |
 
-`timeline.h` 实际只提供 `lerp` 重载族（算术 / `Point` / `Size` / `Color` / `EdgeInsets` / `Rect`）、`Tween<T>`、`Keyframes<T>` 与时间轴编排（`TimelineSpec` / `TimelineResolved`，见 §6.6）。多段编排优先用 `TimelineSpec` + `TimelinePlayer`；单条多关键帧曲线仍可用 `Keyframes<T>` 的 `Stop{time, value}` 序列表达，或经 `Animator::add_binding` 追加帧回调按 `AnimationController::status()` / `value()` 分段驱动。
+`timeline.h` 实际只提供 `lerp` 重载族（算术 / `Point` / `Size` / `Color` / `EdgeInsets` / `Rect`）、`Tween<T>`、`Keyframes<T>` 与时间轴编排（`TimelineSpec` / `TimelineResolved`，见 §6.6）。多段编排优先用 `TimelineSpec` + `TimelinePlayer`；单条多关键帧曲线仍可用 `Keyframes<T>` 的 `Stop{time, value, curve}` 序列表达（每段曲线取该段起点 `Stop`，见上表），或经 `Animator::add_binding` 追加帧回调按 `AnimationController::status()` / `value()` 分段驱动。`spring.h` 提供 `SpringDescription` / `SpringSimulation`（纯求解器）与 `SpringAnimation`（驱动封装），动画域公共头共四个：`animator.h` / `timeline.h` / `easing.h` / `spring.h`。
 
 ### 6.2 Animator 与生命周期
 
@@ -554,11 +556,31 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 
 > 凡「控制器是某控件的成员、却注册进 `Application` 全局 `Animator`」的场景（典型如 `NavigatorHost`），**必须**在析构函数中调用 `remove(const AnimationController&)` 注销该控制器及其全部绑定，否则控件析构后下一帧 `tick` 就会写入已释放内存（use-after-free）。对未登记过的控制器调用是无操作，可重复调用。
 
+**帧回调的两种形态**：`add_binding(fn)` 收 `void()`，不归属任何控制器，故 `remove(c)` **摘不掉**它（用于与树同寿命的观察者）；`add_frame_binding(fn, owner)` 收 `void(double dt)` 并绑定一个归属控制器，`remove(owner)` 会连同该绑定一并摘除。带 `dt` 是给「自持时间轴的驱动件」用的（`SpringAnimation::attach` 即走这条），回调收到的 `dt` **已由 `Animator` 折算**，绑定体内不得再过一次漏斗。
+
+**端点行为与进度定位**：`repeat(count, alternate)` 只登记 `PlaybackMode::Repeat`，起播仍需 `forward()` / `reverse()`；它与方向正交（先 `forward` 再 `repeat` 不覆盖方向、先 `repeat` 再 `forward` 不清模式），`reset()` / `stop()` 把模式清回 `Once`。`count <= 0`（含缺省 `-1` 与 `0`）是无限循环，`0` 不表示「播 0 次」；`count > 0` 每次到达端点递减，归零后在最后到达的端点置终态。有限计数耗尽才产生 `Completed`，所以 `on_completed` 这类一次性回调在循环全程不触发、只在置终态那一帧触发一次。`alternate = false` 为同向重启（到 1 回 0 续跑），为真则每次到达端点翻转方向。无限循环在途期间 `Animator::has_active()` 恒真——应用不再进入空闲深睡，这是能力本身的代价，退出方式是 `stop()` / `reset()`。
+
+`set_progress(t)` 供手势跟手在帧边界前外部定位：越界夹入 `[0,1]`，**不改写 `status_`、不清 `PlaybackMode`**（播放中调用 = 重定位后续跑，静止态调用 = 只定位且不使 `has_active()` 变真），因此「拖拽跟手 → 松手由 `forward` / `reverse` 接管收尾」无需借道 `reset` 的状态副作用。写回经**外部脏位**送达：`dirty()` 取「推进脏 ∨ 外部脏」，`tick()` 入口只清推进脏，外部脏活到 `Animator` 帧末统一 `clear_dirty()`，故同一帧的绑定阶段即可把新进度插值写回目标 `State`。时间缩放为 `0.0` 时 `set_progress` **仍然生效**（缩放冻结的是推进步长，不是定位语义）。
+
+**应用内全局时间缩放**：`set_time_scale(scale)` 是调试 / 演示 / 降速入口，**非业务动画契约**（不改 `duration`、不改目标 `State` 终值、不改曲线，也不缩放事件、布局、输入与 `Scheduler` 定时任务）；`1.0` 正常、`2.0` 两倍速、`0.5` 慢放、`0.0` 冻结，负值与非有限值夹取为 `0.0`。与 Flutter `timeDilation` 互为倒数。
+
+缩放只有一个入口：自由函数 `scaled_frame_dt(raw_seconds)`（`Animator::scale_frame_dt` 的当前实例侧薄封装），它把裸帧步长**只做乘法**折算成动画时间轴步长；`Animator::current()` 为空（无头 / golden 场景）时**恒等返回**，故既有确定性基线逐字节不变；倍率 `1.0` 时逐比特恒等。**不夹取**是就地取舍：入参既可能是调用方声明的步长（`Animator::tick(1.0)` 做「一步到位」是既有契约），也可能是控件自驱路径的墙钟差（既有 `Skeleton` 用例以 3 秒差推进相位），在此夹取会同时改掉两者语义。
+
+同一条帧步长从取值到消费**至多经过漏斗一次**：`Animator::tick` 折算后推进控制器并把已折算的 `dt` 交给 `add_frame_binding` 回调；各控件自驱路径（`Scroll` / `LazyList` / `GridView` / `PullToRefresh` 的收位滑动、`ReorderableList::tick_settle` 的落位弹簧、`Skeleton` 的相位累加、`DragToDismiss` 经 `SpringAnimation` 的弹簧段）在**自己的 `tick_gestures` / `tick` 入口**取一次裸墙钟差并折算，下游求解器（`ScrollGlide::tick`、`SpringSimulation::value`）保持纯时序数学、不感知缩放。两层都乘会让倍率变成平方。
+
+**明确不缩放的例外**：近边缘自动滚边（`DragAutoScroll::advance` / `ReorderableList::tick_auto_scroll`）是速度型手感而非一段有始有终的时序；媒体播放钟（`VideoPlayer`）是内容时钟，缩放它等于改播放速度。`reduce_motion` **优先于**缩放——短路落端点的路径不乘倍率，否则「一步到位」的无障碍语义会变成「慢速播放」。
+
+**冻结（`0.0`）不得产生常驻帧**，两条停手机制各自可证：`Animator` 侧登记控制器本帧不推进即不置脏、绑定不写回，`has_active()` 同时转假；控件自驱侧拿到 `0` 步长后不推进、不写回、不标脏、不请求帧，其逐控件在途标志（`needs_gesture_tick_`）**保留**——解冻不能指望控件自己醒（全局入口触达不到私有标志），故 `0 → >0` 置一位重挂请求，由 `Application::wait_once` 消费出「下一帧不深睡」，那一帧里各控件照常 `tick_gestures` 并自行续帧；无在途动画时那是一帧空转，代价与「解冻」这一动作同频。就地取舍：冻结期间若帧循环已深睡，控件侧墙钟锚点停在那一帧，解冻首帧的 `now - last` 含整段停摆时长、在途滑动会一次跳进相应进度；冻结帧照常刷新锚点，故只要帧循环还产出别的脏帧就看不出该折算。
+
+**弹簧的生命周期告诫同样适用**：`SpringAnimation::attach(anim)` 内部 `drive` 一个自持的登记时钟并经 `add_frame_binding` 绑定，故控件把弹簧注册进 `Application` 全局 `Animator` 时，仍须在析构前 `remove(spring.clock())`（该时钟同时作注销键）。弹簧收敛定格后自己 `stop()` 该时钟，`has_active()` 随之转假——漏掉收敛判定会表现为「定格前多写几帧」或「永不停帧的空转」，所以收敛判定收在原语一处，调用方不再重复实现。
+
 ### 6.3 AnimatedValue
 
 `AnimatedValue<T>` 把 `State<T>`、一条 `Tween` 与控制器收拢一处，**内部以 `shared_ptr` 持有驱动载荷（pimpl）**，因此句柄可按值返回、自由拷贝，且 `attach(animator)` 后即使原句柄离开作用域，帧循环仍安全持有驱动载荷（不悬垂）。
 
-接口：`forward(from)`、`tick(dt)`（自驱动一帧）、`progress()`、`current()`（目标 `State` 当前值）、`is_completed()`、`on_completed(cb)`（到达终点的一次性回调）、`attach(Animator&)`（接入帧循环）。
+接口：`forward(from)`、`tick(dt)`（自驱动一帧）、`progress()`、`current()`（目标 `State` 当前值）、`is_completed()`、`on_completed(cb)`（到达终点的一次性回调）、`attach(Animator&)`（接入帧循环）、`controller()`（交出内部控制器）。
+
+`AnimatedValue<T>` **不转发** `repeat` / `set_progress`——播放模式与外部定位是控制器轴上的能力，句柄只再暴露它已有的三合一面；需要循环或跟手定位时经 `controller()` 设置（`handle.controller().repeat(...)` / `handle.controller().set_progress(t)`）。句柄不自持时间缩放：`tick(dt)` 内部经 `scaled_frame_dt` 折算（受当前 `Animator` 的倍率约束），`attach` 路径收到的 `dt` 已由 `Animator` 折算、不再二次缩放。
 
 ### 6.4 统一入口 animate
 
@@ -583,11 +605,17 @@ auto h2 = au::animate(opacity, au::Tween<float>(1.0F, 0.0F, au::Curves::linear()
 // 每帧：h2.tick(dt);
 ```
 
+其余自驱动形态同一条漏斗：`TweenAnimation<T>::tick(dt)`、`TimelinePlayer::tick(dt)`、`AnimatedValue<T>::tick(dt)`、`SpringAnimation::tick(dt)` 都在入口调 `scaled_frame_dt`，故应用内缩放与冻结对「不接 `Animator` 的手动推进」同样生效（`Animator::current()` 为空时恒等，单测手喂 `dt` 不受影响）。弹簧没有 `animate(...)` 式的自由函数入口，其即插形态就是 `SpringAnimation` 本身（见 §6.1 与 §6.7）。
+
 ### 6.5 设计约束
 
 动画只改变 `State<T>`（视觉属性如 opacity / transform），**不改变布局盒模型**；布局快照在动画前后一致（与 [`03-layout-render.md`](03-layout-render.md) §10.2 规则 7 同源）。
 
 **自驱动动画**：在 `on_paint` 末尾 `mark_needs_paint()` 自调度下一帧、并用 `std::chrono::steady_clock` 算 `dt` 手动缓动的控件，必须覆写 `can_cache_display_list()` 返回 `false`（[`04-widget.md`](04-widget.md) §2.4）。
+
+**缩放边界**：`Animator::set_time_scale` 只作用于**动画时间轴**——不缩放事件、布局、输入与 `Scheduler` 定时任务，也不改 `duration`、曲线与目标 `State` 终值。它是调试 / 演示 / 降速入口，**不进入业务动画契约**（业务侧要快慢就调 `duration` 或换曲线）。取值域与例外清单见 §6.2。
+
+**无障碍优先**：`reduce_motion` 优先于缩放与循环——短路路径单帧落本次目标端点、置终态，不产生中间帧，也不因 `repeat` 而往复；倍率不参与该短路的换算。
 
 ### 6.6 Timeline 编排（TimelineSpec / TimelinePlayer）
 
@@ -625,12 +653,13 @@ player.attach(app.animator());
 - **生命周期**：沿用 `AnimatedValue` 模式——载荷 `shared_ptr` 自持，`attach` 后句柄可离开作用域不悬垂；轨道目标 `State<T>` 为非拥有引用，必须比播放器存活更久；
 - **类型擦除边界**：轨道存储在播放器内部以 `shared_ptr<void>` + apply 函数擦除；公共 API（`track<T>`）全程类型安全，擦除不经接口泄漏；
 - **写序**：同帧多轨道按绑定序写入，无相互依赖的 State 间无顺序假设。
+- **分段曲线的两条路径**：跨槽位的「每段不同缓动」用 `TimelinePlayer`——每轨道一条 `Tween<T>`、各自带 `curve`，槽位区间天然就是分段边界；单条动画内的多段缓动（同值同时间轴、逐停靠点换曲线）用 `Keyframes<T>` 的 `Stop{time, value, curve}`，段取**该段起点** `Stop` 的曲线（见 §6.1）。两者不互相代偿：`TimelinePlayer` 不为单轨道开分段接口，`Keyframes<T>` 不感知槽位与总时长。
 
 ### 6.7 手势驱动动画（DragToDismiss / Dismissible）
 
 单指拖动跟手 + 松手 spring 裁决的 drag-to-dismiss 语义（pointer-agnostic，鼠标 / 触摸统一走 `pointer_id` 抽象流）。
 
-**`DragToDismiss`（`event/gesture.h`）**：拖动消除驱动器，内部持有 `DragRecognizer`。
+**`DragToDismiss`（`event/gesture.h`）**：拖动消除驱动器，内部持有 `DragRecognizer` 与一个 **`SpringAnimation`**（写回目标即它的进度 `State<double>`，值域经 `set_range(0, 1)` 夹取）。弹簧段复用公共封装，本类不再自持「累积模拟时间 + `is_settled` 定格 + 写 `State`」的私有实现——收敛与 `reduce_motion` 短路都只有原语一处；对外的帧入口也只有 `tick(raw_dt)` 一个（`Dismissible` 传裸墙钟差，折算发生在 `SpringAnimation::tick` 内，本类不预缩放）。
 
 - **跟手 = 直接操作而非动画**：drag 期间 `progress` 逐事件写为「主轴位移 / `travel`（消除行程，逻辑 dp）」，1:1 映射；`reduce_motion` 不干预跟手（无障碍语义：直接操作保持 1:1 响应）。负方向夹取 0，超行程夹取 1。
 - **松手裁决**：`on_release()` 按 `progress ≥ threshold`（默认 0.5）判落点——≥ 阈值 spring 到 1，收敛后触发 `on_dismissed`；否则 spring 回 0（静默，不触发回调）。拖动速度（最近事件位移 / 固定 60Hz 采样假设，主轴分量）作 spring 初速度：方向与裁决一致保留、相反丢弃。
@@ -653,6 +682,17 @@ player.attach(app.animator());
 ### 7.1 Route
 
 `Route`（`navigation/route.h`）是一条路由。构造 `Route(Node root, std::string name = "", RouteTransition transition = {})`；`root()` 返回该页 UI 子树，`name()` 返回路由名。
+
+`RouteTransition` 是转场描述值：`animated`（是否用转场动画）/ `kind`（`TransitionKind`）/ `curve`（缺省 `Curves::linear()`）/ `duration_seconds`（缺省 `0.3`）。
+
+**现状限制（转场侧尚未接线）**：
+
+- `NavigatorHost` 的转场曲线**硬编码** `Curves::ease_in_out()`（其 `anim_.bind` 一处），逐路由的 `RouteTransition::curve` 当前不生效——该字段是声明位，不是已兑现的能力。
+- `pop()` / `pop_to_root()` **强制** `TransitionKind::Fade`，仅 `push` 读 `RouteTransition::kind`。
+- `TransitionKind` 目前只有 `Fade` / `Slide` 两态。
+- 没有声明式 `PageRouteBuilder`（路由即转场描述）封装，现形是 `NavigatorHost` + `Route` 的命令式接法。
+
+可中断 / 交互式转场所需的原语已在动画层就位（`AnimationController::set_progress` 定位不改状态语义、`Keyframes` 分段曲线、`SpringAnimation` 的即插收敛），上表限制属导航层接线，不属这些原语缺失。
 
 ### 7.2 Navigator
 

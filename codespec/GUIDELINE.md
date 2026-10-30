@@ -1575,7 +1575,7 @@ auto list = std::make_shared<LazyList>(200, [](int i) -> Node { return Node{Text
 list->set_snap(ScrollSnap{.extent = 48.0F, .alignment = ScrollSnapAlignment::Center});
 ```
 
-收位不是跳变：滚轮落点后 150ms easeOutCubic 短滑动收敛到对齐点（自驱动 `tick_gestures`，不占 `Animator`）。程序化滚动用 `scroll_to(offset, animate)`（`LazyList` 另有 `scroll_to_item(index, animate)`），`animate = false` 即时落位；`set_offset` / `set_scroll_offset` 会**作废进行中的滑动**。观测点 `is_gliding()`。
+收位不是跳变：滚轮落点后 150ms easeOutCubic 短滑动收敛到对齐点（自驱动 `tick_gestures`，不占 `Animator`，但步长仍经 `scaled_frame_dt` 折算——`Animator::set_time_scale` 的缩放与冻结对它生效，见 `specification/05-event-navigation.md` §6.2）。程序化滚动用 `scroll_to(offset, animate)`（`LazyList` 另有 `scroll_to_item(index, animate)`），`animate = false` 即时落位；`set_offset` / `set_scroll_offset` 会**作废进行中的滑动**。观测点 `is_gliding()`。
 
 ### 38.2 下拉刷新
 
@@ -2250,3 +2250,98 @@ reload.on_click = [quote]() mutable -> void { quote.reload(); };  // 掐在途�
 - **取图一行版**：图片走 `au::set_default_image_fetcher(au::net::http::image_fetcher())`（`image_fetcher()` 返回的形态与 `au::ImageFetcher` 别名同构），`ImageView` 的 URL 入口即被这条通道接住，无需手写 `bind_resource`。
 
 全部形态（流式 `deliver_stream`、事件流 `deliver_sse`、WebSocket `deliver_ws`、回调式 `deliver`）见 [`include/aurora/net/http_binding.h`](include/aurora/net/http_binding.h) 与 [`specification/02-state.md`](specification/02-state.md) §5.4；可编译样例见 `examples/demos/demo_net_http.cpp`。
+---
+
+## 46 动画进阶配方（循环 / 全局缩放 / 手势定位 / 弹簧 / 分段曲线）
+
+五个配方只依赖 `animation/` 的四个公共头（`animator.h` / `timeline.h` / `easing.h` / `spring.h`）与 `Application` 的帧循环；片段里的 `app` 指既有 `au::Application`（建窗见配方 2），照 §29 的省略口径；权威语义见 [`specification/05-event-navigation.md`](specification/05-event-navigation.md) §6.1–§6.7。
+
+### 46.1 循环与往复：`repeat` 取代手写端点翻转
+
+```cpp
+au::AnimationController breathe{1.6};   // 背景呼吸：同向重启（到 1 回 0 续跑）
+au::AnimationController pingpong{1.2};  // 来回缩放：往复（到端点翻方向）
+au::AnimationController thrice{0.5};    // 有限计数：到达端点 3 次后置终态停住
+au::State<au::Color> tinted{au::Color{59, 130, 246}};
+au::State<float> scale_v{0.6F};
+
+au::Application app{std::move(scene), 520, 520};
+app.animator().bind(breathe, au::Tween<au::Color>{au::Color{59, 130, 246}, au::Color{236, 72, 153}}, tinted);
+app.animator().bind(pingpong, au::Tween<float>{0.6F, 1.4F}, scale_v);
+// 无需再每帧判 `is_completed()` / `is_dismissed()` 后手动翻方向——端点行为由 repeat 登记。
+thrice.repeat(3, /*alternate=*/true);
+thrice.forward();
+breathe.repeat();  // count <= 0（含缺省 -1 与 0）= 无限循环
+breathe.forward();
+pingpong.repeat(-1, /*alternate=*/true);
+pingpong.forward();
+```
+
+要点：`repeat` **只登记模式、不起播也不改方向**（起播仍要 `forward()` / `reverse()`，与方向正交）；有限计数只在耗尽那一帧产生 `Completed`，所以 `AnimatedValue::on_completed` 这类一次性回调在循环全程不触发；`reset()` / `stop()` 把模式清回 `Once`（无限循环的退出方式就是这两个）。代价要写明：`repeat(-1, ...)` 在途期间 `Animator::has_active()` 恒真，应用不会进入空闲深睡——这是「常驻动效」本身的语义，不是缺陷。`reduce_motion` 开启时单帧落本次目标端点并置终态，**不进入循环**。
+
+### 46.2 调试慢放与冻结：`set_time_scale`
+
+```cpp
+app.animator().set_time_scale(0.35);  // 全场慢放（动画时间轴按 0.35 倍推进）
+app.animator().set_time_scale(0.0);   // 冻结：不推进、不写回、不再钉住帧循环
+app.animator().set_time_scale(1.0);   // 还原；解冻自动送一帧使在途自驱动动画续跑
+const double now_scale = app.animator().time_scale();  // 读当前倍率（缺省 1.0）
+```
+
+要点：这是**调试 / 演示 / 降速**入口，不是业务动画 API——业务要快慢请改 `duration` 或换曲线。它只缩放动画时间轴：不改 `duration`、不改曲线、不改目标 `State` 终值，也**不缩放事件、布局、输入与 `Scheduler` 定时任务**；近边缘自动滚边（`DragAutoScroll` / `ReorderableList` 滚边）与媒体播放钟（`VideoPlayer`）是有意的例外（前者是速度型手感，后者是内容时钟）。与 Flutter `timeDilation` 互为倒数（`timeDilation = 2` ⇔ `time_scale = 0.5`）。负值与 NaN / inf 一律夹取为 `0.0`（冻结）。同一倍率覆盖所有动画路径：`Animator` 登记控制器、`AnimatedValue` / `TweenAnimation` / `TimelinePlayer` 的 `tick`、控件自驱的收位滑动与弹簧——同一条帧步长**至多折算一次**，业务侧不需要也不应该自己再乘。
+
+### 46.3 手势直接定位进度：`set_progress`
+
+```cpp
+au::AnimationController drawer{0.3};
+au::State<double> progress{0.0};
+au::State<float> translate{0.0F};
+app.animator().bind(drawer, au::Tween<double>{0.0, 1.0}, progress);
+
+au::Modifier grab = au::Modifier{}
+                        .size(320.0F, 56.0F)
+                        .draggable(
+                            [&drawer, &translate](au::Point delta, au::Point /*pos*/) -> void {
+                                translate.set(translate.get() + static_cast<float>(delta.x));  // 跟手位移
+                                drawer.set_progress(static_cast<double>(translate.get()) / 320.0);  // 只定位
+                            },
+                            /*on_start=*/[&drawer]() -> void { drawer.stop(); },  // 打断在途播放，交给人手
+                            /*on_end=*/[&drawer]() -> void {
+                                // 松手接管：过半程正向收尾，否则反向回位（都从当前进度续播）
+                                drawer.value() >= 0.5 ? drawer.forward() : drawer.reverse();
+                            });
+```
+
+要点：`set_progress(t)` 越界夹入 `[0,1]`，写回经**外部脏位**送达——手势发生在帧边界之前时，同一帧的绑定阶段就把新进度插值写回目标 `State`，跟手不掉帧。它与 `reset(v)` 是两条语义：`reset` 会按值改写 `status_`（`>=1` → `Completed`，否则 `Dismissed`）并把循环模式清回 `Once`，`set_progress` 两者都不碰，因此静止态调用不会让 `has_active()` 变真、播放中调用等于重定位后续跑。缩放为 `0.0`（冻结）时 `set_progress` **仍然生效**：冻结停的是推进步长，不是定位。
+
+### 46.4 弹簧即插到 `State`：`SpringAnimation`
+
+```cpp
+au::State<double> offset{0.0};
+au::SpringAnimation spring{offset};              // 写回目标是一枚 State<double> 句柄
+spring.set_range(0.0, 1.0);                       // 值域受限的目标才夹取（欠阻尼会回弹越界）
+spring.on_settled([]() -> void { /* 定格一次：每次 animate_to 至多触发一回 */ });
+spring.animate_to(1.0, au::SpringDescription{.stiffness = 170.0, .damping = 22.0, .mass = 1.0},
+                  /*initial_velocity=*/240.0,     // 拖拽速度交接
+                  /*tolerance=*/0.01);            // 收敛容差：与目标值同单位域，不是归一化时间
+spring.attach(app.animator());                    // 接入帧循环；句柄离开作用域也安全
+```
+
+要点：`SpringSimulation` 仍是**纯求解器**（`value` / `velocity` / `is_settled` / `target`），本封装只补驱动层——逐帧写 `State`、`is_settled` 后定格于目标值并停帧（不再增长内部时间、不再写 `State`、`has_active()` 转假）。漏掉收敛判定是这类手写最常见的缺陷（表现为「定格前多写几帧」或「永不停帧的空转」），所以判定收在原语一处，调用方不再复刻。没有 `Application` 在跑时改用手驱动：`spring.tick(raw_dt)`（入参是裸帧间隔，内部经同一漏斗折算）。`attach` 走 `Animator::add_frame_binding(fn, owner)`，归属弹簧自持的登记时钟，故注销方式是 `app.animator().remove(spring.clock())`——把弹簧作为控件成员注册进全局 `Animator` 时，仍须在控件析构前注销。只做标量 `double`：向量 / 矩形 / 颜色由调用方组合多个实例（各写一枚 `State<double>`），框架不做泛化。`reduce_motion` 下单帧落目标并结束。
+
+### 46.5 关键帧分段曲线：每段各取该段起点的曲线
+
+```cpp
+au::Keyframes<double> kf{std::vector<au::Keyframes<double>::Stop>{
+    {.time = 0.0, .value = 0.0, .curve = au::Curves::ease_in_quad()},   // 段 [0, 0.5] 起慢终快
+    {.time = 0.5, .value = 10.0, .curve = au::Curves::ease_out_quad()}, // 段 [0.5, 1] 起快终慢
+    {.time = 1.0, .value = 20.0},                                       // 末点的曲线不参与求值
+}};
+au::State<double> v{0.0};
+au::AnimationController ctrl{0.6};
+app.animator().bind(ctrl, kf, v);  // bind 有 Keyframes 重载，脏帧按段曲线写回
+ctrl.forward();
+```
+
+要点：段 `[stop_i, stop_{i+1}]` 的整形曲线取**第 *i* 个 `Stop`** 的 `curve`，末个 `Stop` 的曲线不参与任何取值；缺省 `curve` 为线性，所以既有 `Stop{time, value}` 写法逐位不变。同时刻的相邻停靠点（零宽段）取该段起点值；停靠点经稳定排序，同时刻保持插入次序、`curve` 随所属 `Stop` 一起移动。跨槽位的「每段不同缓动」不归 `Keyframes` 管——那是 §29 `TimelinePlayer` 的每轨道一条带曲线的 `Tween`。
+

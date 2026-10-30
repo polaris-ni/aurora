@@ -123,7 +123,7 @@ Aurora 是一个 C++20 跨平台 GUI 库，以**声明式 + 响应式**为核心
 | 模块 | 路径 | 主要头文件 |
 |:---|:---|:---|
 | 导航 | `navigation/` | `navigator.h` `route.h`（`Route` / `RouteTransition`） `router.h` `transition_layer.h` `navigator_host.h` `hero.h` |
-| 动画 | `animation/` | `timeline.h`（`Tween` / `Keyframes`） `animator.h` `easing.h`（`Curve`） `spring.h`（`SpringSimulation`） |
+| 动画 | `animation/` | `timeline.h`（`Tween` / `Keyframes` / `TimelineSpec`） `animator.h`（`AnimationController` / `Animator` / `AnimatedValue` / `TimelinePlayer`） `easing.h`（`Curve`） `spring.h`（`SpringSimulation` / `SpringAnimation`） |
 | 主题 | `theming/` | `theme.h`（聚合） `color_roles.h` `type_scale.h` `csd_roles.h` `csd_style_bridge.h` `theme_scope.h` `theme_query.h` `theme_extension.h` `color_scheme.h` |
 | 环境注入 | `environment/` | `environment.h` `media_query.h` `build_context.h` |
 | 国际化 | `i18n/` | `message_id.h`（`MessageId`） `locale.h` `localized_string.h`（`LocalizedString` / `MessageArg`） `message_catalog.h`（`MessageCatalog` / `default_catalog`） `plural.h`（CLDR 表驱动判定） `format.h`（数字 / 货币 / 日期 + `CivilDate`） `builtin_messages.h`（内置词表薄封装，生成件 `builtin_messages.gen.h`） |
@@ -214,6 +214,8 @@ drain_posted → pump_all_once → on_frame_ → 关闭闸门询问步 poll_clos
 | 有脏区 / 动画（活跃帧） | 按 `WindowOptions::max_fps` 帧预算节流 |
 | 仅定时任务 | 睡到最近到期时刻（`Scheduler::next_deadline_ms`） |
 | 后端自带节拍（D3D11 vsync，`Surface::paces_frames()` 为真） | 跳过 CPU sleep，避免双重限速 |
+
+「有动画」分支的读法须与动画层的两个机制对齐：`repeat(-1, ...)` 的无限循环与在途 `SpringAnimation` 都算「有动画」，前者本就要求常驻帧（能力本身的代价），后者在 `is_settled` 定格并 `stop()` 登记时钟后自动退出该分支。反向的一条是**冻结不得变成常驻帧**：`Animator::set_time_scale(0.0)` 下 `has_active()` 恒假、登记控制器不置脏，控件自驱路径拿到 0 步长也不标脏、不请求帧——「停着不动却满帧唤醒」是缺陷不是设计。解冻不能靠控件自醒（每帧计时是逐控件私有标志），`0 → >0` 由 `Animator::take_rearm_request()` 请求「下一帧不深睡」，那一帧各控件照常推进并自行续帧。
 
 各后端实现真阻塞：`Win32` 经 `MsgWaitForMultipleObjectsEx`、`Glfw` 经 `glfwWaitEventsTimeout`；`Headless` 为 no-op（测试以 `max_frames` 驱动，保证确定性与速度）。跨线程回投（`au::async` 的 `then` 回调）经 `Task::set_main_poster` 入队 + `Surface::request_wake()` 唤醒睡眠中的主循环，下一帧开头在主线程排水执行。
 
@@ -453,6 +455,9 @@ Aurora 内置轻量级运行时性能检测体系，提供帧级指标采集、�
 11. **几何权威在 `Node`**：`Widget` 不持有任何几何缓存。
 12. **原生子视图不被合成**：`NativeViewHost` 管理的原生子视图（系统 WebView 等）由窗口系统直接叠加显示，**不参与** `Painter` / `RhiBackend` 的帧录制与回放；aurora 侧只下发几何 / 可见性并按需读取快照像素。命中 / 裁剪 / 重叠一律以宿主窗口系统的实际叠加为准，库内不得假设其被合成进 aurora 帧缓冲。
 13. **平台 socket 头唯一落点不放宽**：`net/socket.cpp` 是 Winsock2 / BSD socket 头的仓内唯一适配 TU——其他 TU（含链路态采集腿这类新增的 OS 查询）不得包含平台 socket 头，也不得为一条查询新增线程。链路态的 Windows 腿（`GetIfTable2` / `GetIpForwardTable2`）因此住在 `socket.cpp`，Linux 腿只读伪文件与 `sysfs`；「多一条 OS 事实要读」不是放宽这条边界的理由。
+14. **动画时间轴的 dt 只有单一漏斗入口**：帧步长到动画步长的折算只经 `scaled_frame_dt`（或 `Animator::scale_frame_dt`）**一次**——`Animator::tick` 折算后推进控制器并把折算值交给 `add_frame_binding`，各控件自驱路径在自己的 `tick` / `tick_gestures` 入口折算一次，下游求解器（`ScrollGlide::tick`、`SpringSimulation::value`、`AnimationController::tick`）保持纯时序、不感知倍率。两层都乘 ⇒ 倍率变平方。`Animator::current()` 为空时漏斗恒等返回（无头 / golden 的确定性基线据此不破），漏斗**只做乘法、不夹取**。缩放为 `0.0`（冻结）不得产生常驻帧：控制器不置脏、绑定不写回、`has_active()` 转假、控件侧不标脏不请求帧。
+15. **循环模式不改写既有一次性语义**：`PlaybackMode::Repeat` 只改变「到达端点之后怎么办」，不改单次播放的进度方程、曲线、终值，也不新增 `completed` 触发——`on_completed` 仍只在控制器被置为 `Completed` / `Dismissed` 终态那一帧触发一次，无限循环全程不触发；`reset()` / `stop()` 把模式清回 `Once`。`reduce_motion` 优先于循环：无障碍档单帧落本次目标端点即止，不进入往复。
+16. **`set_progress` 不改状态语义**：外部定位只写进度（越界夹入 `[0,1]`），**不改 `status_`、不清 `PlaybackMode`**；它与 `reset(v)`（按值改写 `status_`）是两条不同语义，不得互相代偿。外部脏位与推进脏分离：`tick()` 入口只清推进脏，外部脏活到 `Animator` 帧末 `clear_dirty()` 一并清——否则「手势在帧边界前写入、同一帧绑定阶段写回」与「空闲帧不写回」两条既有语义会同时失真。
 
 ---
 
@@ -571,6 +576,9 @@ CI 配置位于 `.github/workflows/`：
 | `release.yml` | 发布流程（构建产物 / 版本标签） |
 
 矩阵按「每个 feature 宏分支至少被一个 job 编译一次」设计；选项语义见 [`BUILD_OPTIONS.md`](BUILD_OPTIONS.md)。CI 只负责「拉起构建 + 跑 CTest」，不承载测试设计。
+
+- **动画域不变量的单测没有 1:1 载体可对齐**：`include/aurora/widget/scroll_viewport.h` 不是 widget 单元头（widget spec 第 4 篇不收录它），其单测 `utest_scroll_viewport` 没有属性键 / 序列化 schema 可对账，故不进 `CODING_STANDARDS.md` §3.1「源—示例—测试 1:1」映射，也不受 §3.2 `TEST-R3`（一个单元头至多被一个 `tests/unit/` 测试声明）约束。该反向不变量由本条文本守住，与 `check_test_registry` 的孤儿 / 重名校验并列；新增此类「非单元头单测」时按同一条目登记，不要为凑齐 1:1 而给它造一个 demo。
+- **`tools/include/known_enums.h` 的入表判据**（该表注释就地写明，此处留存口径）：只在「工具链需要能填这个值」时入表——widget 属性键 / MCP 入参 / LSP 补全的取值域。仅经 getter 读出、既不作为任何属性类型也不作为工具入参出现的公共枚举（`AnimationStatus`、`PlaybackMode` 同族）不入表：入表会把「读出来的状态」提示成「填进去的值」，而后者编译不过。`itest_known_enums.cpp` 只对账「表里的枚举 ↔ 属性类型」，不检查公共枚举覆盖率，故新增枚举无须全量入表。
 
 **网络能力面（Inspector 服务器 + TLS provider）是流水线的公共前缀**，不是某一个作业的职责：由 `.github/actions/setup-net-capability-flags` 复合动作按 runner OS 装配开关串——Linux 侧装 `libmbedtls-dev` 并把安装根指向动作搭好的 `/opt/aurora-tls-mbedtls`（不能用 `/usr`：那里 openssl 与 mbedtls 两套头同时在场，OpenSSL 优先，`tls_mbedtls.cpp` 会永远编不到），Windows / macOS 走系统栈缺省装配（Schannel / SecureTransport，不给 provider 即已开启），Emscripten 只取 Inspector。core / backends / toggles / tls-providers / asan / coverage / install-consumer / wasm 引用同一份串。集中一处的原因是这两枚开关控制的是**运行面**而非编译面：`utest_inspector_server` 在 `AURORA_BUILD_INSPECTOR_SERVER` 关闭时整文件降级 SKIP，`utest_net_tls` 在无 provider 时大半 SKIP，任一作业漏开即少一处别人补不上的覆盖。
 
