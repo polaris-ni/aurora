@@ -4,21 +4,25 @@
 /// cache_extent 窗口、滚动偏移钳制与 scroll_to_item、滚轮步进、滚出窗口回收重建、序列化与自描述、
 /// 反序列化回填标量属性（含非法值降级、显式偏移优先于 restore_key 恢复）、
 /// snap/paging 收位短滑动（逐帧推进至终点对齐）、reduce-motion 直落、offset_signal 发布、滚轮余量上冒、
-/// 绘制盒与命中盒同源（对齐/非对齐滚动位下点中的条目==可见的条目）
+/// 绘制盒与命中盒同源（对齐/非对齐滚动位下点中的条目==可见的条目）、
+/// 应用内全局时间缩放的 LazyList 消费点（到位帧数按倍率折半且终值不变 / 冻结段零重绘请求且解冻续跑）
 
 #include <chrono>
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "aurora/animation/animator.h"
 #include "aurora/app/scroll_storage.h"
 #include "aurora/core/accessibility.h"
 #include "aurora/layout/layout_engine.h"
 #include "aurora/widget/lazy_list.h"
 #include "framework/aurora_test.h"
 #include "framework/json_access.h"
+#include "support/animation_fixture.h"
 
 namespace aurora::test_cases::utest_lazy_list {
 
@@ -100,6 +104,79 @@ auto wheel(LazyList &list, float delta_y) -> ScrollEvent {
     list.on_scroll(e);
     return e;
 }
+
+/// @brief 缩放 / 冻结判据的固定帧步长：62500µs = 1/16 秒（二进制精确，跨倍率帧数可整除推导）。
+constexpr auto AURORA_SCALE_FRAME_STEP = std::chrono::microseconds(62500);
+
+/// @brief 按固定帧步长推进一帧（假想帧钟，不读墙钟）——收位滑动的逐帧入口。
+template <typename WidgetT>
+auto pump_scaled_frame(WidgetT &w) -> void {
+    frame_clock() += AURORA_SCALE_FRAME_STEP;
+    w.tick(frame_clock());
+}
+
+/// @brief 按固定帧步长推进到收位滑动结束（`is_gliding()` 转假），返回真正喂进去的帧数。
+/// @tparam WidgetT 被驱动的控件类型（须有 `tick(time_point)` 与 `is_gliding()`）。
+/// @param w 目标控件。
+/// @param budget 帧预算上限（防呆：正常路径 1–3 帧，超预算即记账失败）。
+/// @return 到位用掉的帧数；超预算时返回 `budget + 1`（并已就地记一次失败）。
+template <typename WidgetT>
+auto pump_until_glide_ends(WidgetT &w, int budget = 32) -> int {
+    for (int n = 1; n <= budget; ++n) {
+        pump_scaled_frame(w);
+        if (!w.is_gliding()) {
+            return n;
+        }
+    }
+    AURORA_TEST_FAIL("snap glide never finished within the frame budget");
+    return budget + 1;
+}
+
+/// @brief 到位帧数的推导模型（倍率只乘**一层**）：`ScrollGlide` 累计满 0.15 秒即刻位，每帧步长 1/16 秒。
+///
+/// 1x / 2x / 4x 依次为 3 / 2 / 1 帧（0.0625、0.125、0.1875 越线）。若消费点与 `scaled_frame_dt`
+/// 两层都乘，倍率变成平方：2x 档每帧 0.25 秒 ⇒ 只需 1 帧，与下表的 2 帧不符。
+/// @param scale `Animator::set_time_scale` 的倍率（调用方须传正值）。
+/// @return 从滑动起步（elapsed 已归零）到收位所需的固定步长帧数。
+constexpr auto expected_glide_frames(double scale) -> int {
+    constexpr double frame_seconds = 1.0 / 16.0;  // 与 `AURORA_SCALE_FRAME_STEP` 同值的秒数
+    constexpr double duration_seconds = 0.15;  // `ScrollGlide::default_duration_s()`
+    double elapsed = 0.0;
+    for (int n = 1; n <= 64; ++n) {
+        elapsed += frame_seconds * scale;
+        if (elapsed >= duration_seconds) {
+            return n;
+        }
+    }
+    return 0;
+}
+
+/// @brief 重绘请求计数器：作用域内把控件的 `on_dirty` 换成计数回调，出作用域还原原回调。
+///
+/// `Widget::request_frame` 一定会调用挂在控件自身的 `on_dirty`（即便 `layout_parent_` 为空），
+/// 所以它是「本段里请求了多少帧重绘」的直接观测量——判据 11(b) 的「冻结不空转」就落在这个计数上。
+class ScopedDirtyCounter final {
+  public:
+    /// @brief 接上计数回调并保存此前挂在 `on_dirty` 上的回调（通常为空）。
+    /// @param w 观察目标控件（非拥有引用，须比本对象存活更久）。
+    explicit ScopedDirtyCounter(Widget &w) : widget_(w), saved_(std::move(w.on_dirty)) {
+        w.on_dirty = [this](bool /*layout*/) -> void { ++requests_; };
+    }
+    ScopedDirtyCounter(const ScopedDirtyCounter &) = delete;
+    auto operator=(const ScopedDirtyCounter &) -> ScopedDirtyCounter & = delete;
+    ScopedDirtyCounter(ScopedDirtyCounter &&) = delete;
+    auto operator=(ScopedDirtyCounter &&) -> ScopedDirtyCounter & = delete;
+    ~ScopedDirtyCounter() { widget_.on_dirty = std::move(saved_); }
+
+    /// @brief 本作用域内累计的重绘请求数。
+    /// @return `on_dirty` 被调用的次数。
+    [[nodiscard]] auto count() const -> int { return requests_; }
+
+  private:
+    Widget &widget_;
+    std::function<void(bool)> saved_;
+    int requests_ = 0;
+};
 
 /// @brief reduce-motion 守卫：作用域内开启，离开时复原进程级设置（单例，测试须自清）。
 class ReduceMotionGuard final {
@@ -614,6 +691,88 @@ AURORA_TEST_CASE(vertical_view_size_reports_visible_fraction_of_content) {
     AURORA_TEST_CHECK_NEAR(range.viewport, 100.0, 1e-3);
     AURORA_TEST_CHECK_NEAR(range.content, 400.0, 1e-3);
     AURORA_TEST_CHECK_NEAR(aurora::compute_vertical_view_size(range), 25.0, 1e-6);
+}
+
+// ---- 应用内全局时间缩放：ScrollGlide 的 LazyList 消费点（判据 9 / 10 / 11(b)）----
+
+// @brief 判据 9/10（LazyList 行）：收位滑动的到位帧数按倍率折半、终值逐位不变（倍率只乘一层）。
+AURORA_TEST_CASE(lazy_list_glide_frame_count_follows_time_scale) {
+    // 推导同 utest_scroll：帧步长 1/16 秒（二进制精确）、`ScrollGlide` 缺省 0.15 秒 ⇒ 1x/2x/4x = 3/2/1 帧。
+    // 首帧的裸步长是「锚点未置」时的 1/60 兜底值，与后续帧不等长会污染取整，故每档先喂一帧兑现它，
+    // 再在途重定向（`scroll_to` 的 `start` 归零 elapsed、保留锚点），计数段内每帧便恰为固定步长。
+    Animator anim;
+    const testing::ScopedCurrentAnimator current{anim};
+    LazyList list{100, {}, 48.0F};  // 内容 4800 / 视口 400 ⇒ 可滚 [0, 4400]
+    list.set_cache_extent(0.0F);  // 关预取：滑动帧只做窗口重建，不掺入额外脏源
+    LayoutEngine::layout(list, bounded(300.0F, 400.0F));
+
+    // 同一棵树、同一目标，只换倍率：复位 → 起滑动 → 兑现兜底帧 → 重定向 → 计数到位帧。
+    auto frames_at = [&list, &anim](double scale) -> int {
+        anim.set_time_scale(scale);
+        list.scroll_to(2000.0F, false);  // 即时复位（同时作废在途滑动）
+        AURORA_TEST_CHECK(list.scroll_to(4400.0F));
+        pump_scaled_frame(list);
+        AURORA_TEST_CHECK(list.scroll_to(4400.0F));  // 在途重定向：elapsed 归零、锚点已就位
+        return pump_until_glide_ends(list);
+    };
+
+    const int n_1x = frames_at(1.0);
+    const float end_1x = list.scroll_offset();
+    const int n_2x = frames_at(2.0);
+    const float end_2x = list.scroll_offset();
+    const int n_4x = frames_at(4.0);
+    const float end_4x = list.scroll_offset();
+
+    AURORA_TEST_CHECK_EQ(n_1x, expected_glide_frames(1.0));
+    AURORA_TEST_CHECK_EQ(n_2x, expected_glide_frames(2.0));
+    AURORA_TEST_CHECK_EQ(n_4x, expected_glide_frames(4.0));
+    AURORA_TEST_CHECK_EQ(n_1x, 3);
+    // 判据 9：帧数恰为 1x 档的一半。双层缩放（倍率平方）会让 2x 档每帧吃 0.25 秒 ⇒ 一帧到位，
+    // 与这里的 2 帧冲突即转红——2x 档正是抓出「两层都乘」的那一档。
+    AURORA_TEST_CHECK_EQ(n_2x, (n_1x + 1) / 2);
+    AURORA_TEST_CHECK_EQ(n_4x, (n_1x + 3) / 4);
+    AURORA_TEST_CHECK(end_1x == end_2x && end_2x == end_4x);  // 只改步长、不改终值
+    AURORA_TEST_CHECK_FALSE(list.is_gliding());
+    AURORA_TEST_CHECK_EQ(end_1x, 4400.0F);  // 落位即夹取到的可滚末端
+
+    anim.set_time_scale(1.0);  // 倍率还原后行为与原先一致（判据 9 的无残留半句）
+    list.scroll_to(2000.0F, false);
+    AURORA_TEST_CHECK(list.scroll_to(4400.0F));
+    pump_scaled_frame(list);
+    AURORA_TEST_CHECK(list.scroll_to(4400.0F));
+    AURORA_TEST_CHECK_EQ(pump_until_glide_ends(list), n_1x);
+}
+
+// @brief 判据 11(b) + 8 的 0.0 档（LazyList 行）：冻结段不推进、零重绘请求，解冻按剩余帧数续跑到同一终值。
+AURORA_TEST_CASE(lazy_list_glide_freeze_holds_progress_and_emits_no_redraw) {
+    Animator anim;
+    const testing::ScopedCurrentAnimator current{anim};
+    LazyList list{100, {}, 48.0F};  // 可滚 [0, 4400]
+    list.set_cache_extent(0.0F);
+    LayoutEngine::layout(list, bounded(300.0F, 400.0F));
+
+    AURORA_TEST_CHECK(list.scroll_to(4400.0F));
+    pump_scaled_frame(list);  // 兑现首帧的 1/60 兜底步长
+    AURORA_TEST_CHECK(list.scroll_to(4400.0F));  // 在途重定向 ⇒ 其后每帧恰为 1/16 秒
+    pump_scaled_frame(list);  // 推进一帧：elapsed = 1/16 秒
+    AURORA_TEST_REQUIRE_TRUE(list.is_gliding());
+    const float frozen_from = list.scroll_offset();
+
+    anim.set_time_scale(0.0);
+    AURORA_TEST_CHECK_EQ(anim.time_scale(), 0.0);
+    ScopedDirtyCounter dirty{list};
+    for (int i = 0; i < 8; ++i) {
+        pump_scaled_frame(list);
+    }
+    AURORA_TEST_CHECK_EQ(list.scroll_offset(), frozen_from);  // 冻结段一步都不挪
+    AURORA_TEST_CHECK_TRUE(list.is_gliding());  // 在途标志按实现保留（不该被摘除）
+    AURORA_TEST_CHECK_EQ(dirty.count(), 0);  // 判据 11(b)：停着不动也不满帧唤醒（虚拟化窗口不重建）
+
+    anim.set_time_scale(1.0);  // 解冻重武装：进度不丢，剩余 2 帧（0.125 → 0.1875 越线）收位
+    AURORA_TEST_CHECK_EQ(pump_until_glide_ends(list), 2);
+    AURORA_TEST_CHECK_GT(dirty.count(), 0);  // 对照：冻结段的 0 不是「回调没接线」
+    AURORA_TEST_CHECK_FALSE(list.is_gliding());
+    AURORA_TEST_CHECK_EQ(list.scroll_offset(), 4400.0F);  // 与不冻结路径的终值逐位一致
 }
 
 }  // namespace aurora::test_cases::utest_lazy_list

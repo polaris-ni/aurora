@@ -3,15 +3,19 @@
 /// 测试说明: 滚动视口内核——clamp_offset 符号与夹取、apply_scroll 状态机、remaining_offset 余量回传
 /// （端点被吃掉的部分、step<=0 全退）、ScrollSnap::page/enabled 生效条件、
 /// snap_target 三方位（Start/Center/End）与分页、末端不足一周期时夹到 max、吸附关闭时退化普通夹取、
-/// ScrollGlide 启动/重定向/tick 收敛与到点精确终止；
+/// ScrollGlide 启动/重定向/tick 收敛与到点精确终止、ScrollGlide::tick 的 dt 口径（自身不缩放，
+/// 挂 time_scale=4.0 的 Animator 与无 current 两档逐帧一致；scaled_frame_dt 在无 current 时恒等）；
 /// 拖入自动滚边内核——驱动即激活、带内按侵入深度比例给速（顶带负 / 底带正、首帧 dt 兜底 1/60）、
 /// 带外或视口未定尺即就地收车、新鲜度超时收车（宿主停发意图的兜底）、收车后可重新驱动、
 /// 触发带在矮视口下半高夹取、落点与视口盒同为窗口逻辑坐标时按原点差换算、共享调参常量钉值
 
 #include <chrono>
+#include <vector>
 
+#include "aurora/animation/animator.h"
 #include "aurora/widget/scroll_viewport.h"
 #include "framework/aurora_test.h"
+#include "support/animation_fixture.h"
 
 namespace aurora::test_cases::utest_scroll_viewport {
 
@@ -276,6 +280,54 @@ AURORA_TEST_CASE(auto_scroll_constants_are_shared_defaults) {
     AURORA_TEST_CHECK_NEAR(AURORA_AUTO_SCROLL_THRESHOLD_DP, 48.0F, 1e-6F);
     AURORA_TEST_CHECK_NEAR(AURORA_AUTO_SCROLL_MAX_SPEED, 600.0F, 1e-6F);
     AURORA_TEST_CHECK_NEAR(AURORA_DRAG_AUTO_SCROLL_STALE_S, 1.0, 1e-9);
+}
+
+// ---- ScrollGlide 的 dt 口径（单一漏斗不叠加 / 无 current 确定性）----
+
+// @brief 判据 9/12：ScrollGlide::tick 是纯时序数学、自身不缩放——同一 dt 序列在挂着 time_scale=4.0
+//        的 Animator 下与无 current 环境下逐帧返回值一致（缩放只在消费点，未渗进求解器）。
+AURORA_TEST_CASE(scroll_glide_tick_is_immune_to_current_animator_time_scale) {
+    Animator *saved = Animator::current();
+    Animator fast;
+    fast.set_time_scale(4.0);
+    const double steps[] = {0.02, 0.05, 0.03, 0.1, 0.05};
+
+    std::vector<float> under_scale;
+    {
+        const testing::ScopedCurrentAnimator scope{fast};
+        ScrollGlide g;
+        g.start(0.0F, 100.0F);
+        for (double dt : steps) {
+            under_scale.push_back(g.tick(dt));
+        }
+    }
+
+    std::vector<float> neutral;
+    {
+        Animator::set_current(nullptr);
+        ScrollGlide g;
+        g.start(0.0F, 100.0F);
+        for (double dt : steps) {
+            neutral.push_back(g.tick(dt));
+        }
+    }
+    Animator::set_current(saved);
+
+    AURORA_TEST_REQUIRE_EQ(under_scale.size(), neutral.size());
+    for (std::size_t i = 0; i < under_scale.size(); ++i) {
+        // 容差 0 即逐比特一致：求解器不读 current()，倍率无从渗入。
+        AURORA_TEST_CHECK_NEAR(under_scale[i], neutral[i], 0.0F);
+    }
+}
+
+// @brief 判据 12：Animator::current() 为空时 scaled_frame_dt 恒等返回入参（无头 / golden 基线不破）。
+AURORA_TEST_CASE(scaled_frame_dt_is_identity_without_current_animator) {
+    Animator *saved = Animator::current();
+    Animator::set_current(nullptr);
+    AURORA_TEST_CHECK_NEAR(scaled_frame_dt(0.37), 0.37, 0.0);
+    AURORA_TEST_CHECK_NEAR(scaled_frame_dt(3.0), 3.0, 0.0);
+    AURORA_TEST_CHECK_NEAR(scaled_frame_dt(-1.0), -1.0, 0.0);  // 负值原样返回，交各消费点守卫视为不推进
+    Animator::set_current(saved);
 }
 
 }  // namespace aurora::test_cases::utest_scroll_viewport

@@ -63,6 +63,12 @@ namespace aurora::tools {
     enums["Curve"] = {"Linear",      "EaseIn",        "EaseOut",        "EaseInOut",   "EaseInSine",
                       "EaseOutSine", "EaseInOutSine", "EaseInQuad",     "EaseOutQuad", "EaseInOutQuad",
                       "EaseInCubic", "EaseOutCubic",  "EaseInOutCubic", "BounceOut",   "Custom"};
+    // 动画域其余两枚只读判别枚举**不入表**，理由是它们不构成任何可填写的取值域：
+    // `AnimationStatus`（播放/反向/完成/停止）与 `PlaybackMode`（Once/Repeat）都只经 getter 读出
+    // （`AnimationController::status()` / `mode()`），既不是 widget 属性键（`props[].type` 零命中），
+    // 也不作为工具链入参出现（`repeat(int count, bool alternate)` 收的是计数与布尔，不收枚举）。
+    // 入表会让 LSP / MCP 把「读出来的状态」当成「填进去的值」提示出去，那类建议根本编译不过；
+    // `itest_known_enums.cpp` 的覆盖腿也只按属性类型对账，不要求公共枚举全量入表。
 
     // ---- input ----
     enums["CursorShape"] = {"Arrow",      "IBeam", "PointingHand", "ResizeNS",   "ResizeEW", "ResizeNWSE",

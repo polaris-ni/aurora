@@ -132,9 +132,11 @@ class Tween {
     Curve curve_;
 };
 
-/// @brief 关键帧补间：在 (time,value) 停靠点之间线性插值（time∈[0,1]）。
+/// @brief 关键帧补间：在 (time,value,curve) 停靠点之间按段插值（time∈[0,1]）。
 ///
-/// 停靠点按时间排序；区间外用端点值（对应 Flutter `Keyframe` / 时间线）。
+/// 停靠点按时间排序；区间外用端点值（对应 Flutter `Keyframe` / `TweenSequence` 每段带 `curve`）。
+/// 每段的整形曲线取自**该段起点**那个停靠点（见 `Stop::curve`），缺省线性——既有不传曲线的写法
+/// 行为逐位不变。
 ///
 /// @tparam T 停靠点值类型，须有匹配的 `lerp(T, T, double)` 可用，且可默认构造（空停靠点返回 `T{}`）。
 /// @note Thread: thread-safe (pure value type)
@@ -143,24 +145,25 @@ class Tween {
 template <typename T>
 class Keyframes {
   public:
-    /// @brief 关键帧停靠点：某时刻对应的值。
+    /// @brief 关键帧停靠点：某时刻对应的值与该时刻**向后段**的整形曲线。
     struct Stop {
         double time = 0.0;  ///< 归一化时间 [0,1]
         T value;  ///< 该时刻的取值
+        Curve curve;  ///< 本点起向下一段的整形曲线（缺省线性）
     };
 
     Keyframes() = default;
     /// @brief 构造并排序停靠点。
-    /// @param stops 停靠点列表（内部按 time 稳定排序，同时刻保持插入次序）。
+    /// @param stops 停靠点列表（内部按 time 稳定排序，同时刻保持插入次序；`curve` 随所属 `Stop` 移动）。
     explicit Keyframes(std::vector<Stop> stops) : stops_(std::move(stops)) {
         // 稳定排序：同时刻停靠点保持插入次序（取值确定、不受排序抖动影响）。
         std::stable_sort(stops_.begin(), stops_.end(),
                          [](const Stop &a, const Stop &b) -> auto { return a.time < b.time; });
     }
 
-    /// @brief 计算时刻 t 处的值（线性插值相邻停靠点）。
+    /// @brief 计算时刻 t 处的值（按段起点的曲线整形后插值相邻停靠点）。
     /// @param t 归一化时刻；空停靠点返回 T{}，区间外取最近端点值。
-    /// @return 相邻停靠点间的插值结果（退化段取前点值）。
+    /// @return 相邻停靠点间的插值结果（零宽段取前点值；末点的 curve 不参与求值）。
     [[nodiscard]] auto value(double t) const -> T {
         if (stops_.empty()) {
             return T{};
@@ -175,8 +178,9 @@ class Keyframes {
             if (t <= stops_[i].time) {
                 const double a = stops_[i - 1].time;
                 const double b = stops_[i].time;
+                // 零宽段（同时刻）local 退化 0 → 取该段起点值（曲线在 0 处亦映射到 0，仍得起点值）。
                 const double local = (b > a) ? (t - a) / (b - a) : 0.0;
-                return lerp(stops_[i - 1].value, stops_[i].value, local);
+                return lerp(stops_[i - 1].value, stops_[i].value, stops_[i - 1].curve.transform(local));
             }
         }
         return stops_.back().value;

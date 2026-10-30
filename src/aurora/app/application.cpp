@@ -438,9 +438,12 @@ auto Application::wait_once(const std::chrono::steady_clock::time_point &frame_s
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - frame_start).count();
     // 跨宿主聚合：任一宿主要求「不等待」→ 立即返回；否则取最小正值；全部为「无限」才无限等待。
     // 不能直接对所有返回值取 min：`<0`（无限）在数值上最小却语义最宽松，会被误选。
+    // 解冻重挂与登记动画同等计入：`set_time_scale(0 → >0)` 只留下一位请求，控件自驱的在途标志
+    // 是私有的、全局入口触达不到，就靠这一帧让各控件照常 `tick_gestures` 后自行续跑。
+    const bool anim_active = anim_.has_active() || anim_.take_rearm_request();
     double wait_ms = -1.0;
     for (const auto &h : hosts_) {
-        const double w = h->decide_wait(budget_ms, anim_.has_active(), sched_.next_deadline_ms(), elapsed_ms);
+        const double w = h->decide_wait(budget_ms, anim_active, sched_.next_deadline_ms(), elapsed_ms);
         if (w == 0.0) {
             wait_ms = 0.0;
             break;

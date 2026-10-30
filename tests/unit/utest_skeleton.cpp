@@ -1,18 +1,21 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/widget/skeleton.h
 /// 测试说明: 覆盖 Skeleton——size_hint 与占满/回退布局语义、tick 驱动 shimmer 相位推进与回绕、
-/// duration 覆写与非正容错、属性序列化往返与 describe 元数据
+/// duration 覆写与非正容错、属性序列化往返与 describe 元数据、shimmer 相位经单一 dt 漏斗的应用内
+/// 全局时间缩放（倍率折半 / 冻结相位不动且不请求重绘）
 
 #include <chrono>
 #include <memory>
 #include <string>
 
+#include "aurora/animation/animator.h"
 #include "aurora/environment/environment.h"
 #include "aurora/layout/layout_engine.h"
 #include "aurora/theming/theme.h"
 #include "aurora/widget/skeleton.h"
 #include "framework/aurora_test.h"
 #include "framework/json_access.h"
+#include "support/animation_fixture.h"
 
 namespace aurora::test_cases::utest_skeleton {
 using aurora::testing::require_child;
@@ -74,9 +77,9 @@ AURORA_TEST_CASE(zero_height_falls_back_to_16) {
 
 AURORA_TEST_CASE(tick_advances_phase_and_wraps) {
     Skeleton s{Size{.width = 120.0F, .height = 16.0F}};  // 显式尺寸构造才开启 gesture-tick 驱动
-    // 起点须避开 epoch：tick_gestures 以 time_point{} 作为 start_ 的「未初始化」哨兵，
-    // epoch 起点会让每次 tick 都命中哨兵分支重置 start_（相位恒滞后一拍）。
-    // 固定偏移 1ms 的起点保持确定性，且不影响 elapsed = now - start_ 的差值计算。
+    // 首帧只登记 last_tick_ 锚点（尚未建立时步长为 0），此后每帧以相邻两 now 之差累计 elapsed_，
+    // 相位经 scaled_frame_dt 折算得出（不再直接取墙钟差 / 周期）。固定偏移 1ms 的起点只作假帧钟原点，
+    // epoch 已非哨兵——起点取何值都不改变 elapsed 由逐帧差累计的口径，偏移仅为保持确定性。
     const auto t0 = std::chrono::steady_clock::time_point{} + std::chrono::milliseconds(1);
 
     s.tick(t0);  // 首帧登记起点，相位仍 0
@@ -91,7 +94,8 @@ AURORA_TEST_CASE(tick_advances_phase_and_wraps) {
 }
 
 AURORA_TEST_CASE(set_duration_overrides_period) {
-    // 同上：起点避开 epoch 哨兵（time_point{}），否则每次 tick 都会重置 start_ 导致相位滞后。
+    // 同上：首帧登记 last_tick_ 锚点（步长 0），此后按相邻帧差累计相位；起点取固定假帧钟原点即可，
+    // epoch 已非哨兵，不再有「每次 tick 重置起点、相位滞后一拍」的旧口径。
     const auto t0 = std::chrono::steady_clock::time_point{} + std::chrono::milliseconds(1);
 
     Skeleton custom{Size{.width = 120.0F, .height = 16.0F}};
@@ -184,6 +188,65 @@ AURORA_TEST_CASE(skeleton_explicit_colors_override_theme) {
     s.set_highlight(Color(5, 6, 7, 8));
     AURORA_TEST_CHECK(s.resolve_base(dark) == Color(1, 2, 3, 4));
     AURORA_TEST_CHECK(s.resolve_highlight(dark) == Color(5, 6, 7, 8));
+}
+
+// ---- 应用内全局时间缩放：Skeleton shimmer 相位经单一 dt 漏斗 ----
+
+// @brief 判据 10 覆盖矩阵相位行：Skeleton 相位累加吃折算后的 dt，time_scale=2.0 达到同一相位所需
+//        帧数为 1.0 的一半（默认周期 1.5s，每帧裸步长 0.1s：越过相位 0.5 需 elapsed≥0.75）。
+AURORA_TEST_CASE(skeleton_shimmer_phase_frames_halve_with_time_scale) {
+    const auto fake_t0 = std::chrono::steady_clock::time_point{} + std::chrono::milliseconds(1);
+    // 返回从锚点后推进到「相位首次 >= 0.5」所需的帧数（不含登记锚点的首帧）。
+    auto frames_to_phase = [&](double scale) -> int {
+        aurora::Animator anim;
+        anim.set_time_scale(scale);
+        const aurora::testing::ScopedCurrentAnimator scope{anim};
+        Skeleton s{Size{.width = 120.0F, .height = 16.0F}};  // 缺省周期 1.5s
+        s.tick(fake_t0);  // 首帧登记 last_tick_，步长 0，相位不动
+        auto now = fake_t0;
+        int frames = 0;
+        while (s.phase() < 0.5 && frames < 200) {
+            now += std::chrono::milliseconds(100);  // 裸帧间隔 0.1s，折算后为 0.1×scale
+            s.tick(now);
+            ++frames;
+        }
+        return frames;
+    };
+
+    const int f_1x = frames_to_phase(1.0);  // 0.1×1×8 = 0.8 ≥ 0.75 → 8 帧
+    const int f_2x = frames_to_phase(2.0);  // 0.1×2×4 = 0.8 ≥ 0.75 → 4 帧
+    AURORA_TEST_REQUIRE_GT(f_1x, 0);
+    AURORA_TEST_CHECK_EQ(f_1x, 2 * f_2x);  // 帧数恰半：出现 1/4 即双层缩放，出现等量即漏缩放
+}
+
+// @brief 判据 11(b) 冻结行：time_scale=0 时相位不前进、on_dirty 重绘请求计数为 0；恢复后相位续走。
+AURORA_TEST_CASE(skeleton_freeze_holds_phase_and_requests_no_frames) {
+    const auto fake_t0 = std::chrono::steady_clock::time_point{} + std::chrono::milliseconds(1);
+    aurora::Animator anim;
+    anim.set_time_scale(1.0);
+    const aurora::testing::ScopedCurrentAnimator scope{anim};
+
+    Skeleton s{Size{.width = 120.0F, .height = 16.0F}};
+    s.tick(fake_t0);
+    s.tick(fake_t0 + std::chrono::milliseconds(100));  // 推进一帧，相位已非零
+    const double frozen_phase = s.phase();
+    AURORA_TEST_CHECK_GT(frozen_phase, 0.0);
+
+    anim.set_time_scale(0.0);  // 冻结：折算步长归零
+    int dirty_count = 0;
+    s.on_dirty = [&dirty_count](bool /*layout*/) -> void { ++dirty_count; };
+    auto now = fake_t0 + std::chrono::milliseconds(100);
+    for (int i = 0; i < 5; ++i) {
+        now += std::chrono::milliseconds(100);
+        s.tick(now);
+    }
+    AURORA_TEST_CHECK_NEAR(s.phase(), frozen_phase, 0.0);  // 相位停在冻结前
+    AURORA_TEST_CHECK_EQ(dirty_count, 0);  // dt 归零不标脏、不请求帧
+
+    anim.set_time_scale(1.0);  // 解冻续跑：相位重新前进（冻结非终态）
+    now += std::chrono::milliseconds(100);
+    s.tick(now);
+    AURORA_TEST_CHECK_GT(s.phase(), frozen_phase);  // 解冻后相位越过冻结前的值
 }
 
 }  // namespace aurora::test_cases::utest_skeleton

@@ -10,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include "aurora/animation/animator.h"
 #include "aurora/app/scroll_storage.h"
 #include "aurora/core/accessibility.h"
 #include "aurora/core/transform.h"
@@ -776,8 +777,11 @@ class Scroll : public Container, public ScrollProps {
         return children_[0]->covers_extra_hit_box(content_local - content_box.origin, ctx, content_offset);
     }
 
-    /// @brief 收位滑动逐帧推进（自驱动 tick，不占 Animator；同 Dismissible/ReorderableList 模式）。
+    /// @brief 收位滑动逐帧推进（自驱动 tick，不占 Animator；同 Dismissible/ReorderableList 模式。
+    ///        步长在本入口经 scaled_frame_dt 折算一次，ScrollGlide::tick 只吃折算值）。
     ///        滑动帧与滚轮帧同策略：仅平移 blit，不重录内容缓冲。
+    ///        滑动步长经 `scaled_frame_dt` 折算：应用内全局时间缩放与冻结对本控件生效，
+    ///        自动滚边段不在此列（速度型手感，见该函数的就地裁决）。
     /// @param now 本帧时刻（单调时钟），与上一滑动时刻求差推进收位滑动插值。
     auto tick_gestures(std::chrono::steady_clock::time_point now) -> void override {
         Container::tick_gestures(now);  // 子树手势照常计时
@@ -794,9 +798,19 @@ class Scroll : public Container, public ScrollProps {
             // 盖回 0——两条驱动共用一次 tick，写段只归激活的那条。
             return;
         }
-        const double dt =
+        const double raw =
             glide_last_.has_value() ? std::chrono::duration<double>(now - *glide_last_).count() : (1.0 / 60.0);
         glide_last_ = now;
+        // 单一 dt 漏斗：应用内全局时间缩放在此折算，`ScrollGlide::tick` 只吃折算后的步长
+        // （它自己不再缩放——两层都乘会让倍率变成平方）。
+        const double dt = scaled_frame_dt(raw);
+        if (dt <= 0.0) {
+            // 冻结帧的空闲纪律：不推进、不写回、不标脏、不请求帧（否则「停着不动却满帧唤醒」）。
+            // 在途标志与 `glide_last_` 原样保留：解冻由 `Animator::take_rearm_request` 送一帧进来，
+            // 本函数照常走到这里续跑，冻结前进度不丢（锚点已逐帧刷新，深睡停摆的折算见
+            // `Animator::set_time_scale` 的就地取舍）。
+            return;
+        }
         float v = glide_.tick(dt);
         // 布局可能在滑动中改变内容/视口尺寸：目标随动夹取，防滑出可滚范围。
         v = std::clamp(v, 0.0F, std::max(0.0F, content_h_ - viewport_h_));

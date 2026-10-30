@@ -4,6 +4,7 @@
 #include <chrono>
 #include <optional>
 
+#include "aurora/animation/animator.h"
 #include "aurora/core/color.h"
 #include "aurora/render/painter.h"
 #include "aurora/theming/theme_scope.h"  // inherit_theme：未显式设色时取主题角色
@@ -194,13 +195,17 @@ class Skeleton : public LeafWidget {
         p.fill_rect(band, resolve_highlight(ctx));
     }
 
+    /// @brief 逐帧推进 shimmer 相位（自驱动 tick，走动画时间轴）。
+    ///        相位由**累积的折算步长**得出（不再直接取墙钟差 / 周期），因此应用内全局时间缩放
+    ///        与冻结对微光动画生效：冻结帧步长为 0 → 相位不动 → 不标脏、不请求帧。
+    /// @param now 本次 tick 的墙钟时刻（与上一时刻求差得裸帧间隔）。
     auto tick_gestures(std::chrono::steady_clock::time_point now) -> void override {
-        if (start_ == std::chrono::steady_clock::time_point{}) {
-            start_ = now;
-        }
-        const double elapsed = std::chrono::duration<double>(now - start_).count();
+        const double raw = last_tick_.has_value() ? std::chrono::duration<double>(now - *last_tick_).count() : 0.0;
+        last_tick_ = now;
+        // 单一 dt 漏斗：与 `Scroll` / `Dismissible` 家族同口径（`Animator::current()` 为空时恒等返回）。
+        elapsed_ += scaled_frame_dt(raw);
         const double dur = duration_ > 0.0 ? duration_ : 1.5;
-        double ph = std::fmod(elapsed / dur, 1.0);
+        double ph = std::fmod(elapsed_ / dur, 1.0);
         if (ph < 0.0) {
             ph += 1.0;
         }
@@ -216,7 +221,8 @@ class Skeleton : public LeafWidget {
     std::optional<Color> highlight_ = std::nullopt;  ///< 高亮带色；空 = 跟随主题 surface_container_lowest
     double duration_ = 1.5;
     double phase_ = 0.0;
-    std::chrono::steady_clock::time_point start_;
+    std::optional<std::chrono::steady_clock::time_point> last_tick_;  ///< 上一帧时刻（求裸帧间隔；首帧为 0 步长）
+    double elapsed_ = 0.0;  ///< 已累积的动画时间轴时长（秒，经缩放折算；冻结时不增长）
 };
 
 }  // namespace aurora

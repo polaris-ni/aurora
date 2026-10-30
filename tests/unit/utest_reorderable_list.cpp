@@ -5,7 +5,9 @@
 ///           可见范围与命中索引换算、自绘滚动控件的缓存声明语义，以及键盘重排替代路径
 ///           （方向键光标 + 抓取/落位/取消 + 滚入视口 + 读屏播报 + i18n 键 + 开关让路）
 /// 覆盖说明: 拖拽识别 / 让位 / 落位动画 / 近边缘 auto-scroll（触发带缺省取共享常量
-///           AURORA_AUTO_SCROLL_THRESHOLD_DP，与跨进程系统拖放同一手感）见同文件后续用例
+///           AURORA_AUTO_SCROLL_THRESHOLD_DP，与跨进程系统拖放同一手感）见同文件后续用例；
+///           应用内全局时间缩放对自驱路径的作用面见文末三枚用例（落位弹簧吃折算 dt 帧数折半 /
+///           冻结停帧不请求重绘 / 自动滚边增量不随倍率变化的反向例外）
 
 #include <algorithm>
 #include <chrono>
@@ -13,6 +15,7 @@
 #include <string>
 #include <vector>
 
+#include "aurora/animation/animator.h"
 #include "aurora/app/scroll_storage.h"
 #include "aurora/core/accessibility.h"
 #include "aurora/event/dispatcher.h"
@@ -25,6 +28,7 @@
 #include "aurora/widget/reorderable_list.h"
 #include "framework/aurora_test.h"
 #include "framework/json_access.h"
+#include "support/animation_fixture.h"
 
 namespace aurora::test_cases::utest_reorderable_list {
 using aurora::testing::require_field;
@@ -960,6 +964,119 @@ AURORA_TEST_CASE(keyboard_announcements_are_localizable_and_switch_off_mid_grab_
     AURORA_TEST_CHECK_EQ(items.get(), std::vector<int>{1, 0, 2});
     AURORA_TEST_CHECK_TRUE(list.reorder(0, 2));  // 数据仍可程序化重排：仅键盘路径被关闭
     AURORA_TEST_CHECK_EQ(items.get(), std::vector<int>{0, 2, 1});
+}
+
+// ---- 应用内全局时间缩放：落位弹簧吃折算 dt / 冻结停帧 / 自动滚边为有意例外 ----
+
+// @brief 判据 10 覆盖矩阵落位弹簧行 + 判据 9：`tick_settle` 的 dt 经 `scaled_frame_dt` 单一漏斗，
+//        time_scale=2.0 到位帧数约为 1.0 的一半且终值不变。弹簧按累积时间收敛、非等步长整除，
+//        故帧数只落在含舍入的上下界内断言（出现 1/4 才说明双层缩放），不硬写等式。
+AURORA_TEST_CASE(settle_spring_frame_count_halves_with_time_scale) {
+    const auto fake_t0 = std::chrono::steady_clock::time_point{} + std::chrono::milliseconds(1);
+    auto settle_frames = [&](double scale) -> int {
+        aurora::Animator anim;
+        anim.set_time_scale(scale);
+        const aurora::testing::ScopedCurrentAnimator scope{anim};
+        auto items = make_items({0, 1, 2});
+        ReorderableList<int> list{items, make_builder({40.0F})};
+        list.set_drag_slop(4.0);
+        list.set_drag_handle(true);
+        LayoutEngine::layout(list, bounded(200.0F, 200.0F));
+        AURORA_TEST_REQUIRE_TRUE(send(list, MouseAction::Press, 180.0F, 10.0F));
+        AURORA_TEST_REQUIRE_TRUE(send(list, MouseAction::Move, 180.0F, 60.0F));
+        AURORA_TEST_REQUIRE_TRUE(send(list, MouseAction::Release, 180.0F, 60.0F));
+        AURORA_TEST_REQUIRE_TRUE(list.is_settling());
+        auto now = fake_t0;
+        int frames = 0;
+        while (list.is_settling() && frames < 400) {
+            now += std::chrono::milliseconds(16);
+            list.tick(now);
+            ++frames;
+        }
+        AURORA_TEST_CHECK_FALSE(list.is_settling());
+        AURORA_TEST_CHECK_EQ(items.get(), std::vector<int>{1, 2, 0});  // 缩放不改终值（判据 9）
+        return frames;
+    };
+
+    const int n_1x = settle_frames(1.0);
+    const int n_2x = settle_frames(2.0);
+    AURORA_TEST_REQUIRE_GE(n_1x, 2);  // 保证「减半」关系非平凡
+    AURORA_TEST_CHECK_GE(n_2x, (n_1x / 2) - 1);
+    AURORA_TEST_CHECK_LE(n_2x, ((n_1x + 1) / 2) + 1);
+}
+
+// @brief 判据 11(b) 冻结行：落位在途时把 time_scale 置 0，喂固定 8 帧——弹簧值停在冻结前位移、
+//        Widget::on_dirty 重绘请求计数为 0；恢复 1.0 后续跑到与不冻结路径相同的终值（进度不丢）。
+AURORA_TEST_CASE(frozen_time_scale_pauses_settle_without_frame_requests_and_thaw_resumes) {
+    const auto fake_t0 = std::chrono::steady_clock::time_point{} + std::chrono::milliseconds(1);
+    aurora::Animator anim;
+    anim.set_time_scale(1.0);
+    const aurora::testing::ScopedCurrentAnimator scope{anim};
+
+    auto items = make_items({0, 1, 2});
+    ReorderableList<int> list{items, make_builder({40.0F})};
+    list.set_drag_slop(4.0);
+    list.set_drag_handle(true);
+    LayoutEngine::layout(list, bounded(200.0F, 200.0F));
+    AURORA_TEST_REQUIRE_TRUE(send(list, MouseAction::Press, 180.0F, 10.0F));
+    AURORA_TEST_REQUIRE_TRUE(send(list, MouseAction::Move, 180.0F, 60.0F));
+    AURORA_TEST_REQUIRE_TRUE(send(list, MouseAction::Release, 180.0F, 60.0F));
+    AURORA_TEST_REQUIRE_TRUE(list.is_settling());
+
+    // 冻结段：on_tick 拿到 dt<=0 整段早退——不推进、不标脏、不请求帧，只在途标志保留。
+    anim.set_time_scale(0.0);
+    int dirty_count = 0;
+    list.on_dirty = [&dirty_count](bool /*layout*/) -> void { ++dirty_count; };
+    const float frozen_follow = list.drag_follow();
+    auto now = fake_t0;
+    for (int i = 0; i < 8; ++i) {
+        now += std::chrono::milliseconds(16);
+        list.tick(now);
+    }
+    AURORA_TEST_CHECK_NEAR(list.drag_follow(), frozen_follow, 0.0F);  // 弹簧停在冻结前位移
+    AURORA_TEST_CHECK_EQ(dirty_count, 0);  // 冻结段内零重绘请求
+    AURORA_TEST_CHECK_TRUE(list.is_settling());  // 在途标志未丢
+
+    // 解冻续跑：恢复到与不冻结路径相同的终值。
+    list.on_dirty = {};
+    anim.set_time_scale(1.0);
+    int guard = 0;
+    while (list.is_settling() && guard < 400) {
+        now += std::chrono::milliseconds(16);
+        list.tick(now);
+        ++guard;
+    }
+    AURORA_TEST_CHECK_FALSE(list.is_settling());
+    AURORA_TEST_CHECK_EQ(items.get(), std::vector<int>{1, 2, 0});
+}
+
+// @brief 判据 10 反向项：近边缘自动滚边（`tick_auto_scroll`）属速度型手感、按规格不纳入缩放——
+//        同一帧步长下 time_scale 1.0 与 4.0 两档的单帧滚动增量相等（证「有意不缩放」是真例外）。
+AURORA_TEST_CASE(auto_scroll_edge_increment_is_excluded_from_time_scale) {
+    const auto fake_t0 = std::chrono::steady_clock::time_point{} + std::chrono::milliseconds(1);
+    auto single_frame_scroll_delta = [&](double scale) -> float {
+        aurora::Animator anim;
+        anim.set_time_scale(scale);
+        const aurora::testing::ScopedCurrentAnimator scope{anim};
+        // 10 × 40 = 内容 400 / 视口 200 → 可滚 200，留出线性段避免夹取干扰单帧增量。
+        auto items = make_items({0, 1, 2, 3, 4, 5, 6, 7, 8, 9});
+        ReorderableList<int> list{items, make_builder({40.0F})};
+        list.set_drag_slop(4.0);
+        list.set_auto_scroll_threshold(48.0F);
+        LayoutEngine::layout(list, bounded(200.0F, 200.0F));
+        AURORA_TEST_REQUIRE_TRUE(send(list, MouseAction::Press, 100.0F, 10.0F));
+        AURORA_TEST_REQUIRE_TRUE(send(list, MouseAction::Move, 100.0F, 190.0F));  // 拖入下边缘带
+        AURORA_TEST_REQUIRE_TRUE(list.is_dragging());
+        list.tick(fake_t0);  // 首帧登记锚点（步长兜底 1/60），不计入受测增量
+        const float before = list.scroll_offset();
+        list.tick(fake_t0 + std::chrono::milliseconds(20));  // 受测帧：裸 dt = 0.02s
+        return list.scroll_offset() - before;
+    };
+
+    const float delta_1x = single_frame_scroll_delta(1.0);
+    const float delta_4x = single_frame_scroll_delta(4.0);
+    AURORA_TEST_REQUIRE_GT(delta_1x, 0.0F);  // 自动滚边确在推进（非空断言）
+    AURORA_TEST_CHECK_NEAR(delta_4x, delta_1x, 1e-4F);  // 滚边增量吃裸 dt，不随倍率变化
 }
 
 }  // namespace aurora::test_cases::utest_reorderable_list

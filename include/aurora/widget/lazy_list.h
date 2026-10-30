@@ -12,6 +12,7 @@
 #include <utility>
 #include <vector>
 
+#include "aurora/animation/animator.h"
 #include "aurora/app/scroll_storage.h"
 #include "aurora/core/accessibility.h"
 #include "aurora/core/diagnostics.h"
@@ -704,7 +705,8 @@ class LazyList : public Widget {
         });
     }
 
-    /// @brief 收位滑动逐帧推进（自驱动 tick，不占 Animator；同 Scroll/Dismissible 模式）。
+    /// @brief 收位滑动逐帧推进（自驱动 tick，不占 Animator；同 Scroll/Dismissible 模式。步长在本入口
+    ///        经 scaled_frame_dt 折算一次，ScrollGlide::tick 只吃折算值——两层都乘会让倍率变平方）。
     ///        与 Scroll 的差异：本控件偏移参与子布局，每滑动帧经 apply_offset 标布局脏，
     ///        由虚拟化窗口重建保证开销仅与可见项数相关。
     /// @param now 本次 tick 的墙钟时刻（推进滑动步进与子控件节拍）。
@@ -727,9 +729,16 @@ class LazyList : public Widget {
             // 同形（本控件此前漏了这一段，故拖文件到列表边缘时列表反而跳回开头）。
             return;
         }
-        const double dt =
+        const double raw =
             glide_last_.has_value() ? std::chrono::duration<double>(now - *glide_last_).count() : (1.0 / 60.0);
         glide_last_ = now;
+        // 单一 dt 漏斗：应用内全局时间缩放在此折算一次，`ScrollGlide::tick` 只吃折算后的步长。
+        const double dt = scaled_frame_dt(raw);
+        if (dt <= 0.0) {
+            // 冻结帧的空闲纪律：不推进、不标脏、不请求帧；在途标志与 `glide_last_` 保留，
+            // 解冻的那一帧由此续跑（见 `Animator::take_rearm_request`）。与 `Scroll` 同形。
+            return;
+        }
         float v = glide_.tick(dt);
         // 布局可能在滑动中改变内容/视口尺寸：目标随动夹取，防滑出可滚范围。
         v = std::clamp(v, 0.0F, max_scroll_offset());

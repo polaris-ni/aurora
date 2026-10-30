@@ -42,7 +42,8 @@ struct ScrollSnap {
 /// @brief 收位滑动动画（snap 收位 / 程序化 scroll-to 的共用时序数学）。
 ///
 /// 150ms easeOutCubic 从 `from` 收敛到 `to`；由宿主控件的 `tick_gestures` 逐帧推进
-/// （Dismissible/ReorderableList 自驱动先例，不占 `Animator`）。reduce-motion 的短路
+/// （Dismissible/ReorderableList 自驱动先例，不占 `Animator`；倍率折算发生在宿主入口，本结构体
+/// 保持纯时序数学、不感知缩放）。reduce-motion 的短路
 /// 属宿主职责（对齐 `AnimationController::tick` 语义：直落端点、不产生中间帧）。
 struct ScrollGlide {
     /// @brief 默认滑动总时长：150ms easeOutCubic 收敛。

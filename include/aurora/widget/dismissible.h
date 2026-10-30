@@ -6,6 +6,7 @@
 #include <optional>
 #include <utility>
 
+#include "aurora/animation/animator.h"
 #include "aurora/animation/spring.h"
 #include "aurora/event/gesture.h"
 #include "aurora/render/painter.h"
@@ -157,13 +158,19 @@ class Dismissible : public SingleChild {
 
     auto tick_gestures(std::chrono::steady_clock::time_point now) -> void override {
         SingleChild::tick_gestures(now);
-        // spring 推进：以墙钟差为 dt（tick 由 Application::tick 每帧驱动）。
+        // spring 推进：以墙钟差为 dt（tick 由 Application::tick 每帧驱动）。步长在
+        // `DragToDismiss::tick` 内经 `scaled_frame_dt` 折算，此处**不**预缩放——两层都乘
+        // 会让全局时间缩放变成倍率的平方。
         const double dt =
             last_tick_.has_value() ? std::chrono::duration<double>(now - *last_tick_).count() : (1.0 / 60.0);
         last_tick_ = now;
         const bool was_animating = dtd_.is_animating();
         dtd_.tick(dt);
-        if (was_animating || dtd_.is_dragging()) {
+        // 冻结判定复用同一漏斗（只取值不作推进步长）：步长为 0 即本帧弹簧未推进。
+        const bool frozen = scaled_frame_dt(dt) <= 0.0;
+        // 重绘请求的空闲纪律：跟手是 1:1 直接操作（不属动画时间轴，冻结也须跟手），
+        // spring 段则只在真有推进的帧标脏——否则冻结表现为「停着不动却满帧唤醒」。
+        if (dtd_.is_dragging() || (!frozen && was_animating)) {
             mark_needs_paint();
         }
         // spring 结束 + progress 已到 1 → 摘除。

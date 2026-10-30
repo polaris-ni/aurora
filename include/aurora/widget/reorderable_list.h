@@ -1306,15 +1306,23 @@ class ReorderableList : public Container {
     }
 
     /// @brief 每帧推进：拖拽中走 auto-scroll、落位中走 spring；空闲零开销。
+    ///        落位弹簧是动画时间轴，步长经 `scaled_frame_dt` 单一漏斗折算（冻结帧整段跳过：
+    ///        不推进、不标脏、不请求帧，只保留在途状态）；近边缘 auto-scroll 属速度型手感，
+    ///        按规格**不**纳入缩放，继续吃裸帧间隔。
     /// @param now 当前时间戳（steady_clock，用于求帧间隔 dt）。
     auto on_tick(std::chrono::steady_clock::time_point now) -> void {
-        const double dt =
+        const double raw =
             last_tick_.has_value() ? std::chrono::duration<double>(now - *last_tick_).count() : (1.0 / 60.0);
         last_tick_ = now;
         if (drag_state_ == DragState::Settling) {
+            const double dt = scaled_frame_dt(raw);
+            if (dt <= 0.0) {
+                // 冻结：落位弹簧停在冻结前的位移上，等解冻那一帧续跑（见 `Animator::take_rearm_request`）。
+                return;
+            }
             tick_settle(dt);
         } else if (drag_state_ == DragState::Dragging) {
-            tick_auto_scroll(dt);
+            tick_auto_scroll(raw);
         }
     }
 
@@ -1352,6 +1360,9 @@ class ReorderableList : public Container {
     bool has_move_sample_ = false;  ///< 是否已有帧间速度样本（首次移动不算）
     CompactGeometry drag_geom_;  ///< 起拖时定稿的压缩序几何
     SpringDescription spring_{};  ///< 落位弹簧
+    // 全仓唯一与 `SpringAnimation` 同构的私有弹簧驱动（累积时间 + `is_settled` 定格 + 写值）。
+    // 本控件落位写的是普通成员 `drag_follow_` 而非 `State<double>`，收口到公共封装需要先裁决
+    // 「给控件加 State 句柄」还是「给原语加值汇形参」——那是状态模型的独立决策，留待后续提案。
     std::optional<SpringSimulation> spring_active_;  ///< 落位动画（Settling 期有效）
     double settle_t_ = 0.0;  ///< 落位动画已推进时间（秒）
     std::optional<std::chrono::steady_clock::time_point> last_tick_;  ///< 上一帧时间（求 dt）

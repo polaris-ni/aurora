@@ -6,6 +6,7 @@
 #include <optional>
 #include <utility>
 
+#include "aurora/animation/animator.h"
 #include "aurora/core/accessibility.h"
 #include "aurora/core/color.h"
 #include "aurora/event/gesture.h"
@@ -42,7 +43,8 @@ struct PullToRefreshProps {
 /// 上冒给本容器（本容器在命中链上位于子滚动控件更浅层）。
 ///
 /// 指示器以**覆盖层**绘制在视口顶部（不动布局盒、不推挤内容，spec §6.5「动画不改布局」），
-/// 回弹/收拢走共享 `ScrollGlide` 短滑动时序（自驱动 tick，不占 `Animator`）；
+/// 回弹/收拢走共享 `ScrollGlide` 短滑动时序（自驱动 tick，不占 `Animator`，步长在消费点经
+/// `scaled_frame_dt` 折算一次）；
 /// reduce-motion 下直落端点、不产生中间帧（对齐 `AnimationController::tick` 短路语义）。
 ///
 /// 对标 Flutter `RefreshIndicator`、Material 3 pull-to-refresh、iOS UIRefreshControl。
@@ -365,12 +367,22 @@ class PullToRefresh : public SingleChild, public PullToRefreshProps {
     }
 
     /// @brief 回弹/旋转逐帧推进（自驱动 tick，同 Scroll/Dismissible 模式）。
+    ///        步长经 `scaled_frame_dt` 折算：应用内全局时间缩放对旋转指示器与回弹滑动同时生效，
+    ///        冻结（倍率 0）时本帧既不推进也不标脏、不请求帧，但保持每帧计时武装。
     /// @param now 当前帧时刻（墙钟，用于计算帧间隔 dt）。
     auto tick_gestures(std::chrono::steady_clock::time_point now) -> void override {
         SingleChild::tick_gestures(now);  // 先驱动子级手势
-        const double dt =
+        const double raw =
             last_tick_.has_value() ? std::chrono::duration<double>(now - *last_tick_).count() : (1.0 / 60.0);
         last_tick_ = now;
+        // 单一 dt 漏斗：缩放只在此处发生一次（`ScrollGlide::tick` 与旋转累加都吃折算后的步长）。
+        const double dt = scaled_frame_dt(raw);
+        if (dt <= 0.0) {
+            // 冻结帧的空闲纪律：旋转与回弹都停在冻结前的姿态——不 mark_needs_paint、不 request_frame
+            // （否则「停着不动却满帧唤醒」），也不摘 `needs_gesture_tick_`：解冻由
+            // `Animator::take_rearm_request` 送一帧进来，本函数由此续跑，冻结前进度不丢。
+            return;
+        }
         bool busy = false;
         if (state_ == PullToRefreshState::Refreshing) {
             spin_angle_ += static_cast<float>(dt) * 6.0F;  // ~1 圈/秒

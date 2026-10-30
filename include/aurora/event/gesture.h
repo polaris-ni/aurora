@@ -1,12 +1,11 @@
 #pragma once
 
+#include <algorithm>
 #include <cmath>
 #include <functional>
 #include <numbers>
-#include <optional>
 
 #include "aurora/animation/spring.h"
-#include "aurora/core/accessibility.h"
 #include "aurora/event/event.h"
 #include "aurora/state/state.h"
 
@@ -300,8 +299,9 @@ class DragRecognizer {
 /// 回位（spring 到 0，静默）。拖动速度（最近两次事件的位移 / dt，主轴分量）作为
 /// spring 初速度，方向与裁决一致时自然加速、相反时自然衰减。
 ///
-/// `reduce_motion` 对 spring 阶段短路：直接落端点（落 1 触发 dismissed、落 0 静默），
-/// 与 `AnimationController::tick` 的短路语义同源。
+/// `reduce_motion` 对 spring 阶段短路：直接落端点（落 1 触发 dismissed、落 0 静默）——该短路不在
+/// 本类内手写，而由 `SpringAnimation` 驱动层统一提供（与 `AnimationController::tick` 的短路语义同源）。
+/// 帧步长同样经 `scaled_frame_dt` 漏斗：应用内全局时间缩放与冻结（缩放为 0 时本帧不推进）对本类生效。
 ///
 /// 用法：
 /// @code
@@ -322,7 +322,10 @@ class DragToDismiss {
     /// @param travel_distance_dp [in] 消除行程；非正值夹取为 1.0 防除零。
     /// @param spring [in] 松手后 spring 模拟使用的参数。
     DragToDismiss(DragAxis axis, double travel_distance_dp, const SpringDescription &spring)
-        : axis_(axis), travel_(travel_distance_dp > 0.0 ? travel_distance_dp : 1.0), spring_desc_(spring) {}
+        : axis_(axis), travel_(travel_distance_dp > 0.0 ? travel_distance_dp : 1.0), spring_desc_(spring) {
+        // 进度值域 0..1：弹簧欠阻尼回弹可能越界，写出前夹取（与重构前的逐帧 clamp 同语义）。
+        spring_anim_.set_range(0.0, 1.0);
+    }
 
     /// @brief 更新消除行程（如布局后按主轴向尺寸校准；非正值夹取 1.0 防除零）。
     /// @param travel_distance_dp [in] 新行程（逻辑 dp）。
@@ -367,9 +370,7 @@ class DragToDismiss {
         if ((v > 0.0) != dismiss) {
             v = 0.0;
         }
-        spring_ = SpringSimulation(spring_desc_, current, end, v);
-        spring_t_ = 0.0;
-        spring_end_ = end;
+        spring_anim_.animate_to(end, spring_desc_, v);
         animating_ = true;
         recognizer_.reset();  // 识别器清零，开启下一次拖动
     }
@@ -379,31 +380,17 @@ class DragToDismiss {
     auto on_dismissed(std::function<void()> cb) -> void { on_dismissed_ = std::move(cb); }
 
     /// @brief 帧推进（spring 阶段；跟手阶段 no-op）。到位触发 on_dismissed（仅飞出方向）。
-    /// @param dt_seconds [in] 帧间隔（秒），推进 spring 时间轴。
+    /// @param dt_seconds [in] 裸帧间隔（秒）：经 `SpringAnimation::tick` 内的缩放漏斗折算后推进弹簧
+    ///                        时间轴（全局缩放为 0 时本帧不推进、进度保持）。
     auto tick(double dt_seconds) -> void {
         if (!animating_) {
             return;
         }
-        if (current_accessibility_settings().reduce_motion) {
-            // 短路：直接落端点（语义与 AnimationController::tick 的 reduce_motion 分支同源）。
+        spring_anim_.tick(dt_seconds);
+        if (!spring_anim_.is_running()) {
+            // 定格（自然收敛或 reduce_motion 单帧落端点）：本帧是 animating_ 的唯一观察点，
+            // on_dismissed 在此派发——每段 spring 恰一次（animating_ 随后转假，重复 tick 不再触发）。
             animating_ = false;
-            progress_.set(spring_end_);
-            fire_dismissed_if_needed();
-            return;
-        }
-        if (!spring_.has_value()) {
-            // 不变量兜底：animating_ 置真与 spring_ 建模拟同在 on_release 完成，正常路径不可达此处；
-            // 若状态被破坏（如外部误置 animating_），按「静止」收敛并保留当前 progress，
-            // 而非解引用空 optional（未定义行为）。不弹 on_dismissed：未飞出即不触发飞出回调。
-            animating_ = false;
-            return;
-        }
-        spring_t_ += dt_seconds;
-        const double v = spring_->value(spring_t_);
-        progress_.set(std::clamp(v, 0.0, 1.0));
-        if (spring_->is_settled(spring_t_)) {
-            animating_ = false;
-            progress_.set(spring_end_);
             fire_dismissed_if_needed();
         }
     }
@@ -422,7 +409,7 @@ class DragToDismiss {
 
   private:
     auto fire_dismissed_if_needed() const -> void {
-        if (spring_end_ >= 1.0 && on_dismissed_) {
+        if (spring_anim_.target() >= 1.0 && on_dismissed_) {
             on_dismissed_();
         }
     }
@@ -449,11 +436,9 @@ class DragToDismiss {
     SpringDescription spring_desc_;
     DragRecognizer recognizer_;
     State<double> progress_{0.0};
-    std::optional<SpringSimulation> spring_;
-    double spring_t_ = 0.0;
-    double spring_end_ = 0.0;
+    SpringAnimation spring_anim_{progress_};  ///< 松手阶段的公共弹簧驱动（写回 progress_，值域夹取 0..1）
     double axis_velocity_ = 0.0;
-    bool animating_ = false;
+    bool animating_ = false;  ///< 裁决后到弹簧定格的观察位（定格后据此派发 on_dismissed 一次）
     std::function<void()> on_dismissed_;
 };
 

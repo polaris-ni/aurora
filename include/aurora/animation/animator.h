@@ -1,5 +1,7 @@
 #pragma once
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -16,6 +18,12 @@ enum class AnimationStatus : std::uint8_t {
     Forward,  ///< 正向播放中
     Reverse,  ///< 反向播放中
     Completed,  ///< 在终点（进度 1）
+};
+
+/// @brief 播放模式：端点到达后是停住还是续播（specification/05-event-navigation.md §6.1）。
+enum class PlaybackMode : std::uint8_t {
+    Once,  ///< 到端点即钳制并置对应终态（缺省，既有语义）
+    Repeat,  ///< 到端点按 `AnimationController::repeat` 的次数与方向规则续播
 };
 
 /// @brief 时间驱动：在 duration 内把线性进度 0→1（或反向）推进（specification/05-event-navigation.md §6.1）。
@@ -67,11 +75,60 @@ class AnimationController {
     }
 
     /// @brief 本帧 value 是否发生变化（供 Animator 决定是否需要写目标 State）。
-    /// @return tick 推进后本帧进度有变化时为 true（调用 clear_dirty 后复位）。
-    [[nodiscard]] auto dirty() const -> bool { return dirty_; }
+    /// @return 推进脏或外部脏任一为真：`tick` 推进后进度有变化，或 `set_progress` 外部写入待消费。
+    [[nodiscard]] auto dirty() const -> bool { return dirty_ || external_dirty_; }
 
-    /// @brief 清除脏标记（Animator::tick 在应用全部绑定后统一调用）。
-    auto clear_dirty() -> void { dirty_ = false; }
+    /// @brief 清除全部脏标记（Animator::tick 在应用全部绑定后统一调用）。
+    /// 推进脏与外部脏**一并清**：二者都只保证「自上次帧末以来已写回一次」，逐帧由 Animator 收口。
+    auto clear_dirty() -> void {
+        dirty_ = false;
+        external_dirty_ = false;
+    }
+
+    /// @brief 当前播放模式。
+    /// @return Once（到端点停住，缺省）或 Repeat（到端点续播）。
+    [[nodiscard]] auto mode() const -> PlaybackMode { return mode_; }
+
+    /// @brief 是否处于循环模式（等价 `mode() == PlaybackMode::Repeat`）。
+    /// @return 循环模式为真；与是否正在播放（`is_animating()`）无关。
+    [[nodiscard]] auto is_repeating() const -> bool { return mode_ == PlaybackMode::Repeat; }
+
+    /// @brief 进入循环模式（只登记模式，不起播、不改方向）。
+    ///
+    /// 与 `forward`/`reverse` 正交：先 `forward` 再 `repeat` 不覆盖方向，先 `repeat` 再 `forward`
+    /// 不清模式。起播仍需 `forward()`/`reverse()`——与非循环模式一样，静止的控制器不会自己动。
+    ///
+    /// **循环在途期间 `Animator::has_active()` 恒真**（无限循环尤甚：应用永不进入空闲深睡，
+    /// 这是能力本身的代价）；退出方式是 `stop()` 或 `reset()`，二者都把模式清回 `Once`。
+    ///
+    /// @param count 到达端点的次数上限；`<= 0`（含缺省 `-1` 与 `0`）为**无限循环**——`0` 与 `-1`
+    ///              同义，不表示「播 0 次」；`> 0` 为有限次数，每次到达端点递减，归零后在最后
+    ///              到达的端点置终态并把模式清回 `Once`。
+    /// @param alternate 为真时每次到达端点**翻转方向**（往复：到 1 转 Reverse、到 0 转 Forward，
+    ///                  进度停在被到达的端点、下一帧反向续跑）；为假时**同向重启**（Forward 到 1
+    ///                  后回 0 续跑、Reverse 到 0 后回 1）。两种形态在重启帧都置脏。
+    auto repeat(int count = -1, bool alternate = false) -> void {
+        mode_ = PlaybackMode::Repeat;
+        alternate_ = alternate;
+        remaining_ = (count > 0) ? count : AURORA_INFINITE_REMAINING;
+    }
+
+    /// @brief 外部写入归一化进度（手势拖拽跟手用），**保留状态语义不变**。
+    ///
+    /// 与 `reset(v)` 的区别是本函数不改写 `status_`、也不清 `PlaybackMode`：播放中调用 =
+    /// 重定位后从新进度续跑；静止态调用 = 只定位，不会使 `Animator::has_active()` 变真。
+    /// 因此「拖拽跟手 → 松手由 `forward`/`reverse` 接管收尾」无需借道 `reset` 的状态副作用。
+    ///
+    /// 写回经**外部脏位**送达（不碰推进脏）：`tick()` 入口只清推进脏，本位活到 Animator 帧末
+    /// 统一 `clear_dirty()`，故手势在帧边界前写入、同一帧绑定阶段即可插值写回目标 `State`。
+    /// 时间缩放为 0（冻结）时本函数**仍然生效**——缩放只冻结推进步长，不改定位语义。
+    ///
+    /// 与构造初值同为「夹取」口径（构造不夹取、越界原样返回，本函数夹入 `[0,1]`）。
+    /// @param t 目标归一化进度；越界夹入 [0,1]。
+    auto set_progress(double t) -> void {
+        value_ = std::clamp(t, 0.0, 1.0);
+        external_dirty_ = true;
+    }
 
     /// @brief 正向播放（可选从 from 起步）。
     /// @param from 起步进度，夹入 [0,1]；-1（默认）为哨兵 = 从当前进度续播。
@@ -80,22 +137,34 @@ class AnimationController {
     /// @brief 反向播放。
     auto reverse() -> void;
 
-    /// @brief 复位到 v（不播放，静止）。
+    /// @brief 复位到 v（不播放，静止）；同时把循环模式清回 `Once`。
     /// @param v 复位到的进度，夹入 [0,1]（默认 0）；≥1.0 时报 Completed，否则报 Dismissed。
     auto reset(double v = 0.0) -> void;
 
-    /// @brief 停止：保持当前进度，静止于最近端点语义。
+    /// @brief 停止：保持当前进度，静止于最近端点语义；同时把循环模式清回 `Once`。
     auto stop() -> void;
 
-    /// @brief 推进 dt 秒；到达端点时钳制并置对应终态。
-    /// @param dt_seconds 本帧时间步长（秒）；reduce_motion 生效时直接落在本次播放的目标端点。
+    /// @brief 推进 dt 秒；端点处按 `PlaybackMode` 决定停住还是续播。
+    /// @param dt_seconds 本帧时间步长（秒）；reduce_motion 生效时直接落在本次播放的目标端点，
+    ///                  且**优先于循环**——无障碍档下一步到位即止，不进入循环。
     auto tick(double dt_seconds) -> void;
 
   private:
+    /// @brief 无限循环哨兵（`remaining_` 取值；`repeat` 把 count<=0 归一到这里）。
+    static constexpr int AURORA_INFINITE_REMAINING = -1;
+
+    /// @brief 进度到达端点时的行为分派：Once 置终态停住，Repeat 按剩余次数 / alternate 续播。
+    /// @param terminal 本帧到达的端点终态（Completed = 到达 1.0，Dismissed = 到达 0.0）。
+    auto on_endpoint(AnimationStatus terminal) -> void;
+
     double duration_ = 0.0;
     double value_ = 0.0;
     AnimationStatus status_ = AnimationStatus::Dismissed;
-    bool dirty_ = false;
+    bool dirty_ = false;  ///< 推进脏：tick 入口清、推进到变化时置
+    bool external_dirty_ = false;  ///< 外部脏：set_progress 置，仅帧末 clear_dirty 清（与推进脏分离）
+    PlaybackMode mode_ = PlaybackMode::Once;  ///< 端点行为：停住 / 续播
+    bool alternate_ = false;  ///< 循环到端点是否翻转方向（false = 同向重启）
+    int remaining_ = AURORA_INFINITE_REMAINING;  ///< 有限循环剩余端点到达次数；AURORA_INFINITE_REMAINING = 无限
 };
 
 /// @brief 帧动画管理器（specification/05-event-navigation.md §6.2 `Animator`）。
@@ -138,20 +207,101 @@ class Animator {
     static auto set_current(Animator *a) -> void { current_ = a; }
 
     /// @brief 是否有运行中的控制器（Forward/Reverse），供帧调度决策取值，无活跃动画时 idle 帧可阻塞等待事件。
-    /// @return 任一登记控制器处于播放态时为 true。
+    ///        缩放为 `0.0`（冻结）时**恒假**：本帧无人推进，就不该再把帧循环钉在满帧——冻结的
+    ///        空闲纪律在 `Animator` 侧靠这一位落地，解冻由 `take_rearm_request` 送回首帧。
+    /// @return 倍率非零且任一登记控制器处于播放态时为 true。
     [[nodiscard]] auto has_active() const -> bool {
+        if (time_scale_ == 0.0) {
+            return false;
+        }
         return std::ranges::any_of(
             controllers_, [](const AnimationController *c) -> bool { return c != nullptr && c->is_animating(); });
     }
 
+    /// @brief 设置应用内全局时间缩放（调试 / 演示 / 降速用途，**非业务动画契约**）。
+    ///
+    /// 倍率语义：`1.0` 正常、`2.0` 两倍速、`0.5` 慢放、`0.0` 冻结。与 Flutter
+    /// `timeDilation` 互为倒数（`timeDilation = 2` ⇔ `time_scale = 0.5`）。
+    ///
+    /// 只缩放**动画时间轴**：不改 `duration`、不改目标 `State` 终值、不改曲线，也不影响
+    /// 事件、布局、输入与 `Scheduler` 定时任务。明确排除在外的两类：近边缘自动滚边
+    /// （`DragAutoScroll` / `ReorderableList` 滚边）是速度型手感而非一段有始有终的时序；
+    /// 媒体播放钟（`VideoPlayer`）是内容时钟，缩放它等于改播放速度，不属本口径。
+    /// `reduce_motion` 优先于缩放——短路落端点的路径不乘倍率，否则「一步到位」的无障碍语义
+    /// 会变成「慢速播放」。
+    ///
+    /// 冻结（`0.0`）不产生常驻帧：登记控制器本帧不推进即不置脏、绑定不写回，`has_active()` 同时
+    /// 转假（本 Animator 不再有帧需求）；控件自驱路径拿到 0 步长后同样不推进、不标脏、不请求帧，
+    /// 帧调度因此回到空闲分支（不出现「停着不动却满帧唤醒」）。解冻不能指望控件自己醒——每帧计时
+    /// 是逐控件私有标志，全局入口触达不到，故 `0 → >0` 置一位重挂请求，由 `Application::wait_once`
+    /// 消费出「下一帧不深睡」，那一帧里各控件照常 `tick_gestures` 并自行续帧。
+    ///
+    /// 就地取舍（漏斗不夹取，见 `scale_frame_dt`）：冻结期间若帧循环已深睡，控件侧的墙钟锚点
+    /// 就停在那一帧，解冻首帧的 `now - last` 含整段停摆时长——在途滑动会一次跳进相应进度。
+    /// 本入口是调试 / 演示用途，为此引入夹取会改掉「调用方声明步长」与累积相位两类既有语义，
+    /// 代价大于收益。冻结帧照常刷新各控件的墙钟锚点，故只要帧循环还在产帧（另有脏源），解冻即
+    /// 从原处续；只有帧循环已进入深睡，才出现上述一次性折算。
+    ///
+    /// @param scale 速度倍率；负值与非有限值（NaN / inf）一律夹取为 `0.0`（冻结）。
+    auto set_time_scale(double scale) -> void {
+        const double next = (scale > 0.0 && std::isfinite(scale)) ? scale : 0.0;
+        // 解冻（0 → >0）须显式重挂一帧：冻结帧按纪律不标脏、不请求帧，帧循环可能已深睡，
+        // 少了这一位就再没有人产出帧，在途的控件自驱滑动 / 弹簧永远停在冻结前的进度上。
+        // 只置一位、由 `Application::wait_once` 消费——不做每帧全树扫描（取舍见 ARCHITECTURE §5.2）。
+        if (time_scale_ == 0.0 && next > 0.0) {
+            rearm_pending_ = true;
+        }
+        time_scale_ = next;
+    }
+
+    /// @brief 取出并清除「解冻重挂」请求（应用帧循环的接线点，非业务动画 API）。
+    ///
+    /// 控件自驱路径的每帧计时是逐控件私有标志，`set_time_scale` 拿不到控件指针，因此解冻不
+    /// 逐个重挂，而是请求「下一帧不许深睡」：那一帧里各控件照常 `tick_gestures`，步长已 > 0，
+    /// 在途滑动便自行恢复逐帧请求帧。无在途动画时这一帧是空转帧，代价与「解冻」这一动作同频。
+    /// @return 本次调用前存在重挂请求时为 true，并清除该请求（每轮唤醒决策至多消费一次）。
+    [[nodiscard]] auto take_rearm_request() -> bool {
+        const bool pending = rearm_pending_;
+        rearm_pending_ = false;
+        return pending;
+    }
+
+    /// @brief 当前时间缩放倍率。
+    /// @return `set_time_scale` 存入的倍率（缺省 `1.0`，取值域 `0.0` 或正有限值）。
+    [[nodiscard]] auto time_scale() const -> double { return time_scale_; }
+
+    /// @brief 把帧步长折算为动画时间轴步长（缩放漏斗的实例侧实现）。
+    ///
+    /// **只做乘法，不夹取**：入参可能是调用方声明的步长（`Animator::tick(dt)` 传 1.0 做「一步到位」
+    /// 是既有契约），也可能是控件自驱路径的墙钟差（既有 `Skeleton` 用例以 3 秒差推进相位）。在这里
+    /// 夹取会同时改掉两者的既有语义，故倍率为 `1.0` 时逐比特恒等（判据 12 的确定性据此成立）。
+    /// 停摆时长（后台、断点、冻结后深睡）确实会一次性折算进本帧——见 `set_time_scale` 的就地取舍。
+    /// @param raw_seconds 帧步长（秒，裸值；负值原样乘，由各消费点的 `<= 0` 守卫视为不推进）。
+    /// @return `raw_seconds * time_scale_`；冻结时为 0。
+    [[nodiscard]] auto scale_frame_dt(double raw_seconds) const -> double { return raw_seconds * time_scale_; }
+
     /// @brief 推进所有控制器并应用所有绑定（在帧边界调用一次）。
-    /// @param dt_seconds 帧时间步长（秒）。
+    /// @param dt_seconds 帧时间步长（秒，裸值；本函数按 `time_scale_` 自行折算，故保持 `const`）。
     auto tick(double dt_seconds) const -> void;
 
     /// @brief 追加一帧回调（在 tick 中于所有控制器推进后、clear_dirty 前执行）。
     /// @param fn 每帧执行一次的回调；不归属任何控制器，不随 `remove` 摘除。
     auto add_binding(std::function<void()> fn) -> void {
         on_tick_.push_back(Binding{.owner = nullptr, .fn = std::move(fn)});
+    }
+
+    /// @brief 追加一条**带帧步长且按控制器归属可注销**的帧回调（弹簧这类自持时间轴的驱动件用）。
+    ///
+    /// 与 `add_binding` 的三点差别，逐条对应 `SpringAnimation` 的接入需求：
+    /// ① 回调收到本帧**已缩放**的动画时间轴步长（裸 dt 在此不可得，避免调用方绕过漏斗）；
+    /// ② 归属 `owner`，故 `remove(owner)` 会连同本回调一并摘除（`add_binding` 的裸回调摘不掉）；
+    /// ③ `owner` 须已 `drive` 登记，这样驱动件在途期间 `has_active()` 为真、
+    ///    `Application::wait_once` 不会深睡把动画半途冻住。
+    ///
+    /// @param fn 每帧执行一次的回调，入参为折算后的帧步长（秒）。
+    /// @param owner 归属控制器（非拥有；须同时经 `drive` 登记，生命周期契约同 `drive`）。
+    auto add_frame_binding(std::function<void(double)> fn, AnimationController &owner) -> void {
+        on_tick_.push_back(Binding{.owner = &owner, .fn = {}, .dt_fn = std::move(fn)});
     }
 
     /// @brief 绑定 (控制器 + 补间) → 目标 State：每帧把插值写入 State。
@@ -191,14 +341,32 @@ class Animator {
     struct Binding {
         const AnimationController *owner = nullptr;  ///< 非拥有；nullptr = add_binding 的裸回调（不参与 remove）
         std::function<void()> fn;  ///< 每帧执行一次的回调（可空）
+        std::function<void(double)> dt_fn;  ///< 带帧步长的回调（`add_frame_binding` 登记；可空）
     };
 
     std::vector<AnimationController *> controllers_;  ///< 非拥有
     std::vector<Binding> on_tick_;  ///< 帧回调表：tick 中在推进控制器之后、清脏之前按登记序执行
+    double time_scale_ = 1.0;  ///< 应用内全局时间缩放倍率（1.0 正常，0.0 冻结）
+    bool rearm_pending_ = false;  ///< 解冻重挂请求：置位后下一轮唤醒决策不得深睡（`take_rearm_request` 消费）
 
     /// @brief 当前运行实例槽位（由 `Application::run()` 起止设置；无运行时为 nullptr）。
     static Animator *current_;  // NOLINT
 };
+
+/// @brief 动画时间轴的唯一帧步长入口：把裸 dt 折算为受应用内全局缩放约束的 dt。
+///
+/// 一切「推进动画」的 dt 都必须经此漏斗（`Animator::tick` 与控件自驱的 `ScrollGlide` /
+/// `SpringAnimation` / `AnimatedValue::tick` / `TimelinePlayer::tick` / `TweenAnimation::tick`），
+/// 缩放才是**应用内全局**而非只覆盖 Animator。倍率取自 `Animator::current()`：
+/// 无运行中应用（无头渲染 / golden / 手工驱动单测）时**原样返回入参**，以保持既有 golden 的
+/// 逐字节确定性——这条恒等回退同时是文档里「不覆盖的例外」。
+///
+/// @param raw_seconds 裸帧步长（秒），通常来自单调钟相邻两帧之差。
+/// @return 缩放后的动画时间轴步长；冻结时为 0；无运行中 Animator 时为 `raw_seconds`。
+inline auto scaled_frame_dt(double raw_seconds) -> double {
+    Animator *a = Animator::current();
+    return a != nullptr ? a->scale_frame_dt(raw_seconds) : raw_seconds;
+}
 
 /// @brief 便捷封装：把 `State<T>` + `Tween<T>` + `AnimationController` 收拢一处，
 /// 通过 `attach(animator)` 一键接入帧循环（对应 Flutter `AnimatedBuilder` 的驱动部分）。
@@ -285,9 +453,9 @@ class AnimatedValue {
     }
 
     /// @brief 自驱动一帧（无 Animator 时手动推进）：推进控制器 → 写回目标 → 触发 completed。
-    /// @param dt_seconds 帧时间步长（秒）。
+    /// @param dt_seconds 帧时间步长（秒，裸值；内部经 `scaled_frame_dt` 折算，故受应用内缩放约束）。
     auto tick(double dt_seconds) -> void {
-        m_->controller.tick(dt_seconds);
+        m_->controller.tick(scaled_frame_dt(dt_seconds));
         if (m_->controller.dirty()) {
             m_->target->set(m_->tween.value(m_->controller.value()));
             if (m_->controller.is_completed() && !m_->fired_completed) {
@@ -371,12 +539,13 @@ class TweenAnimation {
     }
 
     /// @brief 每帧推进（由帧循环调用）。
-    /// @param dt_seconds 帧时间步长（秒）；未动画时为 no-op。
+    /// @param dt_seconds 帧时间步长（秒，裸值；内部经 `scaled_frame_dt` 折算，故受应用内缩放约束）；
+    ///                   未动画时为 no-op。
     auto tick(double dt_seconds) -> void {
         if (!animating_) {
             return;
         }
-        controller_.tick(dt_seconds);
+        controller_.tick(scaled_frame_dt(dt_seconds));
         current_ = tween_.value(controller_.value());
         state_.set(current_);
         if (!controller_.is_animating()) {
