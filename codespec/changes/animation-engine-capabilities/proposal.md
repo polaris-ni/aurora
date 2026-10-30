@@ -4,7 +4,7 @@
 | :--- | :--- |
 | 变更编号 | CHG-048 |
 | 提出日期 | 2026-10-29 |
-| 当前状态 | 已提议 |
+| 当前状态 | 已归档 |
 | 关联需求 | SPEC.API.EXPLICIT-FIRST.001 |
 | 影响面 | 动画公共头 `include/aurora/animation/animator.h`（`AnimationController` / `Animator` / `AnimatedValue`）、`include/aurora/animation/spring.h`（新增 `SpringAnimation`）、`include/aurora/animation/timeline.h`（`Keyframes<T>::Stop`）；`easing.h` 的 `Curve` 仅被引用、本提案不改动它。实现 `src/aurora/animation/animator.cpp`。因「真全局缩放」与「弹簧去重」两项裁决，波及面扩到驱动层消费点：`include/aurora/event/gesture.h`（`DragToDismiss` 重构为复用 `SpringAnimation`）、`include/aurora/widget/dismissible.h`（消费点，接口不变）、`include/aurora/widget/scroll_viewport.h`（缩放下沉进 `ScrollGlide::tick` 还是留在各消费点的 dt 取值——二者只可选其一，双层乘会重复缩放，实施时须就地定案）与 `include/aurora/widget/scroll.h` / `lazy_list.h` / `grid_view.h` / `pull_to_refresh.h` 的自驱动收位路径、`include/aurora/widget/reorderable_list.h` 的 `tick_settle` 弹簧 dt（其私有弹簧实现本提案不收口，见「关联限制与后续」）、`src/aurora/app/application.cpp`（空闲帧决策与缩放为 0 时的停手语义）、视冻结重挂形态而定 `include/aurora/widget/widget.h`（`needs_gesture_tick_` 是逐控件字段，全局 `set_time_scale` 若要重挂需一处树遍历入口）。受影响测试与 demo 与上述同源；规格回写见末节（`05-event-navigation.md` §6.1–§6.7 与 §7.1、ARCHITECTURE、CONCEPTS、GUIDELINE、SPECIFICATIONS、manual-test/08-animation）。本提案不改动导航层转场接线（逐路由 curve / pop 类型 / `TransitionKind` 扩展）。 |
 
@@ -107,10 +107,10 @@
 
 新增 `SpringAnimation`（标量 `double` 专用，落 `include/aurora/animation/spring.h`，**不新增公共头**——新增头会连锁 `codespec/manual-test/08-animation.md` §1.1 的「动画层 4 个公共头」计数声称、`codespec/ARCHITECTURE.md` §4.5 模块地图与 `tools/check/umbrella_manifest.txt`）：
 
-- 持有 `SpringSimulation`（纯求解器，不替换、签名与语义不动）、目标 `State<double>`（非拥有引用）、内部累积时间、可选收敛容差与 settled 回调。
-- 公共形态：`explicit SpringAnimation(State<double> &target)`；`animate_to(double target, const SpringDescription &spring, double initial_velocity = 0.0, double tolerance = 0.01) -> void`（起点取目标 `State` 当前值，构造 `SpringSimulation` 并起播）；`tick(double dt)`（自驱动一帧）；`attach(Animator &a)`（接入帧循环）；`is_running()`；`on_settled(std::function<void()>)`。`SpringSimulation::is_settled` 的容差是**值域单位**（不是归一化时间），封装须把它作为参数暴露并沿用默认 `0.01`，文档写明单位随目标量纲变化。
+- 持有 `SpringSimulation`（纯求解器，不替换、签名与语义不动）、目标 `State<double>`（**句柄副本**，与来源共享同一响应式节点，故不要求实参比弹簧存活更久；实施时据此把首稿的「非拥有引用」改掉，句柄拷贝正是 `attach` 后帧循环持副本不悬垂的前提）、内部累积时间、可选收敛容差与 settled 回调。
+- 公共形态（落码即此，参数名与默认值按头文件）：`explicit SpringAnimation(const State<double> &target)`；`animate_to(double target, const SpringDescription &spring, double initial_velocity = 0.0, double tolerance = 0.01) const -> void`（起点取目标 `State` 当前值，构造 `SpringSimulation` 并起播）；`set_range(double lo, double hi) const -> void`（写出值夹取窗口，弹簧过冲时不越出目标值域）；`tick(double raw_dt_seconds) const -> void`（自驱动一帧，步长在此经漏斗折算）；`attach(Animator &anim) const -> void`（接入帧循环）；`is_running()`；`target()`（最近一次起播的收敛目标）；`on_settled(std::function<void()>)`；`clock()`（作 `Animator::remove` 的注销键）。`SpringSimulation::is_settled` 的容差是**值域单位**（不是归一化时间），封装须把它作为参数暴露并沿用默认 `0.01`，文档写明单位随目标量纲变化。
 - **`Animator` 侧需要先补一个入口**（首稿漏掉的依赖）：现状 `add_binding(fn)` 登记的回调 `owner` 恒为空、`remove(controller)` 摘不掉它，且回调形参不含 dt。本提案新增**带 dt 且按控制器归属可注销**的绑定入口（如 `add_frame_binding(std::function<void(double)>, AnimationController &owner)`，最终名以 `check_naming_conventions` 为准）：`SpringAnimation::attach` 自持一条 `AnimationController` 作为登记键与活跃性来源（`drive()` 登记，使 `has_active()` 在弹簧在途期间为真、`Application::wait_once` 不会深睡），帧步长经该入口下发，`remove(controller)` 连同该绑定一起摘除，满足 §6.2 的可注销不变量。弹簧的时间轴只由该 dt 累积，不使用控制器的进度值。
-- 每帧：`t_sim_ += scaled_frame_dt(dt)`，以 `simulation.value(t_sim_)` 写目标 `State`；`simulation.is_settled(t_sim_, tolerance)` 为真时定格于 `target`（`State::set(target)`）、停掉登记用的控制器（`has_active()` 转假）、触发一次 `on_settled`，之后不再增长 `t_sim_`、不再写 `State`，也不再有幽灵帧。
+- 每帧：`elapsed += scaled_frame_dt(dt)`，以 `simulation.value(elapsed)` 写目标 `State`；`simulation.is_settled(elapsed, tolerance)` 为真时定格于 `target`（`State::set(target)`）、停掉登记用的控制器（`has_active()` 转假）、触发一次 `on_settled`，之后不再增长 `elapsed`、不再写 `State`，也不再有幽灵帧。载荷 `SpringAnimation::Payload` 的字段按本仓 pimpl 约定取名（同 `AnimatedValue` / `TimelinePlayer` 的 `Payload`：公开、`lower_case`、不带尾下划线），故这里叫 `elapsed` 而不是 `t_sim_`。
 - `reduce_motion` 生效时单帧直接落 `target` 并结束（与 §6.7 现弹簧阶段的语义一致，不能因为换成公共原语而丢失）。
 - 不把 `SpringSimulation` 改成驱动件；`SpringAnimation` 是它之上的即插封装。类型就是 `SpringAnimation`（非模板，仅 `double`），本提案不引入 `SpringAnimation<T>` 形态；向量 / 矩形弹簧由调用方组合多个标量实例，不在本提案范围。
 - **`DragToDismiss` 重构（同批落地，不让仓库里出现第三份同构弹簧驱动）**：`include/aurora/event/gesture.h` 里 `DragToDismiss` 的私有 `std::optional<SpringSimulation>` + `spring_t_` + `spring_end_` 三件套改为持有一个 `SpringAnimation`（或共用其内部驱动），`on_release()` 只负责阈值裁决与把拖动速度按方向规则交作 `initial_velocity`，收敛与定格交回原语；`include/aurora/widget/dismissible.h` 的对外接口与调用点不变。重构后 §6.7 的四条语义必须逐条保持：跟手 1:1（`tick` 为 no-op、`reduce_motion` 不干预跟手）、松手按 `threshold` 二选一（回位静默 / 飞出后触发 `on_dismissed` 一次）、`reduce_motion` 单帧落端点、spring 阶段仍由使用方 `tick(dt)` 自驱（不强制改为 `Animator` 登记，避免把事件层耦合进 `NavigatorHost` 那类生命周期问题）。既有 `tests/unit/utest_gesture.cpp` 与 `tests/unit/utest_dismissible.cpp` 的全部用例须逐条继续绿，任何因重构产生的用例语义变化都要就地写明理由而不是改断言凑绿。
@@ -162,7 +162,7 @@ if (anim != nullptr) {          // 无运行中 App 时必须降级，见 Animat
 
 // 4. 弹簧即插封装：标量收敛到目标，is_settled 自动定格停帧
 au::State<double> offset{0.0};
-au::SpringAnimation spring{offset};   // 目标 State（非拥有）
+au::SpringAnimation spring{offset};   // 内部持 State 句柄副本（与来源共享，非裸引用）
 spring.on_settled([] { /* 收敛后收尾 */ });
 spring.animate_to(120.0, au::SpringDescription{.stiffness = 180.0, .damping = 22.0}, /*velocity=*/-200.0);
 spring.attach(app.animator());        // 走新增的带 dt 可注销绑定入口；或每帧 spring.tick(dt) 自驱
@@ -186,7 +186,7 @@ if (a2 != nullptr) {
 
 ## 验收判据
 
-本提案处于已提议状态，尚未实施；下列判据为实施验收目标，取证留待实施批次。每条均以可编译用例 + 行为断言覆盖，并附负向判据（不得破坏既有语义）。
+每条判据均以可编译用例 + 行为断言覆盖，并附负向判据（不得破坏既有语义）。逐条取证见本节之后的「验收证据」；取证过程中对判据措辞的收紧与偏离，连同理由一并记在文末「实施记录与偏离（落码期回写）」。
 
 ### 循环 / 往复播放
 
@@ -202,8 +202,8 @@ if (a2 != nullptr) {
 
 8. `set_time_scale(2.0)` 下，相同 `dt` 序列推进到同一 `value` 的帧数约为 `scale = 1.0` 的一半；`set_time_scale(0.0)` 冻结；`set_time_scale(-1.0)` 与 NaN 夹取为 `0.0`；默认 `1.0`。
 9. 缩放**只**影响推进步长：目标 `State` 终值、`duration`、曲线不变；缩放还原为 `1.0` 后行为与原先一致（无残留）。缩放不得叠加——同一条帧步长从取值到消费至多经过 `scaled_frame_dt` 一次（`ScrollGlide::tick` 与其消费点不得两层都乘）；判据：以 `scale = 2.0` 注入固定 dt 序列，各路径的到位帧数都恰为 `scale = 1.0` 的一半，出现 1/4 即双层缩放。
-10. **覆盖矩阵（真全局的判据）**：同一缩放值下，逐一验证 `Animator` 登记控制器、`AnimatedValue::tick`、`TimelinePlayer::tick`、`TweenAnimation::tick`、`ScrollGlide::tick` 的每个消费点（实测四处：`Scroll` / `LazyList` / `GridView` / `PullToRefresh`）、`ReorderableList::tick_settle` 的落位弹簧、`DragToDismiss`（重构后经 `SpringAnimation`）——任一仍吃裸 dt 即本项判据不成立。反向项：同一缩放值下 `DragAutoScroll::advance` / `ReorderableList::tick_auto_scroll` 的每帧滚边增量不变（验证「例外」是真例外，不是漏网）。
-11. 冻结不空转（两条停手机制各自可证）：`scale == 0.0` 时 (a) `Animator` 侧登记控制器不置脏、绑定回调不写回；(b) 控件自驱侧在途标志（`Scroll` / `LazyList` / `GridView` / `PullToRefresh` 的每帧计时、Dismissible 的 `tick_gestures` 重挂）在 dt 归零的同一帧摘除——判据形式为固定帧序列下统计 `tick_gestures` 的实际推进次数 / 重绘请求数，冻结段内不得随帧数线性上升；恢复 `> 0` 后由 `set_time_scale` 重新武装续跑，冻结前进度不丢。
+10. **覆盖矩阵（真全局的判据）**：同一缩放值下，逐一验证 `Animator` 登记控制器、`AnimatedValue::tick`、`TimelinePlayer::tick`、`TweenAnimation::tick`、`SpringAnimation::tick`（`DragToDismiss` 重构后经它）、`ScrollGlide::tick` 的每个消费点（实测四处：`Scroll` / `LazyList` / `GridView` / `PullToRefresh`）、`ReorderableList::tick_settle` 的落位弹簧与 `Skeleton` 的微光相位——任一仍吃裸 dt 即本项判据不成立。反向项：同一缩放值下 `DragAutoScroll::advance` / `ReorderableList::tick_auto_scroll` 的每帧滚边增量不变（验证「例外」是真例外，不是漏网）。
+11. 冻结不空转（两条停手机制各自可证）：`scale == 0.0` 时 (a) `Animator` 侧登记控制器不置脏、绑定回调不写回；(b) 控件自驱侧的冻结帧不推进、不写回、不标脏、**不请求帧**——判据形式为固定帧序列下统计重绘请求数（`Widget::on_dirty` 计数），冻结段内该数须恒为 0 而不随帧数线性上升，解冻后须重新为正（同计数器自证不是「回调没接线」）。控件的每帧计时标志（`needs_gesture_tick_` / 在途 `is_animating()`）**在冻结段保留不摘**：摘了就没有续跑点，而全局入口拿不到逐控件指针，故解冻由 `set_time_scale` 置一枚重挂请求、`Application::wait_once` 消费出「下一帧不深睡」，那一帧各控件照常 `tick_gestures` 并自行续帧；恢复 `> 0` 后冻结前进度不丢。 Animator 侧的对应判据是 `has_active()` 在倍率为 0 时恒假（否则帧循环被钉在满帧）。
 12. 确定性不破：`Animator::current()` 为空（无头 / golden 场景）时 `scaled_frame_dt` 恒等返回，既有 golden 基线逐字节不变。
 13. `reduce_motion` 与缩放正交且优先：短路落端点的路径不受倍率影响。
 14. 该入口不进入业务动画契约：文档标注调试 / 演示用途，并写清「不缩放事件、布局、输入与定时任务」。
@@ -240,7 +240,7 @@ if (a2 != nullptr) {
 
 实施验收须重建库、测试、受影响 demos 与 `aurora_api_json`，构建启用最大可用并行线程，再运行全量 ctest（含无头 golden 与动画 / 事件 / widget 域用例）。按 `codespec/ARCHITECTURE.md` §14.6「公共 API」行的完整矩阵，必跑静态门禁为：`check_api_schema_sync`（先建生成器）、`check_naming_conventions`、**`check_api_budget`**、**`check_doc_comments`**、`lint`（覆盖实际修改 TU）、`format-check`；另跑 `check_umbrella_header`、`check_arch_module_map`、`check_codespec_xref`、`check_code_doc_sync`、`check_manual_test_format`、`check_change_proposals`、`check_version_consistency`、`check_no_cjk_literals`、`check_no_hardcoded_paths`、`check_nolint_layout`，测试面改动对应 CTest 名 `registry_integrity`（即 `tools/check/check_test_registry.py`）与 `check_test_temp_hygiene`，文档目标另跑 `--target docs`。
 
-新增枚举 `PlaybackMode` 是否进 `tools/include/known_enums.h` 须在实施批次定案并就地写理由：现状该表动画域只收录 `Curve`（`CurveKind` 的判别枚举），`AnimationStatus` 未入表；若决定收录，必须同步 `tests/integration/itest_known_enums.cpp`（该表是 `gen_api_tools` / `aurora_mcp` / `aurora_cli` / `aurora_lsp` 的单一来源）。
+新增枚举 `PlaybackMode` **不进** `tools/include/known_enums.h`，理由就地写在该表的动画域注释里：该表的用途是给工具链提供「可填写的取值域」（widget 属性键 / MCP 入参 / LSP 补全），而 `PlaybackMode` 与既存的 `AnimationStatus` 同族——两者只经 getter 读出（`AnimationController::mode()` / `status()`），既不出现在任何 `props[].type`，也不作为工具链入参（`repeat(int count, bool alternate)` 收计数与布尔，不收枚举）。入表会把「读出来的状态」提示成「填进去的值」，那类建议编译不过。`tests/integration/itest_known_enums.cpp` 按属性类型对账，公共枚举无须全量入表，故本批不改该文件。
 
 变异只在临时验证副本实施，逐项还原，记录确实失败的测试；不拿「不存在某诊断字符串」或无关测试冒充能力证明。
 
@@ -249,19 +249,110 @@ if (a2 != nullptr) {
 | 删除 `repeat` 的端点续播分支 | 判据 1/2/3 的循环 / 往复 / 有限计数用例 |
 | 让 `Repeat` 分支排在 `reduce_motion` 短路之前 | 判据 6 的无障碍优先用例 |
 | 把 `set_time_scale` 短路为恒 1 | 判据 8/9 的倍率 / 冻结 / 夹取用例 |
-| 只让 `Animator::tick` 缩放、把 `ScrollGlide::tick` 的任一消费点（`Scroll` / `LazyList` / `GridView` / `PullToRefresh`）、`ReorderableList::tick_settle` 或 `DragToDismiss` 改回裸 dt | 判据 10 的覆盖矩阵对应行（证明「真全局」不是嘴上口径） |
+| 只让 `Animator::tick` 缩放、把覆盖矩阵里的任一自驱消费点改回裸 dt（四处 `ScrollGlide::tick` 消费点 / `ReorderableList::tick_settle` 的落位弹簧 / `SpringAnimation::tick`（`DragToDismiss` 经它）/ `Skeleton` 的微光相位 / `AnimatedValue` · `TimelinePlayer` · `TweenAnimation` 三条手动自驱路径） | 判据 10 的覆盖矩阵对应行（证明「真全局」不是嘴上口径） |
 | 把自动滚边（`DragAutoScroll::advance` / `ReorderableList::tick_auto_scroll`）也纳入缩放 | 判据 10 的反向项（滚边每帧增量不随倍率变化） |
 | 在 `ScrollGlide::tick` 与它的消费点两层各乘一次倍率 | 判据 9 的双层缩放项（`scale = 2.0` 下到位帧数变成 1/4 而非 1/2） |
-| 冻结时仍逐帧自标脏 | 判据 11(a) 的置脏 / 写回用例 |
-| 冻结时仅把 dt 归零、不摘控件侧每帧计时 | 判据 11(b) 的推进次数计数用例（证明冻结不是「停着不动但满帧唤醒」） |
+| 冻结时仍逐帧自标脏 / 仍请求帧（在 `Scroll` 的零步长分支补一枚 `request_frame`，或把 `Skeleton` 的「相位变了才标脏」改成无条件标脏） | 判据 11(b) 的重绘请求计数用例（`scroll_glide_freeze_...` / `skeleton_freeze_...`） |
+| 让 `Animator::has_active()` 的零倍率分支失效（冻结仍报「有活跃动画」） | 判据 11(a)：冻结下登记控制器仍被推进、置脏并经绑定写回 |
+| 冻结只把 dt 归零、不置解冻重挂请求（摘除 `set_time_scale` 的 `rearm_pending_`） | 判据 11(b) 的推进次数计数用例（解冻后无人送首帧，进度停在冻结处不续跑） |
 | 让 `set_progress` 只置 `dirty_`（不动外部位） | 判据 16 的当帧写回用例 |
-| 删掉 `tick()` 入口清脏、让外部位与推进脏合一 | 判据 17 的既有 `controller_reverse_reset_stop_semantics` / `animator_bindings_write_only_on_dirty_frames` |
+| 删掉 `tick()` 入口清脏、让外部位与推进脏合一 | 判据 17 的既有 `controller_forward_ticks_to_completed` / `controller_reverse_reset_stop_semantics`（首稿此处还点了 `animator_bindings_write_only_on_dirty_frames`，实测该档下它不转红，见「验收证据」判据 17 行与实施记录） |
 | 让 `set_progress` 改写 `status_` | 判据 15/18 的「status_ 不变」与「与 reset 区分」用例 |
-| 把 `SpringAnimation` 收敛改成不经 `is_settled` | 判据 20/22 的定格 / 停帧用例 |
+| 把 `SpringAnimation` 收敛改成不经 `is_settled` | 判据 20/22 的容差 / 停帧时机用例（`spring_animation_settle_time_follows_tolerance`） |
 | 让新绑定入口不带 `owner`（`remove()` 摘不掉） | 判据 21 的注销与悬垂用例 |
 | `DragToDismiss` 保留自己的弹簧三件套不复用原语 | 判据 25 的符号级核对 + 判据 10 的 Dismissible 行 |
 | 把分段曲线改成「末点曲线作用于向前段」 | 判据 28 的「改末点曲线不影响任何取值」断言 |
 | 把 `Keyframes` 段间插值改回全局线性 | 判据 28/31 的分段曲线用例 |
+
+## 验收证据
+
+实施批次（2026-10-30，本机 MinGW GCC 16.1.0 / Ninja / ccache，构建一律启用最大并行）取得下列证据。判据编号沿用上一节；载体只写**实际断言该判据的用例名**，一条用例覆盖多条判据时在各行分别列出。
+
+### 判据 → 载体
+
+| 判据 | 取证载体（套件 = 文件 stem） | 结果 |
+| :--- | :--- | :--- |
+| 1 无限循环同向重启、`0` 与 `-1` 同义 | `utest_animator.repeat_infinite_restarts_forward_at_zero_and_zero_count_means_infinite` | 通过；变异 M01 转红 |
+| 2 往复两端翻转 | `utest_animator.repeat_alternate_oscillates_between_both_endpoints` | 通过；变异 M01 转红 |
+| 3 有限计数末次到端置终态、`n == 1` 与一次性等价 | `utest_animator.repeat_finite_count_stops_at_last_reached_endpoint` | 通过；变异 M01 转红 |
+| 4 `reset` / `stop` 清模式、与方向正交 | `utest_animator.repeat_is_orthogonal_to_direction_and_cleared_by_reset_and_stop` | 通过；变异 M01 也命中该例（摘掉端点续播后正交断言失守） |
+| 5 循环期 `on_completed` 只在计数耗尽那帧一次 | `utest_animator.repeat_completed_callback_fires_only_when_count_exhausts` | 通过；变异 M01 转红 |
+| 6 `reduce_motion` 优先于循环 | `utest_animator.reduce_motion_short_circuits_repeat_instead_of_looping` | 通过；变异 M02 使该例转红（短路排到循环之后即失守） |
+| 7 无限循环 = 常驻活跃帧 | `utest_animator.infinite_repeat_keeps_animator_active_until_stop` | 通过；变异 M01 转红（续播分支被摘后控制器到端即停，`has_active()` 提前转假） |
+| 8 倍率减半帧数、`0` 冻结、负 / NaN 夹 `0.0`、缺省 `1.0` | `utest_animator.time_scale_halves_frames_and_clamps_invalid_values` | 通过；变异 M03 转红 |
+| 9 只改步长不改终值 / 曲线 / `duration`，还原无残留；缩放不叠加 | `utest_animator.scaling_preserves_duration_curve_and_final_value_without_residue`；单层性由 `utest_scroll_viewport.scroll_glide_tick_is_immune_to_current_animator_time_scale` 钉住（`ScrollGlide::tick` 保持纯时序数学） | 通过；变异 M06（两层各乘一次）使到位帧数落到 1/4 而转红 |
+| 10 覆盖矩阵：登记控制器 / `AnimatedValue` / `TimelinePlayer` / `TweenAnimation` / 四枚 glide 消费点 / `ReorderableList` 落位弹簧 / `SpringAnimation`（含 `DragToDismiss`）/ `Skeleton` 相位 | `utest_animator.every_progress_path_scales_by_exactly_the_multiplier`（内核四条路径同批断言）+ `utest_scroll.scroll_glide_frame_count_follows_time_scale` / `utest_lazy_list.lazy_list_glide_frame_count_follows_time_scale` / `utest_grid_view.grid_view_glide_frame_count_follows_time_scale` / `utest_pull_to_refresh.pull_to_refresh_setback_frame_count_follows_time_scale` + `utest_reorderable_list.settle_spring_frame_count_halves_with_time_scale` + `utest_spring.spring_animation_scales_with_the_animator_and_freezes_on_zero` + `utest_dismissible.dismissible_spring_frames_halve_when_time_scale_doubles` + `utest_skeleton.skeleton_shimmer_phase_frames_halve_with_time_scale`；反向项 `utest_scroll.scroll_drag_auto_scroll_delta_ignores_time_scale` 与 `utest_reorderable_list.auto_scroll_edge_increment_is_excluded_from_time_scale` | 通过；消费点单点改回裸 dt 可定位转红（M04a / M04e / M04g / M04j 各命中对应行），反向项由 M05a / M05b 转红 |
+| 11(a) 冻结帧不置脏、不写回 | `utest_animator.frozen_animator_neither_dirties_nor_writes_back` | 通过；变异 M07c（`has_active()` 的零倍率分支失效）使该例转红——冻结仍被报成「有活跃动画」时，`Animator::tick` 照常推进登记控制器并置脏、经绑定写回目标 `State` |
+| 11(b) 控件侧冻结不推进、不请求重绘；解冻续跑且不丢进度；`has_active()` 零倍率恒假 | 重绘请求计数用例 `utest_scroll.scroll_glide_freeze_holds_progress_and_emits_no_redraw` / `utest_lazy_list.lazy_list_glide_freeze_holds_progress_and_emits_no_redraw` / `utest_grid_view.grid_view_glide_freeze_holds_progress_and_emits_no_redraw` / `utest_pull_to_refresh.pull_to_refresh_setback_freeze_holds_progress_and_emits_no_redraw` / `utest_skeleton.skeleton_freeze_holds_phase_and_requests_no_frames` / `utest_reorderable_list.frozen_time_scale_pauses_settle_without_frame_requests_and_thaw_resumes` / `utest_dismissible.dismissible_freeze_holds_spring_and_thaw_resumes_to_same_endpoint`；`Animator` 侧 `utest_animator.thaw_arms_one_rearm_request_and_resumes_from_frozen_progress` | 通过；M07a（Scroll 的零步长分支补一枚 `request_frame`）⇒ `scroll_glide_freeze_holds_progress_and_emits_no_redraw` 转红；M07b（Skeleton 无条件标脏）⇒ `skeleton_freeze_holds_phase_and_requests_no_frames` 转红；M08（摘除 `rearm_pending_`）⇒ `thaw_arms_one_rearm_request_...` 转红（解冻无人送首帧）。三行互不重叠，归属确定 |
+| 12 无当前 `Animator` 时漏斗恒等，golden 不破 | `utest_scroll_viewport.scaled_frame_dt_is_identity_without_current_animator`、`utest_animator.funnel_is_identity_without_current_animator`；全量 ctest 含既有像素 golden 套件在内 450 例全绿（见下节） | 通过 |
+| 13 `reduce_motion` 与缩放正交且优先 | `utest_animator.reduce_motion_short_circuit_ignores_time_scale`、`utest_spring.spring_animation_reduce_motion_settles_in_one_frame` | 通过 |
+| 14 不进入业务动画契约（文档标注 + 缩放边界） | `codespec/specification/05-event-navigation.md` §6.5 与 `codespec/GUIDELINE.md` §46.2 正文；代码面核对：本批只改动画步长取源，事件派发 / 布局 / `Scheduler` 的 dt 未被触及（改动文件清单可逐一对账） | 通过（文档与代码面核对项，不另立数值用例） |
+| 15 `set_progress` 只定位、越界夹取、`status_` 与模式不变 | `utest_animator.set_progress_positions_without_touching_status_or_mode` | 通过；变异 M11（改写 `status_`）转红 |
+| 16 当帧写回链路 | `utest_animator.set_progress_writes_back_through_binding_in_the_same_frame`（含 `has_active()` 不因定位转真、帧末双清） | 通过；变异 M09（只置 `dirty_`）转红，且同档连带命中判据 19 的 `gesture_drag_then_forward_or_reverse_takes_over` |
+| 17 既有语义不被机制带走 | 既存的 `utest_animator.controller_reverse_reset_stop_semantics` 与 `utest_animator.animator_bindings_write_only_on_dirty_frames` 未改动继续绿 | 通过；变异 M10（摘掉 `tick()` 入口清脏）实测转红的是 `controller_forward_ticks_to_completed` 与 `controller_reverse_reset_stop_semantics` 两例——**`animator_bindings_write_only_on_dirty_frames` 在该档下不转红**（它按帧统计写回、推进脏被吞掉时其断言仍成立），故本行证据只认前两例 |
+| 18 与 `reset` 区分 | 同判据 15 用例末段（`reset(1.0)` 对照改写 `status_` 并清模式） | 通过 |
+| 19 手势驱动转场前置可行性 | `utest_animator.gesture_drag_then_forward_or_reverse_takes_over`、`utest_gesture.drag_recognizer_positions_bound_progress_then_playback_takes_over` | 通过；前者同时是 M09 与 M11 的转红载体（外部位失效或状态被改写时，「定位 → 接管」这条链先断） |
+| 20 逐帧逼近、`is_settled` 后定格停帧、`on_settled` 恰一次 | `utest_spring.spring_animation_converges_then_settles_exactly_once`，容差另由 `utest_spring.spring_animation_settle_time_follows_tolerance` | 通过；变异 M12（把收敛判定改成不经 `is_settled` 的固定时长）实测**只**使容差用例 `spring_animation_settle_time_follows_tolerance` 转红——`spring_animation_converges_then_settles_exactly_once` 在该档下不转红（它不断言具体收敛时长，只数 `on_settled` 次数），故本行的数值证据以容差用例为准 |
+| 21 `attach` 后在途即活跃、`remove` 连带摘除绑定 | `utest_spring.spring_animation_attach_keeps_active_and_is_removable` | 通过；变异 M13（绑定不带 `owner`）转红 |
+| 22 停帧真由 `is_settled` 驱动 | 判据 20 的定格断言（`has_active()` 转假 + 不再写 `State`） | 通过；存在性证明落在判据 20 的容差用例上——停帧时机随容差变化而非受常量时长支配，说明判据取自 `is_settled`（同档下定格断言本身不转红，见上行，本行不据此另立证据） |
+| 23 `SpringSimulation` 纯求解器不动 | `include/aurora/animation/spring.h` 本批 **161 增 / 0 删**；既存 6 例纯求解器用例（`spring_description_defaults_and_derived_quantities` 起）未改动继续绿 | 通过 |
+| 24 `reduce_motion` 单帧落 `target` | `utest_spring.spring_animation_reduce_motion_settles_in_one_frame` | 通过 |
+| 25 重复实现归零两处清点 | 符号级核对用例 `utest_gesture.drag_to_dismiss_holds_no_private_spring_duplicate`（读本仓 `include/aurora/event/gesture.h` 源码断言三件套符号不存在）；`reorderable_list.h` 的 `spring_active_` / `settle_t_` 仍在并按判据就地注释指向后续 | 通过；变异 M14（把三件套加回 `DragToDismiss`）使该例转红 |
+| 26 `DragToDismiss` 重构回归（§6.7 四条对外语义） | `utest_gesture.dtd_follow_phase_tick_is_a_no_op` / `dtd_release_arbitrates_only_between_the_two_endpoints` / `dtd_release_drops_opposing_velocity_and_keeps_aligned_one` / `dtd_spring_phase_self_drives_and_dismissed_fires_exactly_once` / `dtd_reduce_motion_lands_in_one_frame_but_leaves_follow_untouched`；`utest_gesture`（21 例）与 `utest_dismissible`（11 例）全绿；缩放 / 冻结在 Dismissible 路径上的判据 10/11 见上两行 | 通过 |
+| 27 只做标量、组合合法 | `utest_spring.two_scalar_springs_compose_into_a_vector_offset`；句柄拷贝共享载荷另由 `utest_spring.spring_animation_handle_copies_share_the_payload`、越界夹取窗口由 `utest_spring.spring_animation_writes_overshoot_unless_range_declared` | 通过 |
+| 28 段曲线取**起点** `Stop`、末点曲线不参与求值 | `utest_timeline.keyframes_segment_curve_belongs_to_left_stop`（含「改末点曲线不影响任何取值」断言）、`utest_timeline.keyframes_segment_curve_applies_to_composite_value_type` | 通过；变异 M15（改成末点曲线）使该两例连同判据 31 的 `animator_keyframe_binding_applies_segment_curves` 一并转红 |
+| 29 缺省线性、向后兼容 | 既存 `utest_timeline` 用例（16 例中 13 例未改动）继续绿 | 通过 |
+| 30 零宽段取起点值、`stable_sort` 携带曲线、区间外取最近端点 | `utest_timeline.keyframes_sort_carries_curve_and_keeps_insertion_order_on_ties` | 通过 |
+| 31 `Animator::bind` 自动应用分段曲线 | `utest_animator.animator_keyframe_binding_applies_segment_curves` | 通过；M15（末点曲线）与 M16（段间退回全局线性）两档均使该例转红，M16 同时命中判据 28 的两例 |
+
+新增用例合计 **54 例**，分布在 12 个套件：`utest_animator` 18、`utest_spring` 8、`utest_gesture` 7、`utest_timeline` 3、`utest_scroll` 3（含滚边反向项 1 例）、`utest_reorderable_list` 3（含自动滚边反向项 1 例）、`utest_dismissible` / `utest_lazy_list` / `utest_grid_view` / `utest_pull_to_refresh` / `utest_scroll_viewport` / `utest_skeleton` 各 2。测试侧夹具 `tests/support/animation_fixture.h` 为本批新增文件（当前 / 作用域内 `Animator`、减弱动态效果档、缩放帧泵、重绘请求计数器四件），按 `codespec/CODING_STANDARDS.md` §3.2 的「一个单元头至多一个测试声明」约束不另立单元目标。
+
+### 临时变异 → 实际转红
+
+22 档变异逐档注入（脚本 `.workbuddy/tmp/build/mutation_proof.py`，每档以「目标串在本文件中恰好出现一次」为锚点，注入后 `cmake --build build --target aurora_test_runner --parallel 16`，只跑受影响套件的 ctest 并收割 `[ FAILED ]` 行），每档跑完在 `finally` 里按字节还原。结果：**22 档全部 RED，无空转档**（`NOT_RED_OR_EMPTY=none`），合计 43 条失败用例实例、去重后 35 条用例。下表只列实际转红者，未转红的预期已就地写进判据行。
+
+| 档 | 注入 | 实际转红的用例 | 归属判据 |
+| :--- | :--- | :--- | :--- |
+| M01 | 删除 `repeat` 的端点续播分支 | `utest_animator`：`infinite_repeat_keeps_animator_active_until_stop` / `repeat_alternate_oscillates_between_both_endpoints` / `repeat_completed_callback_fires_only_when_count_exhausts` / `repeat_finite_count_stops_at_last_reached_endpoint` / `repeat_infinite_restarts_forward_at_zero_and_zero_count_means_infinite` / `repeat_is_orthogonal_to_direction_and_cleared_by_reset_and_stop`（6） | 1/2/3/4/5/7 |
+| M02 | 让 `Repeat` 分支排在 `reduce_motion` 短路之前 | `utest_animator.reduce_motion_short_circuits_repeat_instead_of_looping`（1） | 6 |
+| M03 | 把 `set_time_scale` 短路为恒 1 | `utest_animator`：`every_progress_path_scales_by_exactly_the_multiplier` / `funnel_is_identity_without_current_animator` / `scaling_preserves_duration_curve_and_final_value_without_residue` / `time_scale_halves_frames_and_clamps_invalid_values` + `utest_scroll.scroll_glide_frame_count_follows_time_scale`（5） | 8/9/10/12 |
+| M04a | 消费点改回裸 dt：`Scroll` | `utest_scroll`：`scroll_glide_frame_count_follows_time_scale` / `scroll_glide_freeze_holds_progress_and_emits_no_redraw`（2） | 10/11(b) |
+| M04e | 消费点改回裸 dt：`ReorderableList::tick_settle` | `utest_reorderable_list`：`frozen_time_scale_pauses_settle_without_frame_requests_and_thaw_resumes` / `settle_spring_frame_count_halves_with_time_scale`（2） | 10/11(b) |
+| M04g | 消费点改回裸 dt：`SpringAnimation::tick`（覆盖 `Dismissible`） | `utest_dismissible`：`dismissible_freeze_holds_spring_and_thaw_resumes_to_same_endpoint` / `dismissible_spring_frames_halve_when_time_scale_doubles` + `utest_spring.spring_animation_scales_with_the_animator_and_freezes_on_zero`（3） | 10/11(b) |
+| M04j | 消费点改回裸 dt：`TimelinePlayer::tick` 手动自驱 | `utest_animator.every_progress_path_scales_by_exactly_the_multiplier`（1） | 10 |
+| M05a | 把自动滚边也纳入缩放：`DragAutoScroll::advance` | `utest_scroll.scroll_drag_auto_scroll_delta_ignores_time_scale`（1） | 10 反向项 |
+| M05b | 把自动滚边也纳入缩放：`ReorderableList::tick_auto_scroll` | `utest_reorderable_list.auto_scroll_edge_increment_is_excluded_from_time_scale`（1） | 10 反向项 |
+| M06 | 在 `ScrollGlide::tick` 与消费点两层各乘一次倍率 | `utest_scroll.scroll_glide_frame_count_follows_time_scale` + `utest_scroll_viewport.scroll_glide_tick_is_immune_to_current_animator_time_scale`（2） | 9 |
+| M07a | 冻结时仍逐帧自标脏：`Scroll` 收位滑动 | `utest_scroll.scroll_glide_freeze_holds_progress_and_emits_no_redraw`（1） | 11(b) |
+| M07b | 冻结时仍逐帧自标脏：`Skeleton` 微光相位 | `utest_skeleton.skeleton_freeze_holds_phase_and_requests_no_frames`（1） | 11(b) |
+| M07c | 冻结不摘 `Animator` 侧停帧判据（`has_active()` 的零倍率分支失效） | `utest_animator.frozen_animator_neither_dirties_nor_writes_back`（1） | 11(a) |
+| M08 | 冻结只归零 dt、不送解冻重挂帧 | `utest_animator.thaw_arms_one_rearm_request_and_resumes_from_frozen_progress`（1） | 11(b) |
+| M09 | 让 `set_progress` 只置 `dirty_`（不动外部位） | `utest_animator`：`gesture_drag_then_forward_or_reverse_takes_over` / `set_progress_writes_back_through_binding_in_the_same_frame`（2） | 16/19 |
+| M10 | 删掉 `tick()` 入口清脏、让外部位与推进脏合一 | `utest_animator`：`controller_forward_ticks_to_completed` / `controller_reverse_reset_stop_semantics`（2） | 17 |
+| M11 | 让 `set_progress` 改写 `status_` | `utest_animator`：`gesture_drag_then_forward_or_reverse_takes_over` / `set_progress_positions_without_touching_status_or_mode`（2） | 15/19 |
+| M12 | 把 `SpringAnimation` 收敛改成不经 `is_settled` | `utest_spring.spring_animation_settle_time_follows_tolerance`（1） | 20/22 |
+| M13 | 让新绑定入口不带 `owner`（`remove()` 摘不掉） | `utest_spring.spring_animation_attach_keeps_active_and_is_removable`（1） | 21 |
+| M14 | `DragToDismiss` 保留自己的弹簧三件套不复用原语 | `utest_gesture.drag_to_dismiss_holds_no_private_spring_duplicate`（1） | 25 |
+| M15 | 把分段曲线改成「末点曲线作用于向前段」 | `utest_animator.animator_keyframe_binding_applies_segment_curves` + `utest_timeline`：`keyframes_segment_curve_applies_to_composite_value_type` / `keyframes_segment_curve_belongs_to_left_stop`（3） | 28/31 |
+| M16 | 把 `Keyframes` 段间插值改回全局线性 | 同 M15 的 3 例（3） | 28/31 |
+
+判据 13 / 14 / 18 / 23 / 24 / 26 / 27 / 29 / 30 未单设变异档：它们的行为断言已由正向用例钉住（端点形态、纯求解器未改动、句柄共享、向后兼容与排序携带），且其失败面与上表已有档重合（如 13 落在 M02 / M03 的转红集合里、18 落在 M11 的对照断言里）；26 是既有对外语义的回归集合，本批的注入面不覆盖它。不为凑数给这些判据造无关变异。
+
+### 未取证项
+
+- `codespec/manual-test/08-animation.md` 的本批新增用例 TC-ANIMATION-008 … TC-ANIMATION-012（含既有的 TC-ANIMATION-001）**未按人工步骤在真实窗口上执行**，其三、四节（执行记录 / 缺陷反馈）留空；步骤里的观测量（缩放前后同一手势的到位时长、冻结期间 CPU 不升满帧、减弱动态效果档与缩放叠加的观感）由上述单测的等价断言覆盖，像素与主观流畅度仍需人工复核。
+- 未做真实窗口的像素探针：本批未新增 golden，也不改渲染路径（判据 12 的「golden 不破」是以全量 ctest 的既有 golden 套件继续绿为证，不是以新截图为证）。
+- 性能面未量化：冻结期间「不再满帧唤醒」由 `Animator::has_active()` 的零倍率分支与控件侧 `needs_gesture_tick_` 的摘除逻辑保证，用例按帧请求计数取证，未测绝对 CPU 占用曲线。
+
+### 重建与门禁
+
+按上一节的口径重建并复跑，构建一律 `--parallel 16`（本机 16 逻辑核，Ninja + MinGW GCC + ccache）。
+
+- **重建**：库与测试目标 90 步、`demos` 177 步、`aurora_api_json` 2 步，三段 `EXIT=0`。`aurora_api.json` 重建后与 HEAD **零差异**（`git status` 对该文件无输出），与「schema 面不承载动画类、枚举仍来自策展表」的现状一致，不得据此宣称 schema 已反映本批能力。
+- **全量测试**：`ctest --preset ninja-test` **450/450 通过**、`EXIT=0`、real 22.79 秒。格式化与 lint 整改前后各复跑一次，两次同为 450/450。该套件含本节列出的全部 `check_*` 静态门禁（`check_api_schema_sync` / `check_naming_conventions` / `check_api_budget` / `check_doc_comments` / `check_umbrella_header` / `check_arch_module_map` / `check_codespec_xref` / `check_code_doc_sync` / `check_manual_test_format` / `check_change_proposals` / `check_version_consistency` / `check_no_cjk_literals` / `check_no_hardcoded_paths` / `check_nolint_layout`）、`registry_integrity`、`check_test_temp_hygiene`，以及无头 golden 与动画 / 事件 / widget 域用例；判据 12 的「golden 不破」即以此为准。首稿担心的 `check_doc_comments` 面在本批实际为 0 findings（独立复跑 `EXIT=0`）。
+- **format-check**：以 `tools/check/run_clang_format.py`（`format-check` 目标的同一执行器、`build/CMakeCache.txt` 里记录的同一 clang-format 二进制）对本批 29 枚源文件跑 `mode=check`：**checked 29 / conforming 29 / non-conforming 0 / diff lines 0**。两轮批内 `--fix` 的作用域由暂存文件清单拼出的路径正则限定，实测改写全部落在批内（批外文件名单为空），且逐 hunk 核对为尾注对齐与换行回收、无逻辑改动。全仓 `format-check` 目标未复跑——它是本机曾出现过静默不结束的那条形制，本批的合规面由同执行器的批内检核承担。
+- **lint**：`select_lint_tus.py --changed-only` 从 768 枚 TU 里选出本批改动的 15 枚（改动的全部 `.cpp`；改动的公共头经其同源 `utest_*` TU 覆盖，无未覆盖 TU），`run_clang_tidy.py --fail-on warning --jobs 16` 首轮报 **38 条、全部落在本批新增行上**（历史背负 0 条），逐条改码而非抑制：31 条 `readability-identifier-naming`——本批新写的常量按本仓约定改名（文件 / 命名空间作用域常量取 `AURORA_` + 全大写、与 `utest_scroll.cpp` 既有的 `AURORA_ROW_H` 同形；函数内常量取 `lower_case`；类内 `static constexpr` 取全大写；`SpringAnimation::Payload` 的字段去掉尾下划线，与该头之外既有的 `AnimatedValue` / `TimelinePlayer` 载荷同形）；4 条 `readability-math-missing-parentheses`（补显式括号，不改算式）；`modernize-use-designated-initializers` 与 `modernize-use-auto` 各 1 条（demo 侧写法）。唯一未改码的是 1 条 `performance-unnecessary-copy-initialization`：那句 `SpringAnimation alias = spring;` 的**句柄拷贝正是被测对象**（验证两份句柄共享同一载荷），按建议直接复用 `spring` 会让用例失去所验语义，故按 `codespec/CODING_STANDARDS.md` §5.2 就地抑制——理由整段写在指令之前、名单单行闭合于代码行。复跑：**unique findings 0、blocking 0、`EXIT=0`**，`check_nolint_layout` 随全量 ctest 同绿。
+- **docs**：`--target docs` 在 `WARN_AS_ERROR=YES` 下于 `include/aurora/net/http.h` 的 `Content-Range` 段注释早退（该行内联码里写着 `bytes */1234`，反引号块内的 `*/` 被 Doxygen 读成 C 注释收尾）。该文件本批未触碰（`git diff HEAD` 对其为空，最后一次改动来自上游提交），属既有红。为拿到完整名单另跑一遍全树扫描（同一 `Doxyfile`、仅把 `WARN_AS_ERROR` 置否、产物落在构建目录外）：Doxygen 1.18.0 全树 `EXIT=0`、共 10 条 warning，逐条落在 `net/http.h`(4) / `state/resource.h`(2) / `app/application.h`(2) / `core/thread_pool.h`(1) / `net/blocking.h`(1)——**本批的动画 / 事件 / widget 公共头一条不报**（名单里不含 `animation/animator.h`、`animation/spring.h`、`animation/timeline.h`、`event/gesture.h` 与本批改动的八枚 widget 头）。
 
 ## 提案时证据与未验证边界
 
@@ -289,9 +380,10 @@ if (a2 != nullptr) {
 - `NavigatorHost` 的 `pop` / `pop_to_root` 强制 `Fade`，仅 `push` 走 `RouteTransition::kind`；`TransitionKind` 枚举仅 `Fade` / `Slide` 两种。
 - 无声明式 `PageRouteBuilder`（路由即转场描述）封装；当前为 `NavigatorHost` + `Route` 的命令式接法。
 - `AnimatedValue::attach` / `TimelinePlayer::attach` 经 `add_binding` 登记的回调 `owner` 为空、`remove()` 摘不掉（既存形态）。本提案新增的可注销 dt 绑定入口不得复制该缺陷，但把 `AnimatedValue` / `TimelinePlayer` 自身的注销收口留在后续，避免本提案顺手改动既有 pimpl 生命周期。
+- `Dismissible` 的拖动主轴在实施前就**没有接到底层**：构造函数的 `axis` 形参只转给 `DragToDismiss`（决定手势锁轴与松手裁决），成员 `dtd_axis_` 从未被赋值，故绘制位移与行程标定（读它的 `travel_distance` 与平移矩形两处）恒按 `Horizontal` 走——请求 `DragAxis::Vertical` 时表现为「拖得动、裁决方向对，但位移画在水平轴上、行程按宽度折算」。`describe_static()` 把 `axis` 作为可填属性对外承诺，缺口因此在 schema 面可见。修它要连带裁决「`dtd_axis_` 与 `DragToDismiss` 内部轴谁是真值」，属缺陷修复批次。
 - `ReorderableList` 的落位弹簧（`spring_active_` / `settle_t_` / `tick_settle`）收口到 `SpringAnimation`。阻塞点不是弹簧本身而是**值汇**：该控件落位写普通成员 `drag_follow_` 并靠重排绘制生效，而 `SpringAnimation` 的写回目标是 `State<double>`。两条路各自有代价——给控件加 State 句柄会把它的内部位移纳入响应式图（每次拖拽都经信号，可能牵动重建口径），给原语加「值汇形参」（回调式落点）则弱化「弹簧即插到 State」这一模型的第一读感。该裁决应连同其余同样非-State 落点的控件（若穷举后有第二例）一起定，不塞进本提案。
 
-前三项依赖本提案的 `set_progress`（交互式 / 可中断转场）与分段曲线能力，建议在本提案归档后单独评估；第四、五项是本提案明确划出的收口边界，不为凑齐全仓归零而扩大自身范围。
+前三项依赖本提案的 `set_progress`（交互式 / 可中断转场）与分段曲线能力，建议在本提案归档后单独评估；第四、五项是本提案明确划出的收口边界，不为凑齐全仓归零而扩大自身范围；第六项是实施 `DragToDismiss` 回归（判据 26）时就地发现的既有缺陷，本批只改该文件的步长取源与冻结期标脏纪律、未触碰其行为，故判据 26 的对外语义回归结论不受影响。
 
 ## 回写落点
 
@@ -308,3 +400,19 @@ if (a2 != nullptr) {
 - 仓库根变更记录（CHANGELOG）：`[Unreleased]` 的 `Added` 节记动画五项能力与 `DragToDismiss` 收口（`DragToDismiss` 的对外语义不变，故归 `Added`/`Notes` 而非 `Breaking`；若实施中出现签名或头文件变动须改记 `Breaking` 并给迁移路径），本提案不自行决定升版。
 
 实施开始后状态改为「实施中」，全部契约与门禁取得证据、回写完成后改为「已归档」。不得用文档检查通过代替实现验收。
+
+## 实施记录与偏离（落码期回写）
+
+1. **折算点按实测穷举为十一处，判据 10 的矩阵随之扩行**：`Animator::tick`（`src/aurora/animation/animator.cpp`，成员 `scale_frame_dt`）、`TimelinePlayer::tick`（同文件）、`AnimatedValue::tick` 与 `TweenAnimation::tick`（`include/aurora/animation/animator.h`）、`SpringAnimation::tick`（`include/aurora/animation/spring.h`）、六处控件自驱入口（`scroll.h` / `lazy_list.h` / `grid_view.h` / `pull_to_refresh.h` 的收位滑动、`reorderable_list.h` 的 `tick_settle`、`skeleton.h` 的微光相位）。首稿矩阵只列 glide 四消费点 + `ReorderableList` + `DragToDismiss`，**`Skeleton` 的相位与三条手动自驱路径是穷举后补进去的行**；`DragToDismiss` 收口到公共原语后不再单列，经 `SpringAnimation::tick` 计入。另有第十二处调用是 `dismissible.h` 的 `tick_gestures` 冻结判定，只取折算值作「本帧是否推进」的谓词、不作为步长，故不构成第二重缩放。
+2. **折算下沉点定在消费点，求解器保持纯时序**：`ScrollGlide::tick` / `AnimationController::tick` / `SpringSimulation` 都不感知倍率。该取舍由 `utest_scroll_viewport.scroll_glide_tick_is_immune_to_current_animator_time_scale` 钉住，并由变异 M06（在 `ScrollGlide::tick` 与消费点两层各乘一次）实证可转红——否则 2.0 档静默变成 4.0 档。
+3. **判据 11(b) 的实现形态与提案首稿不同，判据正文已按实现改写**：首稿写「冻结时摘掉控件侧每帧计时」，落码否决——全局缩放入口拿不到逐控件指针，而摘除在途标志就没有续跑点（解冻只能等下一次输入）。实现取「计时标志保持武装 + 冻结帧不推进、不写回、不标脏、不请求帧」，解冻由 `set_time_scale` 置一枚重挂请求、`Application::wait_once` 消费出「下一帧不深睡」，那一帧各控件照常 `tick_gestures` 并自行续帧。判据形式相应改为重绘请求计数（`Widget::on_dirty`），并新增 `Animator::has_active()` 在倍率为 0 时恒假这条对应判据。该形态不需要树遍历入口，故影响面一行里「视冻结重挂形态而定」的 `include/aurora/widget/widget.h` 本批未改动。
+4. **本批唯一改动既有行为次序的一处（缺陷修正）**：`AnimationController::tick` 的零步长守卫首版排在 `reduce_motion` 短路之前，使「冻结帧 + 减弱动态效果」下控制器不落端点，全量 ctest 的既有 `utest_accessibility.reduce_motion_snaps_controller_to_endpoint` 实测转红。守卫改到短路之后（无障碍短路不使用 dt，「一步到位」本就是一帧到位，没有可被冻住的东西），次序与 `SpringAnimation::Payload::advance` 对齐——两个驱动件对同一无障碍档给出同一形态。判据 13 的新用例即锚定该对齐。
+5. **漏斗只做乘法、不夹取**：入参既可能是调用方声明的步长（`Animator::tick(1.0)` 做「一步到位」是既有契约），也可能是控件自驱路径的墙钟差（既有 `Skeleton` 用例以三秒差推进相位），在此夹取会同时改掉两者语义、并让 `1.0` 档在掉帧时被静默改速。非法倍率改在 `set_time_scale` 入口折成 `0.0`（负值 / NaN / inf 同档）；`Animator::current()` 为空时自由函数恒等返回，故无头 golden 逐字节不变。
+6. **`set_progress` 的脏位分工按「推进脏 / 外部脏」两位实现**：`tick()` 入口只清推进脏，`dirty()` 取两位之或，帧末 `clear_dirty()` 双清。首稿只说「外部脏位或进 `dirty()`」未写清入口清脏的范围，落码时该分工是判据 16（当帧写回）与判据 17（静止控制器不得使 `has_active()` 转真 / 空闲帧不写回）同时成立的前提，已回写进 `include/aurora/animation/animator.h` 的头注与 `codespec/specification/05-event-navigation.md` §6.1。
+7. **可注销 dt 绑定入口复用既有容器，不新开一条注册表**：`Animator::add_frame_binding(fn, owner)` 向同一 `on_tick_` 向量登记 `Binding{.owner = &owner, .fn = {}, .dt_fn = std::move(fn)}`，`remove(owner)` 的摘除口径因此对两类绑定天然一致。既存 `add_binding(std::function<void()>)` 的 `owner` 恒 `nullptr` 这一缺陷本批未动（改它要连带裁决 `AnimatedValue` / `TimelinePlayer` 的注销收口，仍列「关联限制与后续」第四项）。
+8. **`PlaybackMode` 不入 `tools/include/known_enums.h`**：该表只收「可作为属性值 / 工具入参填写」的取值域，`PlaybackMode` 与既存的 `AnimationStatus` 同为只读判别枚（`repeat(int count, bool alternate)` 收计数与布尔，不收枚举），入表会把读出来的状态提示成填进去的值。理由就地写在该表动画段的注释里；`tests/integration/itest_known_enums.cpp` 按属性类型对账，未改。
+9. **回写落点微调（两处提案未列、不改即漂移）**：`codespec/specification/04-widget.md` §3.3 的「收位是短滑动」与 `codespec/specification/08-tooling.md` 的 E2E 收敛表行都写着「自驱动 `tick_gestures`，不占 `Animator`」，各补一句「步长在消费点经 `scaled_frame_dt` 折算一次」并指向 §6.2，否则文档与代码口径相反。`codespec/GUIDELINE.md` §38.1 的「自驱动 `tick_gestures`，不占 `Animator`」一句就地补上折算口径（§29 经核对没有同类表述——其 Timeline 配方走 `Animator::tick` 主路径，故未改），并新增 §46 五段配方。`codespec/SPECIFICATIONS.md` 未动——本批不发明需求 ID。`codespec/manual-test/08-animation.md` §1.1 的「动画层（4 个公共头）」计数不变（本批未新增公共头，`tools/check/umbrella_manifest.txt` 与伞头同不动）；新增的 `tests/support/animation_fixture.h` 是夹具而非被测单元，不触发「一源文件对一 `utest_*` 与一 `demo_*`」约定。`examples/demos/demo_animation.cpp` 承载五组新舞台，`demo_dismissible.cpp` 未改（`DragToDismiss` 对外语义不变，复用既有舞台即可）。
+10. **变异自证有三档的实际转红集合与首稿预期不同，两处已同步改写、不留未兑现的预期**：M10（摘掉 `tick()` 入口清脏）不使 `animator_bindings_write_only_on_dirty_frames` 转红，转红的是 `controller_forward_ticks_to_completed` 与 `controller_reverse_reset_stop_semantics`；M12（收敛不经 `is_settled`）只使 `spring_animation_settle_time_follows_tolerance` 转红，`..._converges_then_settles_exactly_once` 因不断言收敛时长而不转红；M15（段曲线归末点）除判据 28 的两例之外还命中判据 31 的 `animator_keyframe_binding_applies_segment_curves`。判据行与「门禁与变异自证」的契约表按实测各改一遍，负向发现写明。另有九条判据（13/14/18/23/24/26/27/29/30）未单设变异档，理由记在「临时变异 → 实际转红」表后，不为凑数造无关变异。
+11. **人工用例与像素面按实申报为未取证**：`TC-ANIMATION-008` 至 `TC-ANIMATION-012` 未在真实窗口按人工步骤执行（其三、四节留空），观测量由单测的等价断言覆盖；本批不新增 golden，也不改渲染路径——「判据 12 的 golden 不破」以全量 ctest 的既有 golden 套件继续绿为证，不以新截图为证。冻结期「不再满帧唤醒」按帧请求计数取证，未测绝对 CPU 曲线。
+12. **实施中撞到两条文档口径缺口，回写落在 `codespec/ARCHITECTURE.md`（原「回写落点」未列）**：其一，`scroll_viewport.h` 不是 widget 单元头，其单测没有属性键 / schema 可对账，须明文排除出 §3.1 的「源—示例—测试 1:1」映射，否则下一批会为了凑齐 1:1 而给它造一个 demo；其二，`tools/include/known_enums.h` 的入表判据原先只散在该表注释里，现把「只读判别枚不入表」提为架构条目，与 `itest_known_enums.cpp` 的对账口径（只对账表内枚举 ↔ 属性类型，不查覆盖率）分开写明。
+13. **lint 整改排在变异自证之后，是保行为的改名与补括号**：`readability-identifier-naming` 的 31 条要求把本批新写的常量按本仓约定更名（`SpringAnimation::Payload` 的字段一并去掉尾下划线、与该家族既有的两份载荷同形），另有 4 条补显式括号与 3 条 demo 侧写法改写，均不改算式、不改控制流、不改任何公共签名。上一节的 22 档变异与 43 条转红实例是在更名前的树上取得的，本条记录该先后关系；更名的行为不变性由同一套 450 例复跑绿（见「重建与门禁」）承担，未重跑变异。公共形态一节所载的构造函数形参（`const State<double> &`）与 `set_range` / `target()` / `clock()` 三枚读点，以及载荷字段名 `elapsed`，是按落码后的头文件回填的——首稿此处写作「非拥有引用」并用了 `t_sim_` 一名，与实现不符处已就地改正而非留作偏离。
