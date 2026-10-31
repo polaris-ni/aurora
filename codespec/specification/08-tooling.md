@@ -336,7 +336,7 @@ server.stop();        // 停止并 join 工作线程
 
 ### 5.2 调试端点
 
-以下端点需先 `set_surface_getter`（除纯 JSON 状态类外）；所有 Surface / 树 / 全局状态读取经**主线程 marshal**（`marshal_get<T>` 复用 `aurora::detail::main_poster`，无事件循环时直接执行）后返回，与 `Surface` 的 main-thread-only 约束一致。
+以下端点需先 `set_surface_getter`（除纯 JSON 状态类外）；所有 Surface / 树 / 全局状态读取经**主线程 marshal**（`marshal_opt` / `marshal_json` 经进程级唯一队列 `MainQueue::try_post` 入队、阻塞等待值班循环执行）后返回，与 `Surface` 的 main-thread-only 约束一致。**无在岗循环时 `try_post` 拒入队、端点回 HTTP 503**（不做跨线程直读，也不静默就地执行）。
 
 | 方法 | 路径 | 返回 | 说明 |
 |:---|:---|:---|:---|

@@ -223,14 +223,14 @@ count.set(1);   // → effect 重跑
 | `with_timeout(d)` | 超过 `d` 未完成则向 `then` 回调投递 `async-timeout` 错误（`async.h`）。两条实现路径按线程池模式分流、语义一致：worker 池下看守是**可中断等待 `d` 的后台池任务**（进程退出时由线程池 `stop_` 信号提前唤醒，析构不再卡满超时窗口）；deferred（无 pthreads）下无线程可睡，只登记到期时刻，由 `Application::step_frame()` 帧尾扫描触发，等待中的宿主循环经该期限并入唤醒决策 |
 | `cancel()` | 取消结果投递（`async.h`）：置位后 `then` 回调不再被调，已登记的取消观察者在锁外恰触发一次。幂等——第二次调用既不重新置位也不再触发观察者 |
 | `on_cancel(hook)` | 登记取消观察者（`async.h`）：`cancel()` 置位那一刻在**调用线程**上同步触发一次。三条契约与 `net::Cancellation::on_cancel` 同构——只保留最后登记的一枚（传空即撤销）、至多触发一次、**登记时若已取消则在当前线程立即触发**（不留「登记即失效」的窗口）。观察者不得阻塞，也不得假设自己跑在哪条线程上。本入口把「取消」补成可订阅的事实，于是承接侧（一条在途连接、一份待归还的句柄）能在同一刻放手，不必轮询取消标志或等自己的超时 |
-| `set_main_poster(poster)` | 静态，安装跨线程投递器（`async.h`） |
+| `blocking_wait()` | 同步等待**结果本身**（`AsyncState` 就绪条件），不经投递通道、与值班 / 世代无关（`async.h`）。「打烊取消的是投递、不是结果」：持有句柄的等待者在循环打烊后照样取得 `Result<T>`；出生即取消的 Task 立即返回取消错误（不空等）。勿在循环内用它等 `then` 回调——那是投递语义，要排水才走 |
 
-**`then` 的回调默认在承载 `fn` 的线程池 worker 线程上同步执行**（未安装主线程投递器时直接调用 `fn`，供 headless / 测试；deferred 构建下「承载线程」就是宿主泵任务的线程，即 UI 主线程）；安装 `Task::set_main_poster`（或 `au::async` 的主线程投递器）后，回调才经投递器回到 UI（主）线程执行，此时方可直接更新 UI。安装者与帧循环唤醒的联动契约见 [`06-app-platform.md`](06-app-platform.md)。
+**发起需循环（值班者）在场**：`then` 的回调由进程级唯一队列 `MainQueue` 回投，**只在值班循环排水时于主线程执行**（见 [`01-core.md`](01-core.md) §8.2）。发起闸门三分：在岗 ⇒ 正常发起并捕获本世世代；打烊窗口（`loop_end` 收尾排空中）⇒ 出生即取消；其余无值班 ⇒ `on_contract_violation` 硬失败（FATAL + 默认 terminate，与线程局部 strict 无关）。落地晚于打烊或世代失配 ⇒ 打烊取消（丢弃并计数，ERROR 诊断），**绝不回退到承接 worker 线程就地执行**——那会让回调跨线程写 `State`。循环外要结果用 `Task::blocking_wait()`；取消只丢弃或改道投递，`fn` 仍在 worker 上跑完。
 
 ```cpp
-auto task = au::async([] { return fetch_from_network(); });
+auto task = au::async([] { return fetch_from_network(); });   // 须在值班循环内发起
 task.with_timeout(std::chrono::seconds(5))
-    .then([](const au::Result<Data> &r) {          // 安装主线程投递器后在 UI 线程（否则在 worker 线程）
+    .then([](const au::Result<Data> &r) {          // 由值班循环在主线程排水执行
         if (r) labels.set("loaded");
         else   au::Diagnostics::report(r.error().message, {}, r.error().code);
     });
@@ -244,7 +244,7 @@ task.with_timeout(std::chrono::seconds(5))
 
 | 符号 | 说明 | 位置 |
 |:---|:---|:---|
-| `co_async(fn)` | 返回 awaitable，`co_await` 在后台线程池执行 `fn`，续体经主线程投递器回到主线程 | `coroutine.h` |
+| `co_async(fn)` | 返回 awaitable，`co_await` 在后台线程池执行 `fn`，续体经 `MainQueue` 回投值班循环（首次 resume 捕获本世世代，打烊后失配即随循环终结） | `coroutine.h` |
 | `CoroTask<T>` | 协程返回类型 | `coroutine.h` |
 | `CoroTask<T>::on_done(hook)` | 登记完成观察者：帧收尾那一刻以协程的 `Result<T>` 触发一次，三条契约与 `Task<T>::on_cancel` 同构（最后登记的一枚生效、至多一次、登记时帧已收尾则当前线程立即触发）。本库的 promise 永不首挂也不终挂，帧只靠 `resume` 前进，收尾历来只有 `is_done()` 一条轮询问法——本入口把「结束即交付」补成订阅问法，适配层因此不必自带节拍。**`void` 特化不提供**：它能交出的只有「已结束」与一枚可选错误，而有值形态那条契约的载荷在这里没有对应物 | `coroutine.h` |
 | `launch(task)` | 启动顶层协程 | `coroutine.h` |
@@ -279,7 +279,7 @@ au::launch(load());
 | 到 `ReadOnlyState<ResourceSnapshot<T>>` 的隐式转换 | **别名**读句柄：与控制核共享所有权并指向同一来源，作业随读句柄保活并继续落定 |
 | `StreamResource<T>::open(opts = {})` | 打开等待写入的流槽位（初始 `Loading`） |
 | `StreamResource<T>::push(item, wire_bytes = 0)` | 写入端交付一条数据并计入在途批次；`wire_bytes` 供 `batch_bytes()` 累计，非线上流传 0 |
-| `StreamResource<T>::fail(err)` | 报错终止：丢弃未提交批次，状态进 `Failed`，已提交数据保留；终态之后的 `push()` 被丢弃（续用请另开一个流资源） |
+| `StreamResource<T>::fail(err)` | 报错终止：**在途未提交批先入账**（与 `flush` 的取批同判据：`Append` 追加、`Replace` 只留最新一条，`batch_bytes` 同上），再进 `Failed`——「已抵达的交付不因合批投递未落地而凭空蒸发」；已提交数据保留，终态之后的 `push()` 被丢弃（续用请另开一个流资源） |
 | `items()` / `batch_bytes()` | 已提交列表的只读引用（下一次提交后失效）/ 最近一次提交批次的累计线上字节数 |
 | `ResourceOptions` | `{ timeout = 30s, debounce = 0 }`；`timeout <= 0` = 不设超时。默认值在声明处可见（`SPEC.API.SENSIBLE-DEFAULTS.001`） |
 | `StreamOptions` | `{ policy = StreamPolicy::Append }`；`Append` 累计、`Replace` 只留最新一条 |
@@ -303,10 +303,10 @@ au::launch(load());
 - **一个资源 = 一个信号源**：阶段、值、错误打包成一份快照写进同一个 `State<...>`，一次落定只通知一次——三分支渲染必然同时读这三者，拆成三个信号只会让每次迁移多跑一轮重建；粒度因此收在「每个资源一个信号」，不同资源之间依旧互不牵连。Resource 与 Stream 的内部快照源显式禁用默认等值短路，以保留每次有效落定/批次的通知语义；下游 computed 可自行去重。
 - **读句柄保活控制核**：临时 Resource 转为 `ReadOnlyState` 后作业必须继续运行并落定；最后一个控制句柄、读投影、订阅持有或派生闭包中的资源持有者释放，才取消未完成作业。控件卸载仅在释放最后持有者时触发取消。控制核不得保存拥有自己的读句柄，完成回调保持弱引用。
 - **结果不串台**：每次发送推进一个代次（generation），完成回调只认自己那一代。`Task::cancel()` 只能让尚未投递的结果闭嘴，**已排进主线程队列的那次投递照样抵达**，故 `reload()` 之后前序作业的迟到结果由代次守卫丢弃，不覆盖新状态。快照通知在簿记锁外执行；回调中请求 reload/push/fail 等动作也遵守后续轮边界，候选提交须复核代次。`producer` 的锁内调用前置条件单独保留，不扩张为允许其重入本资源。
-- **帧内合并（流式）**：`push()` 只累加批次，并把「提交」经主线程投递器排队；队列排空前到达的全部交付合并成**一次**状态写入。故宿主卡顿期间的多次交付损失的是提交次数，不是数据——`batch_bytes()` 给出的是该批累计量，不是末条大小。
+- **帧内合并（流式）**：`push()` 只累加批次，并把「提交」经 `MainQueue` 排进值班循环；队列排空前到达的全部交付合并成**一次**状态写入。故宿主卡顿期间的多次交付损失的是提交次数，不是数据——`batch_bytes()` 给出的是该批累计量，不是末条大小。`fail()` 落终态时把在途未提交批**先入账再进 `Failed`**：旧实现「未提交批次丢弃」与排队提交合并，会让已抵达的交付在 EOF / 终态抢先时蒸发。
 - **默认值与通道复用**：默认 30 秒超时、0 去抖；`timeout` 复用 `Task<T>::with_timeout` 的两条分流（worker 池下是可中断等待 `d` 的池任务；deferred 下登记到期看守、由帧尾扫描触发），去抖延时的通道与之相同，精度口径同 §5.1。`from(Task)` 的 reload 重新等待同一作业，不先取消它；`from(producer)` 的 reload 取消前序并产出新作业。
 
-**必须先安装主线程投递器**（`Task<T>::set_main_poster`，真实事件循环已装）：状态写入发生在完成回调所在线程，未装投递器时回调在承接作业的 worker 线程直调，写 `State` 即违反「main-thread only」。deferred（无 pthreads）构建下承载线程就是宿主泵任务的线程，自装与否都不越约定。
+**发起须在值班循环内**：回投恒经进程级唯一队列 `MainQueue`，回调只在值班循环排水时于主线程执行，状态写入因此不越「main-thread only」。循环外无值班的发起是编程错误（硬失败），打烊窗口内发起出生即取消，落地晚于打烊则取消并计数——三条都不存在「回退到 worker 线程就地执行」。CLI / 单测等无 UI 场景由宿主自领租约并 `take_batch` 排水（`TestController` 即此形态），或改用 `Task<T>::blocking_wait()` 同步取结果。
 
 ```cpp
 auto request = au::Resource<std::string>::from(producer);
@@ -388,7 +388,16 @@ auto increment = [count] { count.update([](const int &old) { return old + 1; });
 
 > **口径补充（与 §5.1 同源，编号与上句文字一律保留）**：上句约束的是**作业体**，不是整条链路。取消同刻还经 `Task<T>::on_cancel` 外传给承接侧，故「绝不中断用户函数」与「取消把在途的对外作业掐停」并存——网络交付面（`net/http_binding.h`，见 [`06-app-platform.md`](06-app-platform.md) §8.8.30）就是这条外传的消费者。协程侧的对称入口是 `CoroTask<T>::on_done`（§5.2），它把「帧收尾」从轮询补成订阅。
 
-> 内存与所有权侧的所有权模型见 [`01-core.md`](01-core.md) §8.1（SPEC.QUALITY.CORE.MEMORY-SAFETY.001）；跨线程回投与帧循环唤醒见 [`06-app-platform.md`](06-app-platform.md)。
+**回投契约（值班口径，取代「无投递器则就地执行」）**
+
+- **发起需循环在场**：`au::async` / `Task<T>::then` 只在有值班循环时正常发起，并捕获本世世代；循环外的发起是编程错误，经 `on_contract_violation` 硬失败（与线程局部 strict 无关，worker 线程上的违规同样被拦）。
+- **落地晚于打烊 = 取消**：完成回调若在循环打烊后抵达或世代失配，不投递、不 terminate，记 ERROR 诊断并计入 `MainQueue::dropped_count()`。协程 resume 同形：`try_post(epoch)` 失败即协程随打烊终结。
+- **就地回退废除**：已删除进程级投递器槽与 `Task<T>::set_main_poster`；不存在「未装投递器就在承接 worker 线程同步执行」的路径，跨线程写 `State` 从机制上不可达。
+- **循环外取结果的出口**：`Task<T>::blocking_wait()` 同步等待结果本身，不经投递、与值班 / 世代无关；出生即取消的 Task 立即返回取消错误。
+
+**流式资源的终态口径**：`StreamResource<T>::fail()` 在进 `Failed` 之前把**在途未提交批先入账**（`Append` 追加 / `Replace` 只留最新一条，与 flush 同判据，`batch_bytes` 同口径）——已抵达的交付不因合批投递尚未落地而蒸发；终态之后 `push()` 丢弃。
+
+> 内存与所有权侧的所有权模型见 [`01-core.md`](01-core.md) §8.1（SPEC.QUALITY.CORE.MEMORY-SAFETY.001）；队列与值班租约的机制面（`MainQueue`、`Lease`、`closing_scope`）见 [`01-core.md`](01-core.md) §8.2；帧循环的领牌 / 还牌时序见 [`06-app-platform.md`](06-app-platform.md) §3。
 
 ### 7.3 SPEC.FEAT.NET.DECLARATIVE-BINDING.001 异步结果三态响应式绑定
 
@@ -400,7 +409,7 @@ auto increment = [count] { count.update([](const int &old) { return old + 1; });
 
 **验收标准：** ① 一次落定只通知一份快照、只通知一次；② `reload()` 取消前序作业，且其迟到结果不覆盖新状态（含通知内重入 reload）；③ 宿主析构后抵达的回调被丢弃，无悬垂访问；临时资源转 `ReadOnlyState` 后仍能落定，释放最后持有者才取消；④ `StreamResource` 的 `Append` / `Replace` 两策略与帧内合并批次（`batch_bytes()` 为累计量）；⑤ 快照字段符合 §5.4 的有效性表（重发保留旧值、Failed 清空 value）；⑥ 默认超时 30 s、`reload()` 不去抖，默认值在声明处可见。单测见 `tests/unit/utest_state_resource.cpp`。
 
-**约束：** 状态写入限主线程（须先装主线程投递器）；取消只改结果的投递去向，不中断作业体（作业体之外那一半见 §5.1 的口径补充：来源登记了 `on_cancel` 时，取消同时掐停来源的在途作业——HTTP 交付面即如此，判据在 `tests/unit/utest_net_http_binding.cpp`）；去抖与超时复用 `Task<T>` 的既有通道，精度口径随其构建模式（见 §5.1）。**持续态事实不进这三态容器**：`Resource` / `StreamResource` 折算的是「一次作业的落定」，而链路态（[`06-app-platform.md`](06-app-platform.md) §8.8.41）没有落定时刻、也不由本容器驱动——宿主在 `ConnectivityMonitor::subscribe()` 的回调里写自己的 store（回调已回投主线程），故 `state/` 仍不认识网络。
+**约束：** 状态写入限主线程（发起须在值班循环在场，回投经 `MainQueue`）；取消只改结果的投递去向，不中断作业体（作业体之外那一半见 §5.1 的口径补充：来源登记了 `on_cancel` 时，取消同时掐停来源的在途作业——HTTP 交付面即如此，判据在 `tests/unit/utest_net_http_binding.cpp`）；去抖与超时复用 `Task<T>` 的既有通道，精度口径随其构建模式（见 §5.1）。**持续态事实不进这三态容器**：`Resource` / `StreamResource` 折算的是「一次作业的落定」，而链路态（[`06-app-platform.md`](06-app-platform.md) §8.8.41）没有落定时刻、也不由本容器驱动——宿主在 `ConnectivityMonitor::subscribe()` 的回调里写自己的 store（回调已回投主线程），故 `state/` 仍不认识网络。
 
 ---
 

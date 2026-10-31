@@ -402,6 +402,28 @@ auto node = au::find_node_by_path(root, path);  // widget/inspect.h，位于 aur
 
 > 异步 API 契约（`au::async`、`Task<T>::then`、`co_async`、`CoroTask<T>`、`launch`）见 [`02-state.md`](02-state.md) §5；定时与周期任务由 `Scheduler` / `Timer` 承担，见 [`06-app-platform.md`](06-app-platform.md)。
 
+**主线程队列与值班租约**（`core/main_queue.h` 的 `MainQueue`，不变量）
+
+跨线程回投只有一个进程级队列：全静态门面，队列、值班位、世代计数与唤醒通道同址同锁，「投进谁家队列」与「叫谁起床」不再由安装者决定。消费权经 `on_duty(wake)` 领取 RAII 租约 `Lease`；同一时刻至多一个循环在岗，CAS 只拒**并发**（归还后重入的循环可再次领取，覆盖 WASM `raf_tick` 后重跑 `run()` 的形态）。
+
+- **世代号**：`on_duty` 成功时单调分配（自 1 起，永不重置 / 复用 / 回退）。`current_epoch()` 是值班世代的全函数——在岗返回当前世代号，否则恒为 `0`；`has_on_duty()` 只是该式的可读别名，判据单源。接受判据（与入队原子）：`current_epoch() != 0 && (expected_epoch == 0 || expected_epoch == current_epoch())`。三条推论：打烊期一切投递（含代际无关的网络 / 协程）拒绝；重入 run 领到更大的新世代 ⇒ 上一世在途任务拒绝；同世在途任务放行。`expected_epoch == 0` 是「代际无关」哨兵，发起时捕获世代的追踪任务恒为 ≥1。
+- **两相失败**：**发起时**（`au::async` / `Task<T>::then`）按时间相三分——在岗 ⇒ 正常发起并捕获本世世代；打烊窗口（`is_closing()`）⇒ **出生即取消**（不排工，立即返回 `is_cancelled()` 的 Task，`then` 恒不执行、`on_cancel` 登记即触发）；其余无值班 ⇒ 纯编程错误，经 `on_contract_violation` 硬失败（FATAL 日志 + 默认 terminate，与线程局部 strict 开关无关，故 worker 线程上的违规同样被拦）。**落地时**（`MainQueue::post` / `try_post`）无值班或世代失配 ⇒ 合法生命周期事实：不投递、不 terminate，记 ERROR 诊断并累加 `dropped_count()`；`post` 返回 void（失败无可行动作），契约边界需要失败知识处走 `try_post`（返回 false，且不触发失败处理器）。**不存在「空槽就地执行」的回退**——旧语义会让回调在 worker 线程写 `State`，正是本机制要根除的跨线程写入。
+- **时序纪律**：`loop_end` 先 `Lease::release()`（世代归 0），再以 `MainQueue::closing_scope()` 守卫罩住 `take_batch()` 的收尾排空，守卫析构即关窗。`closing` 必须**有界**：绝不延到下次 `on_duty` 才清，否则「循环结束后仍发起异步」会被弱化成静默取消而丢掉 fail-fast。`take_batch()` 不要求值班在手（收尾排空专用），捞完后队列不可能再被写入。
+- **唤醒与等待决策**：`wake` 在投递者线程的锁外调用，只负责打断值班者的 `wait_events`；`has_pending()` 供帧末等待决策（有待办即不深睡）。唤醒方式由上岗者注入，`core` 不认识 `Application`。
+
+```cpp
+const auto lease = aurora::MainQueue::on_duty([this] { request_wake_all(); });
+if (!lease) { /* 并发 run：硬失败，见 on_contract_violation */ }
+// ... 帧循环：MainQueue::take_batch() 逐个执行 ...
+lease->release();
+{
+    const auto closing = aurora::MainQueue::closing_scope();  // 收尾排空窗口
+    drain_posted();
+}
+```
+
+**验收标准：** `utest_main_queue` 覆盖租约互不冒卸与归还后重领、`release()` 前入队项必被收尾捞全、世代失配落地不 terminate、`try_post` 两种失败均返回 false、epoch 全函数与重入世代防线、打烊窗口发起二分；`utest_async` / `utest_coroutine` / `utest_state_resource` 以 `Lease` + `take_batch` 替身迁移后全绿。
+
 ### 8.3 SPEC.QUALITY.CORE.GRACEFUL-DEGRADATION.001 错误恢复与降级渲染
 
 **核心目标：** AI 生成的错误 UI 不会崩溃。

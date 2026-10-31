@@ -308,7 +308,7 @@ drain_posted → pump_all_once → on_frame → 逐宿主 tick → 共享 anim/s
 - **等待聚合**：每帧只等待一次，取各宿主 `decide_wait` 与最近超时看守期限的**最小正值**（任一为 `0` 则不等待；全为「无限」才无限等待）。优先交由 `waits_thread_queue()==true` 的后端（Win32/GLFW）执行；无此类后端时（X11/Wayland）封顶 8ms 轮询，避免其余窗口饥饿。
 - **回收时机**：`reap_closed()` 在**帧末**执行（不在事件派发栈内销毁宿主），并保留最后一个宿主，使 `scene()`/`window()` 等访问器在 `run()` 结束后仍可用。
 - **帧尾兜底推进 `pump_deferred_work()`**（`reap_closed` 之后、`wait_once` 之前）：排空 deferred `ThreadPool` 队列 + 扫描 `with_timeout` 到期看守。**两步同挂帧循环而非上屏路径**是刻意的——空闲帧被脏区决策整段跳过就没有 `present()`，挂那里等于把续体与超时一起饿死（同 WASM ARIA 桥自驱拍的教训）。有后台线程的构建下二者恒为空操作。
-- **跨线程回投**：`Task::set_main_poster` 唤醒**全部**窗口的等待通道，避免回投工作只唤醒其中一个窗口而延迟执行。
+- **跨线程回投**：`Application::loop_begin` 领取进程级唯一队列的前台租约（`MainQueue::on_duty`，唤醒体 `request_wake_all` 唤醒**全部**窗口的等待通道，避免回投工作只唤醒其中一个窗口而延迟执行）；帧首 `drain_posted` 以 `take_batch` 排水。队列、值班与两相失败契约见 [`01-core.md`](01-core.md) §8.2。
 
 **帧统计归属**：单窗口刻意保留写入进程级单例 `FrameStats::instance()`（既有 `PerfOverlay`、基准工具与性能集成测试直读之，行为零变化）；登记第二个窗口起，各宿主切到自有实例（`WindowHost::own_frame_stats()`）。`PerfOverlay` 经 `Application::set_overlay` 自动绑定到主窗口统计，其他窗口的叠加层请显式 `bind_frame_stats(&host->frame_stats())`。
 
@@ -318,11 +318,11 @@ drain_posted → pump_all_once → on_frame → 逐宿主 tick → 共享 anim/s
 
 ### 3.1 帧循环
 
-帧循环由 **`Application::run()` 统一驱动**（多窗口语义见 §2.4）：每帧 pump 平台事件 → 集中排空异步结果（通知激活 / 热键命中 / 系统拖放终结与在途读取，见下）→ 集中派发 → `tick` → 逐窗口 `present_root`（脏区决策）→ `present()`。`Window::run(on_frame, max_frames)` **保留**供单窗口低阶调用方（自拼帧循环、测试、demo 直驱）使用；多窗口请走 `Application::run`。所有构建、事件、重绘都在 UI 线程（单线程 UI，见 [`01-core.md`](01-core.md) §8.1）。
+帧循环由 **`Application::run()` 统一驱动**（多窗口语义见 §2.4）：每帧 pump 平台事件 → 集中排空异步结果（通知激活 / 热键命中 / 系统拖放终结与在途读取，见下）→ 集中派发 → `tick` → 逐窗口 `present_root`（脏区决策）→ `present()`。**`Window` 不再自带帧循环**：`Window::run`、其自带 `RunQueue`、`next_wait_ms_` / `set_next_wait(double)` 已随进程级唯一队列的引入而删除；单窗口低阶调用方（demo、集成与单测）同样迁移到 `Application` 驱动，不再存在两套帧序。所有构建、事件、重绘都在 UI 线程（单线程 UI，见 [`01-core.md`](01-core.md) §8.1）。
 
-> ⚠ **`Window::run` 不含「逐宿主 tick」这一步**：`Widget::tick`（长按阈值、甩动惯性、`VideoPlayer` 播放时钟等一切每帧计时）只在 `Application::run` 的帧序里被驱动。低阶自拼循环若承载这类控件，须在 `on_frame` 回调内自行 `root.widget().tick(now)`，并把帧等待的 `anim_active` 取作「本帧实际发生了渲染」（`!Window::is_idle_frame()`），否则控件恒停在首帧、且首帧后即陷入无限深睡。`examples/demos/demo_common.h` 的 `run_demo` 已按此接线。
+> `Application` 的帧序是唯一驱动面：`Widget::tick`（长按阈值、甩动惯性、`VideoPlayer` 播放时钟等每帧计时）与 `system_drag::pump_reads()` 都在其中，迁移后的低阶调用方无需再自行补这两步。`examples/demos/demo_common.h` 的 `run_demo` 已按 `Application` 驱动接线。值班租约的领取 / 归还时序见 §3.3。
 
-**异步结果排空点（帧内兑现通则）**：三类异步结果在同一时点集中排空——平台事件抽取之后、`on_frame` 回调之前：通知激活（`NotificationCenter::pump_events()`）、热键命中（`OsHotkeyRegistry::drain_pending()`）、系统拖放的终结回调与在途读取（`system_drag::pump_reads()`，契约见 §8.9）。通则：**异步结果在帧内排空兑现、不在平台消息泵内同步回调**——回调可能重建页面 / 触发重排，在消息泵内重入会把布局与绘制切到半途的状态（热键与通知激活两条既有路径同此，本批把系统拖放并入同一时点）。宿主不调用对应排空入口 ⇒ 回调不到，库**不谎报**成功（与 `NotificationCenter` 既有口径一致）。⚠ **`Window::run` 低阶路径不含拖放排空这一步**：自拼帧循环若承载拖出会话或 `read_async` 在途读取，须每帧自行调用 `system_drag::pump_reads()`（无在途项时近零开销），否则终态与读取结果永远不到；`Application::run` 已含此步。
+**异步结果排空点（帧内兑现通则）**：三类异步结果在同一时点集中排空——平台事件抽取之后、`on_frame` 回调之前：通知激活（`NotificationCenter::pump_events()`）、热键命中（`OsHotkeyRegistry::drain_pending()`）、系统拖放的终结回调与在途读取（`system_drag::pump_reads()`，契约见 §8.9）。通则：**异步结果在帧内排空兑现、不在平台消息泵内同步回调**——回调可能重建页面 / 触发重排，在消息泵内重入会把布局与绘制切到半途的状态（热键与通知激活两条既有路径同此，本批把系统拖放并入同一时点）。宿主不调用对应排空入口 ⇒ 回调不到，库**不谎报**成功（与 `NotificationCenter` 既有口径一致）。⚠ **自拼帧循环不含这一步**：不经 `Application::run` 而自行驱动的低阶循环若承载拖出会话或 `read_async` 在途读取，须每帧自行调用 `system_drag::pump_reads()`（无在途项时近零开销），否则终态与读取结果永远不到；`Application::run` 已含此步。
 
 ### 3.2 脏区追踪（默认开启）
 
@@ -353,7 +353,7 @@ drain_posted → pump_all_once → on_frame → 逐宿主 tick → 共享 anim/s
 
 ### 3.3 事件驱动帧节流
 
-`Application::run` / `Window::run` 采用「事件驱动 + 帧节流」：静态界面空闲时不忙轮询，CPU 占用趋近 0。
+`Application::run` 采用「事件驱动 + 帧节流」：静态界面空闲时不忙轮询，CPU 占用趋近 0。
 
 **决策纯函数**：
 
@@ -373,11 +373,16 @@ compute_wait_timeout(has_dirty, anim_active, next_deadline_ms, frame_budget_ms, 
 
 **`WindowOptions` 相关字段**：`int max_fps = 60`（活跃帧帧率上限，`0` = 不限）、`bool power_saving = true`（idle 阻塞等待；`false` = 忙轮询旧行为）、`RendererPreference renderer = Auto`。
 
-**`Window` 新增**：`has_pending_dirty()`、`set_next_wait(double)`；`run` 在帧末 `wait_events` 阻塞（一次性消费，未设则不等）。
+**`Window` 保留** `has_pending_dirty()`；`set_next_wait(double)` 与 `next_wait_ms_` 随 `Window::run` 一并删除——帧末等待由 `Application` 的 `wait_once` 按宿主 `decide_wait` 与看守期限聚合决策。
 
 **`Animator::has_active()`** 与 **`Scheduler::next_deadline_ms()`** 供决策判断活跃动画与最近定时任务到期。
 
-**跨线程回投**：`Application::run` 安装 `Task::set_main_poster`；`au::async` 的 `then` 回调入队 + `request_wake()` 唤醒主循环，下一帧开头主线程排水执行。单线程 UI 不变；无运行循环时在完成线程直接调用。
+**值班租约与帧循环时序**（`loop_begin` / `loop_end`，机制面见 [`01-core.md`](01-core.md) §8.2）：
+
+- **领牌**：`loop_begin` 调 `MainQueue::on_duty([this]{ request_wake_all(); })` 领取前台租约；`nullopt` ⇒ 已有循环在岗 ⇒ **拒绝并发 run**（多实例允许、并发 run 不允许），经 `on_contract_violation` 硬失败并携带前值班者的世代号。
+- **还牌与收尾**：`loop_end` 先 `Lease::release()`（世代归 0），再以 `MainQueue::closing_scope()` 守卫罩住 `drain_posted()` 收尾排空，守卫析构即关窗。收尾期无值班，一切投递拒绝（队列只减不增，一次捞即净）；收尾中的续体链式发起 `async()` 走「出生即取消」，守卫之后的无值班发起回到硬失败。
+- **重领**：租约归还后槽位可再次领取（WASM 的 `run()` 移交 rAF、末帧 `raf_tick` 调 `loop_end`，JS 侧再次 `run()` 会重新 `loop_begin` 领到**更大的新世代**）；CAS 只拒并发、不拒复用。
+- **模态共享同一队列**：`run_modal` 不再做 prev / restore 快照——外层 `run()` 在岗时复用其租约，外层无循环时自领一枚并在退出时按 `loop_end` 同口径收尾；`step_frame` 经 `take_batch` 排水照常。
 
 **`FrameStats` 观测**：`record_wait(double)`、`wakeup_count()`、`wakeups_per_sec()`、`sleep_ratio()`。停帧状态：`record_idle(double dt)`（累加空闲时长）、`is_stale()` / `stale_duration_ms()`（详见 `ARCHITECTURE.md` §10.1 的停帧陈旧语义）。
 
@@ -585,15 +590,15 @@ app.set_on_os_color_scheme([](au::ColorScheme s) { apply_chrome_scheme(s); });
 
 **macOS 桥（NSAccessibility）。** 实现为 `src/aurora/window/detail/macos_ax_bridge.{h,cpp}` 的 `MacOSAxBridge : a11y::Provider`，由 `MacOSSurface::Impl` 唯一持有。平台查询入口不是窗口消息 / D-Bus，而是内容视图的无障碍协议：视图 `isAccessibilityElement` 回 NO、`accessibilityRole` 为 group，`accessibilityChildren` / `accessibilityHitTest:` / `accessibilityFocusedUIElement` 转发给桥（首个查询到达时才构造桥并 `activate()`，同时补喂宿主早已记下的根——与 Win32 的惰性口径同形）。查询即 `sync_if_dirty()`：语义树 → 快照 → `NSAccessibilityElement` 元素树，元素按 `runtime_id` 复用、字段按值持副本（根销毁经 `on_widget_destroying` 立即切断，控件树不在时不会留下悬垂指针），帧经内容视图 `convertRect:toView:` + `convertRectToScreen:` 换成屏幕点。反向动作按节点 id 回控件：`accessibilityPerformPress` 取 Invoke → Click → Toggle 首个可用者、`accessibilityPerformIncrement/Decrement` 以 `range.step` 步进并夹在 `[min,max]` 后走 `Value`、`setAccessibilityFocused:` 走 `Focus`。推送面 = 快照 diff 的另一种消费：焦点 → `FocusedUIElementChanged`、Name → `TitleChanged`、Value/Range → `ValueChanged`、结构 / 几何 / 状态 / 动作变化合并一条视图级 `LayoutChanged`，播报 → `AnnouncementRequested`（带 `NSAccessibilityAnnouncementKey` 与 medium 优先级）。拆除：`destroy_window` 先 `deactivate()`（注销注册表、清元素与快照）再放视图；`set_root` 恒置脏（帧是元素属性，布局每帧可动，这一点与 UIA 的「仅换根置脏」不同）。AppKit 无障碍查询本就只在主线程，故无 Win32 那套跨线程回投面。
 
-**线程模型（provider 回调一律回投主人线程）。** UIA 把 in-proc provider 的**每一次**回调投递在 `UIAutomationCore.dll` 的 COM/RPC 线程上（激活时初始化 STA 套间只保证公寓模型，并不保证那就是 UI 线程），而 widget 树、`snap_`、`id_by_widget_`、`providers_` 只属于**主人线程**（= 构造桥并安装 `main_poster` 帧循环的那条）。故 `Win32UiaBridge` 把访问面劈成两半：
+**线程模型（provider 回调一律回投主人线程）。** UIA 把 in-proc provider 的**每一次**回调投递在 `UIAutomationCore.dll` 的 COM/RPC 线程上（激活时初始化 STA 套间只保证公寓模型，并不保证那就是 UI 线程），而 widget 树、`snap_`、`id_by_widget_`、`providers_` 只属于**主人线程**（= 持有 `MainQueue` 值班租约的帧循环那条）。故 `Win32UiaBridge` 把访问面劈成两半：
 
 - **回投 + 按值副本**（provider 侧唯可用形）：`eval_on_main` / `eval_widget_on_main` 派生出的 `snapshot_copy`（属性与几何读的都是副本）、`navigate_target`、`has_scrollable_ancestor`、`hit_test_id`、`focused_id`、`visible_box`、`provider_for`、`root_provider`，以及全部动作（`Invoke` / `Toggle` / `SetValue` / `Scroll` / `ScrollIntoView` / `SetFocus`）与文本面（`ITextRangeProvider` / `ITextProvider` 的每次 `accessibility_text` / `accessibility_char_bounds` / 选区读写）。跨线程只传值，悬垂读由构造排除。
 - **主人线程裸口**（provider 侧禁用）：`sync_if_dirty` / `rebuild` / `find_node` / `snapshot()` / `id_of` / `mark_dirty` / `queue_*`。拉取式重建会整体换掉 `snap_`，任何指向它的指针出不了主人线程。
-- **就地执行的两条合法路径**（都不入队、不等待，代价与回投改造之前一致）：调用线程本就是主人线程（`WM_GETOBJECT`、帧循环、`UiaDisconnectProvider` 的同步重入），或进程级 `main_poster` 未安装（无头 / 单测，与 `Task::post_to_main` 的无回投器回退同语义）。
+- **就地执行的唯一合法路径**：调用线程本就是主人线程（`WM_GETOBJECT`、帧循环、`UiaDisconnectProvider` 的同步重入），不入队、不等待。非主人线程一律走 `MainQueue::try_post`——无值班（无头 / 已打烊）即返回 false、以零值 `R{}` 收场并映射 `UIA_E_ELEMENTNOTAVAILABLE`，**不再有「槽为空就地执行」的第二条回退**。
 - **限时等待 + 降级**：读路径预算 `AURORA_UI_READ_TIMEOUT_MS`（250ms）、动作路径 `AURORA_UI_ACTION_TIMEOUT_MS`（500ms），显著小于读屏客户端自身的秒级超时。超时即返回零值，provider 侧映射为 `UIA_E_ELEMENTNOTAVAILABLE`；「控件没有这项语义」仍回 `UIA_E_NOTSUPPORTED`，两者是不同判据，故回投结果用三态承载而非单一 `optional`。超时路径**刻意不打诊断**（`Diagnostics` 的收集器是主人线程专属），可观测性由客户端看到的错误码承担。
 - **两道闸**（队列项真正执行前逐条过）：`abandoned` —— 调用方已超时返回，则晚到的项绝不补做用户动作（Invoke/SetValue 不能事后发生）；`alive_` —— 桥已析构，则闭包绝不解引用本桥。`wait_on_main` 入队后只碰局部的 promise/future，不再访问 `this`，故桥与等待方是两条独立时间线。`rtl_` 与 `listener_count_` 因 RPC 线程也会读/写而改为原子量。
 
-回归面见 `tests/unit/utest_win32_ua_marshal`（换线程执行 / 两条就地路径 / 超时零值且丢弃晚到项 / 桥析构丢弃在途项 / provider 读经回投）。
+回归面见 `tests/unit/utest_win32_ua_marshal`（换线程执行 / 主人线程就地路径 / 无值班 `try_post` 返回零值并映射 `UIA_E_ELEMENTNOTAVAILABLE` / 超时零值且丢弃晚到项 / 桥析构丢弃在途项 / provider 读经回投）。
 
 **滚动量 → UIA `IScrollProvider` 映射（公式单一真源）。** `get_VerticalViewSize` 的 UIA 语义是「可见内容占全部内容的百分比」，唯一真源是平台中立纯函数 `core::compute_vertical_view_size(range)`（`range.viewport / range.content × 100`，夹到 `[0,100]`）；`content <= 0` 或 `viewport <= 0` 即「无内容/无视口」报 100；无任何滚动语义的控件由桥侧直接报 100（恒「全部可见」，不反推 span）。两量 `viewport`/`content` 由 `Widget::accessibility_scroll()` 的覆写方填：纵向语义下 `viewport` = 视口高、`content` = 内容总高。`LazyRow` 等横轴专用控件纵轴不可滚，报 `viewport = content` ⇒ 纵轴 100% 可见。`min`/`max`/`position` 仅用于滚动位置（`get_VerticalScrollPercent`），与 `VerticalViewSize` 的「占比」语义相互独立——`content - viewport != max - min` 时仍按 `viewport/content` 算得有几何意义的百分比。此前的反向缺陷（`max/(max+1)×100` 把「可滚跨度」误当「可见占比」，内容越大反而越接近 100%）已修复，验证见 `utest_accessibility` 的 `vertical_view_size_*` 三例 + `utest_scroll` / `utest_lazy_list` 各一例（三平台全绿，变异自证：仅把公式换回 `max/(max+1)` ⇒ 占比判据转红）。
 
@@ -1032,14 +1037,14 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 
 网络栈 L0 宿主集成层的通用就绪通知底座（`include/aurora/app/event_source_registry.h` + `src/aurora/app/event_source_registry.cpp`）：把「一个可等待句柄 + 就绪回调」汇成一张待等待表，供第三方非阻塞会话（libssh2、DBus 一类）与库自带的 poll 线程引擎共同复用。**缺省驱动方是 §8.8.4 的常驻引擎线程**（本库各平台腿的统一形态）；自带等待集的宿主调 `set_host_driven(true)` 接管，引擎随即只等自己的唤醒通道。提案  §2 的逐平台并入点与 §18 定案 1 的竞态契约仍然有效，但**仓内宿主不再各自并入**（理由见 §8.8.5 与提案 §16 第 12 项）。
 
-- **平台无关且位于 `net/` 之下**：本 `.cpp` 不出现任何平台 socket/poll 头（`winsock2.h`/`poll.h` 唯一落点仍是 `src/aurora/net/socket.cpp`，不变量不破）。真正的「阻塞直到某些句柄就绪」经三枚可注入接缝表达——`set_poller(Poller)`（等待实现，由 net 引擎层或测试安装）、`set_dispatcher(Dispatcher)`（主线程投递实现，缺省为就地同步执行，与 `post_to_main` 无 poster 时的口径一致）、`set_change_notify(ChangeNotify)`（表变动与驱动方转变的通知，归常驻等待方独占，判据见 §8.8.4 投递纪律 ②）。自带等待集的宿主不装 `Poller`、改走 `sources()` 取快照 + `dispatch(ready)` 投递。无 fd 语义的腿（wasm）在**构造期**把 `event_source_supported()` 置假（编译期事实只落一处，公共头维持零 `#ifdef`），此后 `register_source` 一律回 `net-platform-unavailable`，`wait_and_dispatch` 在未装 Poller 时同码，均**不忙等、不假降级**。
+- **平台无关且位于 `net/` 之下**：本 `.cpp` 不出现任何平台 socket/poll 头（`winsock2.h`/`poll.h` 唯一落点仍是 `src/aurora/net/socket.cpp`，不变量不破）。真正的「阻塞直到某些句柄就绪」经三枚可注入接缝表达——`set_poller(Poller)`（等待实现，由 net 引擎层或测试安装）、`set_dispatcher(Dispatcher)`（主线程投递实现，缺省为就地同步执行——这是本接缝的显式缺省，宿主要「回主线程」语义须装 `MainQueue::post` 形态；库内引擎即如此）、`set_change_notify(ChangeNotify)`（表变动与驱动方转变的通知，归常驻等待方独占，判据见 §8.8.4 投递纪律 ②）。自带等待集的宿主不装 `Poller`、改走 `sources()` 取快照 + `dispatch(ready)` 投递。无 fd 语义的腿（wasm）在**构造期**把 `event_source_supported()` 置假（编译期事实只落一处，公共头维持零 `#ifdef`），此后 `register_source` 一律回 `net-platform-unavailable`，`wait_and_dispatch` 在未装 Poller 时同码，均**不忙等、不假降级**。
 - **句柄生命周期与三条竞态契约（§18-1，规范性）**：`register_source` 返回 move-only RAII 句柄 `EventSourceRegistration`，析构即注销且**幂等**、移动后源转空态、其析构不再触发二次注销。注销语义 = **停止产生新回调**：`dispatch` 在锁内只快照待投递闭包（`shared_ptr` 按值捕获令条目独立于注册表存活），**释放锁后**才逐个投递——因此已进入 `Dispatcher` 队列的一次尾批仍会抵达一次（回调载荷须由使用方以弱令牌保护宿主），但此后新的 `dispatch` 不再为该令牌产生回调。需连尾批一起作废另用 `cancel_pending()`（置条目的 `cancelled` 原子位），该调用与析构**互不隐含**：前者只作废尾批、不影响后续投递；后者只移除快照条目、不作废已入队尾批。回调内可安全再注册/注销（投递在锁外）。
 - **令牌关联**：同 `handle` 可多次登记、各自持独立令牌与回调（`next_token()` 单调、从 1 起、0 留空态）；宿主等待回来后按令牌回填 `ReadySource`，注销后重登记取新令牌、旧令牌的迟到就绪不会误触发新条目回调。
 - **进程级单例刻意不析构**：本表的存续期必须覆盖**整个静态析构阶段**。常驻引擎先构造完自己、再在 `ensure_started()` 里首次触到本表，按「构造完成逆序析构」的口径本表反而先死，而 `~PollEngine` 在退出路径上收敛线程时要经 `set_change_notify` 回收接缝——给一枚已析构的 `mutex` 加锁即未定义行为（MinGW 腿实测为退出时段错误）。表里只有 `std::function` 与计数，没有任何需要归还给操作系统的资源，故泄漏没有代价；把正确性寄托在「谁先被碰到」上才有代价。
 - 错误码：复用 `net-platform-unavailable`（本次新增，`retryable = false`；`hint` 指向 `Engine::capabilities()` 查询与能力矩阵）。
 - 回归：`utest_app_event_source_registry`（有效句柄与 `-1`/不支持腿的拒绝、就绪回调「抵达次数 == 就绪次数」、原生宿主无 Poller 走 `sources()`/`dispatch()` 的通路、`unregister` 与 `cancel_pending` 在排程 Dispatcher 下的尾批分岔、移动不双重注销、同句柄重登记取新令牌、`host_driven` 两次转变都通知常驻方）。引擎侧的互斥落地判据见 §8.8.4 的 `utest_net_engine`。
 
-**逐平台等待集并入 = 宿主可选项，仓内宿主一律走引擎线程**（裁决与理由见 §8.8.5；提案 §16 第 12 项）：本注册口对外提供的就是这条可选项——自带循环的宿主（含嵌入本库的第三方事件循环）装 `set_host_driven(true)` 后自行 `sources()`/`dispatch()`，其余腿由常驻引擎驱动，回调一律经主线程投递器回到 UI 线程。
+**逐平台等待集并入 = 宿主可选项，仓内宿主一律走引擎线程**（裁决与理由见 §8.8.5；提案 §16 第 12 项）：本注册口对外提供的就是这条可选项——自带循环的宿主（含嵌入本库的第三方事件循环）装 `set_host_driven(true)` 后自行 `sources()`/`dispatch()`，其余腿由常驻引擎驱动，回调一律经 `MainQueue` 回到值班循环。
 
 #### 8.8.3 事件驱动就绪基元（`aurora::net::wait_ready`，底座）
 
@@ -1063,7 +1068,7 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 - **`Engine` 是引擎的公共面**：`instance()` / `name()` / `capabilities()` / `post()` / `post_after()` / `running()` / `shutdown()`。`name()` 回报实现名（自带引擎 `"poll"`、无 fd 语义腿 `"none"`），供 Inspector 与日志区分。查询能力**不**拉起线程；惰性启动的触发者是 `post` / `post_after`（§2「随首个需要它的对象惰性启动」）。
 - **循环节奏**：「跑已到期任务 → 快照 `sources()` → `wait_ready` → 交回 `dispatch()`」，一条线程承载任务队列与到期定时器，不为定时器另起线程。等待窗口 = `min(最早到期定时, 空闲上限 200ms)` 且**下限 1ms**（不忙等；200ms 只是「唤醒通知丢失」的延迟上界，正常路径由唤醒通道即时打断）。
 - **唤醒通道刻意不引入新平台代码**：它是一对**回环 TCP 流**（`blocking::Listener::listen_loopback` + `blocking::StreamSocket::connect_loopback` + `accept`），两平台的 poll 族都认得 socket 句柄，因此 `engine.cpp` 不出现 `poll.h` / `winsock2.h`——「平台 socket 头唯一落点是 `src/aurora/net/socket.cpp`」不变量继续成立。单轮只读一块（8 字节）且不计数：读只在 `POLLIN` 报可读后发生，故必不阻塞；残余字节让下一轮立刻返回可读。引擎另持一成员 `detail::Session`，随自身生命周期收敛运行时引用（§8.8.16 的归属 ②）。
-- **投递纪律（三条，规范性）**：① `Dispatcher` 只在宿主未装时补 `aurora::detail::post_to_main` 形态（与 `Task<T>::set_main_poster` 同一条投递器，§1 不变量），宿主已装则不改；② `ChangeNotify` 归常驻等待方（即本引擎），登记与**注销**都要通知——注销后宿主随即关闭句柄，滞留快照会让下一次系统调用撞上无效句柄；③ **一条事件源只由一个驱动方等待**：常驻引擎循环与宿主自带等待集互斥，同时启用会让一次就绪投递两次。开关就是注册口的 `set_host_driven(bool)`（缺省假 = 引擎驱动），引擎每轮等待都读它，置真即让位、置回假即接管，两种转变都经 ② 的通知立刻生效，不必等一个等待窗口或先 `shutdown()`。本库各平台腿缺省全部走引擎驱动（宿主并改为可选项，理由见 §8.8.5）。
+- **投递纪律（三条，规范性）**：① `Dispatcher` 只在宿主未装时补 `aurora::detail::post_to_main` 形态（转发到进程级唯一队列 `MainQueue::post`，§1 不变量），宿主已装则不改；② `ChangeNotify` 归常驻等待方（即本引擎），登记与**注销**都要通知——注销后宿主随即关闭句柄，滞留快照会让下一次系统调用撞上无效句柄；③ **一条事件源只由一个驱动方等待**：常驻引擎循环与宿主自带等待集互斥，同时启用会让一次就绪投递两次。开关就是注册口的 `set_host_driven(bool)`（缺省假 = 引擎驱动），引擎每轮等待都读它，置真即让位、置回假即接管，两种转变都经 ② 的通知立刻生效，不必等一个等待窗口或先 `shutdown()`。本库各平台腿缺省全部走引擎驱动（宿主并改为可选项，理由见 §8.8.5）。
 - **瞬态等待失败不终止循环**：注销与就绪同帧发生时本轮可能正持着含已关闭句柄的快照，`wait_ready` 落 `net-wait-failed` 属预期竞态；循环丢弃本轮结果并在下一轮重取快照（`utest_net_engine` 的 `unregister_during_wait_keeps_the_loop_alive` 即此判据）。
 - **停机语义**：`shutdown()` 幂等，停止接收新任务、把**已入队任务与已到期定时跑完**再 join（不丢已承诺的工作），未到期的定时**丢弃且不执行**——静默跑一个过期续体会伪造出错误的完成时序；已投进主线程队列的完成事件由宿主退出路径排空（§2）。收敛后再次 `post` 会重新惰性启动。
 - **退出收敛是显式的，进程级单例刻意不析构**：`shared_engine()` 以 `*new PollEngine()`（wasm 腿为 `NullEngine`）存储且不登记销毁函数，与 §8.8.9 里 `app::EventSourceRegistry` 的处置成对——常驻线程的收敛要加锁、`join`、关唤醒套接字、拆 `detail::Session`，而静态析构阶段这些原语已不可依赖：winpthread 的互斥体属于它自己的静态区，可能先于本单例拆除，MinGW 腿实测（进程只做一次 `post` 即返回）在 `PollEngine::shutdown()` → `detail::Session::~Session()` 的加锁处段错误。保留析构但不 `join` 更糟（`std::thread` 在 joinable 状态下析构即 `std::terminate`），改经 `std::atexit` 登记只是换到同一个拆除阶段的另一个登记处。代价是一枚不回收的进程内分配与一条随进程终止的线程；套接字与 Winsock 引用计数由操作系统在退出时收回。需要确定性收敛的调用方（宿主关闭流程、真机探针、集成用例的 `EngineGuard`）自己调 `shutdown()`，该路径不依赖拆除次序。
@@ -1717,7 +1722,7 @@ wasm 腿没有 fd 语义，`Engine` 维持 `NullEngine`（传输能力全 false�
 - **旁证四行证据表，不走事件总线**：库内单点入口 `detail::note_connection_outcome(connected, loopback_peer, code)` 由全库唯一建连出口 `detail::await_connect_via` 的结局处调用一处（四条腿都从这一个函数经过）。四行是：成功且非回环计一枚正证；成功但回环**不计正证也不采样**（本机自连不证明外链）；任何非 `Cancelled` / `Invalid` 失败**只触发合并采样并写 `last_failure`**，不计负证；`Cancelled` / `Invalid` 无动作。分类复用 `error_class_of`（只用来筛触发与排除取消），不新造第二套归因。失败不作负证的理由：`Dns` 同时覆盖 NXDOMAIN 与解析器故障、`Unreachable` 的 `NetConnectFailed` 同时覆盖 ECONNREFUSED 与 ENETUNREACH、`Proxy` 覆盖 407 / 协议错误 / 配置读不到，任一类当负证都会造出假离线。**旁证不走事件总线**是因为总线在 `AURORA_ENABLE_DEBUG=OFF` 下整类裁为空壳，而本件公共面按 [`BUILD_OPTIONS.md`](../BUILD_OPTIONS.md) §1.2 恒在——共用一条通道会让 Release 下的链路态变钝，且判据要写两遍。
 - **定时复用引擎自己的 `post_after`，无撤销口下用 epoch + pending 合并**：`post_after` 不支持取消，故每登记一拍 `epoch` +1，旧闭包到期时见 epoch 不符或共享 live 标志已假即整拍 no-op；单一 `sample_pending` 标记让插队合并、**首因保留**——断链瞬间几十次失败只采一次、最多两枚存活登记（一枚作废的周期拍加一枚证据拍），采样结束后只登记下一枚周期拍。周期拍**只在至少一枚订阅存在时**登记；末枚订阅注销后不再有周期拍；证据拍可在无订阅者时跑一次（那正是「有交换」的场合）。**登记失败必须清 pending**：`post_after` 回 `net-platform-unavailable` 时按 epoch 守卫把标记清零，否则此后每一拍都合并进一枚不存在的定时器，链路永久停在首态。`set_options()` 与 `refresh()` 同样只「请求一次采样」，返回值只表请求已受理，结果经 `snapshot()` 或订阅回调抵达。
 - **探测 I/O 在运行时互斥量之外**：采样体先在锁内校验 epoch / live，**锁外**读 OS 表与伪文件，再回锁内复核一遍后落状态机；`snapshot()` 的加锁拷贝因此不会排在一次 I/O 后面。发布变更与调用订阅者一律在锁外。本件只有一把互斥量，**持锁期间不调 `post_to_main`、不调探针、不调用户回调**。
-- **线程与投递纪律**：采样体只在引擎线程执行；订阅回调经 `aurora::detail::post_to_main` 回投（装有主线程投递器时在主线程，无投递器时就地调用），**不新增第三种排队**；抛出型订阅者被摘除并记恰好一条 WARN，不中断采样循环、不改变任何在途交换；`subscribe()` **返回前绝不回调**（live 标志在返回前一瞬才置真，故并发发布抢不了跑）。响应式一侧到此为止：不提供 `Resource` / 流式信号形态（持续态没有「一次落定」可折算，且引擎线程直接写响应式状态会撞「引擎线程绝不触碰 widget / `State`」那条不变量）。
+- **线程与投递纪律**：采样体只在引擎线程执行；订阅回调经 `aurora::detail::post_to_main` 回投进程级唯一队列（`MainQueue`），**只在值班循环排水时于主线程执行**（无值班则投递被打烊取消：丢弃并计数，绝不就地执行），**不新增第三种排队**；抛出型订阅者被摘除并记恰好一条 WARN，不中断采样循环、不改变任何在途交换；`subscribe()` **返回前绝不回调**（live 标志在返回前一瞬才置真，故并发发布抢不了跑）。响应式一侧到此为止：不提供 `Resource` / 流式信号形态（持续态没有「一次落定」可折算，且引擎线程直接写响应式状态会撞「引擎线程绝不触碰 widget / `State`」那条不变量）。
 - **`stale` 是派生读数、`generation` 只标已发布序列**：`stale` = 距上次成功采样或合格正证超过 3× `sample_interval`（阈值写死、**不设旋钮**，否则两枚旋钮能配出自相矛盾的组合），`snapshot()` 按同一公式重算，读取不触发 I/O、不发布通知；`StalenessMarked` 只在采样循环观察到 false→true 时发布一次。`generation` 只在对外发布的变更上 +1（状态转换或 `stale` 翻转）；`last_failure` 是冻结错误码 slug（**不含主机名与 URL**），静默更新、不推进代际、不单独通知，转入 `Online` 时清空。`since` 只在 `state` 变化时更新，初值取 monitor 建立时刻、**不是** epoch 零点。
 - **句柄三条契约逐字沿用 `EventSourceRegistration`**：析构即注销且幂等（双析构不双重摘除）、移动后源句柄转为空态（`is_registered()` 假且 `token()` 归 0，故 `= default` 的移动不够用）、已入队的一次尾批仍抵达且 `cancel_pending()` 与析构互不隐含。首条变更的 `previous` 等于订阅时刻的 `snapshot()`；合并待投递变更时以最后一次为准、`previous` 仍锚在**该订阅者**已见值上。
 - **明确不做**：不做发起侧闸门（闸仍在 `NetPolicy` 与能力闸两处，本件只交事实与通知——拿探测当闸等于把可交付请求变成库侧自己发起的失败，那类失败对端不留痕、时间线看不出根因）、不做链路级重连编排、不做第四档、不给 `Resource` / 流式信号形态、不加 `Capabilities` 字段、**不新增错误码**（不可得与无源一律复用 `net-platform-unavailable`）、**不新增 feature 宏且不随 `AURORA_ENABLE_DEBUG` 裁切**、不引 netlink / COM / 任何 vendored 依赖、不起新线程、探测**不主动打一个包**（零出站是本件的硬判据）、不把任何连接失败当链路负证、不导出任何拓扑事实（接口名 / 网关 / SSID / 链路本地地址连内部快照都不留，`ProbeReading` 只含 `optional<bool>`）。

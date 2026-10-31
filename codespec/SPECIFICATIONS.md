@@ -105,7 +105,7 @@ Aurora 本质上是一个**把 UI 开发变成「结构化数据描述」问题*
 | SPEC.FEAT.TOOLING.RECIPE-DOCS.001 | 示例驱动文档（Recipe 形式） | AI 从示例高效学习 | [`08-tooling.md`](specification/08-tooling.md) §10.5 |
 | SPEC.FEAT.TOOLING.AI-TOOLCHAIN.001 | LSP / MCP Server / CLI 工具链 | AI Agent 直接集成 | [`08-tooling.md`](specification/08-tooling.md) §10.6、[`09-cli.md`](specification/09-cli.md) §10.1（argv 解析底座） |
 | SPEC.QUALITY.CORE.MEMORY-SAFETY.001 | 安全的内存与所有权模型 | AI 生成无内存错误的代码 | [`01-core.md`](specification/01-core.md) §8.1 |
-| SPEC.FEAT.CORE.ASYNC-CONCURRENCY.001 | 结构化异步与并发模型 | AI 轻松处理耗时操作 | [`01-core.md`](specification/01-core.md) §8.2、[`02-state.md`](specification/02-state.md) §7.2 |
+| SPEC.FEAT.CORE.ASYNC-CONCURRENCY.001 | 结构化异步与并发模型（进程级唯一队列 `MainQueue` + 值班租约；发起需循环在场、落地晚于打烊 = 取消、无就地回退；`Task<T>::blocking_wait` 为循环外取结果出口） | AI 轻松处理耗时操作 | [`01-core.md`](specification/01-core.md) §8.2、[`02-state.md`](specification/02-state.md) §7.2 |
 | SPEC.QUALITY.LAYOUT.ALGEBRA.001 | 布局系统的代数一致性 | AI 可推理尺寸和位置 | [`03-layout-render.md`](specification/03-layout-render.md) §10.2 |
 | SPEC.QUALITY.CORE.GRACEFUL-DEGRADATION.001 | 错误恢复与降级渲染 | AI 生成的错误 UI 不会崩溃 | [`01-core.md`](specification/01-core.md) §8.3 |
 | SPEC.FEAT.TOOLING.UI-TO-CODE.001 | 可逆性：UI → 代码的参考还原 | AI 可分析现有界面并重构 | [`08-tooling.md`](specification/08-tooling.md) §10.7（工具链侧）、[`04-widget.md`](specification/04-widget.md) §6.2（控件侧） |
@@ -145,7 +145,7 @@ Aurora 本质上是一个**把 UI 开发变成「结构化数据描述」问题*
 | SPEC.API.STRONG-TYPES.001 强类型 vs 编译速度 | 大量模板 / 概念检查拖慢编译 | 核心路径用简单类型，高级校验放在**独立验证工具**中（CLI），不阻塞编译 |
 | SPEC.FEAT.TOOLING.API-SCHEMA.001 机器 Schema vs SPEC.API.NAMING-CONSISTENCY.001 命名一致 | Schema 需要额外维护 | Schema 从代码**自动生成**（`gen_api_tools`），保证与实现同步 |
 | SPEC.FEAT.STATE.SIGNAL-STATE.001 信号刷新 vs 高频交互 | 每帧走全链路延迟不可接受 | 默认细粒度信号定点刷新；高频绘制用 `Canvas` opt-in |
-| SPEC.QUALITY.CORE.MEMORY-SAFETY.001 单线程 UI vs SPEC.FEAT.CORE.ASYNC-CONCURRENCY.001 异步 | 异步结果需回 UI 线程 | `au::async` 经主线程投递器回到 UI 线程 |
+| SPEC.QUALITY.CORE.MEMORY-SAFETY.001 单线程 UI vs SPEC.FEAT.CORE.ASYNC-CONCURRENCY.001 异步 | 异步结果需回 UI 线程 | `au::async` 经进程级唯一队列 `MainQueue` 回投值班循环；发起需循环在场，打烊后落地 = 取消（无就地回退） |
 | SPEC.API.NAMING-CONSISTENCY.001 命名一致 vs 历史 API | AI 可能混用新旧命名 | 文档统一 snake_case 属性 + CamelCase 类型，废弃名仅在兼容层标注 |
 
 ---

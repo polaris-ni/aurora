@@ -34,15 +34,11 @@ cmake -S . -B build -DAURORA_BACKEND_GLFW=ON
 最小可编译配方（完整版见 `examples/demos/demo_glfw_surface.cpp`）：
 
 ```cpp
-#include <chrono>
-
 #include "aurora/aurora.h"
 namespace au = aurora;
 int main() {
     au::enable_dpi_awareness();                 // 必须在建窗前（进程级 DPI 感知）
     au::Node root = au::Text("Hello GLFW!");
-    au::FocusManager fm;
-    fm.set_root(&root.widget());
 
     au::GlfwOptions opts;                       // size/title 继承自 WindowOptions，逐字段赋值
     opts.size = au::Size{480.0F, 320.0F};
@@ -51,22 +47,11 @@ int main() {
     auto win_res = au::create_window(opts);
     if (!win_res)
         return 1;
-    auto win = std::move(win_res.value());
-    win->surface().set_event_handler([&](au::Event &e) {
-        if (auto *me = dynamic_cast<au::MouseEvent *>(&e))
-            au::EventDispatcher::dispatch(root.widget(), *me, &fm);
-        else if (auto *ke = dynamic_cast<au::KeyEvent *>(&e))
-            au::EventDispatcher::dispatch(root.widget(), *ke, fm);
-    });
-    win->run([&] {                              // 帧循环：关闭窗口即退出
-        const auto t0 = std::chrono::steady_clock::now();
-        (void)win->present_root(root);
-        const double elapsed_ms = std::chrono::duration<double, std::milli>(
-            std::chrono::steady_clock::now() - t0).count();
-        win->set_next_wait(au::compute_wait_timeout(
-            win->has_pending_dirty(), /*anim_active=*/false, /*next_deadline_ms=*/-1.0,
-            /*frame_budget_ms=*/1000.0 / 60.0, elapsed_ms, win->surface().paces_frames()));
-    });                                         // 不设 next_wait 则退化为忙轮询
+
+    // 帧循环由 Application 统一驱动：事件派发 / 焦点 / 帧节流 / 跨线程回投排空都在其中；
+    // Window 不再自带 run()（关闭窗口即退出）。
+    au::Application app{au::Scene{root}, std::move(win_res.value()), opts};
+    app.run();
 }
 ```
 

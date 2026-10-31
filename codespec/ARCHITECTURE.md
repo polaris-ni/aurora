@@ -44,7 +44,7 @@ Aurora 是一个 C++20 跨平台 GUI 库，以**声明式 + 响应式**为核心
 
 ### 3.1 线程与事件模型
 
-- **单线程 UI**：所有 widget 树操作、状态变更、事件处理都在主线程。`State::set` 仅限主线程调用（赋值 + notify 无锁无原子）；跨线程计算结果须经 `au::async` / `Task::set_main_poster` 回投主线程后再写 `State`。
+- **单线程 UI**：所有 widget 树操作、状态变更、事件处理都在主线程。`State::set` 仅限主线程调用（赋值 + notify 无锁无原子）；跨线程计算结果须经 `au::async` 回投进程级唯一队列（`MainQueue`）并由值班循环在主线程执行后再写 `State`。
 - **多窗口（仍在同一线程内）**：一个 `Application` 持有一组 `WindowHost`（各自 `Window` + `Scene` + `FocusManager` + 指针/触控捕获表 + 帧统计），由**单一帧循环**统一驱动（`Application::run`，不再委托 `Window::run`）。**焦点与捕获不跨窗口**；`Animator` / `Scheduler` / 快捷键 / 命令注册表为应用级共享（`dt` 每帧只推进一次）。详见 `specification/06-app-platform.md` §2.4。
 - **活动窗口记账点在派发链上的位置**：`Application::active_window()` 的记账落在两处——① 宿主级键盘派发的键盘前置拦截器内，**早于** `ShortcutRegistry::handle`（故快捷键闭包内读到的是本次派发来源）；② 应用级六条程序化派发入口，按「用户输入意图类」事件范围过滤后记账。宿主级直调程序化入口不记账（`WindowHost` 无 `Application` 反指，刻意不加）。记账为 O(1) 指针赋值（成员 `mutable`，以适配 const 派发入口），帧循环零新增开销。它与 `FocusManager` 的**逐窗隔离**是两件互补的事：后者答「窗内哪个控件有焦点」，前者答「这条输入落在哪一扇窗」，二者互不替代，也都不等价于 OS 前台态。语义与范围见 `specification/06-app-platform.md` §2.4。
 - **同步事件**：`EventDispatcher` 在收到原生平台事件后同步派发，命中测试链自最深节点向根冒泡，写 `e.handled = true` 即止。
@@ -197,7 +197,7 @@ API 契约以 `include/aurora/storage/*.h` 的落地声明为准（见 [`specifi
 
 ### 5.2 事件驱动帧循环
 
-`Application::run` / `Window::run` 为**事件驱动 + 帧节流**模型：每帧末尾经纯函数 `compute_wait_timeout`（`window/frame_pacing.h`）决策下次唤醒，循环在 `Surface::wait_events(timeout_ms)` 阻塞。
+`Application::run` 为**事件驱动 + 帧节流**模型：每帧末尾经纯函数 `compute_wait_timeout`（`window/frame_pacing.h`）决策下次唤醒，循环在 `Surface::wait_events(timeout_ms)` 阻塞（`Window` 不再自带帧循环）。
 
 **帧内次序（`Application::run` 的 `step_frame`）**：
 
@@ -217,7 +217,7 @@ drain_posted → pump_all_once → on_frame_ → 关闭闸门询问步 poll_clos
 
 「有动画」分支的读法须与动画层的两个机制对齐：`repeat(-1, ...)` 的无限循环与在途 `SpringAnimation` 都算「有动画」，前者本就要求常驻帧（能力本身的代价），后者在 `is_settled` 定格并 `stop()` 登记时钟后自动退出该分支。反向的一条是**冻结不得变成常驻帧**：`Animator::set_time_scale(0.0)` 下 `has_active()` 恒假、登记控制器不置脏，控件自驱路径拿到 0 步长也不标脏、不请求帧——「停着不动却满帧唤醒」是缺陷不是设计。解冻不能靠控件自醒（每帧计时是逐控件私有标志），`0 → >0` 由 `Animator::take_rearm_request()` 请求「下一帧不深睡」，那一帧各控件照常推进并自行续帧。
 
-各后端实现真阻塞：`Win32` 经 `MsgWaitForMultipleObjectsEx`、`Glfw` 经 `glfwWaitEventsTimeout`；`Headless` 为 no-op（测试以 `max_frames` 驱动，保证确定性与速度）。跨线程回投（`au::async` 的 `then` 回调）经 `Task::set_main_poster` 入队 + `Surface::request_wake()` 唤醒睡眠中的主循环，下一帧开头在主线程排水执行。
+各后端实现真阻塞：`Win32` 经 `MsgWaitForMultipleObjectsEx`、`Glfw` 经 `glfwWaitEventsTimeout`；`Headless` 为 no-op（测试以 `max_frames` 驱动，保证确定性与速度）。跨线程回投（`au::async` 的 `then` 回调）经 `MainQueue::post` 入队，由上岗者注入的唤醒体（`Application` 传 `request_wake_all`）唤醒睡眠中的主循环，下一帧开头 `take_batch` 在主线程排水执行。
 
 `power_saving = false` 或 `max_fps = 0` 退回忙轮询（持续重绘场景的 opt-out）。`FrameStats` 以 `wakeups_per_sec()` 与 `sleep_ratio()` 观测。
 
@@ -320,7 +320,7 @@ drain_posted → pump_all_once → on_frame_ → 关闭闸门询问步 poll_clos
 2. 窗口销毁时 `disconnect_all()` 会先立**单向拆除门闩**再调 `UiaDisconnectProvider`：该 API 会**同步重入** provider 取属性（UIA 需为被丢弃的侦听者补发属性变更事件），门闩保证重入路径只读旧快照、绝不重建。
 
 `deactivate()` 与 `disconnect_all()` 等价且幂等，并在其中**从 `ProviderRegistry` 注销** —— 缺这一步，进程级事件广播会在已析构的桥上调用 `is_active()`（use-after-free）。
-**线程与降级（provider 回调一律回投主人线程）。** 语义树与桥**没有**额外的 UI 线程：但 in-proc provider 的回调由 `UIAutomationCore.dll` 投递在其 **COM/RPC 线程**上（激活时初始化 STA 套间只保证公寓模型，不等于「回调落在 UI 线程」），故桥对 provider 只暴露「回投主人线程 + 按值副本」的访问口（`eval_on_main` 家族），`sync_if_dirty` / `rebuild` / `find_node` 等裸口保持主人线程专用；主人线程自己调回投口时就地执行、零等待，无 `main_poster` 时同样就地执行。回投按预算限时等待（读 250ms / 动作 500ms），超时返回零值并映射 `UIA_E_ELEMENTNOTAVAILABLE`，且以 `abandoned`（调用方已放弃 ⇒ 晚到项不补做动作）与 `alive_`（桥已析构 ⇒ 闭包不碰树）两道闸封死两条迟到路径 —— 访问面劈分、超时降级与不变量详见 [`specification/06-app-platform.md`](specification/06-app-platform.md) §6.3。`UIAutomationCore.dll` 运行时 `LoadLibraryA` 动态加载，缺库或函数缺失即整桥降级 no-op + 一次 `Diagnostics::warn`，无链接期依赖。
+**线程与降级（provider 回调一律回投主人线程）。** 语义树与桥**没有**额外的 UI 线程：但 in-proc provider 的回调由 `UIAutomationCore.dll` 投递在其 **COM/RPC 线程**上（激活时初始化 STA 套间只保证公寓模型，不等于「回调落在 UI 线程」），故桥对 provider 只暴露「回投主人线程 + 按值副本」的访问口（`eval_on_main` 家族），`sync_if_dirty` / `rebuild` / `find_node` 等裸口保持主人线程专用；主人线程自己调回投口时就地执行、零等待；非主人线程一律经 `MainQueue::try_post`（无值班 = 无头 / 已打烊 ⇒ 返回 false、零值收场并映射 `UIA_E_ELEMENTNOTAVAILABLE`，不再有「槽为空就地执行」的第二条回退）。回投按预算限时等待（读 250ms / 动作 500ms），超时返回零值并映射 `UIA_E_ELEMENTNOTAVAILABLE`，且以 `abandoned`（调用方已放弃 ⇒ 晚到项不补做动作）与 `alive_`（桥已析构 ⇒ 闭包不碰树）两道闸封死两条迟到路径 —— 访问面劈分、超时降级与不变量详见 [`specification/06-app-platform.md`](specification/06-app-platform.md) §6.3。`UIAutomationCore.dll` 运行时 `LoadLibraryA` 动态加载，缺库或函数缺失即整桥降级 no-op + 一次 `Diagnostics::warn`，无链接期依赖。
 
 **Linux 桥差异（AT-SPI2）。** 无 `WM_GETOBJECT` 式「读屏在线才出现」的查询信号，故构造时机改为**首次语义树根注入时一次性尝试**（失败 = 永久降级，不再重试）；建树同步点由「入站查询」与「帧循环 dirty」双侧驱动——`pump()` 每轮开头 `sync_point()`（若脏），事件推送不依赖客户端恰好在做查询。D-Bus 传输 fd 经 `Provider` 侧 `poll_watches()` 并入 X11/Wayland 事件等待的 `poll`，fd 就绪由 `pump()` 读入并派发（单线程、无额外线程）。事件通道 = 快照 diff 的另一种消费：`sync_point()` 产 `TreeDiff` 后按上游 `atk-adaptor` 线格式发 D-Bus 信号广播（added/removed → Cache Add/RemoveAccessible + children-changed；Name/Value/Hint/State → property-/state-changed；焦点 → Event.Focus；播报 → Announcement 直发），与 Win32 UIA 桥 `queue_*` 系列同一「diff → 平台事件」消费范式。降级面 = 无会话总线 / `org.a11y.Bus` 不可达 / libdbus 缺失 / `NO_AT_BRIDGE=1`；线格式契约与申报空位见 [`specification/06-app-platform.md`](specification/06-app-platform.md) §6.4。
 
@@ -529,7 +529,7 @@ codespec/errors.toml          (源：slug / domain / kind / severity / retryable
 3. **概念映射透明性**：Aurora 概念与 React / Flutter / Qt 一一对应。
 4. **声明式优于命令式**：组件以不可变声明式树表达，状态变更驱动局部刷新；禁止命令式事后改树。
 5. **最小正交 API**：布局用 `Column` / `Row` / `Stack` / `Grid` / `Scroll`，装饰用 `Modifier`，状态用 `State` / `ReadOnlyState`（派生 `computed`、副作用 `effect`），互不重叠；避免「多种方式做同一件事」带来的选择困惑。
-6. **线程模型**：单线程 UI；`State::set` 仅限主线程（跨线程结果须经 `au::async` / `Task::set_main_poster` 回投后再写）。在文档与示例中明确标注，避免 AI 误用多线程改树。
+6. **线程模型**：单线程 UI；`State::set` 仅限主线程（跨线程结果须经 `au::async` 回投 `MainQueue`、由值班循环执行后再写）。在文档与示例中明确标注，避免 AI 误用多线程改树。
 7. **显式数据流**：状态经 `State` / `ReadOnlyState` 显式流动，依赖图可静态推导（`StateGraph` 带 `schema: 1`），便于 AI 推断「改 X 会影响哪些 widget」。
 8. **单向 / 纯函数**：状态变更单向；`computed` 为纯函数派生值，无副作用，可安全重算。
 9. **扁平组合**：以 `Modifier` 包裹 + 容器组合替代深层继承嵌套。
