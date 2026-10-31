@@ -21,6 +21,20 @@ AURORA_TEST_CASE(macos_surface_type_contract) {
     static_assert(!std::is_move_constructible_v<aurora::MacOSSurface>);
     static_assert(!std::is_default_constructible_v<aurora::MacOSSurface>);
     AURORA_TEST_CHECK_TRUE(std::is_base_of_v<aurora::Surface, aurora::MacOSSurface>);
+    // 四枚运行期开关必须真覆写：`&MacOSSurface::set_visible` 的类型只在类内声明过成员时才是
+    // `MacOSSurface::*`，漏写即继承基类空实现、类型退回 `Surface::*`——此处把「声明了」钉成
+    // 编译期判据，否则 `is_visible()` 恒真而能力位仍声称已接线。
+    using VisibleSetter = void (aurora::MacOSSurface::*)(bool);
+    using VisibleGetter = bool (aurora::MacOSSurface::*)() const;
+    static_assert(std::is_same_v<decltype(&aurora::MacOSSurface::set_visible), VisibleSetter>);
+    static_assert(std::is_same_v<decltype(&aurora::MacOSSurface::is_visible), VisibleGetter>);
+    static_assert(std::is_same_v<decltype(&aurora::MacOSSurface::set_always_on_top), VisibleSetter>);
+    static_assert(std::is_same_v<decltype(&aurora::MacOSSurface::is_always_on_top), VisibleGetter>);
+    // 无障碍两枚覆写同理：漏写即落回基类的 nullptr / no-op 默认实现，桥永不接线。
+    using A11yProviderGetter = aurora::a11y::Provider *(aurora::MacOSSurface::*)() const;
+    using A11yRootSetter = void (aurora::MacOSSurface::*)(aurora::Widget *);
+    static_assert(std::is_same_v<decltype(&aurora::MacOSSurface::accessibility_provider), A11yProviderGetter>);
+    static_assert(std::is_same_v<decltype(&aurora::MacOSSurface::set_accessibility_root), A11yRootSetter>);
 #else
     AURORA_TEST_SKIP("macOS backend builds only under AURORA_PLATFORM_MACOS && AURORA_BACKEND_MACOS; not enabled");
 #endif

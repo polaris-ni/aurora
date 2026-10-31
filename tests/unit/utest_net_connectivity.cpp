@@ -3,7 +3,7 @@
 /// 测试说明: 链路态公共面——快照首态、订阅交付、插队合并（50 次失败只采 1 次）、登记失败清待采样位、
 ///           注册句柄三条契约、停机后快照可读。定时器经 `FakeEngine` 脚本化推进（零实时睡眠），
 ///           读数经库内探针钩子注入（零出站 I/O）；钩子与进程级运行时在每个用例内成对拆装，
-///           避免用例间相互污染。无采集腿的构建（wasm / macOS 腿未落地 / BSD 一类）上，依赖
+///           避免用例间相互污染。无采集腿的构建（wasm / BSD / Android 一类）上，依赖
 ///           采样登记的用例按 §8.8.41 契约降级为 skip；无源契约由专测逐类断言（有旁证通路者
 ///           允许登记但 `refresh()` 恒拒，wasm 两者皆无、订阅也拒），快照两处都恒可读。
 #include <chrono>
@@ -50,8 +50,9 @@ AURORA_TEST_CASE(connectivity_facade_snapshot_never_sampled_is_unknown) {
     set_connectivity_probe_hook({});
     const auto fact = ConnectivityMonitor::instance().snapshot();
     AURORA_TEST_CHECK_EQ(static_cast<int>(fact.state), static_cast<int>(NetworkState::Unknown));
-    // `source` 反映本构建的编译期采集腿令牌：有腿平台为 `IpHelper` / `LinkFiles`，无腿（wasm / macOS 腿未落地）
-    // 平台为 `None`——「无腿即 `None`」是提案验收 2 的口径，故断言与 `compiled_source()` 对齐而非恒非空。
+    // `source` 反映本构建的编译期采集腿令牌：有腿平台为 `IpHelper` / `LinkFiles` / `DynamicStore`，
+    // 无腿（wasm / BSD / Android）平台为 `None`——「无腿即 `None`」是提案验收 2 的口径，故断言与
+    // `compiled_source()` 对齐而非恒非空。
     AURORA_TEST_CHECK_EQ(static_cast<int>(fact.source), static_cast<int>(compiled_source()));
     AURORA_TEST_CHECK_TRUE(fact.stale);
     AURORA_TEST_CHECK_EQ(fact.generation, 0U);
@@ -185,8 +186,8 @@ AURORA_TEST_CASE(connectivity_facade_registration_handle_contracts) {
 }
 
 AURORA_TEST_CASE(connectivity_facade_without_source_contract) {
-    // 验收 2 的降级判据（§8.8.41）：无采集腿分两类——有旁证通路者（BSD / Android / macOS
-    // 腿未落地）允许登记、只由证据驱动但 `refresh()` 恒拒；wasm 两者皆无，订阅也拒。
+    // 验收 2 的降级判据（§8.8.41）：无采集腿分两类——有旁证通路者（BSD / Android）允许登记、
+    // 只由证据驱动但 `refresh()` 恒拒；wasm 两者皆无，订阅也拒。
     // 两类下 `snapshot()` 都恒可读，错误只发生在要求动作的口上。
     if (compiled_source() != ConnectivitySource::None) {
         AURORA_TEST_SKIP("this build has a collection source; the no-source contract is unreachable here");

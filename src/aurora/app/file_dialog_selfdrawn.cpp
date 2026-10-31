@@ -1,4 +1,4 @@
-// file_dialog_selfdrawn.cpp — 文件 / 目录选择器的桌面自绘实现（Linux / macOS）。
+// file_dialog_selfdrawn.cpp — 文件 / 目录选择器的桌面自绘实现。
 //
 // 架构（对应内部头 src/aurora/app/detail/file_picker.h 的四层）：
 //   L0 数据源  —— FsDirectorySource（std::filesystem 默认实现；测试可注入 mock）
@@ -11,8 +11,11 @@
 // 把「装了这个二进制」变成运行期前提；xdg-desktop-portal 的 FileChooser 是异步 DBus 信号，
 // 本库无 DBus 客户端。框架自绘零新增依赖，且状态机层可完全无头证。
 //
-// 非 AURORA_PLATFORM_LINUX / AURORA_PLATFORM_MACOS 平台本文件不含任何定义
-// （Win32 走 file_dialog_win32.cpp，WASM / Android / BSD 保留 file_dialog.h 内联回退）。
+// 门控：L0–L2 在 Linux 与 macOS 上都编译（模型 / 视图可在无头用例里直接断言）；L3 的公共
+// 入口只在**自绘腿真实生效**的组合上定义——Linux，以及「macOS 平台但未启用 AppKit 后端」
+// （GLFW / X11 / Headless）。macOS + AppKit 后端由 `file_dialog_macos.cpp` 提供原生面板，
+// 两处定义互斥，避免同符号重复定义。其余平台（Win32 走 file_dialog_win32.cpp；WASM /
+// Android / BSD 保留 file_dialog.h 内联回退）本文件不含任何定义。
 #include "aurora/core/platform.h"
 #if defined(AURORA_PLATFORM_LINUX) || defined(AURORA_PLATFORM_MACOS)
 
@@ -527,6 +530,10 @@ auto FilePickerSession::run() -> std::vector<std::string> {
 
 namespace {
 
+// 自绘腿的公共入口只在「本腿真实生效」的组合上定义：Linux，或 macOS 未启用 AppKit 后端。
+// macOS + AppKit 的入口在 file_dialog_macos.cpp（原生面板），两处互斥。
+#if defined(AURORA_PLATFORM_LINUX) || (defined(AURORA_PLATFORM_MACOS) && !defined(AURORA_BACKEND_MACOS))
+
 /// @brief 自绘腿统一路由：无 Application 上下文即等价非交互（WARN 回空，不挂起）。
 auto run_selfdrawn(detail::PickerMode mode, const Options &opts, const detail::DirectorySource &source)
     -> std::vector<std::string> {
@@ -578,6 +585,16 @@ auto open_folder(const Options &opts) -> Result<std::string> {
     const std::vector<std::string> picked = run_selfdrawn(detail::PickerMode::OpenFolder, opts, source);
     return Result<std::string>{picked.empty() ? std::string{} : picked.front()};
 }
+
+#else
+
+// macOS + AppKit：入口在 file_dialog_macos.cpp。这里留一枚编译期锚点，防止将来误把
+// 本 TU 的门控改宽后出现「两条腿都没定义」的静默链接错误而无从归因。
+static_assert(true, "self-drawn entries are disabled on macOS with the AppKit backend");
+
+}  // namespace
+
+#endif  // 自绘腿入口生效条件
 
 }  // namespace aurora::file_dialog
 

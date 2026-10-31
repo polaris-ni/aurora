@@ -25,11 +25,15 @@ namespace aurora {
 ///   （Retina 下物理像素与 backing store 对齐，无缩放模糊）；
 /// - 事件：鼠标（左/右/中、移动、拖拽）、滚轮、键盘、修饰键、文本输入与 IME 组合、
 ///   窗口关闭/缩放/最小化/全屏/激活/屏幕切换，翻译为 `aurora::Event` 后交宿主派发器；
+/// - 运行期控制：显隐走 `orderOut:` / `orderFrontRegardless`（显示不激活、不抢焦点），置顶走
+///   `setLevel:`（Floating / Normal）；读回取原生 `isVisible` / `level`，可见性并入 `WindowState` 推导；
 /// - 帧循环：`poll_platform_events()` 抽干 `NSApplication` 队列，`wait_events()` 以
 ///   `nextEventMatchingMask:untilDate:inMode:dequeue:` 阻塞到事件或超时；队列为进程级，
 ///   故 `pumps_thread_queue()` / `waits_thread_queue()` 均为 true；
 /// - DPI：`backingScaleFactor`（Retina 通常 2.0）为唯一真值点，跨屏/缩放变更经
 ///   `windowDidChangeBackingProperties:` 上报 `notify_scale_change`。
+/// - 无障碍：内容视图以 `accessibilityChildren` / `accessibilityHitTest:` 暴露语义树，
+///   VoiceOver 首次查询时惰性构造 NSAccessibility 桥；读屏未在线时零开销。
 ///
 /// @note Thread: main-thread only（AppKit 契约：窗口与事件 API 只在主线程调用）。
 /// @note Side-effects: 创建/销毁原生窗口，读写系统剪贴板类资源以外的窗口状态。
@@ -129,10 +133,34 @@ class MacOSSurface : public Surface {
     auto set_window_mode(WindowMode m) -> void override;
     /// @brief 程序化请求关闭（置关闭标志，不销毁窗口；由宿主回收时析构）。
     auto close() -> void override;
-    /// @brief 把窗口提到同级 z 序顶部（不激活）。
+    /// @brief 本窗口的 NSAccessibility 桥（惰性激活）：AppKit 首次查询无障碍树时才构造。
+    /// @return 已激活的桥；尚未被查询过或无窗口时为 nullptr。
+    [[nodiscard]] auto accessibility_provider() const -> a11y::Provider * override;
+    /// @brief 注入语义树根（每帧由 `Window::present_root` 调用；换根即时转发给已存在的桥）。
+    /// @param root 语义树根控件（非拥有）。
+    auto set_accessibility_root(Widget *root) -> void override;
+    /// @brief 把窗口提到同级 z 序顶部（不激活；已隐藏的窗口不会被唤出）。
     auto raise() -> void override;
-    /// @brief 激活窗口并取得键盘焦点。
+    /// @brief 激活窗口并取得键盘焦点（已隐藏的窗口不会被唤出）。
     auto focus_window() -> void override;
+    /// @brief 运行期显示 / 隐藏窗口（`orderFrontRegardless` / `orderOut:`）。
+    ///
+    /// 显示档**不激活**应用、也不抢焦点（与建窗期 `WindowVisibility::NoActivate` 同口径）：
+    /// 呼出后需要键盘焦点请另调 `focus_window()`。同值重复调用不产生 AppKit 调用（幂等）。
+    /// 显隐变化经原生 `isVisible` 进入 `WindowState` 推导：不在屏恒为 `Hidden`。
+    /// @param on true 显示，false 隐藏。
+    auto set_visible(bool on) -> void override;
+    /// @brief 当前是否在屏（读回原生 `NSWindow.isVisible`）。
+    /// @return 在屏为 true；窗口壳不存在时为 false。
+    [[nodiscard]] auto is_visible() const -> bool override;
+    /// @brief 运行期开关置顶（`NSFloatingWindowLevel` / `NSNormalWindowLevel`）。
+    ///
+    /// 只改 z 序层级，不动几何、焦点与显隐。同值重复调用不产生 AppKit 调用（幂等）。
+    /// @param on true 置顶，false 回到普通层级。
+    auto set_always_on_top(bool on) -> void override;
+    /// @brief 当前是否置顶（读回原生 `NSWindow.level`，高于普通层层级即视为置顶）。
+    /// @return 置顶为 true；窗口壳不存在时为 false。
+    [[nodiscard]] auto is_always_on_top() const -> bool override;
     /// @brief 建立/解除与 owner 的 OS 从属关系（子窗口随 owner 移动/最小化）。
     /// @param owner 父窗口 Surface；nullptr 表示解除。
     auto set_owner(const Surface *owner) -> void override;

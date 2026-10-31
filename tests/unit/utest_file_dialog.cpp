@@ -1,10 +1,12 @@
+/// @file utest_file_dialog.cpp
 /// 测试类型: unit
 /// 目标单元: include/aurora/app/file_dialog.h, include/aurora/app/application.h,
 ///           src/aurora/app/detail/file_picker.h, src/aurora/app/file_dialog_selfdrawn.cpp
 /// 测试说明: 覆盖 Filter/Options 配置结构体默认值与聚合构造、headless 注入钩子
 /// （open/save/folder 预设返回）与 interactive=false 取消语义、钩子优先级、`headless_last_options`
 /// 观察面（三入口逐一记录、排在钩子判据之前、非 ASCII 逐字节回读）；
-/// 桌面自绘腿（Linux / macOS，其余平台记 skip）：L1 状态机无头全覆盖（初始目录三级
+/// 桌面自绘腿（Linux，或未启用 AppKit 后端的 macOS；其余组合记 skip）：L1 状态机无头全覆盖
+/// （初始目录三级
 /// 定位与降级 WARN、进出目录失败驻留、筛选与排序、选择语义、确认绝对路径、取消为空、
 /// SaveFile 形态按 `suggested_name` 末段播种与 `default_extension` 确认时补）、
 /// L2 视图的确认 / 取消 / 上一级与 Options 传导（含输入框初值与状态机同源）、L3 路由三态（钩子优先不构造选择器、
@@ -12,7 +14,8 @@
 /// 还原 / 有限帧驱动 / 帧预算退出 / 一枚叠一枚与第三层拒绝，以及脚本化确认 / 取消 /
 /// 保存文件名 / 目录选择的端到端会话（含两枚选择器叠一层、名字改写以改写后为准）。
 /// 真实系统对话框路径不测（原生 API），全部走钩子 / 非交互 / 自绘腿无头路径；
-/// Win32 腿的 COM 投递由真机探针 `aurora_verify_win32_file_dialog` 取证（见同目录探针头注）。
+/// Win32 腿的 COM 投递由真机探针 `aurora_verify_win32_file_dialog` 取证（见同目录探针头注），
+/// macOS 原生面板属真机交互路径，无自动化落点——其入口口径由头文件契约与钩子 / 非交互用例覆盖。
 
 #include <cstddef>
 #include <functional>
@@ -32,6 +35,13 @@
 #include "aurora/widget/text.h"
 #include "aurora/widget/text_input.h"
 #include "framework/aurora_test.h"
+
+// 自绘选择器腿的生效条件：Linux，或「macOS 但未启用 AppKit 后端」（macOS + AppKit 的入口是
+// file_dialog_macos.cpp 里的原生面板）。L0–L2（数据源 / 状态机 / 视图）在所有桌面平台仍编译，
+// 故 L1/L2 用例继续按「Linux || macOS」守护；只有入口路由与会话端到端用例跟着入口实现走。
+#if defined(AURORA_PLATFORM_LINUX) || (defined(AURORA_PLATFORM_MACOS) && !defined(AURORA_BACKEND_MACOS))
+#define AURORA_UTEST_FILE_DIALOG_SELFDRAWN 1
+#endif
 
 namespace aurora::test_cases::utest_file_dialog {
 
@@ -205,7 +215,7 @@ auto select_first_dir_row(file_dialog::detail::FilePickerModel &model) -> bool {
     return false;
 }
 
-#ifdef AURORA_BACKEND_HEADLESS
+#if defined(AURORA_UTEST_FILE_DIALOG_SELFDRAWN) && defined(AURORA_BACKEND_HEADLESS)
 
 /// @brief 无头驱动一轮自绘会话的观测结果。
 struct SelfdrawnRun {
@@ -262,7 +272,7 @@ auto run_selfdrawn_case(const std::function<void(file_dialog::detail::FilePicker
     return out;
 }
 
-#endif  // defined(AURORA_BACKEND_HEADLESS)
+#endif  // AURORA_UTEST_FILE_DIALOG_SELFDRAWN && AURORA_BACKEND_HEADLESS
 
 #endif  // defined(AURORA_PLATFORM_LINUX) || defined(AURORA_PLATFORM_MACOS)
 
@@ -925,7 +935,7 @@ AURORA_TEST_CASE(view_confirm_cancel_and_go_up) {
 // ---------------------------------------------------------------------------
 
 AURORA_TEST_CASE(no_context_warns_and_returns_empty) {
-#if defined(AURORA_PLATFORM_LINUX) || defined(AURORA_PLATFORM_MACOS)
+#ifdef AURORA_UTEST_FILE_DIALOG_SELFDRAWN
     HookGuard hooks;
     PickerSeamGuard seams;
     aurora::file_dialog::interactive = true;  // 钩子空 + 交互开 + 无 Application 上下文
@@ -946,7 +956,7 @@ AURORA_TEST_CASE(no_context_warns_and_returns_empty) {
     AURORA_TEST_CHECK_TRUE(log.has_line_with({"WRN", "file_dialog", "no running Application context"}));
     AURORA_TEST_CHECK_EQ(file_dialog::detail::picker_construct_count(), 0U);
 #else
-    AURORA_TEST_SKIP("self-drawn no-context routing is the Linux/macOS desktop leg");
+    AURORA_TEST_SKIP("self-drawn no-context routing needs the self-drawn leg (Linux / non-AppKit macOS)");
 #endif
 }
 
@@ -1095,7 +1105,7 @@ AURORA_TEST_CASE(run_modal_refuses_third_level) {
 // 端到端会话：脚本化确认 / 取消 / 保存 / 目录选择 / 两枚叠一层
 // ---------------------------------------------------------------------------
 
-#if (defined(AURORA_PLATFORM_LINUX) || defined(AURORA_PLATFORM_MACOS)) && defined(AURORA_BACKEND_HEADLESS)
+#if defined(AURORA_UTEST_FILE_DIALOG_SELFDRAWN) && defined(AURORA_BACKEND_HEADLESS)
 
 AURORA_TEST_CASE(session_confirm_returns_picked_paths) {
     HookGuard hooks;
@@ -1316,22 +1326,22 @@ AURORA_TEST_CASE(nested_pickers_stack_one_level) {
 #else
 
 AURORA_TEST_CASE(session_confirm_returns_picked_paths) {
-    AURORA_TEST_SKIP("self-drawn session e2e needs Linux/macOS + the Headless backend");
+    AURORA_TEST_SKIP("self-drawn session e2e needs the self-drawn leg + the Headless backend");
 }
 AURORA_TEST_CASE(session_cancel_returns_empty_and_keeps_globals) {
-    AURORA_TEST_SKIP("self-drawn session e2e needs Linux/macOS + the Headless backend");
+    AURORA_TEST_SKIP("self-drawn session e2e needs the self-drawn leg + the Headless backend");
 }
 AURORA_TEST_CASE(session_save_file_uses_name_input) {
-    AURORA_TEST_SKIP("self-drawn session e2e needs Linux/macOS + the Headless backend");
+    AURORA_TEST_SKIP("self-drawn session e2e needs the self-drawn leg + the Headless backend");
 }
 AURORA_TEST_CASE(session_save_file_suggested_name_reaches_result) {
-    AURORA_TEST_SKIP("self-drawn session e2e needs Linux/macOS + the Headless backend");
+    AURORA_TEST_SKIP("self-drawn session e2e needs the self-drawn leg + the Headless backend");
 }
 AURORA_TEST_CASE(session_open_folder_selects_directory) {
-    AURORA_TEST_SKIP("self-drawn session e2e needs Linux/macOS + the Headless backend");
+    AURORA_TEST_SKIP("self-drawn session e2e needs the self-drawn leg + the Headless backend");
 }
 AURORA_TEST_CASE(nested_pickers_stack_one_level) {
-    AURORA_TEST_SKIP("self-drawn session e2e needs Linux/macOS + the Headless backend");
+    AURORA_TEST_SKIP("self-drawn session e2e needs the self-drawn leg + the Headless backend");
 }
 
 #endif

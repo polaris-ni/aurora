@@ -433,18 +433,21 @@ compute_wait_timeout(has_dirty, anim_active, next_deadline_ms, frame_budget_ms, 
 `surface_` 时为 no-op。口径：
 
 - **显示档不抢焦点**：Win32 落 `ShowWindow(SW_SHOWNA)`——与 `NoActivate` 档同一语义；下拉式终端「热键一按
-  就打断用户当前输入」是错的，呼出后要焦点是应用侧另调 `focus_window()`。隐藏档落 `SW_HIDE`。
+  就打断用户当前输入」是错的，呼出后要焦点是应用侧另调 `focus_window()`。隐藏档落 `SW_HIDE`。macOS 落
+  `orderFrontRegardless`（不激活应用与窗口，同 `NoActivate` 语义）/ `orderOut:`；且 `raise()` / `focus_window()`
+  对已隐藏窗口直接短路，不让提层或聚焦把 `orderOut:` 之后的窗口重新唤回。
 - **置顶切换零几何扰动**：`SetWindowPos(..., HWND_TOPMOST / HWND_NOTOPMOST, 0, 0, 0, 0,
   SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)`；构造期的那一次置顶同样补了 `SWP_NOACTIVATE`（建窗档不因置顶
-  而激活）。
+  而激活）。macOS 无布尔置顶位，落 `setLevel:(NSFloatingWindowLevel / NSNormalWindowLevel)`，读回以
+  `level > NSNormalWindowLevel` 为真（外部设得更高时同样如实为真）。
 - **幂等**：两枚 setter 都以 OS 当前值先行判等，同值重复调用不重发 OS 调用（避免多余的 `WM_WINDOWPOSCHANGED`
   与 `Present`）。
-- **读回答 OS 实值，不答应用意图**：`is_visible()` 走 `IsWindowVisible`、`is_always_on_top()` 走
-  `GWL_EXSTYLE & WS_EX_TOPMOST`。最小化或被别的应用覆盖时「意图」与「实际」可以不同，框架不把二者混为
-  一谈；读 OS 也免了新增第二份真值源。
-- **不接线不等于静默**：本批只接 Win32 / D3D11（共用同一宿主故同翻），GLFW / X11 / Wayland / macOS /
-  WASM 保持默认实现，可经 `platform().capabilities().runtime_visibility` / `runtime_always_on_top`
-  **先查询**（§5）；Wayland 的置顶在协议层根本没有核心协议对应，属「可查询的不支持」。
+- **读回答 OS 实值，不答应用意图**：`is_visible()` 走 `IsWindowVisible`（Win32）/ `[window isVisible]`（macOS）、
+  `is_always_on_top()` 走 `GWL_EXSTYLE & WS_EX_TOPMOST`（Win32）/ `[window level] > NSNormalWindowLevel`（macOS）。
+  最小化或被别的应用覆盖时「意图」与「实际」可以不同，框架不把二者混为一谈；读 OS 也免了新增第二份真值源。
+- **不接线不等于静默**：已接 Win32 / D3D11（共用同一宿主故同翻）与 macOS；GLFW / X11 / Wayland / WASM 保持
+  默认实现，可经 `platform().capabilities().runtime_visibility` / `runtime_always_on_top` **先查询**（§5）；
+  Wayland 的置顶在协议层根本没有核心协议对应，属「可查询的不支持」。
 
 ---
 
@@ -494,7 +497,7 @@ au::App().window(win ? std::move(win.value()) : nullptr)
 
 `recent_documents_os_projection` 表「OS 是否提供可写入的最近文档机制、且本库把桥接好了」（§8.10）。当前 `Win32`、`D3D11` 与 `MacOS` 为 true（Win32 / D3D11 共用同一宿主与同一桥实例，故同翻；macOS 走 `NSDocumentController` 的 `noteNewRecentDocumentURL:`，属应用级集合）。`X11` / `Wayland` / `Glfw` / `Wasm` / `Headless` 恒 false：OS 侧无该机制（XDG `recently-used.xbel` 是 GTK 生态的共读文件，不是 OS 机制）。能力位为 false 时 `project_to_os()` / `clear_os_projection()` 返回 `recent-documents-projection-unsupported`，**应用内列表与持久化不受影响**（口径同上：能力位表机制归属，运行期失败另走 `Result`）。期望表由 `utest_recent_documents_translate` 锚定（逐 `SurfaceKind` 断言，含 macOS 为 true 这条）。
 
-`runtime_visibility` 与 `runtime_always_on_top` 表「OS 提供运行期窗口显隐 / 置顶机制，且本库已把 §3.6 的四枚开关接到该机制」。当前仅 `Win32` 与 `D3D11` 为 true（同一宿主：`ShowWindow(SW_SHOWNA / SW_HIDE)` 与 `SetWindowPos(HWND_TOPMOST / HWND_NOTOPMOST)`，故同翻；wgpu 是渲染偏好而非独立 `SurfaceKind`，不另列）。其余恒 false 且各有一句实情：`X11` 的 `XMapWindow` / `XUnmapWindow` 与 `Glfw` 的 `glfwShowWindow` / `glfwHideWindow` **机制在但本库未落桥**，`MacOS` 无窗口壳，`Wayland` 既没有「隐藏顶层窗口」也没有「置顶」的核心协议（只有 minimize），`Headless` 是记录值 seam 而非 OS 机制——**未接线的方向不预先声称**。缺位时 `set_visible` / `set_always_on_top` 是**可观测的 no-op**（`is_visible()` 恒为基类默认 true、`is_always_on_top()` 恒为 false），应用据此先查询再降级，而不是「按了热键窗口没反应还以为是热键坏了」。逐 `SurfaceKind` 期望表由 `utest_window_runtime_control` 锚定（「未接线先翻位」的变异对应用例转红）。
+`runtime_visibility` 与 `runtime_always_on_top` 表「OS 提供运行期窗口显隐 / 置顶机制，且本库已把 §3.6 的四枚开关接到该机制」。当前 `Win32`、`D3D11` 与 `MacOS` 为 true：Win32 / D3D11 共用同一宿主（`ShowWindow(SW_SHOWNA / SW_HIDE)` 与 `SetWindowPos(HWND_TOPMOST / HWND_NOTOPMOST)`，故同翻；wgpu 是渲染偏好而非独立 `SurfaceKind`，不另列）；macOS 落 `orderFrontRegardless` / `orderOut:` 与 `setLevel:(NSFloatingWindowLevel / NSNormalWindowLevel)`。其余恒 false 且各有一句实情：`X11` 的 `XMapWindow` / `XUnmapWindow` 与 `Glfw` 的 `glfwShowWindow` / `glfwHideWindow` **机制在但本库未落桥**，`Wayland` 既没有「隐藏顶层窗口」也没有「置顶」的核心协议（只有 minimize），`Headless` 是记录值 seam 而非 OS 机制——**未接线的方向不预先声称**。缺位时 `set_visible` / `set_always_on_top` 是**可观测的 no-op**（`is_visible()` 恒为基类默认 true、`is_always_on_top()` 恒为 false），应用据此先查询再降级，而不是「按了热键窗口没反应还以为是热键坏了」。逐 `SurfaceKind` 期望表由 `utest_window_runtime_control` 锚定（「未接线先翻位」的变异对应用例转红）。
 
 ```cpp
 const au::Platform p = au::platform();
@@ -548,7 +551,7 @@ au::Lifecycle(
 
 `WindowMode`（`window/window_state.h`）：`Normal` / `Maximized` / `Minimized` / `FullScreen`，与 `WindowState` **正交**——最大化只改变几何态，`WindowState` 仍为 `Visible`；最小化同时满足二者。纯函数 `compute_window_mode(minimized, maximized, fullscreen)` 提供映射。
 
-**后端上报**：`Win32Surface` 处理 `WM_SIZE`（MINIMIZED / MAXIMIZED / RESTORED → 几何态；最小化同时置 `WindowState::Hidden`）与 `WM_ACTIVATE`（非 `WA_INACTIVE` → `Visible`，否则 `Occluded`），两者的状态聚合点 `update_window_state()` 把 `IsWindowVisible(hwnd)` 作为 `on_screen` 传入 `compute_window_state`，故运行期 `set_visible(false)` 报 `Hidden`、`set_visible(true)` 按当时的 `minimized` / `active` 重算；`Win32Host` 构造尾部还会按建窗可见性档**播种**内部快照（`Hidden` 档 ⇒ `Hidden`、`NoActivate` ⇒ `Occluded`、`Normal` ⇒ `Visible`）——只写成员值不触发任何 handler（该时刻 handler 尚未安装），故上报序列与既往逐位相同，而「新建 `Hidden` 档窗口」与「运行期 `set_visible(false)`」读回同一个值（不播种则宿主以 `Visible` 起步、第一次真实变化被「与上次相同」的去重吞掉）。`GlfwSurface` 注册 `glfwSetWindowIconifyCallback` / `glfwSetWindowFocusCallback` / `glfwSetWindowMaximizeCallback`；`HeadlessSurface` 提供 `simulate_window_state` / `simulate_window_mode` 测试 seam，其 `set_visible` 记录显隐值并**同时经 `notify_window_state` 上报**（`false ⇒ Hidden`、`true ⇒ Visible`，同值重复调用不产生第二次上报），使「显隐 → `WindowState` → 应用级投影」这条链在无头 CI 可断言，不依赖真机会话。后端各自仅「**状态变化时**」经 `Surface::WindowStateHandler` / `WindowModeHandler` 上报。
+**后端上报**：`Win32Surface` 处理 `WM_SIZE`（MINIMIZED / MAXIMIZED / RESTORED → 几何态；最小化同时置 `WindowState::Hidden`）与 `WM_ACTIVATE`（非 `WA_INACTIVE` → `Visible`，否则 `Occluded`），两者的状态聚合点 `update_window_state()` 把 `IsWindowVisible(hwnd)` 作为 `on_screen` 传入 `compute_window_state`，故运行期 `set_visible(false)` 报 `Hidden`、`set_visible(true)` 按当时的 `minimized` / `active` 重算；`Win32Host` 构造尾部还会按建窗可见性档**播种**内部快照（`Hidden` 档 ⇒ `Hidden`、`NoActivate` ⇒ `Occluded`、`Normal` ⇒ `Visible`）——只写成员值不触发任何 handler（该时刻 handler 尚未安装），故上报序列与既往逐位相同，而「新建 `Hidden` 档窗口」与「运行期 `set_visible(false)`」读回同一个值（不播种则宿主以 `Visible` 起步、第一次真实变化被「与上次相同」的去重吞掉）。macOS 同口径：`MacOSSurface::Impl::sync_state()` 把 `[window isVisible]` 作为 `on_screen` 传入，构造尾部按建窗可见性档播种 `last_state`（只写成员值、不触发 handler），故 `orderOut:` 之后的失焦通知不再被改写成 `Occluded`。`GlfwSurface` 注册 `glfwSetWindowIconifyCallback` / `glfwSetWindowFocusCallback` / `glfwSetWindowMaximizeCallback`；`HeadlessSurface` 提供 `simulate_window_state` / `simulate_window_mode` 测试 seam，其 `set_visible` 记录显隐值并**同时经 `notify_window_state` 上报**（`false ⇒ Hidden`、`true ⇒ Visible`，同值重复调用不产生第二次上报），使「显隐 → `WindowState` → 应用级投影」这条链在无头 CI 可断言，不依赖真机会话。后端各自仅「**状态变化时**」经 `Surface::WindowStateHandler` / `WindowModeHandler` 上报。
 
 **上层聚合**：`Application` 暴露只读句柄 `ReadOnlyState<WindowState> window_state()` / `ReadOnlyState<WindowMode> window_mode()` 与命令式回调 `set_on_window_state` / `set_on_window_mode`；每帧经 `Window::present_root` 将当前快照注入根 `Environment`，子树可 `ctx.environment<WindowState>()` / `ctx.environment<WindowMode>()` 读取。句柄只开放读取——应用不能把窗口状态写回去，快照的唯一写入者是后端上报。
 
@@ -579,6 +582,8 @@ app.set_on_os_color_scheme([](au::ColorScheme s) { apply_chrome_scheme(s); });
 **销毁顺序（两条硬不变量，均为实机崩溃的修复结论）。** 关闭窗口时 `Win32Host::Impl` 先 `disconnect_all()`（全量 `UiaDisconnectProvider`）再析构桥（`deactivate()` 与 `disconnect_all()` 等价且幂等，并在其中**从注册表注销**——否则进程级广播会在已析构的桥上调用 `is_active()`）。另有一条与窗口无关的路径：桥缓存的语义树根是裸指针，**根控件销毁**时经单源通道 `notify_accessibility_widget_destroying()`（出自 `Node::~Node()`）立即切断根与快照。两条路径的成因、机制与不变量见 [`../ARCHITECTURE.md`](../ARCHITECTURE.md) §8.5。
 
 **多窗口。** 桥与窗口一一对应（`Win32Host::Impl` 唯一持有），多窗口即多个桥同时注册；`screen_reader_active` 是**进程级**设置，任一桥激活即置 `true`、任一桥去激活即试置 `false`（多窗口下复位语义为 best-effort，见 §6.2 同类启发式约定）。
+
+**macOS 桥（NSAccessibility）。** 实现为 `src/aurora/window/detail/macos_ax_bridge.{h,cpp}` 的 `MacOSAxBridge : a11y::Provider`，由 `MacOSSurface::Impl` 唯一持有。平台查询入口不是窗口消息 / D-Bus，而是内容视图的无障碍协议：视图 `isAccessibilityElement` 回 NO、`accessibilityRole` 为 group，`accessibilityChildren` / `accessibilityHitTest:` / `accessibilityFocusedUIElement` 转发给桥（首个查询到达时才构造桥并 `activate()`，同时补喂宿主早已记下的根——与 Win32 的惰性口径同形）。查询即 `sync_if_dirty()`：语义树 → 快照 → `NSAccessibilityElement` 元素树，元素按 `runtime_id` 复用、字段按值持副本（根销毁经 `on_widget_destroying` 立即切断，控件树不在时不会留下悬垂指针），帧经内容视图 `convertRect:toView:` + `convertRectToScreen:` 换成屏幕点。反向动作按节点 id 回控件：`accessibilityPerformPress` 取 Invoke → Click → Toggle 首个可用者、`accessibilityPerformIncrement/Decrement` 以 `range.step` 步进并夹在 `[min,max]` 后走 `Value`、`setAccessibilityFocused:` 走 `Focus`。推送面 = 快照 diff 的另一种消费：焦点 → `FocusedUIElementChanged`、Name → `TitleChanged`、Value/Range → `ValueChanged`、结构 / 几何 / 状态 / 动作变化合并一条视图级 `LayoutChanged`，播报 → `AnnouncementRequested`（带 `NSAccessibilityAnnouncementKey` 与 medium 优先级）。拆除：`destroy_window` 先 `deactivate()`（注销注册表、清元素与快照）再放视图；`set_root` 恒置脏（帧是元素属性，布局每帧可动，这一点与 UIA 的「仅换根置脏」不同）。AppKit 无障碍查询本就只在主线程，故无 Win32 那套跨线程回投面。
 
 **线程模型（provider 回调一律回投主人线程）。** UIA 把 in-proc provider 的**每一次**回调投递在 `UIAutomationCore.dll` 的 COM/RPC 线程上（激活时初始化 STA 套间只保证公寓模型，并不保证那就是 UI 线程），而 widget 树、`snap_`、`id_by_widget_`、`providers_` 只属于**主人线程**（= 构造桥并安装 `main_poster` 帧循环的那条）。故 `Win32UiaBridge` 把访问面劈成两半：
 
@@ -686,15 +691,16 @@ au::Timer(1s, [](au::ReadOnlyState<int> tick) {
 #### 8.1.1 两个真实实现腿
 
 - **Win32 腿**（`src/aurora/app/file_dialog_win32.cpp`，`AURORA_PLATFORM_WINDOWS`）：经 COM 实现——`IFileOpenDialog` 多选 / `IFileSaveDialog` / `FOS_PICKFOLDERS` 文件夹选择器。钩子优先、`interactive == false` 回空、否则弹真框等用户。意图投递集中在 `file_dialog::detail::apply_initial_dir` / `apply_save_name`（声明见 `src/aurora/app/detail/file_dialog_win32_apply.h`，内部头以 `void *` 做类型擦除、不外泄 `<windows.h>`）：`SetFolder` 接初始目录、`SetFileName` 接建议名、`SetDefaultExtension` 接缺省扩展名。`initial_dir` 先 `utf8_to_wstr`（`CP_UTF8`）再 `GetFullPathNameW` 归一，然后交 `SHCreateItemFromParsingName`——该 API 拒正斜杠写法，且其声明由 `_WIN32_IE >= 0x0700` 门控；任一步失败一律 `AURORA_LOG_WARN`（tag `file_dialog`）降级停在 OS 默认位置，不返回 `Error`（解析不了目录是位置问题，不是选择失败）。
+- **macOS 原生腿**（`src/aurora/app/file_dialog_macos.cpp`，`AURORA_PLATFORM_MACOS && AURORA_BACKEND_MACOS`）：`NSOpenPanel`（文件多选 / 目录模式）与 `NSSavePanel` 的同步 `runModal`。选择原生面板而不是自绘，是因为 macOS 用户对侧栏位置、iCloud / 网络卷可见性、沙盒授权（security-scoped URL）有明确预期，而自绘腿走 `std::filesystem` 在沙盒进程里触达不到这些系统位置。投递：`title` → `setMessage:`（面板提示行，不覆盖系统窗口标题）、`initial_dir` → 先 `std::filesystem::is_directory` 校验再 `setDirectoryURL:`（不可解析 / 不存在 ⇒ WARN 停在系统默认位置）、`filters` 的扩展名经 `file_dialog_plan::last_path_segment` + 去 `*` / 前导点折成 `UTType` 白名单（`Filter::name` 无从投递——原生面板没有命名筛选器）、`suggested_name` → `setNameFieldStringValue:`、`default_extension` 排进首选 `UTType` 并在确认后按 `with_default_extension` 兜底（与自绘腿逐字节同解）。无 `NSApplication` 上下文时 WARN 后回空（刻意不调 `sharedApplication` 创建 AppKit，避免无头进程悄悄拉起模态窗）。
 - **折算层（跨腿共用、零平台依赖）**（`src/aurora/app/detail/file_dialog_plan.{h,cpp}`，namespace `aurora::file_dialog_plan`）：末段折算、前导点 / 首尾空白削法、确认名的补全规则只有这一份，每条 CI 腿都编译它并有逐值无头单测（`tests/unit/utest_file_dialog_plan.cpp`）；OS 桥只做投递与失败归因，不再各自写一遍规则。
-- **桌面自绘腿**（Linux / macOS，`src/aurora/app/file_dialog_selfdrawn.cpp`，`AURORA_PLATFORM_LINUX || AURORA_PLATFORM_MACOS`）：框架自绘选择器，零第三方依赖（不引入 GTK / Qt 链接期桌面库、不引入 DBus 客户端、不把「装了外部二进制」变成运行期前提）。架构为四层：
+- **桌面自绘腿**（Linux，以及「macOS 但未启用 AppKit 后端」的 GLFW / X11 / Headless 构建，`src/aurora/app/file_dialog_selfdrawn.cpp`；L0–L2 在 macOS 上也编译以便无头断言，L3 入口只在该腿真实生效的组合上定义）：框架自绘选择器，零第三方依赖（不引入 GTK / Qt 链接期桌面库、不引入 DBus 客户端、不把「装了外部二进制」变成运行期前提）。架构为四层：
   - L0 数据源 `DirectorySource` 概念（`list_dir` / `is_dir` / `to_absolute` / `root`），默认 `std::filesystem` 实现，测试可注入 mock 无头证；
   - L1 状态机 `FilePickerModel`：当前目录、条目、过滤匹配、选择、确认 / 取消，纯逻辑、完全无头；
   - L2 装配 `FilePickerView`：以 `Dialog`（居中内容 + 遮罩 + 焦点作用域）承载、`ListView` / `TextInput` / `Button` 装配的模态面板，**自带零帧循环**，不进 `WidgetRegistry`、不新增公共 widget；
   - L3 三入口路由：钩子优先 → `interactive == false` 回空 → 有 `Application` 上下文走 `Application::run_modal` 嵌套帧循环 → 无上下文 WARN 回空。
 - **其余平台（WASM / Android / BSD 等）**：保留 `file_dialog.h` 内联回退（钩子语义 + 等价取消回空），`AURORA_PLATFORM_WASM` 不做真实选择器（主线程不可阻塞、文件系统是 MEMFS 而非用户真实磁盘），仅在注释与本节如实申报。
 
-#### 8.1.2 钩子与 `interactive` 的优先级次序（三支共用）
+#### 8.1.2 钩子与 `interactive` 的优先级次序（各支共用）
 
 1. 三个 headless 钩子（`headless_open_result` / `headless_save_result` / `headless_folder_result`）任意非空 → 直接返回该预设，**不构造选择器**（计数可证），不消费 `Options`；
 2. `interactive == false` → 回空（等价取消），不弹 UI；
@@ -706,13 +712,13 @@ au::Timer(1s, [](au::ReadOnlyState<int> tick) {
 
 逐腿真值表（「消费」= 落到该腿的真实机制；「不消费」= 头注释如实申报，不做「尽力而为」）：
 
-| 字段 | Win32 腿 | 桌面自绘腿 | 其余平台内联回退 |
-|:---|:---|:---|:---|
-| `title` | `SetTitle`；空 = 形态默认标题 | `Dialog` 标题；空 = 形态默认标题 | 不消费（无 UI） |
-| `initial_dir` | `SetFolder`（三入口共用同一条投递）；解析不了 ⇒ WARN + 停在 OS 默认位置 | 初始目录；不存在 / 不可读 ⇒ 降级数据源根 + 一条可归因 WARN | 不消费 |
-| `suggested_name` | **仅 `save_file`**：`SetFileName`（带目录分隔取末段并 WARN） | **仅 `save_file`**：种进模型 `save_name_` 与名字输入框初值 | 不消费 |
-| `default_extension` | **仅 `save_file`**：`SetDefaultExtension`（削掉前导点后交 OS 补全） | **仅 `save_file`**：确认时按 `with_default_extension` 补在返回名末尾 | 不消费 |
-| `filters` | `SetFileTypes`（`open_file` / `save_file`）；`open_folder` 不投 | 过滤列表展示；`open_folder` 形态忽略——目录无类型语义 | 不消费 |
+| 字段 | Win32 腿 | macOS 原生腿 | 桌面自绘腿 | 其余平台内联回退 |
+|:---|:---|:---|:---|:---|
+| `title` | `SetTitle`；空 = 形态默认标题 | `setMessage:`（提示行）；空 = 系统默认 | `Dialog` 标题；空 = 形态默认标题 | 不消费（无 UI） |
+| `initial_dir` | `SetFolder`（三入口共用同一条投递）；解析不了 ⇒ WARN + 停在 OS 默认位置 | `setDirectoryURL:`（先校验是目录）；不存在 / 不可读 ⇒ WARN + 停在系统默认位置 | 初始目录；不存在 / 不可读 ⇒ 降级数据源根 + 一条可归因 WARN | 不消费 |
+| `suggested_name` | **仅 `save_file`**：`SetFileName`（带目录分隔取末段并 WARN） | **仅 `save_file`**：`setNameFieldStringValue:`（同一末段折算） | **仅 `save_file`**：种进模型 `save_name_` 与名字输入框初值 | 不消费 |
+| `default_extension` | **仅 `save_file`**：`SetDefaultExtension`（削掉前导点后交 OS 补全） | **仅 `save_file`**：首选 `UTType` + 确认后 `with_default_extension` 兜底 | **仅 `save_file`**：确认时按 `with_default_extension` 补在返回名末尾 | 不消费 |
+| `filters` | `SetFileTypes`（`open_file` / `save_file`）；`open_folder` 不投 | 扩展名折成 `allowedContentTypes` 白名单；`Filter::name` 不消费（原生面板无命名筛选器）；`open_folder` 不投 | 过滤列表展示；`open_folder` 形态忽略——目录无类型语义 | 不消费 |
 
 - `suggested_name` 与 `default_extension` 是**保存形态专属**意图：`open_file` / `open_folder` 不消费，头注释与本表同口径。
 - 建议名的折算：空 = 不表达意图（不投、不留痕）；末段为空（尾随分隔符）= 指到目录而非文件名 ⇒ WARN 后按「不表达意图」处理；带目录分隔 ⇒ WARN 后取末段。
@@ -721,12 +727,12 @@ au::Timer(1s, [](au::ReadOnlyState<int> tick) {
 #### 8.1.4 取消与降级的错误语义
 
 - **取消不是失败**：用户取消、目录不可选、无可用通道三路径一律返回 `Ok(空串 / 空列表)`（调用方不必分支），**仅系统级异常回 `Error`**。
-- 桌面腿系统级失败复用既有 `platform-dialog-create-failed` 错误码（见 [`ERROR_CATALOG.md`](../../codespec/ERROR_CATALOG.md)，errors.toml 零新增）；Win32 腿复用 `PlatformComInitFailed`。
+- 错误面按腿分开：Win32 腿在 COM 初始化失败时回 `PlatformComInitFailed`、对话框创建失败时回 `platform-dialog-create-failed`（见 [`ERROR_CATALOG.md`](../../codespec/ERROR_CATALOG.md)，errors.toml 零新增）；macOS 原生腿与桌面自绘腿都不返回 `Error`——AppKit 面板与自绘浮层没有可失败的构造步骤，无 GUI / 无 `Application` 上下文如实 WARN 后按取消回空。
 - 若某平台态确实拿不出选择器，须 `AURORA_LOG_WARN`（tag `file_dialog`）留痕后回空，不弹半残浮层、不回假路径。
 
 #### 8.1.5 `run_modal` 执行模型与「无上下文即等价非交互」路由
 
-桌面自绘腿同步阻塞到用户作答（与 `QFileDialog::exec()` 同口径），真交互路径在调用线程内阻塞到用户作答。执行模型为「恰好一层嵌套模态」：
+macOS 原生腿以 `runModal` 在调用线程内阻塞到用户作答；桌面自绘腿同口径（与 `QFileDialog::exec()` 同一执行模型）。自绘腿的执行模型为「恰好一层嵌套模态」：
 
 - 选择器由菜单 / 帧回调 / 脚本化直调打开时，调用点未必在派发栈内，故 `FilePickerView::show_modal` 自包装当前焦点管理器后再 `Dialog::show`，保证焦点作用域配对；
 - **有 `Application` 上下文**（`loop_begin` 经 `Application::set_loop_application` 登记，自绘三入口据此判「有无上下文」）→ 把选择器挂上主窗口场景根、驱动 `Application::run_modal`（`run_modal` 入口保存进程级单例——`Scheduler` / `Animator` / 主回投器 / 焦点管理器 / 严格模式 / 帧循环所属应用登记——出口逐项还原，模态期新建的定时器 / 动画 / 回投归本应用，退出后外层口径与入口相等，不会半身不遂）；
@@ -1704,7 +1710,7 @@ wasm 腿没有 fd 语义，`Engine` 维持 `NullEngine`（传输能力全 false�
 公共面新增 `include/aurora/net/connectivity.h`（命名空间 `aurora::net`，只含标准头与 `core/result.h`：**零平台头、零 `#ifdef`、不依赖 `Task` / 协程 / `state/`**），实现分三枚 TU：`src/aurora/net/connectivity.cpp`（公共面、投递与令牌换算）、`src/aurora/net/connectivity_probe.cpp`（三平台采集腿与 `compiled_source()`）、`src/aurora/net/detail/connectivity_state.cpp`（判据层状态机与进程级运行时）；库内头 `net/detail/connectivity_probe.h` / `net/detail/connectivity_state.h` 不进伞头、不占公共 API。八个公共类型：枚举 `NetworkState` / `ConnectivitySource` / `ConnectivityChangeCause`，结构体 `ConnectivityFact` / `ConnectivityChange` / `ConnectivityOptions`，类 `ConnectivityMonitor` 与 move-only 句柄 `ConnectivityRegistration`；三枚自由函数 `network_state_text()` / `connectivity_source_text()` / `connectivity_change_cause_text()` 是 REST 与 MCP 侧拼令牌的唯一出处（理由同 `http_stage_text()`）。落码口径：
 
 - **`Online` 只表示「存在可用的缺省链路」，不承诺互联网可达**，故三档而非四档。「有链路、无外网」这一档三平台语义各不相同（macOS 的全局 IPv4/IPv6 键只说明缺省服务、Windows 的连通性提示与 wininet 连接态分处两枚 API、Linux 只能靠旁证推断），开一档等于承诺一份只有个别平台说得清的语义；captive portal、VPN 策略路由与 DNS 可用性都不在三态语义内，需要细节的场合读 `source` / `cause` / `generation` / `since` / `stale` / `last_failure`。
-- **采集原语统一为一句话：是否存在一条经非回环、operational 接口的缺省路由。** Windows 腿落在 `socket.cpp` 的 `probe_default_route_win32()`（`GetIfTable2` + `GetIpForwardTable2`：目的前缀长 0、接口非回环、`IfOperStatusUp`；任一调用失败回 `nullopt`）——**平台 socket 头唯一落点不因本件放宽**，`<winsock2.h>` 与 `iphlpapi` 链接面仍只在既有落点；Linux 腿读 `/proc/net/route`（Destination 全零、标志含 `RTF_UP` 且不含 `RTF_REJECT`）与 `/proc/net/ipv6_route`（目的前缀长 0、标志含 `RTF_UP`），再按接口名读 `/sys/class/net/<if>/operstate` 与 `flags`（`flags` 以 `0x` 前缀的十六进制文本给出，须含 `IFF_UP`），`operstate` 的聚合规则写死——`up` 与 `unknown` 视为 operational，`down` / `dormant` / `lowerlayerdown` / `notpresent` / `testing` 不视为，**任一文件读不到 ⇒ 该腿回「读不到」（`nullopt`），绝不折算成离线**，`lo` 排除；macOS 腿按「未经真机命中的腿不进公共判据」的口径**尚未落地**（Apple 平台 `compiled_source()` 如实回 `None`，缺省形态是动态存储的全局 IPv4/IPv6 键），故 macOS 上 `snapshot()` 今日恒为 `Unknown` + `stale=true`。
+- **采集原语统一为一句话：是否存在一条经非回环、operational 接口的缺省路由。** Windows 腿落在 `socket.cpp` 的 `probe_default_route_win32()`（`GetIfTable2` + `GetIpForwardTable2`：目的前缀长 0、接口非回环、`IfOperStatusUp`；任一调用失败回 `nullopt`）——**平台 socket 头唯一落点不因本件放宽**，`<winsock2.h>` 与 `iphlpapi` 链接面仍只在既有落点；Linux 腿读 `/proc/net/route`（Destination 全零、标志含 `RTF_UP` 且不含 `RTF_REJECT`）与 `/proc/net/ipv6_route`（目的前缀长 0、标志含 `RTF_UP`），再按接口名读 `/sys/class/net/<if>/operstate` 与 `flags`（`flags` 以 `0x` 前缀的十六进制文本给出，须含 `IFF_UP`），`operstate` 的聚合规则写死——`up` 与 `unknown` 视为 operational，`down` / `dormant` / `lowerlayerdown` / `notpresent` / `testing` 不视为，**任一文件读不到 ⇒ 该腿回「读不到」（`nullopt`），绝不折算成离线**，`lo` 排除；macOS 腿读 `SystemConfiguration` 动态存储的两张全局键 `State:/Network/Global/IPv4` 与 `.../IPv6`——键存在即「有该族缺省路由」（configd 在主服务拿到地址并装好路由时发布，含 VPN 的 utun 主接口），store 建不出来 ⇒ 读不到，store 可建而两键都不在 ⇒ 明确离线（不把「没有缺省路由」折算成「读不到」）。
 - **`ConnectivitySource` 是编译期令牌**：构造后不随读数成败变化，它表的是「本构建有没有这条腿」而不是「上次读成功没有」；**不设 `Injected`**——替身只经库内钩子 `detail::set_connectivity_probe_hook()` 安装，公共面不出现实现态。
 - **阈值不对称，且只有探测腿能判离线**：转入 `Offline` 需 `offline_evidence` 枚合格的**探测**读数（缺省 1），`Unknown→Online` 一枚正证即可，`Offline→Online` 需 `online_evidence` 枚一致正证（缺省 2）。等价的三条合法组合各成立：连续两次采样在线、一次采样在线加一次成功建连、两次成功建连。代价论证写在案上：误判离线只是界面多一枚不准的提示，宿主请求照发、失败照旧按九档归因，事实不丢；误判在线会让宿主**停止退避并立刻重试**，在真断链窗口里把一次故障放大成一片刷屏失败——两侧代价不等，故阈值不等。计数规则四条规定死、实现不得自由解释：反向证据清零对方计数、状态转换清零两侧、`stale` 翻转清零两侧、读失败（`nullopt`）**不计数也不清零**。
 - **`Unknown` 是一条独立的态**，既不向 `Online` 也不向 `Offline` 折算（同「PAC / WPAD 一律回 `net-proxy-unsupported`、绝不回空集合」那条既有纪律）。无源腿分两类写死：**wasm 无腿且无证据通路**（fetch 腿不经过建连出口），`subscribe()` 与 `refresh()` 都回 `net-platform-unavailable`，绝不回 OK 后永不通知；**BSD / Android 一类无腿但有旁证**，`subscribe()` 可成功、状态可经非回环成功建连 `Unknown→Online`，但**永不可能转 `Offline`**，`refresh()` 仍回 `net-platform-unavailable`。两类下 `snapshot()` 都恒可读——错误只发生在要求动作的口上。
@@ -1716,7 +1722,7 @@ wasm 腿没有 fd 语义，`Engine` 维持 `NullEngine`（传输能力全 false�
 - **句柄三条契约逐字沿用 `EventSourceRegistration`**：析构即注销且幂等（双析构不双重摘除）、移动后源句柄转为空态（`is_registered()` 假且 `token()` 归 0，故 `= default` 的移动不够用）、已入队的一次尾批仍抵达且 `cancel_pending()` 与析构互不隐含。首条变更的 `previous` 等于订阅时刻的 `snapshot()`；合并待投递变更时以最后一次为准、`previous` 仍锚在**该订阅者**已见值上。
 - **明确不做**：不做发起侧闸门（闸仍在 `NetPolicy` 与能力闸两处，本件只交事实与通知——拿探测当闸等于把可交付请求变成库侧自己发起的失败，那类失败对端不留痕、时间线看不出根因）、不做链路级重连编排、不做第四档、不给 `Resource` / 流式信号形态、不加 `Capabilities` 字段、**不新增错误码**（不可得与无源一律复用 `net-platform-unavailable`）、**不新增 feature 宏且不随 `AURORA_ENABLE_DEBUG` 裁切**、不引 netlink / COM / 任何 vendored 依赖、不起新线程、探测**不主动打一个包**（零出站是本件的硬判据）、不把任何连接失败当链路负证、不导出任何拓扑事实（接口名 / 网关 / SSID / 链路本地地址连内部快照都不留，`ProbeReading` 只含 `optional<bool>`）。
 
-判据：新增 `utest_net_connectivity_state`（17 例，纯内存逐值钉判据层：首态 `Unknown` + `stale`、一枚合格离线读数即转 `Offline`、`Unknown→Online` 一枚正证、`Offline→Online` 的三种组合各一例、回环成功不计正证也不采样、已在线时正证不再采样、读失败不计数不转换、反向证据清零对方计数、`Timeout` 只触发采样并写 `last_failure`、`Cancelled` 无动作、连接失败永不产生离线、`stale` 越过 3× 周期只翻转一次且清零两侧、选项两端钳位、`set_options()` 不重置在途计数也不立即转换）与 `utest_net_connectivity`（7 例，公共面与投递：首快照形态、订阅后一个周期交付 `Online` 且只探测一次、50 次失败合并为 1 次探测 0 条通知、登记失败清 pending 后可重新登记、句柄三条契约含空态令牌归 0、停机后快照仍可读、旋钮往返）。`utest_inspector_server` 补两种形状的 `connectivity` 断言（正常形状与 Release 早退形状同源、字段集合固定、令牌经三枚换算函数）。真机探针 `tools/verify/net_connectivity_live_probe.cpp`（`--expect auto|offline|online`、`--timeout` 1..300 s）登记于 `cmake/AuroraVerify.cmake`，人工用例见 [`manual-test/23-net.md`](../manual-test/23-net.md) 的 TC-NET-009。2026-10-28 实测：Windows 腿 `--expect auto` 21 条判据全 `[PASS]`（`source=ip_helper`、首条变更 `cause=subscription_start state=online`、`generation=1`、`stale` 转假，`since_ms` 约 5.0 s）。WSL Ubuntu 腿首轮 `--expect auto` 在读得到缺省路由时误报 `offline`，暴露并同批修复两处缺陷：`sysfs` 的 `flags` 带 `0x` 前缀而解析器只认纯十六进制字符（接口被误判「读不到」）、以及「接口状态读不到」先于「两族文件可读 ⇒ 离线」返回（把「读不到」折算成了离线，违反本节「绝不把读不到当成 down」的约定）。修复后四跑全 `PASS`：`--expect auto`（`source=link_files`、`state=online`）、`--expect online`、删掉 v4+v6 缺省路由后的 `--expect offline`（`landed ... state=offline ... generation=1`，无任何出站交换）、按原值加回路由后的 `--expect online`；真实接口为 `eth3`。macOS 腿按上文如实记 `None`。
+判据：新增 `utest_net_connectivity_state`（17 例，纯内存逐值钉判据层：首态 `Unknown` + `stale`、一枚合格离线读数即转 `Offline`、`Unknown→Online` 一枚正证、`Offline→Online` 的三种组合各一例、回环成功不计正证也不采样、已在线时正证不再采样、读失败不计数不转换、反向证据清零对方计数、`Timeout` 只触发采样并写 `last_failure`、`Cancelled` 无动作、连接失败永不产生离线、`stale` 越过 3× 周期只翻转一次且清零两侧、选项两端钳位、`set_options()` 不重置在途计数也不立即转换）与 `utest_net_connectivity`（7 例，公共面与投递：首快照形态、订阅后一个周期交付 `Online` 且只探测一次、50 次失败合并为 1 次探测 0 条通知、登记失败清 pending 后可重新登记、句柄三条契约含空态令牌归 0、停机后快照仍可读、旋钮往返）。`utest_inspector_server` 补两种形状的 `connectivity` 断言（正常形状与 Release 早退形状同源、字段集合固定、令牌经三枚换算函数）。真机探针 `tools/verify/net_connectivity_live_probe.cpp`（`--expect auto|offline|online`、`--timeout` 1..300 s）登记于 `cmake/AuroraVerify.cmake`，人工用例见 [`manual-test/23-net.md`](../manual-test/23-net.md) 的 TC-NET-009。2026-10-28 实测：Windows 腿 `--expect auto` 21 条判据全 `[PASS]`（`source=ip_helper`、首条变更 `cause=subscription_start state=online`、`generation=1`、`stale` 转假，`since_ms` 约 5.0 s）。WSL Ubuntu 腿首轮 `--expect auto` 在读得到缺省路由时误报 `offline`，暴露并同批修复两处缺陷：`sysfs` 的 `flags` 带 `0x` 前缀而解析器只认纯十六进制字符（接口被误判「读不到」）、以及「接口状态读不到」先于「两族文件可读 ⇒ 离线」返回（把「读不到」折算成了离线，违反本节「绝不把读不到当成 down」的约定）。修复后四跑全 `PASS`：`--expect auto`（`source=link_files`、`state=online`）、`--expect online`、删掉 v4+v6 缺省路由后的 `--expect offline`（`landed ... state=offline ... generation=1`，无任何出站交换）、按原值加回路由后的 `--expect online`；真实接口为 `eth3`。macOS 腿的 `SCDynamicStore` 读数由本机 AppKit 构建真跑 `--expect auto` 取证（`source=dynamic_store`）。
 
 变异自证四处（摘掉即红）：把 `Offline→Online` 的阈值改成对称（一枚即可）→ `offline_to_online_needs_online_evidence_positives` 转红；把回环成功计成正证 → `loopback_success_does_not_count` 转红；把连接失败计为负证 → `connect_failure_never_counts_negative` 转红；摘掉 `post_after` 失败时的 pending 清零 → `failed_registration_clears_pending` 转红。
 
@@ -1993,6 +1999,6 @@ if (au::platform().is_mobile()) { /* 移动端适配 */ }
 - 事件模型统一（触摸 / 鼠标 / 键盘统一抽象）。
 - 配套**跨平台布局测试套件**与**黄金文件验证**，确保同布局在各平台结果一致。
 - AI 生成的代码无需为不同平台微调。
-- **能力缺位以显式令牌表达，不以静默分岔表达**：某条腿未落地或被裁掉时，公共面回能力位 `false` 或状态令牌而不是让形状随平台变化——形状跨平台一致、只有取值不同。链路态监听即此读法的一例（§8.8.41：Apple 腿未落地故 `source=None`、`state=Unknown`，而 `snapshot()` 的字段集合与调用方式三平台逐字相同）。
+- **能力缺位以显式令牌表达，不以静默分岔表达**：某条腿未落地或被裁掉时，公共面回能力位 `false` 或状态令牌而不是让形状随平台变化——形状跨平台一致、只有取值不同。链路态监听即此读法的一例（§8.8.41：无腿构建 `source=None`、`state=Unknown`，而 `snapshot()` 的字段集合与调用方式三平台逐字相同）。
 
 **验收标准：** 同一棵树在各后端下产出相同的逻辑快照（Level 1 / Level 2）；黄金文件比对零差异。逻辑快照黄金文件由 `utest_offscreen` 承担（11 个固定尺寸布局场景对 `tests/golden/logical_snapshots.json` 逐字段比对，见 [`03-layout-render.md`](03-layout-render.md) §10.1）；像素级 golden 由 `itest_image_view` / `utest_offscreen` 对 `tests/golden/*.png` 比对。

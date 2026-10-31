@@ -53,20 +53,22 @@ struct PlatformCapabilities {
     ///
     /// 能力位只表「机制是否存在且已接线」：与运行期失败不互相替代（同 `system_drag_in` 口径）。
     /// **只在桥已落地的方向翻位**——Win32 / D3D11 共用同一 `Win32Host`
-    /// （`ShowWindow(SW_SHOWNA / SW_HIDE)`），故同翻；wgpu 是**渲染后端偏好**而非独立
+    /// （`ShowWindow(SW_SHOWNA / SW_HIDE)`），故同翻；`MacOS` 走 `MacOSSurface` 的 `orderOut:` /
+    /// `orderFrontRegardless`（显示不激活），读回原生 `isVisible`；wgpu 是**渲染后端偏好**而非独立
     /// `SurfaceKind`（其宿主仍是 Win32），不在此单列。其余恒 false：`X11` 的 `XMapWindow` /
     /// `XUnmapWindow` 与 `Glfw` 的 `glfwHideWindow` / `glfwShowWindow` 机制在但本库未接线，
-    /// `Wayland` 没有「隐藏顶层窗口」的核心协议（只有 minimize），`MacOS` 有窗口壳但 `orderOut:` /
-    /// `setLevel:` 桥未接线（与 `X11` 同属「机制在、桥未落」），`Wasm` 的
+    /// `Wayland` 没有「隐藏顶层窗口」的核心协议（只有 minimize），`Wasm` 的
     /// canvas 没有窗口可见性概念，`Headless` 是记录值 seam 而非 OS 机制。缺位平台上
     /// `set_visible()` 是可观测的 no-op（`is_visible()` 保持基类默认 `true`），不静默。
     bool runtime_visibility = false;
     /// @brief 存在 OS 运行期置顶机制，且本库已把 `Surface::set_always_on_top()` 接到该机制。
     ///
-    /// 翻位口径同 `runtime_visibility`：仅 Win32 / D3D11（同一宿主的 `SetWindowPos(HWND_TOPMOST /
-    /// HWND_NOTOPMOST)`，wgpu 是渲染偏好而非独立 `SurfaceKind`，不另列）；`Wayland` 无核心协议对应
-    /// （其置顶属 `xdg_window` 的扩展或 compositor 策略，本库不引），`X11` 需 `_NET_WM_STATE_ABOVE`
-    /// 客户机消息、`Glfw` 需 `glfwSetWindowAttrib(GLFW_FLOATING)`，两者机制在但未接线，故如实缺位。
+    /// 翻位口径同 `runtime_visibility`：Win32 / D3D11（同一宿主的 `SetWindowPos(HWND_TOPMOST /
+    /// HWND_NOTOPMOST)`，wgpu 是渲染偏好而非独立 `SurfaceKind`，不另列）与 `MacOS`
+    /// （`MacOSSurface` 的 `setLevel:`，Floating / Normal 两档，读回原生 `level`）；
+    /// `Wayland` 无核心协议对应（其置顶属 `xdg_window` 的扩展或 compositor 策略，本库不引），
+    /// `X11` 需 `_NET_WM_STATE_ABOVE` 客户机消息、`Glfw` 需 `glfwSetWindowAttrib(GLFW_FLOATING)`，
+    /// 两者机制在但未接线，故如实缺位。
     bool runtime_always_on_top = false;
 };
 
@@ -147,14 +149,17 @@ struct Platform {
         // `NSMenu`（`NSApp.mainMenu`）桥接线，不随窗口销毁而消失；其余方向无 OS 级机制，回落自绘 MenuBar。
         c.native_menu_bar =
             (surface == SurfaceKind::Win32 || surface == SurfaceKind::D3D11 || surface == SurfaceKind::MacOS);
-        // 运行期显隐 / 置顶：仅 Win32 / D3D11 接线（同一 `Win32Host` 的 `ShowWindow` 与
-        // `SetWindowPos(HWND_TOPMOST / HWND_NOTOPMOST)`，两者共用宿主故同翻）。其余后端本批不接线：
-        // X11 / Glfw 机制在而未落桥，Wayland 无「隐藏顶层窗口」与「置顶」的核心协议，macOS 有窗口壳而
-        // `orderOut:` / `setLevel:` 桥未落，Wasm 的 canvas 无窗口可见性概念，Headless 是记录值 seam
-        // 而非 OS 机制——缺位时 `set_visible` / `set_always_on_top` 为可观测的 no-op
-        // （`is_visible()` 恒为基类默认 true），应用据此降级或申报不支持，而不是「按了没反应还无从知道」。
-        c.runtime_visibility = (surface == SurfaceKind::Win32 || surface == SurfaceKind::D3D11);
-        c.runtime_always_on_top = (surface == SurfaceKind::Win32 || surface == SurfaceKind::D3D11);
+        // 运行期显隐 / 置顶：Win32 / D3D11 接线（同一 `Win32Host` 的 `ShowWindow` 与
+        // `SetWindowPos(HWND_TOPMOST / HWND_NOTOPMOST)`），MacOS 接线（`MacOSSurface` 的
+        // `orderOut:` / `orderFrontRegardless` 与 `setLevel:`），三者共用各自宿主的原生态读回。
+        // 其余后端不接线：X11 / Glfw 机制在而未落桥，Wayland 无「隐藏顶层窗口」与「置顶」的核心协议，
+        // Wasm 的 canvas 无窗口可见性概念，Headless 是记录值 seam 而非 OS 机制——缺位时
+        // `set_visible` / `set_always_on_top` 为可观测的 no-op（`is_visible()` 恒为基类默认 true），
+        // 应用据此降级或申报不支持，而不是「按了没反应还无从知道」。
+        c.runtime_visibility =
+            (surface == SurfaceKind::Win32 || surface == SurfaceKind::D3D11 || surface == SurfaceKind::MacOS);
+        c.runtime_always_on_top =
+            (surface == SurfaceKind::Win32 || surface == SurfaceKind::D3D11 || surface == SurfaceKind::MacOS);
         return c;
     }
 };

@@ -31,7 +31,8 @@ struct ProbeReading {
 };
 
 /// @brief 本构建编译进来的采集腿令牌（编译期常量，构造后不随读数成败变化）。
-/// @return Windows 为 `IpHelper`；Linux 为 `LinkFiles`；其余（含 wasm 与 macOS）为 `None`。
+/// @return Windows 为 `IpHelper`；Linux 为 `LinkFiles`；macOS 为 `DynamicStore`；
+///         其余（wasm / BSD / Android）为 `None`。
 [[nodiscard]] auto compiled_source() -> ConnectivitySource;
 
 /// @brief Windows 采集腿：查路由表与接口表，只交一枚无平台类型的读数。

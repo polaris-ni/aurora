@@ -3,6 +3,7 @@
 // 本文件是全仓**唯一**为链路态引入平台宏的地方。但 Windows 那条腿的 socket 头依赖不在此展开：
 // 查询实现写在既有的 `src/aurora/net/socket.cpp` 内（平台 socket 头唯一落点），本文件只见
 // `optional<bool>` 的签名——「平台 socket 头唯一落点」这条不变量因此不为链路态开口子。
+// macOS 腿读 SystemConfiguration 动态存储的全局键，也不含 socket 头。
 //
 // 两条硬约束：① 只出**同步**查询，不注册回调、不建线程；② **零出站 I/O**，只读 OS 表 / 伪文件 /
 // 动态存储，绝不 `connect` / `sendto` / `getaddrinfo`。
@@ -19,6 +20,14 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#endif
+
+#ifdef AURORA_PLATFORM_MACOS
+#include <CoreFoundation/CoreFoundation.h>
+#include <SystemConfiguration/SystemConfiguration.h>
+
+#include <cstddef>
+#include <optional>
 #endif
 
 namespace aurora::net::detail {
@@ -274,6 +283,37 @@ struct RouteCandidates {
 }
 #endif
 
+#ifdef AURORA_PLATFORM_MACOS
+/// @brief macOS 腿：SystemConfiguration 动态存储里的两张全局键——任一存在即「有缺省路由」。
+///
+/// `State:/Network/Global/IPv4` / `.../IPv6` 由 configd 在「主服务已拿到地址且装好该类缺省
+/// 路由」时发布（含 VPN 的 utun 主接口），键消失即没有该族缺省路由。store 建不出来 ⇒ 读不到；
+/// store 可建而两键都不在 ⇒ 明确离线（不把「没有缺省路由」折算成「读不到」）。
+/// @return 有 / 没有 / 读不到。
+[[nodiscard]] auto apple_global_default_route() -> std::optional<bool> {
+    SCDynamicStoreRef store = SCDynamicStoreCreate(kCFAllocatorDefault, CFSTR("aurora.connectivity"), nullptr, nullptr);
+    if (store == nullptr) {
+        return std::nullopt;  // 动态存储不可达 ⇒ 无从判决
+    }
+    bool present = false;
+    for (const char *const path : {"State:/Network/Global/IPv4", "State:/Network/Global/IPv6"}) {
+        CFStringRef key = CFStringCreateWithCString(kCFAllocatorDefault, path, kCFStringEncodingUTF8);
+        if (key == nullptr) {
+            CFRelease(store);
+            return std::nullopt;  // 键构造失败：不能把「没查成」当「没有」
+        }
+        CFPropertyListRef value = SCDynamicStoreCopyValue(store, key);
+        CFRelease(key);
+        if (value != nullptr) {
+            present = true;
+            CFRelease(value);
+        }
+    }
+    CFRelease(store);
+    return present;
+}
+#endif
+
 }  // namespace
 
 auto compiled_source() -> ConnectivitySource {
@@ -281,8 +321,10 @@ auto compiled_source() -> ConnectivitySource {
     return ConnectivitySource::IpHelper;
 #elif defined(AURORA_PLATFORM_LINUX) && !defined(AURORA_PLATFORM_ANDROID)
     return ConnectivitySource::LinkFiles;
+#elif defined(AURORA_PLATFORM_MACOS)
+    return ConnectivitySource::DynamicStore;
 #else
-    // macOS 的 `SCDynamicStore` 腿归另一位 Agent 落地，桥落地前如实缺位；wasm 无 BSD socket 语义。
+    // 其余平台（wasm / BSD / Android）无 OS 级同步链路事实可采，如实缺位。
     return ConnectivitySource::None;
 #endif
 }
@@ -302,6 +344,8 @@ auto probe_default_route() -> ProbeReading {
     reading.online = probe_default_route_win32();
 #elif defined(AURORA_PLATFORM_LINUX) && !defined(AURORA_PLATFORM_ANDROID)
     reading.online = linux_default_route();
+#elif defined(AURORA_PLATFORM_MACOS)
+    reading.online = apple_global_default_route();
 #else
     reading.online = std::nullopt;
 #endif

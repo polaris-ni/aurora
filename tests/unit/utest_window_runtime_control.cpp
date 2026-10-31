@@ -153,7 +153,7 @@ AURORA_TEST_CASE(compute_window_state_on_screen_matrix) {
 }
 
 AURORA_TEST_CASE(capability_matrix_pins_wired_backends) {
-    // 判据 4：能力位申报「机制存在且已接线」，只在 Win32 / D3D11（同一宿主）翻位；
+    // 判据 4：能力位申报「机制存在且已接线」——Win32 / D3D11（同一宿主）与 MacOS 翻位；
     // 其余后端为「可查询的不支持」，应用据此降级而不是以为热键坏了。
     auto visibility_bit = [](SurfaceKind kind) -> bool {
         Platform p;
@@ -169,8 +169,10 @@ AURORA_TEST_CASE(capability_matrix_pins_wired_backends) {
     AURORA_TEST_CHECK_TRUE(topmost_bit(SurfaceKind::Win32));
     AURORA_TEST_CHECK_TRUE(visibility_bit(SurfaceKind::D3D11));
     AURORA_TEST_CHECK_TRUE(topmost_bit(SurfaceKind::D3D11));
-    for (const SurfaceKind kind : {SurfaceKind::X11, SurfaceKind::Wayland, SurfaceKind::Glfw, SurfaceKind::MacOS,
-                                   SurfaceKind::Wasm, SurfaceKind::Headless}) {
+    AURORA_TEST_CHECK_TRUE(visibility_bit(SurfaceKind::MacOS));
+    AURORA_TEST_CHECK_TRUE(topmost_bit(SurfaceKind::MacOS));
+    for (const SurfaceKind kind :
+         {SurfaceKind::X11, SurfaceKind::Wayland, SurfaceKind::Glfw, SurfaceKind::Wasm, SurfaceKind::Headless}) {
         AURORA_TEST_CHECK_FALSE(visibility_bit(kind));
         AURORA_TEST_CHECK_FALSE(topmost_bit(kind));
     }

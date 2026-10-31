@@ -466,24 +466,30 @@ if (AURORA_BACKEND_MACOS)
     # OBJCXX 语言已在顶层 CMakeLists（add_library(aurora) 之前）统一启用：语言规则须在
     # 目标定义前就绪，否则 Ninja generate 阶段取不到 CMAKE_OBJCXX_* 规则。此处仅平台守卫。
     aurora_define_feature(AURORA_BACKEND_MACOS EXPORT)
-    target_link_libraries(aurora PUBLIC "-framework Cocoa" "-framework AppKit" "-framework Carbon")
+    # UniformTypeIdentifiers：文件对话框的筛选器折算（`UTType`）只在原生腿使用。
+    target_link_libraries(aurora PUBLIC "-framework Cocoa" "-framework AppKit" "-framework Carbon"
+            "-framework UniformTypeIdentifiers")
     # macOS 后端的 ObjC++ TU 须显式指定语言；文件存在才设置，避免 glob 缺失告警。
     # macos_surface.cpp 在 window/（表层），macos_drag.cpp 在 window/detail/（拖放桥，
-    # AppKit 会话状态机，契约见同名头文件）；macos_platform.cpp 是 os_color_scheme 的
+    # AppKit 会话状态机，契约见同名头文件）；macos_ax_bridge.cpp 是 NSAccessibility
+    # 元素树桥（语义树快照 ↔ NSAccessibilityElement + 通知广播）；macos_platform.cpp 是 os_color_scheme 的
     # NSAppearance 读取腿，display_macos.cpp 是 NSScreen 显示器枚举腿；
     # macos_recent_documents.cpp 是 NSDocumentController 最近文档投影腿，
     # macos_menu_bar.cpp 是 NSApp.mainMenu 原生菜单栏腿，
+    # app/file_dialog_macos.cpp 是 NSOpenPanel / NSSavePanel 原生选择器腿（UTType 筛选），
     # app/detail/macos_notification.cpp 是 NSUserNotificationCenter 通知腿，
     # app/detail/macos_tray.cpp 是 NSStatusItem 状态栏托盘腿，
     # app/detail/macos_clipboard.cpp 是 NSPasteboard 富格式/惰性提供腿（ObjC++，语言按本表标记）。
     # 全部文件的门控都在自身 `#if` 内，非 Apple 平台编译为空 TU——与 x11_drag.cpp /
     # wayland_drag.cpp 在别的平台上的处置同构。
     foreach(_macos_objc_src "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/window/macos_surface.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/window/detail/macos_ax_bridge.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/window/detail/macos_drag.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/window/macos_platform.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/window/detail/macos_recent_documents.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/window/detail/macos_menu_bar.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/app/display_macos.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/app/file_dialog_macos.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/app/detail/macos_notification.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/app/detail/macos_tray.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/app/detail/macos_clipboard.cpp")

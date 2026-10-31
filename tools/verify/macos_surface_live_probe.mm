@@ -244,6 +244,59 @@ auto main() -> int {
         surface.poll_platform_events();
         check(true, "request_wake / wait_events / poll_platform_events completed");
 
+        // ---- 运行期显隐 / 置顶：原生态读回、幂等、不动几何、不抢焦点 ----
+        check(aurora::platform().capabilities().runtime_visibility, "capabilities().runtime_visibility");
+        check(aurora::platform().capabilities().runtime_always_on_top, "capabilities().runtime_always_on_top");
+        aurora::WindowState observed = aurora::WindowState::Visible;
+        surface.set_window_state_handler([&observed](aurora::WindowState s) { observed = s; });
+        const NSRect frame_before = [window frame];
+        const aurora::Point pos_before = surface.position();
+        check(surface.is_visible(), "is_visible() true after creation");
+        check(!surface.is_always_on_top(), "is_always_on_top() false at default style");
+        check(surface.is_always_on_top() == ([window level] > NSNormalWindowLevel), "topmost readback == native level");
+
+        surface.set_always_on_top(true);
+        check(surface.is_always_on_top(), "set_always_on_top(true) readback");
+        check([window level] == NSFloatingWindowLevel, "set_always_on_top(true) reaches NSWindow.level",
+              aurora_verify::format_int(static_cast<long long>([window level])));
+        check(NSEqualRects([window frame], frame_before) != NO, "topmost toggle keeps frame");
+        check(surface.is_visible(), "topmost toggle keeps visibility");
+        surface.set_always_on_top(true);  // 幂等：同值不再发 AppKit 调用
+        check([window level] == NSFloatingWindowLevel, "set_always_on_top(true) idempotent");
+        surface.set_always_on_top(false);
+        check(!surface.is_always_on_top(), "set_always_on_top(false) readback");
+        check([window level] == NSNormalWindowLevel, "set_always_on_top(false) back to normal level");
+
+        surface.set_visible(false);
+        check(!surface.is_visible(), "set_visible(false) readback");
+        check([window isVisible] == 0, "set_visible(false) reaches NSWindow.isVisible");
+        check(observed == aurora::WindowState::Hidden, "hidden window reports WindowState::Hidden",
+              aurora_verify::format_int(static_cast<long long>(observed)));
+        check(NSEqualRects([window frame], frame_before) != NO && nearly(surface.position().x, pos_before.x) &&
+                  nearly(surface.position().y, pos_before.y),
+              "hide keeps frame and position");
+        // 隐藏后提层 / 聚焦都不得把窗口唤回（`Surface::raise` / `focus_window` 契约）。
+        surface.raise();
+        check(!surface.is_visible(), "raise() does not un-hide");
+        surface.focus_window();
+        check(!surface.is_visible(), "focus_window() does not un-hide");
+        // 隐藏期间渲染与像素读回照常工作。
+        auto begin_hidden = surface.begin_frame(420, 300);
+        auto present_hidden = surface.present();
+        check(begin_hidden.ok() && present_hidden.ok() && present_hidden.value(), "present while hidden");
+        check(surface.data() != nullptr, "painter data available while hidden");
+
+        surface.set_visible(true);
+        check(surface.is_visible(), "set_visible(true) readback");
+        check([window isVisible] != 0, "set_visible(true) reaches NSWindow.isVisible");
+        check(observed != aurora::WindowState::Hidden, "shown window leaves WindowState::Hidden",
+              aurora_verify::format_int(static_cast<long long>(observed)));
+        check([window isKeyWindow] == 0, "show does not steal keyboard focus");
+        check(NSEqualRects([window frame], frame_before) != NO, "show keeps frame");
+        surface.set_visible(true);  // 幂等
+        check(surface.is_visible(), "set_visible(true) idempotent");
+        surface.set_window_state_handler({});
+
         // ---- Close 语义：close 置位、cancel_close 可撤销 ----
         surface.close();
         check(surface.should_close(), "close() sets should_close");

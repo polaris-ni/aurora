@@ -32,6 +32,7 @@
 #include "aurora/event/event.h"
 #include "aurora/event/keycode.h"
 #include "aurora/window/detail/ime_composition.h"
+#include "aurora/window/detail/macos_ax_bridge.h"
 #include "aurora/window/detail/macos_drag.h"
 #include "aurora/window/detail/macos_keymap.h"
 #include "aurora/window/detail/macos_menu_bar.h"
@@ -121,6 +122,10 @@ struct MacOSSurface::Impl {
     std::unique_ptr<detail::MacOSDragBridge> drag;
     /// @brief 最近文档 OS 投影桥（宿主引用守卫，见 `detail/macos_recent_documents.h`）。
     std::unique_ptr<detail::MacOSRecentDocumentsBridge> recent_docs;
+    /// @brief NSAccessibility 桥（惰性构造：首个 AppKit 无障碍查询到达时才建，见 `ensure_a11y`）。
+    std::unique_ptr<detail::MacOSAxBridge> a11y;
+    /// @brief 语义树根（宿主每帧注入；桥不存在时先记在这里，建桥后补喂）。
+    Widget *a11y_root = nullptr;
 
     /// @brief 把事件交给宿主派发器（未注册时静默丢弃）。
     /// @param e 待派发事件（派发器可写 `is_handled`）。
@@ -135,6 +140,46 @@ struct MacOSSurface::Impl {
         if (owner != nullptr && owner->present_request_) {
             owner->present_request_();
         }
+    }
+
+    /// @brief 惰性构造并激活 NSAccessibility 桥（首个 AppKit 无障碍查询到达时）。
+    /// @return 桥指针；窗口/应用尚未就绪时 nullptr。
+    auto ensure_a11y() -> detail::MacOSAxBridge * {
+        if (!app_ready || view == nil) {
+            return nullptr;
+        }
+        if (a11y == nullptr) {
+            a11y = detail::MacOSAxBridge::create(view);
+            if (a11y == nullptr) {
+                return nullptr;
+            }
+            a11y->set_root(a11y_root);  // 补喂：宿主在桥存在前已记下的根
+            a11y->activate();
+        }
+        return a11y.get();
+    }
+
+    /// @brief 内容视图的无障碍子元素（AppKit 查询入口）。
+    /// @return 自动释放的 `NSArray *`。
+    auto a11y_children() -> id {
+        detail::MacOSAxBridge *const bridge = ensure_a11y();
+        return (bridge != nullptr) ? (id)bridge->children() : @[];
+    }
+
+    /// @brief 屏幕点无障碍命中测试（AppKit 查询入口；point 为屏幕点，原点左下）。
+    /// @param x 屏幕点 x。
+    /// @param y 屏幕点 y。
+    /// @return 命中元素或内容视图。
+    auto a11y_hit_test(double x, double y) -> id {
+        detail::MacOSAxBridge *const bridge = ensure_a11y();
+        return (bridge != nullptr) ? (id)bridge->hit_test(x, y) : (id)view;
+    }
+
+    /// @brief 当前焦点无障碍元素（AppKit 查询入口）。
+    /// @return 焦点元素；无焦点为 nil。
+    auto a11y_focused() -> id {
+        detail::MacOSAxBridge *const bridge = ensure_a11y();
+        return (bridge != nullptr) ? (id)bridge->focused_element() : nil;
     }
 
     /// @brief 观测并同步 backingScaleFactor；变化时上报 `notify_scale_change`。
@@ -171,12 +216,15 @@ struct MacOSSurface::Impl {
         }
     }
 
-    /// @brief 由最小化/激活标志推导可见性态并在变化时上报。
+    /// @brief 由最小化 / 激活 / 屏上可见三输入推导可见性态并在变化时上报。
+    ///
+    /// 可见性取自原生 `isVisible`：`orderOut:` 之后 AppKit 还会送来一条失焦通知，
+    /// 若只看 `active`，隐藏会被改写成 `Occluded`——「隐藏却报遮挡」比不报更糟。
     auto sync_state() -> void {
         if (window == nil) {
             return;
         }
-        const WindowState state = compute_window_state([window isMiniaturized] != 0, active);
+        const WindowState state = compute_window_state([window isMiniaturized] != 0, active, [window isVisible] != 0);
         if (state != last_state) {
             last_state = state;
             if (owner != nullptr) {
@@ -338,7 +386,9 @@ struct MacOSSurface::Impl {
             // 只保证 NativeMenuBar::install 在首个窗口建出后即可用。
             static_cast<void>(detail::macos_menu_bar_ensure_registered());
             last_mode = WindowMode::Normal;
-            last_state = compute_window_state(false, active);
+            // 建窗档即运行期开关的初值：Hidden 档窗口的可见性态播种为 Hidden，
+            // 否则第一次真实变化会被「与上次相同」的去重吞掉。
+            last_state = compute_window_state(false, active, [window isVisible] != 0);
             // 记录初始明暗档（不上报）：宿主在 WindowHost 构造期自行调用 os_color_scheme()
             // 取快照，这里只建立「之后的变化」的比较基准。
             last_scheme = aurora::detail::macos_os_color_scheme();
@@ -361,6 +411,13 @@ struct MacOSSurface::Impl {
 
     /// @brief 收摊：先注销系统拖放桥（在途会话按取消兑现），再释放视图/委托/窗口/图像。
     void destroy_window() {
+        // 无障碍桥先收摊：deactivate 从注册表注销并释放元素（元素持内容视图作 parent），
+        // 必须早于视图/窗口释放。
+        if (a11y != nullptr) {
+            a11y->deactivate();
+            a11y.reset();
+        }
+        a11y_root = nullptr;
         drag.reset();
         recent_docs.reset();
         if (window != nil) {
@@ -812,6 +869,38 @@ auto dispatch_mouse(aurora::MacOSSurface::Impl *impl, NSEvent *event, MouseActio
 - (NSUInteger)characterIndexForPoint:(NSPoint)point {
     (void)point;
     return 0;
+}
+
+// ---- NSAccessibility（转发到惰性桥；查询本身即激活时机）----
+
+- (BOOL)isAccessibilityElement {
+    return NO;  // 容器：自身不是元素，子元素由语义树投影
+}
+
+- (NSString *)accessibilityRole {
+    return NSAccessibilityGroupRole;
+}
+
+- (NSArray *)accessibilityChildren {
+    if (impl == nullptr) {
+        return @[];
+    }
+    return impl->a11y_children();
+}
+
+- (id)accessibilityHitTest:(NSPoint)point {
+    if (impl == nullptr) {
+        return [super accessibilityHitTest:point];
+    }
+    return impl->a11y_hit_test(point.x, point.y);
+}
+
+- (id)accessibilityFocusedUIElement {
+    if (impl == nullptr) {
+        return [super accessibilityFocusedUIElement];
+    }
+    id focused = impl->a11y_focused();
+    return (focused != nil) ? focused : (id)self;
 }
 
 // ---- NSDraggingDestination（转发到拖放桥）----
@@ -1328,21 +1417,76 @@ auto MacOSSurface::close() -> void {
     }
 }
 
+auto MacOSSurface::accessibility_provider() const -> a11y::Provider * {
+    return (impl_ != nullptr) ? impl_->a11y.get() : nullptr;
+}
+
+auto MacOSSurface::set_accessibility_root(Widget *root) -> void {
+    if (impl_ == nullptr) {
+        return;
+    }
+    impl_->a11y_root = root;  // 桥未构造时先记下，建桥后补喂（`ensure_a11y`）
+    if (impl_->a11y != nullptr) {
+        impl_->a11y->set_root(root);
+    }
+}
+
 auto MacOSSurface::raise() -> void {
-    if (impl_ && impl_->window != nil) {
+    // 已隐藏的窗口不因提层而出现（`Surface::raise` 契约）：`orderFront:` 会把 `orderOut:`
+    // 之后的窗口重新排回屏上，等于绕过运行期显隐开关。
+    if (impl_ != nullptr && impl_->window != nil && [impl_->window isVisible] != 0) {
         [impl_->window orderFront:nil];
     }
 }
 
 auto MacOSSurface::focus_window() -> void {
-    if (!impl_ || impl_->window == nil) {
-        return;
+    if (!impl_ || impl_->window == nil || [impl_->window isVisible] == 0) {
+        return;  // 同 `raise`：已隐藏的窗口不因聚焦而出现
     }
     Impl::activate_app();
     [impl_->window makeKeyAndOrderFront:nil];
     if (impl_->view != nil) {
         [impl_->window makeFirstResponder:impl_->view];
     }
+}
+
+auto MacOSSurface::set_visible(bool on) -> void {
+    if (impl_ == nullptr || impl_->window == nil) {
+        return;
+    }
+    // 幂等：先读原生实值，同值不再发 AppKit 调用——重复 `orderOut:` / `orderFrontRegardless`
+    // 各带一次排序与重绘，而语义上没有任何东西要变。
+    if (([impl_->window isVisible] != 0) == on) {
+        return;
+    }
+    if (on) {
+        // 显示但不激活：与建窗期 `NoActivate` 档同口径，呼出面板不该打断用户当前输入。
+        [impl_->window orderFrontRegardless];
+    } else {
+        [impl_->window orderOut:nil];
+    }
+    // 状态经同一条推导上报：隐藏 ⇒ Hidden，显示 ⇒ 按当时 minimized / active 重算。
+    impl_->sync_state();
+}
+
+auto MacOSSurface::is_visible() const -> bool {
+    return impl_ != nullptr && impl_->window != nil && [impl_->window isVisible] != 0;
+}
+
+auto MacOSSurface::set_always_on_top(bool on) -> void {
+    if (impl_ == nullptr || impl_->window == nil) {
+        return;
+    }
+    if (is_always_on_top() == on) {
+        return;  // 同值幂等，理由见 `set_visible`
+    }
+    [impl_->window setLevel:(on ? NSFloatingWindowLevel : NSNormalWindowLevel)];
+}
+
+auto MacOSSurface::is_always_on_top() const -> bool {
+    // 高于普通层即视为置顶：AppKit 没有 Win32 `WS_EX_TOPMOST` 那样的布尔位，
+    // 建窗档与本开关写下的都是 `NSFloatingWindowLevel`，外部设得更高时同样如实为真。
+    return impl_ != nullptr && impl_->window != nil && [impl_->window level] > NSNormalWindowLevel;
 }
 
 auto MacOSSurface::set_owner(const Surface *owner_surface) -> void {
