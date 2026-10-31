@@ -150,96 +150,104 @@ enum class ErrorCode : std::uint16_t {  // NOLINT(*-enum-size)
     PlatformPermissionDenied = 65,  ///< platform-permission-denied: Insufficient permissions: '{detail}'
     PlatformComInitFailed = 66,  ///< platform-com-init-failed: COM initialization failed
     OsHotkeyRegisterFailed = 67,  ///< os-hotkey-register-failed: OS global hotkey registration failed: '{detail}'
-    SurfaceLost = 68,  ///< surface-lost: Surface lost (e.g. window destroyed/device reset)
-    PlatformDialogCreateFailed = 69,  ///< platform-dialog-create-failed: Platform dialog creation failed
-    ClipboardAccessFailed = 70,  ///< clipboard-access-failed: System clipboard is inaccessible: '{detail}'
-    ClipboardWriteFailed = 71,  ///< clipboard-write-failed: Clipboard payload could not be committed: '{detail}'
-    ClipboardFormatUnsupported = 72,  ///< clipboard-format-unsupported
-    ClipboardProviderFailed = 73,  ///< clipboard-provider-failed
-    ClipboardListenUnsupported = 74,  ///< clipboard-listen-unsupported
-    SystemDragNotSupported = 75,  ///< system-drag-not-supported: System drag-and-drop unavailable: '{detail}'
-    SystemDragSessionFailed = 76,  ///< system-drag-session-failed: System drag-and-drop session failed: '{detail}'
-    SystemDragReadFailed = 77,  ///< system-drag-read-failed: System drag payload read failed for '{mime}': '{detail}'
-    SystemDragDecodeFailed = 78,  ///< system-drag-decode-failed
-    SystemDragCancelled = 79,  ///< system-drag-cancelled: System drag session was cancelled: '{detail}'
-    SystemDragMoveRollback = 80,  ///< system-drag-move-rollback
-    NativeMenuUnsupported = 81,  ///< native-menu-unsupported: Native menu bar is not supported on this platform
-    NativeMenuInstallFailed = 82,  ///< native-menu-install-failed: Native menu bar could not be installed: '{detail}'
-    NotificationPostFailed = 83,  ///< notification-post-failed: System notification could not be posted: '{detail}'
-    RecentDocumentsProjectionUnsupported = 84,  ///< recent-documents-projection-unsupported
-    WebViewRuntimeMissing = 85,  ///< webview-runtime-missing: No native web engine runtime available: '{detail}'
-    WebViewEngineInitFailed = 86,  ///< webview-engine-init-failed: Web engine initialization failed: '{detail}'
-    WebViewNavigationFailed = 87,  ///< webview-navigation-failed: Web navigation failed for '{uri}': '{detail}'
-    WebViewScriptEvalFailed = 88,  ///< webview-script-eval-failed: Script evaluation failed: '{detail}'
-    WebViewSnapshotUnsupported = 89,  ///< webview-snapshot-unsupported: Snapshot mode unavailable: '{detail}'
-    WebViewHostUnbound = 90,  ///< webview-host-unbound: Web view not bound to a native host: '{detail}'
-    WebViewUnsupportedMode = 91,  ///< webview-unsupported-mode: Web view mode unsupported on this backend: '{detail}'
-    AudioGraphCycle = 92,  ///< audio-graph-cycle: Audio graph connection would create a cycle ({src} -> {dst})
-    AudioEdgeNotFound = 93,  ///< audio-edge-not-found: Audio connection does not exist and cannot be disconnected
-    AudioContextClosed = 94,  ///< audio-context-closed
-    AudioParamInvalid = 95,  ///< audio-param-invalid: Invalid audio parameter automation ({reason})
-    AudioBufferInvalid = 96,  ///< audio-buffer-invalid: Invalid audio buffer ({reason})
-    AudioDeviceUnavailable = 97,  ///< audio-device-unavailable
-    AudioRecordingFailed = 98,  ///< audio-recording-failed: Audio recording failed: {reason}
-    CliSpecInvalid = 99,  ///< cli-spec-invalid: Invalid command spec: {reason}
-    CliUnknownOption = 100,  ///< cli-unknown-option: Unknown option '{option}' for command '{command}'
-    CliUnknownSubcommand = 101,  ///< cli-unknown-subcommand
-    CliMissingSubcommand = 102,  ///< cli-missing-subcommand: Command '{command}' requires a subcommand
-    CliMissingValue = 103,  ///< cli-missing-value: Option '{option}' requires a value
-    CliInvalidValue = 104,  ///< cli-invalid-value: Value '{value}' is not a valid {kind} for option '{option}'
-    CliChoiceInvalid = 105,  ///< cli-choice-invalid
-    CliRangeViolated = 106,  ///< cli-range-violated: Value '{value}' for option '{option}' is outside [{min}, {max}]
-    CliArityViolated = 107,  ///< cli-arity-violated
-    CliMissingRequired = 108,  ///< cli-missing-required
-    CliTooManyPositionals = 109,  ///< cli-too-many-positionals
-    CliConflictViolated = 110,  ///< cli-conflict-violated
-    NetRuntimeFailed = 111,  ///< net-runtime-failed: Socket runtime initialization failed
-    NetSocketFailed = 112,  ///< net-socket-failed: Socket creation failed
-    NetBindFailed = 113,  ///< net-bind-failed: Socket bind on loopback failed
-    NetListenFailed = 114,  ///< net-listen-failed: Socket listen failed
-    NetAcceptFailed = 115,  ///< net-accept-failed: Socket accept failed
-    NetConnectFailed = 116,  ///< net-connect-failed: Connect to loopback endpoint failed
-    NetTimeoutOptionFailed = 117,  ///< net-timeout-option-failed: Socket timeout option could not be set
-    NetWaitFailed = 118,  ///< net-wait-failed: Socket readiness wait failed
-    NetSendFailed = 119,  ///< net-send-failed: Socket send failed
-    NetRecvFailed = 120,  ///< net-recv-failed: Socket receive failed
-    NetRecvTimeout = 121,  ///< net-recv-timeout: Socket receive timed out
-    NetEndpointInvalid = 122,  ///< net-endpoint-invalid: Network endpoint is not a valid address: '{detail}'
-    NetCancelled = 123,  ///< net-cancelled: Network operation was cancelled
-    NetPlatformUnavailable = 124,  ///< net-platform-unavailable
-    NetUrlInvalid = 125,  ///< net-url-invalid: URL is not a valid absolute or resolvable reference: '{detail}'
-    NetProxyConfigInvalid = 126,  ///< net-proxy-config-invalid: Proxy configuration is not valid: '{detail}'
-    NetProxyUnsupported = 127,  ///< net-proxy-unsupported: This proxy protocol is not supported by the current build
-    NetProxyUnreachable = 128,  ///< net-proxy-unreachable: Proxy tunnel could not be established: '{detail}'
-    NetProxyAuthRequired = 129,  ///< net-proxy-auth-required: Proxy rejected the supplied credentials: '{detail}'
-    NetProxyProtocol = 130,  ///< net-proxy-protocol: Proxy handshake is not protocol-conformant: '{detail}'
-    NetDnsFailed = 131,  ///< net-dns-failed: Host name could not be resolved: '{detail}'
-    NetProxyConfigUnreadable = 132,  ///< net-proxy-config-unreadable
-    NetPolicyViolated = 133,  ///< net-policy-violated
-    NetOptionFailed = 134,  ///< net-option-failed: Socket option or shutdown call failed: '{detail}'
-    NetConnectTimeout = 135,  ///< net-connect-timeout: Connection attempt timed out: '{detail}'
-    NetBufferLimit = 136,  ///< net-buffer-limit: Transfer buffer limit exceeded: '{detail}'
-    NetFramerOverflow = 137,  ///< net-framer-overflow: Framed message exceeds its configured limit: '{detail}'
-    NetFramerConfigInvalid = 138,  ///< net-framer-config-invalid: Invalid framer configuration: '{detail}'
-    NetOptionConflict = 139,  ///< net-option-conflict
-    NetTlsHandshakeFailed = 140,  ///< net-tls-handshake-failed: TLS handshake failed: '{detail}'
-    NetTlsCertRejected = 141,  ///< net-tls-cert-rejected: TLS certificate rejected: '{detail}'
-    NetTlsVersionMismatch = 142,  ///< net-tls-version-mismatch: TLS protocol version mismatch: '{detail}'
-    NetTlsEngineUnavailable = 143,  ///< net-tls-engine-unavailable: No TLS backend available: '{detail}'
-    NetTlsPinMismatch = 144,  ///< net-tls-pin-mismatch: TLS certificate pin mismatch: '{detail}'
-    HttpRequestInvalid = 145,  ///< http-request-invalid: HTTP request cannot be sent as written: '{detail}'
-    HttpTimeout = 146,  ///< http-timeout: HTTP request timed out: '{detail}'
-    HttpRedirectLimit = 147,  ///< http-redirect-limit: HTTP redirect chain exceeded the configured limit: '{detail}'
-    HttpBodyTooLarge = 148,  ///< http-body-too-large: HTTP response body exceeds the configured limit: '{detail}'
-    HttpCharsetUnsupported = 149,  ///< http-charset-unsupported: HTTP response charset is not supported: '{detail}'
-    HttpProtocolError = 150,  ///< http-protocol-error: HTTP peer violated the message grammar: '{detail}'
-    HttpContentEncodingUnsupported = 151,  ///< http-content-encoding-unsupported
-    HttpBodyCorrupt = 152,  ///< http-body-corrupt: HTTP response body cannot be decoded: '{detail}'
-    HttpBodyNotReplayable = 153,  ///< http-body-not-replayable
-    WsClosed = 154,  ///< ws-closed: WebSocket connection is closed: '{detail}'
-    WsHandshakeRejected = 155,  ///< ws-handshake-rejected: WebSocket upgrade was refused: '{detail}'
-    WsProtocolError = 156,  ///< ws-protocol-error: WebSocket peer violated the frame grammar: '{detail}'
-    WsSendQueueFull = 157,  ///< ws-send-queue-full: WebSocket send queue is full: '{detail}'
+    PrintSessionUnsupported = 68,  ///< print-session-unsupported
+    PrintSessionFailed = 69,  ///< print-session-failed: Print session failed: '{detail}'
+    UrlSchemeUnsupported = 70,  ///< url-scheme-unsupported: URL scheme registration is not supported on this platform
+    UrlSchemeFailed = 71,  ///< url-scheme-failed: URL scheme registration failed: '{detail}'
+    FileAssociationUnsupported = 72,  ///< file-association-unsupported
+    FileAssociationFailed = 73,  ///< file-association-failed: File association operation failed: '{detail}'
+    RunAtLoginUnsupported = 74,  ///< run-at-login-unsupported: Run-at-login is not supported on this platform
+    RunAtLoginFailed = 75,  ///< run-at-login-failed: Run-at-login update failed: '{detail}'
+    SurfaceLost = 76,  ///< surface-lost: Surface lost (e.g. window destroyed/device reset)
+    PlatformDialogCreateFailed = 77,  ///< platform-dialog-create-failed: Platform dialog creation failed
+    ClipboardAccessFailed = 78,  ///< clipboard-access-failed: System clipboard is inaccessible: '{detail}'
+    ClipboardWriteFailed = 79,  ///< clipboard-write-failed: Clipboard payload could not be committed: '{detail}'
+    ClipboardFormatUnsupported = 80,  ///< clipboard-format-unsupported
+    ClipboardProviderFailed = 81,  ///< clipboard-provider-failed
+    ClipboardListenUnsupported = 82,  ///< clipboard-listen-unsupported
+    SystemDragNotSupported = 83,  ///< system-drag-not-supported: System drag-and-drop unavailable: '{detail}'
+    SystemDragSessionFailed = 84,  ///< system-drag-session-failed: System drag-and-drop session failed: '{detail}'
+    SystemDragReadFailed = 85,  ///< system-drag-read-failed: System drag payload read failed for '{mime}': '{detail}'
+    SystemDragDecodeFailed = 86,  ///< system-drag-decode-failed
+    SystemDragCancelled = 87,  ///< system-drag-cancelled: System drag session was cancelled: '{detail}'
+    SystemDragMoveRollback = 88,  ///< system-drag-move-rollback
+    NativeMenuUnsupported = 89,  ///< native-menu-unsupported: Native menu bar is not supported on this platform
+    NativeMenuInstallFailed = 90,  ///< native-menu-install-failed: Native menu bar could not be installed: '{detail}'
+    NotificationPostFailed = 91,  ///< notification-post-failed: System notification could not be posted: '{detail}'
+    RecentDocumentsProjectionUnsupported = 92,  ///< recent-documents-projection-unsupported
+    WebViewRuntimeMissing = 93,  ///< webview-runtime-missing: No native web engine runtime available: '{detail}'
+    WebViewEngineInitFailed = 94,  ///< webview-engine-init-failed: Web engine initialization failed: '{detail}'
+    WebViewNavigationFailed = 95,  ///< webview-navigation-failed: Web navigation failed for '{uri}': '{detail}'
+    WebViewScriptEvalFailed = 96,  ///< webview-script-eval-failed: Script evaluation failed: '{detail}'
+    WebViewSnapshotUnsupported = 97,  ///< webview-snapshot-unsupported: Snapshot mode unavailable: '{detail}'
+    WebViewHostUnbound = 98,  ///< webview-host-unbound: Web view not bound to a native host: '{detail}'
+    WebViewUnsupportedMode = 99,  ///< webview-unsupported-mode: Web view mode unsupported on this backend: '{detail}'
+    AudioGraphCycle = 100,  ///< audio-graph-cycle: Audio graph connection would create a cycle ({src} -> {dst})
+    AudioEdgeNotFound = 101,  ///< audio-edge-not-found: Audio connection does not exist and cannot be disconnected
+    AudioContextClosed = 102,  ///< audio-context-closed
+    AudioParamInvalid = 103,  ///< audio-param-invalid: Invalid audio parameter automation ({reason})
+    AudioBufferInvalid = 104,  ///< audio-buffer-invalid: Invalid audio buffer ({reason})
+    AudioDeviceUnavailable = 105,  ///< audio-device-unavailable
+    AudioRecordingFailed = 106,  ///< audio-recording-failed: Audio recording failed: {reason}
+    CliSpecInvalid = 107,  ///< cli-spec-invalid: Invalid command spec: {reason}
+    CliUnknownOption = 108,  ///< cli-unknown-option: Unknown option '{option}' for command '{command}'
+    CliUnknownSubcommand = 109,  ///< cli-unknown-subcommand
+    CliMissingSubcommand = 110,  ///< cli-missing-subcommand: Command '{command}' requires a subcommand
+    CliMissingValue = 111,  ///< cli-missing-value: Option '{option}' requires a value
+    CliInvalidValue = 112,  ///< cli-invalid-value: Value '{value}' is not a valid {kind} for option '{option}'
+    CliChoiceInvalid = 113,  ///< cli-choice-invalid
+    CliRangeViolated = 114,  ///< cli-range-violated: Value '{value}' for option '{option}' is outside [{min}, {max}]
+    CliArityViolated = 115,  ///< cli-arity-violated
+    CliMissingRequired = 116,  ///< cli-missing-required
+    CliTooManyPositionals = 117,  ///< cli-too-many-positionals
+    CliConflictViolated = 118,  ///< cli-conflict-violated
+    NetRuntimeFailed = 119,  ///< net-runtime-failed: Socket runtime initialization failed
+    NetSocketFailed = 120,  ///< net-socket-failed: Socket creation failed
+    NetBindFailed = 121,  ///< net-bind-failed: Socket bind on loopback failed
+    NetListenFailed = 122,  ///< net-listen-failed: Socket listen failed
+    NetAcceptFailed = 123,  ///< net-accept-failed: Socket accept failed
+    NetConnectFailed = 124,  ///< net-connect-failed: Connect to loopback endpoint failed
+    NetTimeoutOptionFailed = 125,  ///< net-timeout-option-failed: Socket timeout option could not be set
+    NetWaitFailed = 126,  ///< net-wait-failed: Socket readiness wait failed
+    NetSendFailed = 127,  ///< net-send-failed: Socket send failed
+    NetRecvFailed = 128,  ///< net-recv-failed: Socket receive failed
+    NetRecvTimeout = 129,  ///< net-recv-timeout: Socket receive timed out
+    NetEndpointInvalid = 130,  ///< net-endpoint-invalid: Network endpoint is not a valid address: '{detail}'
+    NetCancelled = 131,  ///< net-cancelled: Network operation was cancelled
+    NetPlatformUnavailable = 132,  ///< net-platform-unavailable
+    NetUrlInvalid = 133,  ///< net-url-invalid: URL is not a valid absolute or resolvable reference: '{detail}'
+    NetProxyConfigInvalid = 134,  ///< net-proxy-config-invalid: Proxy configuration is not valid: '{detail}'
+    NetProxyUnsupported = 135,  ///< net-proxy-unsupported: This proxy protocol is not supported by the current build
+    NetProxyUnreachable = 136,  ///< net-proxy-unreachable: Proxy tunnel could not be established: '{detail}'
+    NetProxyAuthRequired = 137,  ///< net-proxy-auth-required: Proxy rejected the supplied credentials: '{detail}'
+    NetProxyProtocol = 138,  ///< net-proxy-protocol: Proxy handshake is not protocol-conformant: '{detail}'
+    NetDnsFailed = 139,  ///< net-dns-failed: Host name could not be resolved: '{detail}'
+    NetProxyConfigUnreadable = 140,  ///< net-proxy-config-unreadable
+    NetPolicyViolated = 141,  ///< net-policy-violated
+    NetOptionFailed = 142,  ///< net-option-failed: Socket option or shutdown call failed: '{detail}'
+    NetConnectTimeout = 143,  ///< net-connect-timeout: Connection attempt timed out: '{detail}'
+    NetBufferLimit = 144,  ///< net-buffer-limit: Transfer buffer limit exceeded: '{detail}'
+    NetFramerOverflow = 145,  ///< net-framer-overflow: Framed message exceeds its configured limit: '{detail}'
+    NetFramerConfigInvalid = 146,  ///< net-framer-config-invalid: Invalid framer configuration: '{detail}'
+    NetOptionConflict = 147,  ///< net-option-conflict
+    NetTlsHandshakeFailed = 148,  ///< net-tls-handshake-failed: TLS handshake failed: '{detail}'
+    NetTlsCertRejected = 149,  ///< net-tls-cert-rejected: TLS certificate rejected: '{detail}'
+    NetTlsVersionMismatch = 150,  ///< net-tls-version-mismatch: TLS protocol version mismatch: '{detail}'
+    NetTlsEngineUnavailable = 151,  ///< net-tls-engine-unavailable: No TLS backend available: '{detail}'
+    NetTlsPinMismatch = 152,  ///< net-tls-pin-mismatch: TLS certificate pin mismatch: '{detail}'
+    HttpRequestInvalid = 153,  ///< http-request-invalid: HTTP request cannot be sent as written: '{detail}'
+    HttpTimeout = 154,  ///< http-timeout: HTTP request timed out: '{detail}'
+    HttpRedirectLimit = 155,  ///< http-redirect-limit: HTTP redirect chain exceeded the configured limit: '{detail}'
+    HttpBodyTooLarge = 156,  ///< http-body-too-large: HTTP response body exceeds the configured limit: '{detail}'
+    HttpCharsetUnsupported = 157,  ///< http-charset-unsupported: HTTP response charset is not supported: '{detail}'
+    HttpProtocolError = 158,  ///< http-protocol-error: HTTP peer violated the message grammar: '{detail}'
+    HttpContentEncodingUnsupported = 159,  ///< http-content-encoding-unsupported
+    HttpBodyCorrupt = 160,  ///< http-body-corrupt: HTTP response body cannot be decoded: '{detail}'
+    HttpBodyNotReplayable = 161,  ///< http-body-not-replayable
+    WsClosed = 162,  ///< ws-closed: WebSocket connection is closed: '{detail}'
+    WsHandshakeRejected = 163,  ///< ws-handshake-rejected: WebSocket upgrade was refused: '{detail}'
+    WsProtocolError = 164,  ///< ws-protocol-error: WebSocket peer violated the frame grammar: '{detail}'
+    WsSendQueueFull = 165,  ///< ws-send-queue-full: WebSocket send queue is full: '{detail}'
 };
 
 /// @brief static metadata row of one error code (everything the catalog knows about it).
@@ -256,7 +264,7 @@ struct ErrorMeta {
 };
 
 /// @brief one ErrorMeta row per codespec/errors.toml entry, indexed by ErrorCode's underlying value.
-inline constexpr std::array<ErrorMeta, 158> AURORA_ERROR_TABLE = {
+inline constexpr std::array<ErrorMeta, 166> AURORA_ERROR_TABLE = {
     {
         {
             .code = ErrorCode::GeneralUnknown,
@@ -1031,6 +1039,106 @@ inline constexpr std::array<ErrorMeta, 158> AURORA_ERROR_TABLE = {
             .message_tpl = "OS global hotkey registration failed: '{detail}'",
             .hint = "The key combination may already be grabbed by another process, unsupported on this platform, or "
                     "the platform backend is unavailable",
+        },
+        {
+            .code = ErrorCode::PrintSessionUnsupported,
+            .ident = "PrintSessionUnsupported",
+            .slug = "print-session-unsupported",
+            .domain = ErrorDomain::Platform,
+            .kind = ErrorKind::Unsupported,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "Native print sessions are not supported on this platform",
+            .hint = "The platform offers no print-session mechanism this build can drive; export a PDF through "
+                    "export_pdf() and hand it to the default handler instead. The capability bit native_print_session "
+                    "reports false here, so retrying cannot create the mechanism",
+        },
+        {
+            .code = ErrorCode::PrintSessionFailed,
+            .ident = "PrintSessionFailed",
+            .slug = "print-session-failed",
+            .domain = ErrorDomain::Platform,
+            .kind = ErrorKind::IO,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "Print session failed: '{detail}'",
+            .hint = "The print mechanism exists but this call did not get through (printer gone, spooler refused the "
+                    "document, page rejected). Inspect the detail, fix the printer state and open a new session "
+                    "instead of retrying the same one",
+        },
+        {
+            .code = ErrorCode::UrlSchemeUnsupported,
+            .ident = "UrlSchemeUnsupported",
+            .slug = "url-scheme-unsupported",
+            .domain = ErrorDomain::Platform,
+            .kind = ErrorKind::Unsupported,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "URL scheme registration is not supported on this platform",
+            .hint = "No user-level URL scheme database exists here (or its bridge is not wired). The capability bit "
+                    "url_scheme_registration reports false, so the absence is stable",
+        },
+        {
+            .code = ErrorCode::UrlSchemeFailed,
+            .ident = "UrlSchemeFailed",
+            .slug = "url-scheme-failed",
+            .domain = ErrorDomain::Platform,
+            .kind = ErrorKind::IO,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "URL scheme registration failed: '{detail}'",
+            .hint = "The scheme database exists but this write did not land (registry denied, launch-services refused, "
+                    "desktop entry directory unavailable). The detail names the platform cause; macOS additionally "
+                    "requires the call to run inside a bundle",
+        },
+        {
+            .code = ErrorCode::FileAssociationUnsupported,
+            .ident = "FileAssociationUnsupported",
+            .slug = "file-association-unsupported",
+            .domain = ErrorDomain::Platform,
+            .kind = ErrorKind::Unsupported,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "File association queries or declarations are not supported on this platform",
+            .hint = "No association database is reachable here (or its bridge is not wired). The capability bit "
+                    "file_association reports false, so retrying cannot create the mechanism",
+        },
+        {
+            .code = ErrorCode::FileAssociationFailed,
+            .ident = "FileAssociationFailed",
+            .slug = "file-association-failed",
+            .domain = ErrorDomain::Platform,
+            .kind = ErrorKind::IO,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "File association operation failed: '{detail}'",
+            .hint = "The association database exists but this operation did not get through (registry denied, "
+                    "launch-services refused, desktop entry database unreadable). The detail names the platform cause",
+        },
+        {
+            .code = ErrorCode::RunAtLoginUnsupported,
+            .ident = "RunAtLoginUnsupported",
+            .slug = "run-at-login-unsupported",
+            .domain = ErrorDomain::Platform,
+            .kind = ErrorKind::Unsupported,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "Run-at-login is not supported on this platform",
+            .hint = "No login-item mechanism is available here (or its bridge is not wired); the capability bit "
+                    "run_at_login reports false. macOS sandboxed bundles additionally report this when the login-item "
+                    "service refuses the app",
+        },
+        {
+            .code = ErrorCode::RunAtLoginFailed,
+            .ident = "RunAtLoginFailed",
+            .slug = "run-at-login-failed",
+            .domain = ErrorDomain::Platform,
+            .kind = ErrorKind::IO,
+            .severity = ErrorSeverity::Error,
+            .retryable = false,
+            .message_tpl = "Run-at-login update failed: '{detail}'",
+            .hint = "The login-item mechanism exists but this write did not land (registry denied, login-item service "
+                    "rejected the bundle, autostart directory unwritable). The detail names the platform cause",
         },
         {
             .code = ErrorCode::SurfaceLost,

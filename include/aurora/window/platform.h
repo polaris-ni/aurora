@@ -70,6 +70,29 @@ struct PlatformCapabilities {
     /// `X11` 需 `_NET_WM_STATE_ABOVE` 客户机消息、`Glfw` 需 `glfwSetWindowAttrib(GLFW_FLOATING)`，
     /// 两者机制在但未接线，故如实缺位。
     bool runtime_always_on_top = false;
+    /// @brief 存在 OS 打印会话机制，且本库已接线 `PrintSession`（Windows GDI 打印会话 / macOS AppKit
+    /// 打印操作）。Linux 恒 false：本库不引入 libcups（第三方形态全是 vendored 源码，系统动态库是
+    /// 新开的口子），替代路径是导出 PDF 后交给默认处理程序——结论见
+    /// `specification/06-app-platform.md`。位为 false 时 `print_targets()` 报
+    /// `print-session-unsupported`，不静默返回空列表。
+    bool native_print_session = false;
+    /// @brief 存在 OS 级 URL 方案登记机制，且本库已接线 `register_url_scheme()` 一系。
+    ///
+    /// Windows 写 `HKCU\Software\Classes`；Linux 写用户级桌面条目与 `mimeapps.list`；macOS 靠包内
+    /// `CFBundleURLTypes` + Launch Services（不在 `.app` 包内时调用走 `Result` 失败并点名原因，
+    /// 能力位仍为 true——机制在、桥已接）。
+    bool url_scheme_registration = false;
+    /// @brief 存在 OS 级文件关联数据库，且本库已接线「查询 + 声明候选」一系。
+    ///
+    /// 三平台同 `url_scheme_registration` 的翻位口径。声明**不抢默认处理程序**（默认归用户偏好）；
+    /// 查询只答「当前实际生效的归属」。
+    bool file_association = false;
+    /// @brief 存在 OS 登录项机制，且本库已接线三态查询 / 开关（Windows HKCU Run / Linux 自动启动
+    /// 桌面条目 / macOS `SMAppService`）。
+    ///
+    /// 位为 false 时 `set_run_at_login` 报 `run-at-login-unsupported`、`run_at_login()` 报
+    /// `Unsupported` 并点名原因——三态不压成布尔。
+    bool run_at_login = false;
 };
 
 /// @brief 平台与运行环境快照（显式查询，跳过 Surface 探测，specification/06-app-platform.md §5）。
@@ -105,6 +128,9 @@ struct Platform {
     /// true；`native_menu_bar` 与之同口径（当前均为 Win32 / D3D11 / MacOS，macOS 两条桥同批落地）；
     /// `runtime_visibility` 与 `runtime_always_on_top` 同样仅在已接运行期窗口开关的后端下为 true
     /// （当前仅 Win32 / D3D11，其余后端为「可查询的不支持」，公共 setter 是可观测的 no-op 而非静默失效）。
+    /// `native_print_session` / `url_scheme_registration` / `file_association` / `run_at_login`
+    /// 与 `SurfaceKind` 无关（入口是进程级自由函数），按平台桥的编译期接线整体置位；Linux 的
+    /// `native_print_session` 恒 false（不引入 libcups）。
     [[nodiscard]] auto capabilities() const -> PlatformCapabilities {
         // 待填充的能力标志聚合：默认值起步，先按设备形态、再按 SurfaceKind 逐项置位。
         PlatformCapabilities c;
@@ -149,17 +175,27 @@ struct Platform {
         // `NSMenu`（`NSApp.mainMenu`）桥接线，不随窗口销毁而消失；其余方向无 OS 级机制，回落自绘 MenuBar。
         c.native_menu_bar =
             (surface == SurfaceKind::Win32 || surface == SurfaceKind::D3D11 || surface == SurfaceKind::MacOS);
-        // 运行期显隐 / 置顶：Win32 / D3D11 接线（同一 `Win32Host` 的 `ShowWindow` 与
-        // `SetWindowPos(HWND_TOPMOST / HWND_NOTOPMOST)`），MacOS 接线（`MacOSSurface` 的
-        // `orderOut:` / `orderFrontRegardless` 与 `setLevel:`），三者共用各自宿主的原生态读回。
-        // 其余后端不接线：X11 / Glfw 机制在而未落桥，Wayland 无「隐藏顶层窗口」与「置顶」的核心协议，
-        // Wasm 的 canvas 无窗口可见性概念，Headless 是记录值 seam 而非 OS 机制——缺位时
-        // `set_visible` / `set_always_on_top` 为可观测的 no-op（`is_visible()` 恒为基类默认 true），
-        // 应用据此降级或申报不支持，而不是「按了没反应还无从知道」。
         c.runtime_visibility =
             (surface == SurfaceKind::Win32 || surface == SurfaceKind::D3D11 || surface == SurfaceKind::MacOS);
         c.runtime_always_on_top =
             (surface == SurfaceKind::Win32 || surface == SurfaceKind::D3D11 || surface == SurfaceKind::MacOS);
+        // 桌面外壳集成四枚位：入口是进程级自由函数（`include/aurora/app/` 的五个新头），与
+        // `SurfaceKind` 无关——平台桥按编译期 OS 宏接线（见 `src/aurora/app/detail/` 的三套
+        // `*_shell_integration.cpp`），故这里按平台整体置位，不随 Surface 变化；Headless 在
+        // Windows / Linux 上同样持有这些 OS 机制。Linux 的 `native_print_session` 恒 false：
+        // 本库不引入 libcups，替代路径是导出 PDF 后交给默认处理程序（结论见
+        // `specification/06-app-platform.md`）。文档输出（PDF）**不入**能力位——纯库内能力，
+        // 不依赖任何 OS 机制。
+#if defined(AURORA_PLATFORM_WINDOWS) || (defined(AURORA_PLATFORM_MACOS) && defined(AURORA_BACKEND_MACOS))
+        c.native_print_session = true;
+        c.url_scheme_registration = true;
+        c.file_association = true;
+        c.run_at_login = true;
+#elif defined(AURORA_PLATFORM_LINUX)
+        c.url_scheme_registration = true;
+        c.file_association = true;
+        c.run_at_login = true;
+#endif
         return c;
     }
 };

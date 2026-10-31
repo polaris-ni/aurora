@@ -6247,6 +6247,86 @@
       "hint": "The key combination may already be grabbed by another process, unsupported on this platform, or the platform backend is unavailable"
     },
     {
+      "enum": "PrintSessionUnsupported",
+      "slug": "print-session-unsupported",
+      "domain": "platform",
+      "kind": "unsupported",
+      "severity": "error",
+      "retryable": false,
+      "message": "Native print sessions are not supported on this platform",
+      "hint": "The platform offers no print-session mechanism this build can drive; export a PDF through export_pdf() and hand it to the default handler instead. The capability bit native_print_session reports false here, so retrying cannot create the mechanism"
+    },
+    {
+      "enum": "PrintSessionFailed",
+      "slug": "print-session-failed",
+      "domain": "platform",
+      "kind": "io",
+      "severity": "error",
+      "retryable": false,
+      "message": "Print session failed: '{detail}'",
+      "hint": "The print mechanism exists but this call did not get through (printer gone, spooler refused the document, page rejected). Inspect the detail, fix the printer state and open a new session instead of retrying the same one"
+    },
+    {
+      "enum": "UrlSchemeUnsupported",
+      "slug": "url-scheme-unsupported",
+      "domain": "platform",
+      "kind": "unsupported",
+      "severity": "error",
+      "retryable": false,
+      "message": "URL scheme registration is not supported on this platform",
+      "hint": "No user-level URL scheme database exists here (or its bridge is not wired). The capability bit url_scheme_registration reports false, so the absence is stable"
+    },
+    {
+      "enum": "UrlSchemeFailed",
+      "slug": "url-scheme-failed",
+      "domain": "platform",
+      "kind": "io",
+      "severity": "error",
+      "retryable": false,
+      "message": "URL scheme registration failed: '{detail}'",
+      "hint": "The scheme database exists but this write did not land (registry denied, launch-services refused, desktop entry directory unavailable). The detail names the platform cause; macOS additionally requires the call to run inside a bundle"
+    },
+    {
+      "enum": "FileAssociationUnsupported",
+      "slug": "file-association-unsupported",
+      "domain": "platform",
+      "kind": "unsupported",
+      "severity": "error",
+      "retryable": false,
+      "message": "File association queries or declarations are not supported on this platform",
+      "hint": "No association database is reachable here (or its bridge is not wired). The capability bit file_association reports false, so retrying cannot create the mechanism"
+    },
+    {
+      "enum": "FileAssociationFailed",
+      "slug": "file-association-failed",
+      "domain": "platform",
+      "kind": "io",
+      "severity": "error",
+      "retryable": false,
+      "message": "File association operation failed: '{detail}'",
+      "hint": "The association database exists but this operation did not get through (registry denied, launch-services refused, desktop entry database unreadable). The detail names the platform cause"
+    },
+    {
+      "enum": "RunAtLoginUnsupported",
+      "slug": "run-at-login-unsupported",
+      "domain": "platform",
+      "kind": "unsupported",
+      "severity": "error",
+      "retryable": false,
+      "message": "Run-at-login is not supported on this platform",
+      "hint": "No login-item mechanism is available here (or its bridge is not wired); the capability bit run_at_login reports false. macOS sandboxed bundles additionally report this when the login-item service refuses the app"
+    },
+    {
+      "enum": "RunAtLoginFailed",
+      "slug": "run-at-login-failed",
+      "domain": "platform",
+      "kind": "io",
+      "severity": "error",
+      "retryable": false,
+      "message": "Run-at-login update failed: '{detail}'",
+      "hint": "The login-item mechanism exists but this write did not land (registry denied, login-item service rejected the bundle, autostart directory unwritable). The detail names the platform cause"
+    },
+    {
       "enum": "SurfaceLost",
       "slug": "surface-lost",
       "domain": "window",
