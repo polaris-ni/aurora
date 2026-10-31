@@ -102,10 +102,11 @@ class EventDispatcher {
     auto dispatch_mouse(Widget &root, MouseEvent &e, FocusManager *fm = nullptr) -> bool;
 
     /// @brief 连击判定时间窗（毫秒）：本次 Press 与上次**已完成**点击（Release）的间隔不超过该值才累加序号。
-    ///        初值 `AURORA_DEFAULT_CLICK_WINDOW_MS`（500ms）——库内约定常量，**未接线到系统双击速度设置**
-    ///        （Windows `GetDoubleClickTime` / X11 等），跨平台手感一致。
-    ///        可写：置 0 使每次点击都重置为 1；置极大值使窗口恒开。测试据此注入极端阈值。
-    std::uint32_t click_window_ms = AURORA_DEFAULT_CLICK_WINDOW_MS;
+    ///        初值取 `os_double_click_ms()`（默认跟随系统双击速度：Windows `GetDoubleClickTime()`，
+    ///        其余平台回退 `AURORA_DEFAULT_CLICK_WINDOW_MS`）。可写：显式赋值即覆盖系统值；
+    ///        置 0 使每次点击都重置为 1；置极大值使窗口恒开。测试据此注入极端阈值；
+    ///        再读 `os_double_click_ms()` 回填即可恢复「跟随系统」。
+    std::uint32_t click_window_ms = os_double_click_ms();
 
     /// @brief 连击判定位移半径（逻辑 dp）：两次点击落点距离不超过该值才累加序号。
     ///        初值 `AURORA_DEFAULT_CLICK_RADIUS_DP`（4dp）。可写，语义同 `click_window_ms`。
@@ -215,8 +216,9 @@ class TouchDispatcher {
     /// @return 是否有任意触点命中（is_handled 由各 widget 写入 e）。
     auto dispatch(Widget &root, TouchEvent &e, FocusManager *fm = nullptr) -> bool;
 
-    /// @brief 连击（双 tap）判定时间窗（毫秒）；语义与 `EventDispatcher::click_window_ms` 一致。
-    std::uint32_t click_window_ms = AURORA_DEFAULT_CLICK_WINDOW_MS;
+    /// @brief 连击（双 tap）判定时间窗（毫秒）；语义与 `EventDispatcher::click_window_ms` 一致，
+    ///        初值同样取 `os_double_click_ms()`（默认跟随系统双击速度）。
+    std::uint32_t click_window_ms = os_double_click_ms();
 
     /// @brief 连击（双 tap）判定位移半径（逻辑 dp）；语义与 `EventDispatcher::click_radius_dp` 一致。
     float click_radius_dp = AURORA_DEFAULT_CLICK_RADIUS_DP;

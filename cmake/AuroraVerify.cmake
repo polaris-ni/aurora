@@ -567,6 +567,23 @@ if (AURORA_BUILD_VERIFY_TOOLS)
         list(APPEND _aurora_verify_targets aurora_verify_alsa_audio)
     endif ()
 
+    # ---- Linux 系统双击速度（事件模块，任意 Linux 构建可构建）：真实桌面下
+    # `os_double_click_ms()` 是否真经 GLib GSettings 跟随系统（交叉见证抓「恒返回常量」回归），
+    # 缺 GLib / 无会话时是否优雅回退库级兜底常量。纯函数探针，不建窗口、不依赖任何后端。
+    # 文件内含 #error 守卫，仅在桌面 Linux 可编译。
+    if (LINUX)
+        aurora_add_verify_probe(aurora_verify_linux_double_click "${_aurora_verify_dir}/linux_double_click_live_probe.cpp")
+        list(APPEND _aurora_verify_targets aurora_verify_linux_double_click)
+    endif ()
+
+    # ---- Windows 系统双击速度（事件模块，任意 Windows 构建可构建）：真实 Windows 下
+    # `os_double_click_ms()` 是否真经 GetDoubleClickTime 跟随系统（交叉见证抓「恒返回常量」回归）。
+    # 纯函数探针，不建窗口、不依赖任何后端。文件内含 #error 守卫，仅在 Windows 可编译。
+    if (WIN32)
+        aurora_add_verify_probe(aurora_verify_windows_double_click "${_aurora_verify_dir}/windows_double_click_live_probe.cpp")
+        list(APPEND _aurora_verify_targets aurora_verify_windows_double_click)
+    endif ()
+
     # ---- CoreAudio 音频（macOS）：AudioQueue 建队列 / 真实队列线程 / 格式契约 / 图时钟 /
     # 出声路径真机核对。段结构与 WASAPI / ALSA 探针对齐（激活/格式契约/时钟/缓冲源与推流/
     # suspend-resume/重路由收尾/采集观察口 + --interactive 出声与设备热切换人工段）。

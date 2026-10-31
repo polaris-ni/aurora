@@ -19,12 +19,25 @@ namespace aurora {
 // 分段说明：以下事件类型均为纯数据载荷，只在主线程构造与派发
 // （契约 Thread: main-thread only、Side-effects: pure 逐类成立，此处统一声明）。
 
-/// @brief 连击判定的**默认时间窗**（毫秒）：两次点击间隔不超过该值才可能累加连击序号。
-/// 单一真源：`EventDispatcher::click_window_ms` 以它为初值，窗口装饰层（Wayland CSD 标题栏
-/// 双击最大化）直接引用同一常量，避免「库内两套阈值」漂移。
-/// @note 该值是库内约定常量，**未接线到系统双击速度设置**（Windows `GetDoubleClickTime` /
-///       X11 `Xkb` 等），跨平台才有一致手感；后续接系统值时须同步调整本注释。
+/// @brief 连击判定的**兜底时间窗**（毫秒）：系统双击速度不可读时回落到此值。
+/// 窗口装饰层（Wayland CSD 标题栏双击最大化）直接引用同一常量，避免「库内两套阈值」漂移。
+/// 派发器 `click_window_ms` 的初值现已默认跟随系统（见 `os_double_click_ms()`），本常量仅作回退。
+/// @note 该值是库内兜底常量，不再作为派发器初值；连击窗口默认取 `os_double_click_ms()`
+///       （Windows `GetDoubleClickTime` 等真实系统值），仅在系统值不可读时回落到本常量。
 inline constexpr std::uint32_t AURORA_DEFAULT_CLICK_WINDOW_MS = 500;
+
+/// @brief 查询系统「双击速度」对应的连击时间窗（毫秒）。
+///
+/// 默认跟随系统：`EventDispatcher` / `TouchDispatcher` 的 `click_window_ms` 初值即取此函数。
+/// - Windows 走 `GetDoubleClickTime()`，取真实系统值（通常 100–1000ms）；
+/// - macOS / Wasm / Headless / Android 等无「可零依赖读取」公开 API 的平台，回退到
+///   `AURORA_DEFAULT_CLICK_WINDOW_MS`（库内约定常量）；Linux 经 GLib GSettings
+///   （`org.gnome.desktop.peripherals.mouse` → `double-click`）读取真实系统值，缺库/无会话时回退同常量。
+///
+/// 应用可显式写 `click_window_ms` 覆盖系统值（置 0 关闭连击判定、置极大值使窗口恒开），
+/// 再读本函数回填即可恢复「跟随系统」。Linux 已先经 GLib GSettings 读取真实系统值，其余平台回退常量；新增平台分支只改本函数。
+/// @return 连击时间窗（毫秒），恒为正（≥1）。
+[[nodiscard]] auto os_double_click_ms() -> std::uint32_t;
 
 /// @brief 连击判定的**默认位移半径**（逻辑 dp）：两次点击的落点距离不超过该值才可能累加连击序号。
 /// 单一真源：`EventDispatcher::click_radius_dp` 以它为初值，窗口装饰层与派发器共用。

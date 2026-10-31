@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "aurora/event/event.h"
+#include "aurora/event/dispatcher.h"
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_event {
@@ -225,5 +226,41 @@ AURORA_TEST_CASE(base_reference_shares_handled_flag) {
     mouse_base.is_handled = true;
     AURORA_TEST_CHECK_TRUE(mouse.is_handled);
 }
+
+AURORA_TEST_CASE(click_window_default_follows_system) {
+    // 系统双击速度查询返回值落在合理区间（≥1，且不过大）。
+    const std::uint32_t sys = os_double_click_ms();
+    AURORA_TEST_CHECK(sys >= 1U);
+    AURORA_TEST_CHECK(sys <= 10000U);
+
+    // 默认构造的派发器以系统值为初值。
+    EventDispatcher ed;
+    AURORA_TEST_CHECK_EQ(ed.click_window_ms, sys);
+
+    TouchDispatcher td;
+    AURORA_TEST_CHECK_EQ(td.click_window_ms, sys);
+
+    // 显式覆盖系统值后保持；再回填系统值即恢复「跟随系统」。
+    ed.click_window_ms = 123U;
+    AURORA_TEST_CHECK_EQ(ed.click_window_ms, 123U);
+    ed.click_window_ms = os_double_click_ms();
+    AURORA_TEST_CHECK_EQ(ed.click_window_ms, sys);
+
+    // 特殊阈值语义不受默认来源影响：置 0 关闭连击判定、极大值恒开仍可用。
+    ed.click_window_ms = 0U;
+    AURORA_TEST_CHECK_EQ(ed.click_window_ms, 0U);
+    ed.click_window_ms = 60000U;
+    AURORA_TEST_CHECK_EQ(ed.click_window_ms, 60000U);
+}
+
+#if defined(AURORA_PLATFORM_LINUX) && !defined(AURORA_PLATFORM_ANDROID)
+AURORA_TEST_CASE(click_window_linux_reads_gsettings_or_fallback) {
+    // Linux 分支：要么经 GLib GSettings 读到真实系统值，要么回退库级兜底常量；
+    // 两者均须为正且落在合理区间（避免极端负值或 0 穿透到派发器初值）。
+    const std::uint32_t ms = os_double_click_ms();
+    AURORA_TEST_CHECK_TRUE(ms >= 1U);
+    AURORA_TEST_CHECK_TRUE(ms <= 10000U);
+}
+#endif
 
 }  // namespace aurora::test_cases::utest_event

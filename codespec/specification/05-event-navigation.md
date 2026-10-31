@@ -87,10 +87,10 @@ struct Event {
 
 | 成员 | 初值 | 常量 | 语义 |
 |:---|:---|:---|:---|
-| `click_window_ms` | 500 | `AURORA_DEFAULT_CLICK_WINDOW_MS` | 连击时间窗（毫秒）；**置 0 即关闭连击判定**（任何间隔都不累加），置极大值使窗口恒开——供测试注入极端阈值，无需全局时钟钩子 |
+| `click_window_ms` | `os_double_click_ms()` | `AURORA_DEFAULT_CLICK_WINDOW_MS`（系统不可读时回退） | 连击时间窗（毫秒）；**默认跟随系统双击速度**（Windows `GetDoubleClickTime()`、Linux 经 GLib GSettings 读取、其余（macOS / Wasm / Headless / Android）回退库级常量）；**置 0 即关闭连击判定**（任何间隔都不累加），置极大值使窗口恒开——供测试注入极端阈值，无需全局时钟钩子 |
 | `click_radius_dp` | 4 | `AURORA_DEFAULT_CLICK_RADIUS_DP` | 连击位移半径（逻辑 dp） |
 
-阈值是**库内约定常量，未接线到系统双击速度设置**（Windows `GetDoubleClickTime` / X11 等）；取库内一致值换跨平台手感一致，后续接系统值时须同步修订本段。
+阈值默认**跟随系统双击速度设置**（`os_double_click_ms()`）：Linux 走 GLib GSettings（`org.gnome.desktop.peripherals.mouse` → `double-click`）取真实系统值，macOS / Wasm / Headless / Android 回退库级常量 `AURORA_DEFAULT_CLICK_WINDOW_MS`；应用可显式写 `click_window_ms` 覆盖，再读 `os_double_click_ms()` 回填即恢复跟随系统。
 
 **窗口装饰层（Wayland CSD 标题栏双击最大化）直接引用同一对常量**（`AURORA_DEFAULT_CLICK_WINDOW_MS` / `AURORA_DEFAULT_CLICK_RADIUS_DP`），不另写一套，避免「库内两套阈值」漂移。两者语义正交：CSD 标题栏属窗口装饰层、不进 widget 树、不经 `EventDispatcher`，因此它读不到（也无需读）派发器实例上的可调成员，只能引常量。历史值为 300ms / 5px，统一后与其它平台一致为 500ms / 4dp。
 
