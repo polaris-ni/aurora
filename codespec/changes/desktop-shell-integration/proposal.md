@@ -1,8 +1,8 @@
-# CHG-049 桌面外壳集成四件：文档输出与打印会话、URL 方案注册、文件关联、登录项
+# CHG-054 桌面外壳集成四件：文档输出与打印会话、URL 方案注册、文件关联、登录项
 
 | 字段 | 值 |
 |:---|:---|
-| 变更编号 | CHG-049 |
+| 变更编号 | CHG-054 |
 | 提出日期 | 2026-10-31 |
 | 当前状态 | 已归档 |
 | 关联需求 | 无 |
@@ -121,5 +121,6 @@
 14. **判据 14 / 15 / 16 兑现**：`print_targets_reports_an_empty_system_as_success` 钉住「空列表配 `Ok`」；`pdf_pages_are_composited_onto_the_page_background` 与 `print_session_composites_pages_before_submission` 逐像素断言 alpha 恒 255（去掉合成即转红）；`single_instance` 的 `instance_key_ignores_arguments_and_call_history` 断言同一路径的不同命令行派生同一键，`non_uri_arguments_are_not_queued` 与 `uri_extraction_skips_windows_drive_paths` 区分 URI 与盘符路径。
 15. **macOS 侧的不对称与未测部分（留白）**：URL 方案与文档类型必须在包内 `Info.plist` 静态声明，运行期撤销如实回 `url-scheme-unsupported`；登录项要求 `SMAppService`（13+）、沙箱回 `Unsupported`、`RequiresApproval` 折成 `Disabled`；单实例在该平台恒回 `Primary`（唤起由 AppKit 应用级通道承担，命令行无第二进程可验）。四枚探针在 macOS 上未封装 `.app`（提案提到的 `<name>_probe_info.plist` 未随本批提供），裸可执行按退出码 2 报 ENV-UNAVAILABLE——**这三族的 macOS 真机兑现因此尚未取证**，记为后续补做项。
 16. **Linux 与 macOS 两侧桥未在本机编译**：本机是 Windows，`linux_shell_integration.cpp` / `macos_shell_integration.cpp` 只经代码审查与同构对照，未参与本轮构建；其编译期与运行期行为待 Linux / macOS CI 或真机补证。这是本批最大的验证缺口，不折算成「已验收」。
-17. **文档回写按实际落法改写**：`06-app-platform.md` §5 的能力位段与逐平台矩阵、§8.11–§8.15 五节；`SPECIFICATIONS.md` 的四枚需求行与特性计数（§5 实际 49 条，原表头写 43 已陈旧，同批改正）；`BUILD_OPTIONS.md` §2.4 的四枚探针登记；`manual-test/19-app.md` §1.1 的公共头计数由 20 改为**实际 31**，并补进提案点名的六个存量缺失头与五个新头，§1.8 补四个子域与七个头的覆盖取舍，新增 `TC-APP-015` 至 `TC-APP-018`；`08-tooling.md` §10.1 补 `Platform` 域「机制缺位 / 本次未落地」两分口径；`ERROR_CATALOG.md` 随生成器重建（全表 157 → 165）。
-18. **收官门禁（本机 Windows / MinGW 树）**：改动面 21 个 TU 的 scoped `lint` 清零（`select_lint_tus --changed-only` 选中 21/789，`run_clang_tidy` 报 0 findings；修法按判因拆为字节边界 `NOLINT` 就地记因与算术 / 视图 / 循环形态改写，没有整文件排除）；`format-check` 1296/1296 合规；全量构建后 `ctest --preset ninja-test` 456/456 通过；四枚真机探针 auto 阶段全 PASS——PDF 结构 + 独立 stored-zlib 解压与 Adler-32 复算、方案注册与异主撤销拒绝、文件关联声明前后默认处理程序证据逐字节不变、登录项三态与整棵 `Run` / `StartupApproved` 基线还原。
+17. **文档回写按实际落法改写**：`06-app-platform.md` §5 的能力位段与逐平台矩阵、§8.11–§8.15 五节；`SPECIFICATIONS.md` 的四枚需求行与特性计数（§5 实际 49 条，原表头写 43 已陈旧，同批改正）；`BUILD_OPTIONS.md` §2.4 的四枚探针登记；`manual-test/19-app.md` §1.1 的公共头计数由 20 改为**实际 31**，并补进提案点名的六个存量缺失头与五个新头，§1.8 补四个子域与七个头的覆盖取舍，新增 `TC-APP-015` 至 `TC-APP-018`；`08-tooling.md` §10.1 补 `Platform` 域「机制缺位 / 本次未落地」两分口径；`ERROR_CATALOG.md` 随生成器重建（本批 +8；rebase 到上游后全表 166）。
+18. **收官门禁（本机 Windows / MinGW 树）**：改动面 21 个 TU 的 scoped `lint` 清零（`select_lint_tus --changed-only` 选中 21/792，`run_clang_tidy` 报 0 findings；修法按判因拆为字节边界 `NOLINT` 就地记因与算术 / 视图 / 循环形态改写，没有整文件排除）；`format-check` 1302/1302 合规；全量构建后 `ctest --preset ninja-test` 456/456 通过；四枚真机探针 auto 阶段全 PASS——PDF 结构 + 独立 stored-zlib 解压与 Adler-32 复算、方案注册与异主撤销拒绝、文件关联声明前后默认处理程序证据逐字节不变、登录项三态与整棵 `Run` / `StartupApproved` 基线还原。
+19. **上游 rebase 后的编号与复验**：上游同批落了 `CHG-049`（macOS 运行期窗口显隐与置顶接线）与 `CHG-053`（队列值班），本提案落码期间编号与之撞车，故 rebase 后改号为 `CHG-054`（改动仅限标题与编号行）。冲突三处按「保留双方」处理：`platform.h` 保留上游 macOS 显隐 / 置顶翻位并追加四枚外壳位，`AuroraBackends.cmake` 合并 macOS 框架列表，`CHANGELOG.md` 与 `SPECIFICATIONS.md` 条目并存；生成物从合并后的 `errors.toml` 重新生成。复验：全量重编后 `format-check` 1302/1302、scoped lint 0 findings、`ctest --preset ninja-test` 456/456。
