@@ -241,6 +241,19 @@ if (AURORA_BUILD_VERIFY_TOOLS)
         list(APPEND _aurora_verify_targets aurora_verify_win32_insert_key)
     endif ()
 
+    # ---- Win32 程序化窗控四槽（GDI / D3D11 共用 Win32Host 宿主）：minimize / toggle_maximize /
+    # set_window_mode / set_fullscreen 公共入口真接线 ----
+    # 自动段以 OS 实值独立取证（IsIconic / IsZoomed / GetWindowRect，不读库内状态自证）：
+    # 四请求真的落到窗口、应用级快照与 set_on_window_mode 回调同链上报、目标态连调不翻转、
+    # 全屏档为「可查询的不支持」（矩形不动 + 恰一条 WARN + 能力位 false）。三档装饰
+    # （Default / Borderless / Frameless）逐条重跑，覆盖应用自绘标题栏的缺口暴露档。
+    # 无头 CI 建不了真窗口，故不进 CTest；任务栏动画与 Borderless 观感交 --interactive 人工段。
+    if (WIN32 AND (AURORA_BACKEND_WIN32 OR AURORA_BACKEND_D3D11))
+        aurora_add_verify_probe(aurora_verify_win32_window_mode
+                "${_aurora_verify_dir}/win32_window_mode_live_probe.cpp")
+        list(APPEND _aurora_verify_targets aurora_verify_win32_window_mode)
+    endif ()
+
     # ---- macOS 光标（NSCursor 派发接线）：[NSCursor currentCursor] 单例同一性读回 ----
     # 需 ObjC++ 语言：条件启用，其它平台上完全不涉及（不改动默认构建的语言集合）。
     if (APPLE AND AURORA_BACKEND_MACOS)

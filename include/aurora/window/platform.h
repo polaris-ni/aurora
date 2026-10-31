@@ -70,6 +70,22 @@ struct PlatformCapabilities {
     /// `X11` 需 `_NET_WM_STATE_ABOVE` 客户机消息、`Glfw` 需 `glfwSetWindowAttrib(GLFW_FLOATING)`，
     /// 两者机制在但未接线，故如实缺位。
     bool runtime_always_on_top = false;
+    /// @brief 程序化窗控三原语（`minimize()` / `toggle_maximize()` / `set_window_mode()`）已接到 OS。
+    ///
+    /// 能力位答的是「**公共入口是否全部接通**」，不是「OS 有没有这个机制」（与 `runtime_visibility`
+    /// 同款口径）——`X11` 的 `_NET_WM_STATE_MAXIMIZED_*` 机制在但公共切换腿未落桥，仍如实 false。
+    /// Win32 / D3D11 共用同一 `Win32Host`（`SC_*` 目标态 + `WM_SIZE` 回报定档）故同翻；
+    /// `Wayland` 走 xdg_toplevel 的 set_minimized/set_maximized，`MacOS` 走 AppKit
+    /// `miniaturize:` / `zoom:`；`Glfw` / `Wasm` / `Headless` 恒 false（Headless 的
+    /// `set_window_mode` 是测试 seam，不代表 OS 能力）。
+    bool runtime_window_mode = false;
+    /// @brief 全屏切换（`set_fullscreen()` 与 `set_window_mode(FullScreen)`）已接到 OS。
+    ///
+    /// 口径同 `runtime_window_mode`：`Wayland` / `MacOS` 两家四槽已齐故为 true；
+    /// Win32 / D3D11 无全屏实现（monitor 枚举 / 还原几何 / 定档来源均未落，`set_fullscreen(true)`
+    /// 留一条 WARN），`X11` 虽有 `_NET_WM_STATE_FULLSCREEN` 但公共切换腿未接线，`Glfw` 无
+    /// monitor 通道——以上均如实 false，应用先查询再决定画不画全屏钮。
+    bool runtime_fullscreen = false;
     /// @brief 存在 OS 打印会话机制，且本库已接线 `PrintSession`（Windows GDI 打印会话 / macOS AppKit
     /// 打印操作）。Linux 恒 false：本库不引入 libcups（第三方形态全是 vendored 源码，系统动态库是
     /// 新开的口子），替代路径是导出 PDF 后交给默认处理程序——结论见
@@ -127,7 +143,10 @@ struct Platform {
     /// 未接线的方向不预先声称支持）；`recent_documents_os_projection` 仅在已落 OS 投影桥的后端下为
     /// true；`native_menu_bar` 与之同口径（当前均为 Win32 / D3D11 / MacOS，macOS 两条桥同批落地）；
     /// `runtime_visibility` 与 `runtime_always_on_top` 同样仅在已接运行期窗口开关的后端下为 true
-    /// （当前仅 Win32 / D3D11，其余后端为「可查询的不支持」，公共 setter 是可观测的 no-op 而非静默失效）。
+    /// （当前仅 Win32 / D3D11，其余后端为「可查询的不支持」，公共 setter 是可观测的 no-op 而非静默失效）；
+    /// `runtime_window_mode` / `runtime_fullscreen` 按「公共入口是否全部接通」置位——前者 Win32 /
+    /// D3D11 / Wayland / MacOS 为 true（后两家四槽原已齐全），后者仅 Wayland / MacOS 为 true
+    /// （Win32 / D3D11 无全屏实现留 WARN，X11 / Glfw 公共切换腿未接线）；
     /// `native_print_session` / `url_scheme_registration` / `file_association` / `run_at_login`
     /// 与 `SurfaceKind` 无关（入口是进程级自由函数），按平台桥的编译期接线整体置位；Linux 的
     /// `native_print_session` 恒 false（不引入 libcups）。
@@ -179,6 +198,16 @@ struct Platform {
             (surface == SurfaceKind::Win32 || surface == SurfaceKind::D3D11 || surface == SurfaceKind::MacOS);
         c.runtime_always_on_top =
             (surface == SurfaceKind::Win32 || surface == SurfaceKind::D3D11 || surface == SurfaceKind::MacOS);
+        // 程序化窗控三原语：Win32 / D3D11 接线（同一 `Win32Host` 的 `SC_*` 目标态 + `WM_SIZE`
+        // 回报定档）；Wayland / MacOS 四槽原已齐全，照常为 true。其余后端为「可查询的不支持」：
+        // X11 / Glfw 的 `set_window_mode` 有覆写但三枚切换腿未接（能力位答「公共入口是否全部
+        // 接通」，故整体仍 false）；Wasm 无窗口概念；Headless 的 `set_window_mode` 是测试 seam。
+        c.runtime_window_mode = (surface == SurfaceKind::Win32 || surface == SurfaceKind::D3D11 ||
+                                 surface == SurfaceKind::Wayland || surface == SurfaceKind::MacOS);
+        // 全屏切换：仅 Wayland / MacOS 接到 OS。Win32 / D3D11 无全屏实现（`set_fullscreen(true)`
+        // 留唯一一条 WARN）；X11 有 `_NET_WM_STATE_FULLSCREEN` 但公共切换腿未接线；Glfw 无
+        // monitor 通道——均如实 false，应用先查询再决定是否提供全屏入口。
+        c.runtime_fullscreen = (surface == SurfaceKind::Wayland || surface == SurfaceKind::MacOS);
         // 桌面外壳集成四枚位：入口是进程级自由函数（`include/aurora/app/` 的五个新头），与
         // `SurfaceKind` 无关——平台桥按编译期 OS 宏接线（见 `src/aurora/app/detail/` 的三套
         // `*_shell_integration.cpp`），故这里按平台整体置位，不随 Surface 变化；Headless 在

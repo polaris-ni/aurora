@@ -1,10 +1,13 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/window/surface.h include/aurora/window/window_state.h
-///           include/aurora/window/window.h include/aurora/window/platform.h
+///           include/aurora/window/window.h include/aurora/window/window_chrome.h
+///           include/aurora/window/platform.h
 /// 测试说明: 运行期显隐与置顶开关的四条口径：未接线后端是可观测的 no-op（基类默认值不被改写，
 ///           配合能力位申报而非静默失效）、无头 seam 记录值并上报对应 `WindowState`（同值幂等）、
 ///           `Window` 透传与读回、`compute_window_state` 的第三枚输入 `on_screen`、
 ///           能力位逐 `SurfaceKind` 矩阵、以及「显隐 → 宿主上报 → 应用级 `window_state()`」的聚合链。
+///           另覆盖程序化窗控三原语（minimize/toggle_maximize/set_window_mode）与全屏能力位、
+///           `Window` / `WindowChrome` 两条公共入口到 `Surface` 覆写的透传链。
 ///           置顶切换不得改动几何记录值。全部走无头后端，不依赖真实桌面会话。
 
 #include <memory>
@@ -18,6 +21,7 @@
 #include "aurora/window/platform.h"
 #include "aurora/window/surface.h"
 #include "aurora/window/window.h"
+#include "aurora/window/window_chrome.h"
 #include "aurora/window/window_state.h"
 #include "framework/aurora_test.h"
 
@@ -35,6 +39,30 @@ class BareSurface final : public Surface {
     [[nodiscard]] auto painter() -> Painter & override { return painter_; }
     [[nodiscard]] auto present() -> Result<bool> override { return Result<bool>{true}; }
     [[nodiscard]] auto size() const -> Size override { return Size{.width = 10.0F, .height = 10.0F}; }
+
+  private:
+    Painter painter_;
+};
+
+/// @brief 透传链记录桩：三枚切换原语覆写为记录动作（全屏区分进/出两方向），
+///        供断言 `Window` / `WindowChrome` 两条公共入口确实落到 `Surface` 覆写。
+class RecordingSurface final : public Surface {
+  public:
+    /// @brief 被记录的切换原语动作（全屏按方向拆两枚，断言零歧义）。
+    enum class Action : std::uint8_t { Minimize, ToggleMaximize, FullscreenOn, FullscreenOff };
+
+    auto begin_frame(int /*width*/, int /*height*/) -> Result<bool> override { return Result<bool>{true}; }
+    [[nodiscard]] auto painter() -> Painter & override { return painter_; }
+    [[nodiscard]] auto present() -> Result<bool> override { return Result<bool>{true}; }
+    [[nodiscard]] auto size() const -> Size override { return Size{.width = 10.0F, .height = 10.0F}; }
+
+    auto minimize() -> void override { calls.push_back(Action::Minimize); }
+    auto toggle_maximize() -> void override { calls.push_back(Action::ToggleMaximize); }
+    auto set_fullscreen(bool on) -> void override {
+        calls.push_back(on ? Action::FullscreenOn : Action::FullscreenOff);
+    }
+
+    std::vector<Action> calls;  ///< 按调用序记录的动作。
 
   private:
     Painter painter_;
@@ -176,6 +204,74 @@ AURORA_TEST_CASE(capability_matrix_pins_wired_backends) {
         AURORA_TEST_CHECK_FALSE(visibility_bit(kind));
         AURORA_TEST_CHECK_FALSE(topmost_bit(kind));
     }
+}
+
+AURORA_TEST_CASE(window_control_capability_matrix_pins_entry_wiring) {
+    // 程序化窗控两枚能力位，口径是「公共入口是否全部接通」而非「OS 有没有机制」：
+    // 三原语腿（minimize/toggle_maximize/set_window_mode）——Win32 / D3D11（同一宿主）与
+    // Wayland / MacOS（四槽原已齐全）为 true；X11 / Glfw 的 set_window_mode 有覆写但三枚
+    // 切换腿未接，按整入口口径如实 false；Wasm / Headless 非 OS 能力，恒 false。
+    auto window_mode_bit = [](SurfaceKind kind) -> bool {
+        Platform p;
+        p.surface = kind;
+        return p.capabilities().runtime_window_mode;
+    };
+    AURORA_TEST_CHECK_TRUE(window_mode_bit(SurfaceKind::Win32));
+    AURORA_TEST_CHECK_TRUE(window_mode_bit(SurfaceKind::D3D11));
+    AURORA_TEST_CHECK_TRUE(window_mode_bit(SurfaceKind::Wayland));
+    AURORA_TEST_CHECK_TRUE(window_mode_bit(SurfaceKind::MacOS));
+    for (const SurfaceKind kind : {SurfaceKind::X11, SurfaceKind::Glfw, SurfaceKind::Wasm, SurfaceKind::Headless}) {
+        AURORA_TEST_CHECK_FALSE(window_mode_bit(kind));
+    }
+
+    // 全屏腿——仅 Wayland / MacOS：Win32 / D3D11 无全屏实现（set_fullscreen(true) 留唯一
+    // WARN）；X11 有 _NET_WM_STATE_FULLSCREEN 但公共切换腿未接线（机制在≠接线）；
+    // Glfw 无 monitor 通道。
+    auto fullscreen_bit = [](SurfaceKind kind) -> bool {
+        Platform p;
+        p.surface = kind;
+        return p.capabilities().runtime_fullscreen;
+    };
+    AURORA_TEST_CHECK_TRUE(fullscreen_bit(SurfaceKind::Wayland));
+    AURORA_TEST_CHECK_TRUE(fullscreen_bit(SurfaceKind::MacOS));
+    for (const SurfaceKind kind : {SurfaceKind::Win32, SurfaceKind::D3D11, SurfaceKind::X11, SurfaceKind::Glfw,
+                                   SurfaceKind::Wasm, SurfaceKind::Headless}) {
+        AURORA_TEST_CHECK_FALSE(fullscreen_bit(kind));
+    }
+
+    // 默认构造两格 false：未探测前不预先声称任何支持。
+    const PlatformCapabilities defaults;
+    AURORA_TEST_CHECK_FALSE(defaults.runtime_window_mode);
+    AURORA_TEST_CHECK_FALSE(defaults.runtime_fullscreen);
+}
+
+AURORA_TEST_CASE(window_control_passthrough_reaches_surface_override) {
+    // 透传链回归保护：三枚切换原语经 `Window` 与 `WindowChrome` 两条公共入口都落到
+    // `Surface` 覆写——`Window` 层只透传、不另存意图（后端未覆写时落基类 no-op 静默，
+    // 那是后端缺口的可查询申报问题，透传链本身无责）。
+    auto surface = std::make_unique<RecordingSurface>();
+    RecordingSurface *const raw = surface.get();
+    Window window{std::move(surface)};
+
+    window.minimize();
+    window.toggle_maximize();
+    window.set_fullscreen(true);
+    window.set_fullscreen(false);
+    AURORA_TEST_REQUIRE_EQ(raw->calls.size(), 4U);
+    AURORA_TEST_CHECK_EQ(raw->calls.at(0), RecordingSurface::Action::Minimize);
+    AURORA_TEST_CHECK_EQ(raw->calls.at(1), RecordingSurface::Action::ToggleMaximize);
+    AURORA_TEST_CHECK_EQ(raw->calls.at(2), RecordingSurface::Action::FullscreenOn);
+    AURORA_TEST_CHECK_EQ(raw->calls.at(3), RecordingSurface::Action::FullscreenOff);
+
+    const WindowChrome chrome{&window.surface()};
+    raw->calls.clear();
+    chrome.minimize();
+    chrome.toggle_maximize();
+    chrome.set_fullscreen(true);
+    AURORA_TEST_REQUIRE_EQ(raw->calls.size(), 3U);
+    AURORA_TEST_CHECK_EQ(raw->calls.at(0), RecordingSurface::Action::Minimize);
+    AURORA_TEST_CHECK_EQ(raw->calls.at(1), RecordingSurface::Action::ToggleMaximize);
+    AURORA_TEST_CHECK_EQ(raw->calls.at(2), RecordingSurface::Action::FullscreenOn);
 }
 
 AURORA_TEST_CASE(visibility_aggregates_to_application_state) {

@@ -122,6 +122,37 @@ class Win32Surface final : public Surface {
         }
     }
 
+    /// @brief 程序化最小化（Win32：经宿主 `SC_MINIMIZE`，结果由 `WM_SIZE` 上报，与系统菜单同路径）。
+    auto minimize() -> void override { win_->set_window_mode(WindowMode::Minimized); }
+
+    /// @brief 程序化切换最大化（Win32：以 OS 实值 `IsZoomed` 判档后下发目标态）。
+    ///
+    /// 不读宿主缓存 `mode`：缓存由 `WM_SIZE` 回报刷新，请求与回报之间隔着消息窗口期，
+    /// 判档用 OS 实值才与用户连点标题栏钮的行为一致。
+    auto toggle_maximize() -> void override {
+        const bool zoomed = IsZoomed(static_cast<HWND>(win_->hwnd())) != FALSE;
+        win_->set_window_mode(zoomed ? WindowMode::Normal : WindowMode::Maximized);
+    }
+
+    /// @brief 程序化设定几何态（Win32：原样转发宿主 `SC_*` 目标态语义，不做翻转）。
+    ///
+    /// 几何恢复腿（按落盘 `WindowGeometry::mode` 直设）与 `Maximized → FullScreen` 这类
+    /// 直设都靠本槽；`FullScreen` 分支由宿主留 WARN（本后端无全屏实现）。
+    /// @param m 目标几何态。
+    auto set_window_mode(WindowMode m) -> void override { win_->set_window_mode(m); }
+
+    /// @brief 程序化设置全屏（Win32：进入转为 `FullScreen` 目标态由宿主留 WARN；退出为 no-op）。
+    ///
+    /// 本后端无全屏实现（monitor 枚举 / 还原几何 / 定档来源均未落），`on=true` 不静默吞掉——
+    /// 走宿主唯一一条 WARN；`on=false` 时从未进入全屏、无可退出。可先查询
+    /// `platform().capabilities().runtime_fullscreen` 决定是否提供全屏入口。
+    /// @param on true 请求进入全屏（记一条 WARN），false 无操作。
+    auto set_fullscreen(bool on) -> void override {
+        if (on) {
+            win_->set_window_mode(WindowMode::FullScreen);
+        }
+    }
+
     /// @brief 增量上屏脏区（设备坐标）：非空时 present() 仅 blit 脏矩形并界，而非整窗——
     /// 大窗口下整窗 SetDIBitsToDevice 是拖选帧的绝对大头（5760×3132px 实测 ~130ms，
     /// 占帧成本 93%）。脏区一次性消费（present 后清空），未设置则全量 blit（首帧/尺寸变化/

@@ -585,6 +585,10 @@ class Window {
     [[nodiscard]] auto window_mode() const -> WindowMode { return window_mode_; }
     /// @brief 设置当前窗口几何态快照（由 `Application` 在状态变化时调用）。
     /// @param m 新的几何态快照。
+    /// @note 本方法是**快照写入口**（上报链的 sink），不是下发动作入口：应用侧主动设目标档
+    /// 应走 `surface().set_window_mode(m)`（可变引用已在）。若把它「顺手」改成向 Surface
+    /// 转发，会构成「宿主上报 → 写快照 → 下发 → 再上报」回环——上报链的写入点必须与
+    /// 动作入口分开，勿按直觉合并。
     auto set_window_mode(WindowMode m) -> void { window_mode_ = m; }
 
     /// @brief 显式设定本窗根主题（应用换肤/固定主题，最高优先）。

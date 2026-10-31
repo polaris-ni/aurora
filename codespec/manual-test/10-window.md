@@ -31,6 +31,7 @@
 | `tools/verify/glfw_dpi_live_probe.cpp` | `aurora_verify_glfw_dpi` | **GLFW 后端**的 DPI 缩放换算自洽与缩放变化上报（探针，非 demo） |
 | `tools/verify/x11_csd_live_probe.cpp` | `aurora_verify_x11_csd` | **X11 后端**的客户端自绘装饰（CSD）离屏像素级判据：`ClientSide` 撤 WM 口沿后标题栏带真绘出、`content_inset` 上报栏高、`Auto`/`Frameless` 零入侵口径（探针，非 demo） |
 | `tools/verify/win32_csd_live_probe.cpp` | `aurora_verify_win32_csd` | **Win32 后端**的客户端自绘装饰（CSD）离屏像素级判据：`WM_NCCALCSIZE` 吞框（最大化拉回工作区）、五档策略的 `content_inset` / 像素 / `WM_NCHITTEST` 热区回归、按钮释放触发与拖离取消、降级归零、热更（探针，非 demo） |
+| `tools/verify/win32_window_mode_live_probe.cpp` | `aurora_verify_win32_window_mode` | **Win32 / D3D11 家族**程序化窗控四槽公共入口（minimize / toggle_maximize / set_window_mode / set_fullscreen）的 OS 实值判据：`IsIconic` / `IsZoomed` / `GetWindowRect` 独立取证、上报链同链、目标态幂等、全屏档恰一条 WARN，三档装饰（default / borderless / frameless）逐条重跑（探针，非 demo） |
 
 **第三个载体的构建口径与前两个不同，须单独构建目录**（探针受两个开关门控，二者在本模块的默认
 `build/` 里都不满足，故前两个载体的构建步骤不能覆盖它）：
@@ -476,6 +477,24 @@ X11 CSD 探针段），故 TC-WINDOW-014 覆盖 X11 的自绘装饰自动判据�
 
 **本例为何须真机**：无头底座读不到 OS 前台态，无法回答「框架判定与 OS 判定是否一致」。记账范围、兜底口径与回收清号本身由单测覆盖（`tests/unit/utest_application.cpp` 与 `tests/integration/itest_active_window.cpp`），本例只验二者在真实窗口环境下的关系——这是唯一一项无头面读不到、须真机读数一次的判据。
 
+### 2.12 程序化窗控四槽（Win32 / D3D11 真机走查）
+
+#### TC-WINDOW-022 Win32 / D3D11 程序化窗控四槽真机走查
+
+| 项目 | 内容 |
+|:---|:---|
+| 用例编号 | TC-WINDOW-022 |
+| 测试目的 | 验证 Win32 / D3D11 家族的四枚程序化窗控公共入口（minimize / toggle_maximize / set_window_mode / set_fullscreen）在真实窗口上落到 OS（探针自动段以 `IsIconic` / `IsZoomed` / `GetWindowRect` 独立取证），并以人工目视核对任务栏最小化/还原动画与 Borderless 自绘标题栏场景的按钮行为 |
+| 前置条件 | 仓库根目录；窗控真机探针已构建（本机默认 `build/` 追加 `-DAURORA_BUILD_VERIFY_TOOLS=ON` 重 configure 后 `cmake --build build --target aurora_verify_win32_window_mode`，后端开关 `AURORA_BACKEND_WIN32` 或 `AURORA_BACKEND_D3D11` 须有一者已开）；活动桌面会话（锁屏时窗口收不到 OS 消息）；真实指针输入通道（人工段） |
+| 依赖用例 | 无 |
+| 操作步骤 | 1. 运行 `aurora_verify_win32_window_mode` 探针，等待自动段跑完三档装饰（default / borderless / frameless），收集逐条 PASS / FAIL 行与退出码（纯执行，无预期结果）<br>2. 核对退出码与逐条判据行<br>3. 启动任一 Win32 家族 demo（如 `demo_multi_window`），点击自绘标题栏的最小化钮或调用 `Window::minimize()`，观察任务栏与还原动画（人工段）<br>4. 在 `demo_csd_gallery` 的 `Borderless` / `Frameless` 档预览窗上点击自绘标题栏的最小化 / 最大化钮（人工段）<br>5. 汇总自动段三档结果与人工段观感，与 `specification/06-app-platform.md` §5 能力位置位矩阵核对 |
+| 预期结果 | 2. 退出码为 0；三档装饰下判据行全 PASS——`minimize()` 后 `IsIconic` 为真且应用级快照/回调恰一次报 `Minimized`；`toggle_maximize()` 在 `Normal` 上转 `IsZoomed`、再调矩形逐值回位（±1px）且报 `Normal`；`set_window_mode(Maximized)` 连调两次不翻转；`set_fullscreen(true)` 矩形不动、恰一条 WARN，`set_fullscreen(false)` 无 WARN<br>3. 最小化后任务栏留痕、还原动画正常（公共入口与用户点系统钮同走 `SC_*` 一条路径）<br>4. `Borderless` / `Frameless` 自绘标题栏钮驱动的窗控行为与系统钮一致（此前该场景四槽静默 no-op，为本批修复的缺口暴露档）<br>5. 自动段三档结果与矩阵一致（`runtime_window_mode` 为 true、`runtime_fullscreen` 为 false）；人工段观感如实记录，动画瑕疵属 OS 合成器范畴不得记为接线缺陷 |
+
+**本例编号的取定**：现最高为 021（活动窗口查询用例），本例取 022。
+
+**本例为何须真机**：无头 CI 建不了真实 HWND 与消息泵，`SC_*` → `WM_SIZE` → 上报链的整条接线只有真机上可证——单测（`tests/unit/utest_window_runtime_control.cpp`）只覆盖能力位申报与 `Window` / `WindowChrome` 两条透传链，探针自动段是唯一接线证据。人工段补两项机器判不了的事实：任务栏动画观感、自绘标题栏场景的按钮触达。
+
+
 ## 3 执行记录表
 
 | 用例编号 | 执行日期 | 执行人 | 结果 | 失败步骤号 | 实际现象 | 缺陷编号 | 备注 |
@@ -499,3 +518,4 @@ X11 CSD 探针段），故 TC-WINDOW-014 覆盖 X11 的自绘装饰自动判据�
 | TC-WINDOW-019 | | | | | | | |
 | TC-WINDOW-020 | | | | | | | |
 | TC-WINDOW-021 | | | | | | | |
+| TC-WINDOW-022 | 2026-10-31 | WorkBuddy | PASS | | 步骤 2：退出码 0，三档装饰（default / borderless / frameless）各 17 条判据全 PASS（共 51 行 `[PASS]`、0 行 `[FAIL]`）——`minimize()` 后 `IsIconic` 为真、应用级快照与回调恰一次报 `Minimized`；`toggle_maximize()` 转 `IsZoomed`、再调矩形逐值回位（±1px）且报 `Normal`；`set_window_mode(Maximized)` 连调两次不翻转（期间上报恒 `Maximized`）；`set_fullscreen(true)` 矩形逐值不动且恰 1 条 `WRN`，`set_fullscreen(false)` 无 `WRN`。步骤 5：能力位 `runtime_window_mode=true` / `runtime_fullscreen=false` 与 `specification/06-app-platform.md` §5 置位矩阵逐位相符；stderr 恒 0 字节（输出全走 stdout） | | Borderless / Frameless 缺口暴露档的窗控接线已由自动段同档判据覆盖（探针按三档装饰逐档建窗重跑）。取证中两处转红后修复复绿：①初版判据把 WARN 计数片段写成 `WARN`，本库日志级别前缀实为 `WRN`（与 `win32_file_dialog_live_probe` 同款）；②能力位判据缺 `aurora/window/platform.h` 包含致编译错。构建口径为独立目录 `build-verify-win32`（§1.2 Win32 CSD 探针段口径，本机 WIN32/DEBUG 两开关已满足）。判据经四处变异逐一转红后恢复复绿（删 `minimize` / `set_window_mode` / `set_fullscreen` 覆写分别打红判据 1/3/4 项、对 X11 误翻 `runtime_window_mode` 打红能力矩阵单测，对照项 `toggle_maximize` 保持绿），非结构性假绿。步骤 3-4 人工目视段（任务栏动画观感、CSD 画廊按钮触达）待真机会话补记 |

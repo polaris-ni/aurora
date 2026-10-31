@@ -143,7 +143,7 @@ Wayland CSD 的**阴影边距模型**（单表面，libadwaita 风格；纯逻�
 
 margin 在 Maximized / FullScreen / tiled 态塌缩为 0（贴边无可拖缝隙、无阴影），回 Normal 恢复；状态切换走整幅重绘。指针在进入表面的三个入口（enter / motion / button）统一做「表面坐标 → 内容坐标（−margin）」映射，热区判定 `csd::classify_resize_zone` 在内容坐标域进行（表驱动纯函数，`utest_csd_geometry` 守门；映射值仅供后端内部 CSD 判定消费）。对应用上抛的事件（悬停/按压/滚轮）则按契约转发**整幅表面坐标原值**——下沉折算统一由派发根壳承担（见 §3.1），后端不做第二份平移。margin 厚度可经 `WindowFrameStyle::shadow_margin_dp` 显式配置（0 = 关闭；显式关闭 / 能力不足 / 非正值三路归零，见 `csd::frame_margin_dp`），默认值逐值等于既有 10dp 常量。X11 与 Win32 后端 buffer 即内容矩形（不假设 ARGB 视觉与合成器），无外延 margin 分量——外延阴影自动降级为 0，标题栏带为**内缘覆绘** + **内缘热区**（同一 `csd::classify_resize_zone` 判定式按「内容坐标缩进 margin 后的外延环」口径复用，不写第二份八向逻辑），`content_inset()` 只承载标题栏带高度；Win32 自绘档标题栏带宽 `frame_margin_dp(frame, dwm_capable)`（DWM 合成关闭时归零，探针 `aurora_verify_win32_csd` 锁降级语义）。Headless 维持零 inset 口径。
 
-**程序化窗口控制**（`Surface` / `Window` 虚函数，默认空实现）：`close()`、`minimize()`、`toggle_maximize()`、`set_fullscreen(bool)`。Wayland 经 `xdg_toplevel` 协议生效，使无标题栏 / 无边框窗口也能由应用按钮驱动状态。
+**程序化窗口控制**（`Surface` / `Window` 虚函数，默认空实现）：`close()`、`minimize()`、`toggle_maximize()`、`set_fullscreen(bool)`，另有目标态原语 `set_window_mode(WindowMode)`（见 [`06-app-platform.md`](06-app-platform.md)）。后端接线现状：Wayland 经 `xdg_toplevel` 协议生效；**Win32 / D3D11 四槽已接**（同一 `Win32Host` 宿主的 `SC_*` 目标态，`toggle_maximize` 以 OS 实值 `IsZoomed` 判档；`set_fullscreen(true)` 留唯一 WARN——全屏档为「可查询的不支持」，能力位 `runtime_window_mode` / `runtime_fullscreen` 见 [`06-app-platform.md`](06-app-platform.md) §5）；X11 / GLFW 的 `set_window_mode` 槽已接但三枚切换原语未覆写（能力位如实 false，应用先查询再决定画不画窗控钮），使无标题栏 / 无边框窗口也能由应用按钮驱动状态。
 
 ### 4.2 TitleBar
 
