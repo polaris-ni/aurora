@@ -1,8 +1,8 @@
-# CHG-050 macOS 链路态采集腿（SystemConfiguration）
+# CHG-051 macOS 链路态采集腿（SystemConfiguration）
 
 | 字段 | 值 |
 |:---|:---|
-| 变更编号 | CHG-050 |
+| 变更编号 | CHG-051 |
 | 提出日期 | 2026-10-30 |
 | 当前状态 | 已归档 |
 | 关联需求 | SPEC.FEAT.NET.CONNECTIVITY.001 |

@@ -1,8 +1,8 @@
-# CHG-049 macOS 无障碍桥（NSAccessibility）
+# CHG-050 macOS 无障碍桥（NSAccessibility）
 
 | 字段 | 值 |
 |:---|:---|
-| 变更编号 | CHG-049 |
+| 变更编号 | CHG-050 |
 | 提出日期 | 2026-10-30 |
 | 当前状态 | 已归档 |
 | 关联需求 | 无 |
