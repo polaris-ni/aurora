@@ -4,7 +4,7 @@
 > **设计内核**：声明式、响应式、概念可枚举
 > **版本说明**：本文档为设计规格（文档自身无版本号）。库发布版本见 `CHANGELOG.md`（`currentVersion`）；文档与实现冲突时以**代码运行时**为准并回填本文档。
 >
-> 本文件是**总纲与索引**：定位、设计原则、范围、约束、43 条特性清单与文档导航。各主题的详细契约见 `specification/` 九份子系统文档与五份顶层文档。
+> 本文件是**总纲与索引**：定位、设计原则、范围、约束、49 条特性清单与文档导航。各主题的详细契约见 `specification/` 九份子系统文档与五份顶层文档。
 
 ---
 
@@ -75,7 +75,7 @@ Aurora 本质上是一个**把 UI 开发变成「结构化数据描述」问题*
 
 ---
 
-## 5 特性清单（需求 ID 体系，43 条）
+## 5 特性清单（需求 ID 体系，49 条）
 
 需求 ID 形如 `SPEC.<类目>.<域>.[<子域>…]<语义短名>.<数字尾>`：全大写、点分割、层级不限，短名多词用连字符。
 类目封闭 6 类（`API` 语言与接口设计原则 / `FEAT` 面向使用者的功能能力 / `QUALITY` 质量不变量与保证 /
@@ -122,6 +122,10 @@ Aurora 本质上是一个**把 UI 开发变成「结构化数据描述」问题*
 | SPEC.FEAT.APP.NATIVE-MENU-BAR.001 | 原生菜单栏（MenuModel 单一真源 + 原生渲染桥：Win32 `HMENU` 与 macOS `NSMenu` 两座桥已落地；Linux 无 OS 级菜单栏机制，能力位如实为 `false` 并回落自绘） | AI 声明一次菜单即获原生渲染（Win32 / macOS），自绘与原生二显一存、不建平行菜单 API；桥缺位平台应用内菜单行为一致，安装入口明确报错（`native-menu-unsupported`）而非静默 | [`06-app-platform.md`](specification/06-app-platform.md) §8.4 |
 | SPEC.FEAT.APP.RECENT-DOCUMENTS.001 | 最近文档列表（应用内 store 持久化 + OS 级投影：显式 `project_to_os` / `clear_os_projection`、平台无关投影计划、Win32 `SHAddToRecentDocs` 桥与 macOS `NSDocumentController` 桥、投影记账撤销） | AI 可实现跨重启的最近文档，并让用户在系统入口（跳转列表 / 资源管理器「最近」/ Dock 最近文档）看到同一批文档；OS 级投影缺位（Linux 无该机制，能力位如实为 `false`）时应用内列表全平台行为一致、投影入口明确报错而不静默 | [`06-app-platform.md`](specification/06-app-platform.md) §5、§8.10 |
 | SPEC.FEAT.APP.FILE-DIALOG.001 | 文件 / 目录选择器（三入口共用 `Options`：标题、初始目录、建议文件名、缺省扩展名、筛选器；Win32 COM 腿、macOS 原生 NSOpenPanel / NSSavePanel 腿与桌面自绘腿三真实现 + 内联回退腿） | AI 声明一次 `Options` 即得「打开到哪、叫什么名、什么类型」的完整意图，三条真实现腿逐格真实消费（`suggested_name` 只另存为消费、`initial_dir` 不可解析时留 WARN 并按 OS 默认位置降级；macOS 原生面板无命名筛选器，`Filter::name` 在该腿如实不消费、扩展名折成类型白名单）；无真实选择器平台仅保钩子语义、无上下文等价取消，取消恒为 `Ok(空)` 不是 `Error` | [`06-app-platform.md`](specification/06-app-platform.md) §8.1 |
+| SPEC.FEAT.APP.PRINT-SESSION.001 | 文档输出与打印会话（跨平台多页栅格入 PDF：毫米纸张几何 + DPI 栅格、逐页绘制回调、不透明合成；Windows GDI / macOS AppKit 打印会话；打印面板自绘） | AI 可把界面按纸张几何与目标 DPI 导出为可打印 PDF 或直接送打印机；**栅格入 PDF 的三条局限**（文本不可选不可搜 / 放大失真 / 体积随页数线性膨胀）在需求层明示；Linux 不声称原生打印会话（能力位如实为 `false`），无打印机时返回空列表配 `Ok` 而非错误 | [`06-app-platform.md`](specification/06-app-platform.md) §5、§8.11、§8.12 |
+| SPEC.FEAT.APP.URL-SCHEME.001 | URL 方案注册与单实例转交（用户级登记：Windows `HKCU\Software\Classes` / Linux 桌面条目 + `mimeapps.list` / macOS 包内 `CFBundleURLTypes`；归属校验后撤销；命令行 URI 交付已运行实例） | AI 可让应用被系统深链唤起，且第二个进程把 URI 交给已运行实例、失败时回落为新实例（不「闪一个空窗」也不默默退出）；撤销不越过别人的登记，Linux 本机通道落在 0700 私有目录而非 `/tmp` | [`06-app-platform.md`](specification/06-app-platform.md) §5、§8.13 |
+| SPEC.FEAT.APP.FILE-ASSOCIATION.001 | 文件关联查询与声明候选（Win32 `HKCU` ProgID + `RegisteredApplications`/Capabilities、macOS UTI + Launch Services、Linux `mimeapps.list` 的 `[Added Associations]`；扩展名规范化 + 扩展名→MIME 单一真源） | AI 可查询某扩展名当前归谁、声明本应用可处理它，并出现在系统「打开方式」候选里；**不抢占默认处理程序**（默认归用户偏好），撤销只摘本应用的声明 | [`06-app-platform.md`](specification/06-app-platform.md) §5、§8.14 |
+| SPEC.FEAT.APP.RUN-AT-LOGIN.001 | 登录项三态（`Enabled` / `Disabled` / `Unsupported`；Windows `HKCU` Run 值 + `StartupApproved` 禁用记录、Linux 自动启动桌面条目的 `Hidden=` 开关键、macOS `SMAppService`） | AI 能区分「未设置 / 用户禁用 / 本机无机制 / 查询失败」，用户手工禁用的条目保留实体、不被「删文件当禁用」抹掉；沙箱 / 裸可执行形态如实报 `Unsupported` 并点名成因 | [`06-app-platform.md`](specification/06-app-platform.md) §5、§8.15 |
 | SPEC.FEAT.NET.ENGINE-PLUGGABILITY.001 | 可插拔网络引擎（公共 API 面不加宏，实现按平台引擎可选） | AI 生成的网络代码零 `#ifdef`、无能力平台明确降级报错而非静默失败 | [`06-app-platform.md`](specification/06-app-platform.md) §8.8 |
 | SPEC.PLATFORM.NET.EVENT-SOURCE.001 | 事件循环网络完成事件与通用事件源注册口 | 网络结果恒回主线程投递，UI 线程不阻塞在 I/O 等待上 | [`06-app-platform.md`](specification/06-app-platform.md) §8.8 |
 | SPEC.FEAT.NET.TRANSPORT-SUITE.001 | 异步 TCP / UDP / 本地 IPC（UDS / NamedPipe）传输族，含 DNS 双栈与竞速、代理族（`CONNECT` / SOCKS5 / 系统与环境变量）、分帧工具与读写背压 | 可连任意主机、可监听服务、可取消，为第三方非阻塞会话（如 SSH）提供字节流底座，且慢消费者不导致无界缓冲 | [`06-app-platform.md`](specification/06-app-platform.md) §8.8 |

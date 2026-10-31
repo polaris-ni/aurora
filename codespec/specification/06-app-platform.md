@@ -496,13 +496,24 @@ au::App().window(win ? std::move(win.value()) : nullptr)
 
 `au::platform()` 是显式运行时平台查询，跳过后端探测。返回 `Platform{ PlatformKind kind, DeviceKind device, SurfaceKind surface }`，含 `is_mobile()` / `is_desktop()` / `capabilities()`。
 
-`PlatformCapabilities` 字段：`multitouch`、`high_frequency_pointer`、`desktop`、`mobile`、`system_drag_in`、`system_drag_out`、`recent_documents_os_projection`、`native_menu_bar`、`runtime_visibility`、`runtime_always_on_top`。
+`PlatformCapabilities` 字段：`multitouch`、`high_frequency_pointer`、`desktop`、`mobile`、`system_drag_in`、`system_drag_out`、`recent_documents_os_projection`、`native_menu_bar`、`runtime_visibility`、`runtime_always_on_top`、`native_print_session`、`url_scheme_registration`、`file_association`、`run_at_login`。
 
 拖放两位表「**机制是否存在**」：支持接收系统拖入 / 支持发起系统拖出，**按方向独立翻位**（不是成对翻位）。当前 `Win32`、`D3D11`、`X11`、`Wayland` 与 `MacOS` 五类 `SurfaceKind` 两个方向均为 true（Win32 / D3D11 共用同一宿主与同一桥实例；X11 两个方向共用 `x11_drag.h` 的同一桥实例；Wayland 两个方向共用 `wayland_drag.h` 的同一桥实例；macOS 两个方向共用 `macos_drag.h` 的同一桥实例——内容视图登记 `NSDraggingDestination`，桥由 `MacOSSurface::Impl` 在窗口壳建好后 `install()`，运行期 install 失败如实记日志降级；能力位表机制归属，与 `multitouch` 等位的声明口径一致），其余方向与其余 `SurfaceKind` 为 false（方向级期望表由 `utest_drag_payload` 锚定，「未接线先声称」的变异对应用例转红）。能力位与运行期失败**不互相替代**：机制存在但会话建立失败、源中断等仍走 `Result` 错误（`system-drag-*` 码，`retryable = false`，机制缺失是稳态）。
 
 `recent_documents_os_projection` 表「OS 是否提供可写入的最近文档机制、且本库把桥接好了」（§8.10）。当前 `Win32`、`D3D11` 与 `MacOS` 为 true（Win32 / D3D11 共用同一宿主与同一桥实例，故同翻；macOS 走 `NSDocumentController` 的 `noteNewRecentDocumentURL:`，属应用级集合）。`X11` / `Wayland` / `Glfw` / `Wasm` / `Headless` 恒 false：OS 侧无该机制（XDG `recently-used.xbel` 是 GTK 生态的共读文件，不是 OS 机制）。能力位为 false 时 `project_to_os()` / `clear_os_projection()` 返回 `recent-documents-projection-unsupported`，**应用内列表与持久化不受影响**（口径同上：能力位表机制归属，运行期失败另走 `Result`）。期望表由 `utest_recent_documents_translate` 锚定（逐 `SurfaceKind` 断言，含 macOS 为 true 这条）。
 
 `runtime_visibility` 与 `runtime_always_on_top` 表「OS 提供运行期窗口显隐 / 置顶机制，且本库已把 §3.6 的四枚开关接到该机制」。当前 `Win32`、`D3D11` 与 `MacOS` 为 true：Win32 / D3D11 共用同一宿主（`ShowWindow(SW_SHOWNA / SW_HIDE)` 与 `SetWindowPos(HWND_TOPMOST / HWND_NOTOPMOST)`，故同翻；wgpu 是渲染偏好而非独立 `SurfaceKind`，不另列）；macOS 落 `orderFrontRegardless` / `orderOut:` 与 `setLevel:(NSFloatingWindowLevel / NSNormalWindowLevel)`。其余恒 false 且各有一句实情：`X11` 的 `XMapWindow` / `XUnmapWindow` 与 `Glfw` 的 `glfwShowWindow` / `glfwHideWindow` **机制在但本库未落桥**，`Wayland` 既没有「隐藏顶层窗口」也没有「置顶」的核心协议（只有 minimize），`Headless` 是记录值 seam 而非 OS 机制——**未接线的方向不预先声称**。缺位时 `set_visible` / `set_always_on_top` 是**可观测的 no-op**（`is_visible()` 恒为基类默认 true、`is_always_on_top()` 恒为 false），应用据此先查询再降级，而不是「按了热键窗口没反应还以为是热键坏了」。逐 `SurfaceKind` 期望表由 `utest_window_runtime_control` 锚定（「未接线先翻位」的变异对应用例转红）。
+
+**桌面外壳集成四枚位**（`native_print_session` / `url_scheme_registration` / `file_association` / `run_at_login`）表「OS 提供该机制、且本库已把桥接好了」。与上面各位的差别只有一处：这四个入口是**进程级自由函数**（`include/aurora/app/` 下五个新头），与 `SurfaceKind` 无关，故按编译期平台整体置位、不随 Surface 变化——Windows / Linux 上即便是 `Headless` Surface 也照常持有这些 OS 机制。逐平台取值：
+
+| 位 | Win32 / D3D11 | Linux（X11 / Wayland / Glfw / Headless） | macOS | 取值理由 |
+|:---|:---:|:---:|:---:|:---|
+| `native_print_session` | true | **false** | true | Windows 走 GDI 打印会话、macOS 走 AppKit 打印操作；**Linux 不引入 libcups**（第三方形态全为 vendored 源码，系统动态库是新开的口子），替代路径是 `export_pdf()` 后交给默认处理程序（§8.12） |
+| `url_scheme_registration` | true | true | true | Windows 写 `HKCU\Software\Classes`；Linux 写用户级桌面条目 + `mimeapps.list`；macOS 靠包内 `CFBundleURLTypes` + Launch Services（不在 `.app` 包内时调用失败并点名原因，位仍 true——机制在、桥已接）（§8.13） |
+| `file_association` | true | true | true | 同上一行的翻位口径；声明**不抢默认处理程序**（§8.14） |
+| `run_at_login` | true | true | true | Windows `HKCU` Run 值 / Linux 自动启动桌面条目 / macOS `SMAppService`（要求 bundle）；沙箱形态如实报 `Unsupported`（§8.15） |
+
+`Wasm` 与其余未覆盖平台四枚位恒 false。位与运行期失败**不互相替代**（口径同上）：机制存在但这一回没做进去（注册表写入被拒、桌面条目目录不可写、不在 `.app` 包内）仍走 `Result` 的 `*-failed`（`kind = io`，`retryable = false`），机制缺失走 `*-unsupported`（`kind = unsupported`）。逐平台取值表由 `utest_document_output` 锚定（「未接线先翻位」的变异对应用例转红）。**文档输出（PDF）不设位**：它是纯库内能力，不依赖任何 OS 机制，设位会污染「能力位 = OS 机制存在性」这条既有口径。
 
 ```cpp
 const au::Platform p = au::platform();
@@ -1780,6 +1791,82 @@ wasm 腿没有 fd 语义，`Engine` 维持 `NullEngine`（传输能力全 false�
 - **宿主持有**：桥以引用计数守卫（`Win32RecentDocumentsBridge`）由 `Win32Host::Impl` 持有，销毁期先散守卫再放窗口（与输入法桥 / 拖放桥同款纪律）；通路本身与 `HWND` 无关，故无宿主进程（纯命令行 / 无窗应用）由 `project_to_os()` 侧的按需自举取得同一条通路——「先记文档、后建窗口」同样能投影。macOS 同款：`MacOSRecentDocumentsBridge` 由 `MacOSSurface::Impl` 持有，无窗口宿主由 `macos_recent_documents_ensure_registered()` 自举。
 
 回归：`utest_recent_documents`（去重置顶 / 容量淘汰 / 顺序 / 持久化往返 / 空口径 / 损坏信封降级）+ `utest_recent_documents_translate`（投影计划四规则、能力位矩阵（含 macOS 为 true）、显式性、后端失败隔离、无后端时报 `projection-unsupported`）。真机：`aurora_verify_win32_recent_documents`（独立取证「投影后 OS 出现条目 / 重复投影幂等 / 撤销后消失 / 撤销不碰 store」，见 [`../BUILD_OPTIONS.md`](../BUILD_OPTIONS.md) §2.4）与 `aurora_verify_macos_recent_documents`（同一组判据的 macOS 形态，封装为 ad-hoc 签名 `.app`，经 `recentDocumentURLs` 独立取证）。
+
+---
+
+### 8.11 文档输出（`app/document_output.h`）
+
+`PageMargins` / `PageSpec` / `page_content_raster()` / `export_pdf()` 是跨平台、无 OS 依赖的文档合成层：**每页先按纸张几何用软件 `Painter` 光栅化，再作为图像嵌入 PDF**。它与 §8.12 的打印会话共用同一份页面描述，但不依赖任何平台桥——任何能把文件写出去的环境都能导出（含无头 CI）。
+
+五条约束是硬条款，任一条含糊都会产出「看起来对、形体错位」的 PDF：
+
+- **页边长用物理单位，不用 dp**：`width_mm` / `height_mm` / `PageMargins.*_mm` 一律毫米，`dpi` 只决定栅格密度。A4 210×297mm 折到 96 dpi 是 793.7 dp，**整数 dp 表达不了**；写成 `size_dp` 等于先在纸张几何上损失约 0.4% 再一路传到每页像素。内容侧仍走 dp 绘制路径，由本层把 dp 映射到页内容区的物理像素。
+- **物理像素数以 Painter 的读回值为唯一真源**：`page_content_raster()` 走 `set_scale(dpi / 96.0F)` → `begin(内容区 dp)` → 读 `width()` / `height()`（`Painter` 按 dp × scale 四舍五入）。本层不另算一套 `ceil` / `round`——两套规则会差一个像素，而这种差错在肉眼走查里看不出来。
+- **先合成到不透明底色再嵌入**：`Painter` 帧缓冲是 RGBA8 直色，未绘制区域是透明黑，而 `DeviceRGB` 图像 XObject 不带 alpha 通道；直接嵌等于丢掉 alpha，未覆盖区域会印成黑块。`export_pdf()` 在回调之前先铺 `PageSpec::background`（默认纸白），回调之后再合成一次——**进入写出器的位图 alpha 恒为 255**，这一条由单测逐像素断言，不是纸面承诺。
+- **多页落在签名上**：`export_pdf(path, spec, page_count, draw)` 收「页数 + 逐页绘制回调」；回调每收到一枚已 `begin()` 的内容区 `Painter` 就画一页，页边界由调用方决定。只收一棵树的 `export_pdf(scene, spec)` 形态与「多页边界由调用方决定」自相矛盾，故不提供。
+- **不复用既有离屏通道**：`render::offscreen` 的 `render_to_image` 明写「逻辑像素 = 设备像素」、无 device pixel ratio 形参、缩放恒为 1，出不了 600 dpi 的页；`Application::render_to_png` / `Scene::render_to_png` 是**屏幕密度快照**，不是文档路径。两条通道不混为一谈。
+
+PDF 写出器（`src/aurora/render/detail/pdf_writer.h`，内部头）产 PDF 1.4：Catalog / Pages / Page / 内容流 / 图像 XObject（`/DeviceRGB`、8 bpc、`/Filter /FlateDecode`）+ xref 表与 trailer，输出**确定性**（同输入逐字节一致）。内容流只做一次 `cm` + `/Im0 Do`（垂直翻转放在矩阵里），**没有文本操作符**——这是栅格入 PDF 的机械证据，单测遍历内容流断言无 `BT` / `ET` / `Tj` / `TJ` / `Tf`，后续提案不得把它顺手宣称成矢量能力。`FlateDecode` 按 ISO 32000 是 **zlib 包装**（RFC 1950 两字节头 + Adler-32 尾），由写出器自带的 stored DEFLATE 块（RFC 1951 BTYPE=00）编码器产出，不链 zlib；压缩率不是本通道的目标（真源是帧缓冲）。
+
+三条局限如实申报：**文本不可选择、不可搜索**（页面里只有图像 XObject，没有字形与 ToUnicode 映射）；**放大会失真**（位图按页 DPI 采样，超出即插值放大）；**文件体积随页数线性膨胀**（每页一幅独立图像）。要做矢量文本须给 `Painter` 增加记录式后端，并把 DisplayList 语义映射到 PDF 操作集（渐变、bidi 重排后的字形 advance、`.notdef` 回退、CIDFontToWidth 与 ToUnicode CMap），代价远超「打印出来是对的」这个主诉求，本批如实申报局限，不暗示超越实际的能力。
+
+**为什么不设能力位**：文档输出是纯库内能力，不依赖任何 OS 机制；设位会污染「能力位 = OS 机制存在性」这条既有口径。它缺依赖时走既有的 `io-image-encode-failed`，目标文件写不出去走 `io-file-not-found`，参数非法（页尺寸 / 边距 / DPI / 页数 / 页尺寸漂移）走 `general-invalid-argument`，不新开错误域。
+
+回归：`utest_document_output`（页面折算三组：96 dpi / 600 dpi / A4 内容区在 96 dpi 下非整数；PDF 头标识与版本、对象与 xref 偏移、`FlateDecode` 流解压回读等于输入 RGBA8、无文本操作符、逐页 alpha 恒 255、逐页回调升序）。
+
+### 8.12 打印会话（`app/document_output.h`）
+
+`print_targets()` 返回 `Result<std::vector<PrintTarget>>`（`id` / `name` / `is_default`）；`PrintSession` 是移动语义的 RAII 会话：`open(target_id, spec)` → 逐页 `submit_page(const Image &)` → `finish()` / `abort()`，`is_open()` 可查。
+
+- **空集合不是错误**：机器上没有任何打印机时 `print_targets()` 返回**空列表配 `Ok`**——上层据此弹「没有可用打印机」；`print-session-unsupported` 只在机制缺位时出现，两者不互相顶替。
+- **页尺寸与不透明度**：`submit_page` 要求位图尺寸等于 `page_content_raster(spec)` 的读回值、像素为 RGBA8；提交前自动合成到 `PageSpec::background`，后端只会收到不透明位图。`finish()` 幂等（已结束 / 空会话为空操作），`abort()` 与析构都会收口未完成会话；提交失败不改会话状态，调用方可继续提交或中止。
+- **打印面板一律自绘**：本库是 UI 库，目标选择与页面预览由应用用 `Painter` 自绘（`print_targets()` 提供候选、`export_pdf` 同款页面描述提供预览），**不弹系统打印对话框**。理由有二：避免为 Linux 引入 GTK 依赖（本库迄今零 GTK 依赖），且保证三平台观感一致。macOS 侧显式 `setShowsPrintPanel:NO` / `setShowsProgressPanel:NO`，不是漏了系统面板。
+- **三平台落法不对称，并如实说出来**：Windows 用打印后台处理程序（`EnumPrintersW(PRINTER_ENUM_LOCAL | PRINTER_ENUM_CONNECTIONS)` 枚举、`GetDefaultPrinterW` 标默认、`CreateDCW("WINSPOOL", ...)` + `StartDocW` / `StartPage` / 位图传输 / `EndPage` / `EndDocW` 提交页）；macOS 用 AppKit（`NSPrinter.printerNames`、`NSPrinter` 按名取目标、`NSPrintInfo` + 自绘 `NSView` 的 `NSPrintOperation`）；**Linux 不声称原生打印会话**——本库不引入 libcups（第三方形态全是 vendored 源码，系统动态库是第一次开的口子，为此换来一段打印会话这笔账本批不认），能力位如实为 `false`，替代路径是 `export_pdf()` 后交给默认处理程序。**未决项已收口**：本批不引 CUPS；若日后引入，须先在本文与 [`../BUILD_OPTIONS.md`](../BUILD_OPTIONS.md) 登记 CMake 变量与能力位翻位口径，不得先翻位再找补。
+- **错误口径**：机制缺位 `print-session-unsupported`（`kind = unsupported`，`retryable = false`）；机制在但这一回没成 `print-session-failed`（`kind = io`，`retryable = false`，detail 点名打印机 / 后台处理程序 / 页面被拒）。枚举失败与「没有打印机」分开报。
+
+回归：`utest_document_output`（空系统为 `Ok(空)`、目标清单透传、无后端报 `unsupported`、页尺寸不符与参数非法被拒、提交前合成不透明）。真机：`aurora_verify_document_output`（导出 PDF 并复核结构、枚举目标、打开会话提交页；见 [`../BUILD_OPTIONS.md`](../BUILD_OPTIONS.md) §2.4）。
+
+### 8.13 URL 方案注册与单实例转交（`app/url_scheme.h`、`app/single_instance.h`）
+
+`register_url_scheme(scheme, display_name, identity)` / `unregister_url_scheme(scheme, identity)` / `is_url_scheme_registered(scheme)` / `registered_url_scheme_owner(scheme)`。折算层（`src/aurora/app/detail/shell_integration_translate.h`，零平台头）负责 RFC 3986 方案文法（`ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )`）与保留方案拒收（`http` / `https` / `file` / `mailto` / `ftp` / `ftps` / `tel` / `sms` / `data` / `javascript` / `about` / `ws` / `wss` / `ssh` / `urn` / `ldap` / `gopher` / `news`），三平台桥共用同一份判定；文法非法与保留方案都落 `general-invalid-argument`，但 message 分别点名「不符文法」与「属保留方案」，而不是同一句笼统失败。
+
+- **注册落点全为用户级**：Windows 写 `HKCU\Software\Classes\<scheme>`（`URL Protocol` 标记 + `DefaultIcon` + `shell\open\command` 的 `"<exe>" "%1"`），不碰需要提权的 `HKLM`；Linux 写 `$XDG_DATA_HOME/applications/aurora-url-<scheme>.desktop`（`MimeType=x-scheme-handler/<scheme>`）并在 `$XDG_CONFIG_HOME/mimeapps.list` 的 `[Default Applications]` 登记 `x-scheme-handler/<scheme>=<desktop id>`——方案处理器按定义就是「该方案唯一的处理器」，这条与 §8.14 文件关联的「不抢默认」边界不冲突；macOS 的 `CFBundleURLTypes` 是**包内静态声明**，运行期只在已声明时刷新 Launch Services 登记，不在 `.app` 包内或未声明时返回 `url-scheme-failed` 并点名 `CFBundleURLTypes`（能力位仍 true——机制在、桥已接）。
+- **撤销先验归属**：`unregister_url_scheme` 先查当前归属——归属为空视为**幂等成功**；归属是别的应用则**一个字节都不改**并返回 `url-scheme-failed`、message 带上对方的命令模板 / desktop id。「撤销」不得越过别人的登记。macOS 没有按方案撤销的公开 API，故撤销在验明归属后如实返回 `url-scheme-unsupported` 并提示从 `CFBundleURLTypes` 删条目重建包。
+- **单实例是深链的另一半**：只补注册不补转交，用户点链接的观感就是「闪一个新的空窗口」。`SingleInstance::instance().acquire(identity)` 返回 `Primary` / `Forwarded` / `FallbackNewInstance`；`set_on_uri_received(cb)` 供首实例在存续期内接收后续唤起（重复登记替换旧回调），`poll()` 排空平台通道（**Linux 必须由应用每帧调用**；Windows / macOS 由消息泵推进、此函数为空操作），`release()` 幂等，`is_primary()` / `instance_key()` 可查。未登记回调时收到的 URI 留在队列里、不丢。
+- **交付必须有人负责后果**：`Forwarded` 的语义是「已送达并确认」。Windows 用 `Local\AuroraInstance_<key>` 有名互斥量判首实例、隐藏消息窗上的 `WM_COPYDATA` 送 URI 并等 `Local\AuroraInstanceAck_<key>` 事件（3 秒超时）；Linux 把 URI 写进首实例的用户私有 Unix 套接字（4 字节长度前缀 + URI）并逐条等 `'A'` 确认。确认超时 / 对端已退出 / 找不到首实例窗口时**回落为 `FallbackNewInstance`**，「第二实例默默退出」这条路径被禁——它表现为「点了链接什么都没发生」。macOS 由 Launch Services 保证同一 `.app` 只有一个运行实例、唤起经 `kAEGetURL` 直接投递到本进程，故此平台 `acquire` 恒报 `Primary`（没有第二个进程可转交，「已转发」在这一平台不存在）。
+- **本机通道要挡住同机其他用户**：Linux 的目录取 `$XDG_RUNTIME_DIR`（缺失时退回 `$HOME/.cache/aurora/runtime`），以 `0700` 创建；锁文件 `flock`、套接字 `chmod 0600`，服务端还会用 `SO_PEERCRED` 复核对端 uid——**不得用 `/tmp` 下的可预测名字**（否则同机其他用户可以预先占住该名字做拒绝服务，或抢先监听那个套接字接收本应用的 URI）。Windows 有名互斥量落在 `Local\` 命名空间、macOS 唤起通道由 OS 兜底，无需额外处理；这一不对称在头注释里写明。
+- **转交来的 URI 是不可信输入**：本层只从命令行参数（不含 argv[0]）里提取第一条合法 URI（方案文法合法、长度 ≥ 2 以避开 Windows 盘符 `C:`、`:` 后不是反斜杠），**只交给既有的 `Navigator::open_uri` 走路由注册表**；命中不到路由的行为沿用导航层现状（本层不替它兜底），也**不把 URI 拼进任何待执行的命令行**。
+- **实例键必须稳定**：`derive_instance_key(executable_path)` 规范化分隔符、词法消解 `.` / `..`、Windows / macOS 大小写折叠、存在时解析符号链接，然后取 FNV-1a 64 的 16 位十六进制；**不混入版本号、mtime 或命令行内容**——键一变，互斥量与锁文件就认不出自己，表现为「每次都当成首个实例」。`AppIdentity.instance_key` 显式给出时以调用方值为准（可用于同一可执行文件按配置区分实例）。
+
+回归：`utest_url_scheme`（文法通过 / 数字开头 / 下划线 / 冒号被拒；保留方案点名拒因；注册 / 归属 / 幂等撤销；异主撤销零改动且报出对方；无后端 `unsupported`）+ `utest_single_instance`（三种结局互不顶替、首实例命令行 URI 入队、回调替换、`poll` 按到达序交付、实例键稳定性与规范化、通道故障不改状态、`release` / `clear_all` 幂等）+ `utest_shell_integration_translate`（方案文法与保留名单、命令行 URI 提取、`Exec=` 引用、桌面条目与 INI 解析）。真机：`aurora_verify_url_scheme`（注册后系统查询承认归属、异主撤销被拒且原登记不变、撤下后归属回空、二次撤销幂等）。
+
+### 8.14 文件关联（`app/file_association.h`）
+
+`associated_application(extension)`（当前实际生效的归属：`application` + `source`）、`register_file_association(declaration, identity)`（声明本应用可处理某扩展名与 MIME 类型）、`unregister_file_association(extension, identity)`（撤销本应用的声明）。
+
+- **立场是「查询 + 声明候选」，不是「抢占默认」**。默认处理程序属用户偏好且抢占不可逆，是越界动作；这也与本仓库既有的同源判例一致（`tools/servers/aurora_mcp.cpp` 明确拒绝写入自启动目录以防 confused deputy——「写到 OS 会自动生效的位置」是需要显式授权的事，不是库该代劳的事）。具体到各平台：
+  - **Windows**：只写**用户级** `HKCU`——ProgID（`HKCU\Software\Classes\Aurora.<stem>.<ext>`，含 `shell\open\command` 与 `DefaultIcon`）、应用级 `HKCU\Software\AuroraApplications\<stem>\Capabilities\FileAssociations` 与 `HKCU\Software\RegisteredApplications` 的登记值，写完调 `SHChangeNotify(SHCNE_ASSOCCHANGED)` 刷新壳缓存。**只写 ProgID 不行**：Windows 自 Win8 起不允许以编程方式设置默认处理程序，且不登记 Capabilities 时本应用根本不会出现在「打开方式」列表里——只写 ProgID 的实施会得到「注册成功但列表里没有我」的假阴性。
+  - **macOS**：由 UTI + Launch Services 查询（`LSCopyDefaultApplicationURLForContentType`，`source = "launch-services"`）；声明侧要求 `CFBundleDocumentTypes` 已有静态条目，运行期只能刷新 Launch Services 登记（`LSRegisterURL`），不在 `.app` 包内或未声明时返回 `file-association-failed` 并点名 `CFBundleDocumentTypes`；撤销同理如实报「从包内删条目重建」（没有运行期撤销 API）。
+  - **Linux**：归属取决于桌面条目数据库——查询读 `$XDG_CONFIG_HOME/mimeapps.list` 的 `[Default Applications]`（`source = "mimeapps.list"`）；声明写 `$XDG_DATA_HOME/applications/aurora-file-<stem>.desktop`（`MimeType=` 合入）并在 `mimeapps.list` 的 **`[Added Associations]`（候选）**登记，**绝不写 `[Default Applications]`**（默认归用户）；撤销只从 `[Added Associations]` 摘掉本应用并把本应用桌面条目的 `MimeType` 减掉该项，别人的条目零改动。
+- **查询只答「当前实际生效的归属」，并在 `source` 里点明来源**（`windows-assocquery` / `launch-services` / `mimeapps.list`）。系统默认与用户另层偏好（Windows 的用户选择、macOS 的历史关联列表）不混成一次查询——混了就必须回答「谁覆盖谁」，而那在不同 Windows 版本上还不是同一个答案。**空集合不是错误**：没有关联时返回空 `AssociationInfo` 配 `Ok`。
+- **词汇表不另起炉灶**：`include/aurora/app/mime_types.h` 是剪贴板与系统拖放共用的 MIME 唯一真源；本层只补「扩展名 → MIME」这一方向（`mime_type_for_extension`，`constexpr`），未登记扩展名可让调用方在声明里自带 MIME。两张表若各自演化，同一扩展名迟早查出两个 MIME。
+- **扩展名规范化**（折算层）：去掉一个前导点、ASCII 小写；空串、孤立点、含路径分隔符或内嵌点一律拒收（`general-invalid-argument` 并点名原值）。`.PNG` / `png` / `PNG` 折叠为同一键。
+- **撤销先验归属**：本应用没声明过该扩展名 → 幂等成功；别的应用声明过 → 本函数只摘本应用的登记，不动别人的。缺失可执行路径时无法拼出命令模板 / 无法验归属，直接 `general-invalid-argument`。
+
+错误：能力缺位 `file-association-unsupported`；机制在但没落地 `file-association-failed`（detail 点名注册表 / Launch Services / 目录不可写）。两者都 `retryable = false`。
+
+回归：`utest_file_association`（规范化折叠与非法拒收、MIME 方向映射与显式覆盖、缺身份拒收、桥原样透传、无后端 `unsupported`、撤销验归属）+ `utest_shell_integration_translate`。真机：`aurora_verify_file_association`（声明后可查、撤销后回基线、`[Default Applications]` / 系统默认处理程序逐字节不变、探针自建的应用级登记收尾删除）。
+
+### 8.15 登录项（`app/run_at_login.h`）
+
+`RunAtLoginStatus{Enabled, Disabled, Unsupported}`、`RunAtLoginState{status, detail}`、`run_at_login(identity)` 与 `set_run_at_login(bool, identity)`。
+
+- **三态不能压成布尔**：「OS 侧此刻没让我自启」至少有四种成因——从未设置、用户手动禁用、该平台无此机制、查询本身失败。布尔会把后三种并成同一个 `false`，应用就分不清「我调一下就能开」和「这台机器不可能」。
+- **`Disabled` 是「机制在、条目在 / 未设，但此刻不生效」**，与 `Unsupported` 互不顶替：用户手工禁用时条目**仍然存在且带禁用标记**，查询应报 `Disabled`（Windows 的 `StartupApproved\Run` 首字节 bit0 为 0 即属此形态，detail 点明「在 Windows 启动设置里被禁用」），写入也不该把它当成「没设置过」而抹掉。`Unsupported` 必带 detail 点名成因；`Enabled` 的 detail 为空；`Disabled` 可按平台附一句成因。
+- **平台落法**：Windows 写 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`（值名为可执行文件 stem，命令模板是「exe + 逐参数安全引用的命令行快照」）——**不用 `HKLM`**（需要提权，属动用户机器的越界动作）；显式开启会清掉 `StartupApproved\Run` 里的禁用记录（否则 Run 值写了也不生效），关闭只删 Run 值、**保留** StartupApproved 记录。Linux 写 `$XDG_CONFIG_HOME/autostart/aurora-autostart-<stem>.desktop`，启用与禁用**表达在同一个文件里的开关键**（`Hidden=`，若原文件带 `X-GNOME-Autostart-enabled` 则同向同步），**不做「删文件当禁用」**——删掉会同时抹掉用户手工禁用留下的那条记录；两态的差异只在开关键，其余行原样保留。macOS 经 `SMAppService`（macOS 13+，要求 bundle）；沙箱形态如实报 `Unsupported` 并点名原因；`RequiresApproval`（已登记但用户尚未在系统设置里放行）按 `Disabled` 报——OS 此刻确实不会启动本应用。
+- **身份前提**：`set_run_at_login` 要求 `AppIdentity` 至少有可执行路径或 bundle identifier；都缺时 `general-invalid-argument`（不能盲写一个没有命令的条目）。机制缺位 `run-at-login-unsupported`，机制在但这一回没写进去 `run-at-login-failed`（detail 点名注册表被拒 / 登录项服务拒绝 / 自动启动目录不可写）。
+
+回归：`utest_run_at_login`（三态互不顶替、`Unsupported` 必带 detail、查询与写入原样走桥、空身份拒写、平台失败透传、无桥如实 `Unsupported`）+ `utest_shell_integration_translate`（桌面条目开关键翻转只改键、不删文件）。真机：`aurora_verify_run_at_login`（启用后 OS 侧出现、用户禁用形态报 `Disabled` 且条目仍在、关闭后删除且不碰其它条目、逐值还原基线——Windows 侧另核对命令行快照里带空格的参数仍被正确引用）。
 
 ---
 
