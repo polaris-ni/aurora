@@ -61,6 +61,26 @@ if (AURORA_BUILD_VERIFY_TOOLS)
     aurora_add_verify_probe(aurora_verify_net_connectivity "${_aurora_verify_dir}/net_connectivity_live_probe.cpp")
     list(APPEND _aurora_verify_targets aurora_verify_net_connectivity)
 
+    # ---- 桌面外壳集成四枚（Windows / Linux / macOS 的用户级数据库 + 打印会话）----
+    # 只验公共 API；判据全部走**独立取证**（PDF 交叉引用与 zlib 流自行解析、注册表 / mimeapps.list /
+    # autostart 目录直接读），不复用库内折算结果自证。能力位为 false 的构建按退出码 2 报环境不可用。
+    # 写入一律落在用户级（HKCU / XDG 用户目录），结束前把基线逐字节还原；不触碰 HKLM、不抢默认处理程序。
+    if (WIN32 OR LINUX OR APPLE)
+        aurora_add_verify_probe(aurora_verify_document_output
+                "${_aurora_verify_dir}/document_output_live_probe.cpp")
+        list(APPEND _aurora_verify_targets aurora_verify_document_output)
+
+        aurora_add_verify_probe(aurora_verify_url_scheme "${_aurora_verify_dir}/url_scheme_live_probe.cpp")
+        list(APPEND _aurora_verify_targets aurora_verify_url_scheme)
+
+        aurora_add_verify_probe(aurora_verify_file_association
+                "${_aurora_verify_dir}/file_association_live_probe.cpp")
+        list(APPEND _aurora_verify_targets aurora_verify_file_association)
+
+        aurora_add_verify_probe(aurora_verify_run_at_login "${_aurora_verify_dir}/run_at_login_live_probe.cpp")
+        list(APPEND _aurora_verify_targets aurora_verify_run_at_login)
+    endif ()
+
     # ---- X11 光标（Linux/BSD 桌面）：XFIXES 读回屏幕上真实显示的光标 ----
     if (AURORA_BACKEND_X11)
         aurora_add_verify_probe(aurora_verify_x11_cursor "${_aurora_verify_dir}/x11_cursor_live_probe.cpp")

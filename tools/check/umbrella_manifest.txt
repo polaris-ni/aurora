@@ -13,7 +13,9 @@ aurora/animation/spring.h
 aurora/animation/timeline.h
 aurora/app/application.h
 aurora/app/display.h
+aurora/app/document_output.h
 aurora/app/event_source_registry.h
+aurora/app/file_association.h
 aurora/app/file_dialog.h
 aurora/app/generate_ui.h
 aurora/app/hot_reload.h
@@ -24,13 +26,16 @@ aurora/app/notification.h
 aurora/app/os_hotkey.h
 aurora/app/perf_overlay.h
 aurora/app/recent_documents.h
+aurora/app/run_at_login.h
 aurora/app/scene.h
 aurora/app/scheduler.h
 aurora/app/scroll_storage.h
 aurora/app/shortcuts.h
+aurora/app/single_instance.h
 aurora/app/system_tray.h
 aurora/app/test_controller.h
 aurora/app/ui_prompt.h
+aurora/app/url_scheme.h
 aurora/app/validate.h
 aurora/app/validate_ui.h
 aurora/app/window_geometry.h

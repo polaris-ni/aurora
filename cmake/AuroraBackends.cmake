@@ -35,7 +35,9 @@ if (AURORA_BACKEND_WIN32)
         # （ImmGetContext / ImmGetCompositionStringW / ImmSetCandidateWindow，见 window/detail/win32_ime.*）；
         # dwmapi：DWM composition 探测与帧扩展（DwmIsCompositionEnabled /
         # DwmExtendFrameIntoClientArea，见 window/detail/win32_dwm.h，CSD 投影/圆角能力判据）。
-        target_link_libraries(aurora PUBLIC user32 gdi32 shell32 ole32 uuid imm32 dwmapi)
+        # advapi32：注册表（HKCU 下的 URL 方案 / 文件关联 / 登录项，见 app/detail/win32_shell_integration.cpp）；
+        # shlwapi：AssocQueryStringW；winspool：EnumPrintersW / GetDefaultPrinterW 与打印后台会话。
+        target_link_libraries(aurora PUBLIC user32 gdi32 shell32 ole32 uuid imm32 dwmapi advapi32 shlwapi winspool)
     endif ()
 endif ()
 
@@ -467,8 +469,10 @@ if (AURORA_BACKEND_MACOS)
     # 目标定义前就绪，否则 Ninja generate 阶段取不到 CMAKE_OBJCXX_* 规则。此处仅平台守卫。
     aurora_define_feature(AURORA_BACKEND_MACOS EXPORT)
     # UniformTypeIdentifiers：文件对话框的筛选器折算（`UTType`）只在原生腿使用。
+    # CoreServices：Launch Services（URL 方案 / 文件关联的登记与查询）；ServiceManagement：
+    # SMAppService 登录项（macOS 13+）。两者只被 app/detail/macos_shell_integration.cpp 使用。
     target_link_libraries(aurora PUBLIC "-framework Cocoa" "-framework AppKit" "-framework Carbon"
-            "-framework UniformTypeIdentifiers")
+            "-framework UniformTypeIdentifiers" "-framework CoreServices" "-framework ServiceManagement")
     # macOS 后端的 ObjC++ TU 须显式指定语言；文件存在才设置，避免 glob 缺失告警。
     # macos_surface.cpp 在 window/（表层），macos_drag.cpp 在 window/detail/（拖放桥，
     # AppKit 会话状态机，契约见同名头文件）；macos_ax_bridge.cpp 是 NSAccessibility
@@ -480,6 +484,8 @@ if (AURORA_BACKEND_MACOS)
     # app/detail/macos_notification.cpp 是 NSUserNotificationCenter 通知腿，
     # app/detail/macos_tray.cpp 是 NSStatusItem 状态栏托盘腿，
     # app/detail/macos_clipboard.cpp 是 NSPasteboard 富格式/惰性提供腿（ObjC++，语言按本表标记）。
+    # app/detail/macos_shell_integration.cpp 是桌面外壳集成桥（Launch Services / SMAppService /
+    # NSPrintOperation / kAEGetURL，ObjC++）。
     # 全部文件的门控都在自身 `#if` 内，非 Apple 平台编译为空 TU——与 x11_drag.cpp /
     # wayland_drag.cpp 在别的平台上的处置同构。
     foreach(_macos_objc_src "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/window/macos_surface.cpp"
@@ -492,7 +498,8 @@ if (AURORA_BACKEND_MACOS)
             "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/app/file_dialog_macos.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/app/detail/macos_notification.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/app/detail/macos_tray.cpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/app/detail/macos_clipboard.cpp")
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/app/detail/macos_clipboard.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/app/detail/macos_shell_integration.cpp")
         if (EXISTS "${_macos_objc_src}")
             set_source_files_properties("${_macos_objc_src}" PROPERTIES LANGUAGE OBJCXX)
         endif ()
