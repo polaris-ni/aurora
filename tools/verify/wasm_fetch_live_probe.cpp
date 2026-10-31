@@ -454,7 +454,12 @@ EM_JS(void, probe_defer_js, (std::intptr_t fn_ptr), {
 // clang-format on
 
 // @brief 推迟续体的回收口：调用并释放（EM_JS 只传地址，所有权归本函数）。
+//        地址 0 是哨兵「只排水、不回收」——值班租约的 wake 用它把一次排空推迟到本宏任务。
 extern "C" EMSCRIPTEN_KEEPALIVE void aurora_probe_deferred_run(std::intptr_t fn_ptr) {
+    if (fn_ptr == 0) {
+        aurora_probe_drain_duty();
+        return;
+    }
     // 跨语言只传地址（reinterpret_cast 无类型安全替代）；⚠️ 该语句被折行，行尾式豁免会落在第二行
     // 而静默失效，故用区间式豁免覆盖整条语句。
     // NOLINTBEGIN(cppcoreguidelines-pro-type-reinterpret-cast, performance-no-int-to-ptr)
@@ -468,22 +473,31 @@ extern "C" EMSCRIPTEN_KEEPALIVE void aurora_probe_deferred_run(std::intptr_t fn_
 
 extern "C" {
 
-/// @brief 探针入口（由编排脚本在模块就绪后调用；`-sINVOKE_RUN=0`，main 不自启）。
-///
-/// 装主线程投递器再开跑：结算回调里的续体（重定向的下一跳、Jar 的第二跳）被推迟到下一个宏任务
-/// 发起——node/undici 对「同一 tick 内嵌套发起的请求」在退出收尾上有一枚 uv_async 断言（进程级
-/// 噪声，与判据无关），新鲜回合发起即避开；这也与真实宿主的姿态同构（宿主装 poster，续体回主
-/// 线程队列）。
-/// @param port node 服务端端口（相一的回环对端）。
-EMSCRIPTEN_KEEPALIVE void aurora_fetch_probe_run(int port) {
-    probe_state().port = port;
-    aurora::detail::main_poster() = [](std::function<void()> fn) -> void {
+// @brief 排水值班队列：take_batch 取出全部滞留续体，逐个交给 JS 宏任务执行。
+extern "C" EMSCRIPTEN_KEEPALIVE void aurora_probe_drain_duty() {
+    for (auto &fn : aurora::MainQueue::take_batch()) {
+        if (!fn) {
+            continue;
+        }
         auto *holder = new std::function<void()>(std::move(fn));
         // 同上：跨语言只传地址；语句折行 ⇒ 行尾式豁免会落到第二行失效，改用区间式豁免。
         // NOLINTBEGIN(cppcoreguidelines-pro-type-reinterpret-cast)
         probe_defer_js(reinterpret_cast<std::intptr_t>(holder));
         // NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast)
-    };
+    }
+}
+
+/// @brief 探针入口（由编排脚本在模块就绪后调用；`-sINVOKE_RUN=0`，main 不自启）。
+///
+/// 领进程级唯一队列的值班租约再开跑：结算回调里的续体（重定向的下一跳、Jar 的第二跳）
+/// 被推迟到下一个宏任务
+/// 发起——node/undici 对「同一 tick 内嵌套发起的请求」在退出收尾上有一枚 uv_async 断言（进程级
+/// 噪声，与判据无关），新鲜回合发起即避开；这也与真实宿主的姿态同构（本探针就是值班循环，
+/// 续体回全局队列、经宏任务排空）。`wake` 即「把排水本身推迟到下一个宏任务」。
+/// @param port node 服务端端口（相一的回环对端）。
+EMSCRIPTEN_KEEPALIVE void aurora_fetch_probe_run(int port) {
+    probe_state().port = port;
+    static auto duty = aurora::MainQueue::on_duty([]() -> void { probe_defer_js(0); });
     start_phase_real();
 }
 

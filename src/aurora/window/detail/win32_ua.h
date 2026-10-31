@@ -108,7 +108,7 @@ struct UiaApi {
 ///
 /// 线程模型：UIA provider 的**每一个**回调都跑在 `UIAutomationCore.dll` 的 COM/RPC
 /// 线程上（见 `ensure_sta_apartment()`：以 `RPC_E_CHANGED_MODE` 为可接受即已知并依赖了这一点），
-/// 而 widget 树、`snap_`、`providers_` 只属于**主人线程**（= 构造本桥、并安装 `main_poster`
+/// 而 widget 树、`snap_`、`providers_` 只属于**主人线程**（= 构造本桥、并在岗值班 `MainQueue`
 /// 帧循环的那条线程）。故本类把访问面劈成两半：
 ///  - `sync_if_dirty` / `rebuild` / `find_node` / `mark_dirty` / 事件队列等**裸口**只许主人线程调；
 ///  - provider 侧一律走「回投 + 按值副本」口（`eval_on_main` 及其派生方法），调用线程拿到的
@@ -175,8 +175,8 @@ class Win32UiaBridge final : public a11y::Provider {
     /// 三条路径，语义一致地都返回 `R`：
     ///  1. 调用线程即主人线程（宿主接线、帧循环、`UiaDisconnectProvider` 的同步重入）
     ///     → 就地执行，零等待、零入队开销；
-    ///  2. 进程级 `main_poster` 未安装（无头 / 单测 / 事件循环未起）→ 就地执行
-    ///     （与 `post_to_main` 的无回投器回退同语义，裁定③）；
+    ///  2. 无在岗循环（无头 / 单测 / 事件循环已打烊）→ `MainQueue::try_post` 拒绝，
+    ///     回零值 `R{}`（边界降级：绝不把主人线程的树暴露给 RPC 线程就地读写）；
     ///  3. 其余（= 真的跨线程）→ 入队 + 限时等待 `timeout_ms`。
     ///
     /// 超时或 `fn` 抛异常即降级：返回零值 `R{}`，同时把「已放弃」标志置起——晚到的队列项
@@ -302,12 +302,13 @@ class Win32UiaBridge final : public a11y::Provider {
     // ---- 回投内核 ----
     /// @brief 把 `work` 送到主人线程执行并**限时**等待其完成。
     ///
-    /// 就地执行的两条合法路径（都不入队、不等待）：调用线程本就是主人线程（宿主接线、帧循环、
-    /// `UiaDisconnectProvider` 的同步重入），或进程级 `main_poster` 未安装（无头 / 单测）。
+    /// 就地执行只剩一条合法路径：调用线程本就是主人线程（宿主接线、帧循环、
+    /// `UiaDisconnectProvider` 的同步重入）——不入队、不等待。无在岗循环（无头 / 单测 /
+    /// 事件循环已打烊）时**绝不就地跑**：RPC 线程碰主人线程的树正是旧机制的病灶，现在
+    /// `MainQueue::try_post` 返回 false，本口直接回败，调用方降级为「元素不可用」。
     /// 其余情形一律入队；队列项真正执行前还要再过三道闸：桥未被析构、调用方未超时放弃、
-    /// 当前线程确是主人线程（`Window::run` 退出后 poster 会把任务**就地**在投递线程上跑，
-    /// 见 `window.h` 的 `queue->running` 分支——那正是本口要防的形态，故拒绝执行）。
-    /// @return true = `work` 已在主人线程跑完且未抛异常；false = 超时 / 抛异常 / 被任一道闸拒绝。
+    /// 当前线程确是主人线程。
+    /// @return true = `work` 已在主人线程跑完且未抛异常；false = 无在岗循环 / 超时 / 抛异常 / 被任一道闸拒绝。
     /// @note 入队之后本口只碰局部的 promise/future，不再解引用 `this`，因此**桥可以在等待方仍在途
     ///       时被析构**（窗口拆除与 RPC 在途是两条时间线）；存活闸保证队列项同样不碰树。
     [[nodiscard]] auto wait_on_main(std::function<void()> work, const std::shared_ptr<std::atomic<bool>> &abandoned,
@@ -361,7 +362,7 @@ class Win32UiaBridge final : public a11y::Provider {
     std::atomic<bool> rtl_{false};
     std::atomic<int> listener_count_{0};
     /// @brief 主人线程 = 构造本桥的线程（`Win32Host` 建窗时于 UI 线程 `make_unique`，与
-    /// `Window::run` 的帧循环同线程）。`wait_on_main` 据此判定「就地执行 vs 入队等待」。
+    /// `Application` 帧循环同线程）。`wait_on_main` 据此判定「就地执行 vs 入队等待」。
     std::thread::id owner_thread_ = std::this_thread::get_id();
     /// @brief 桥存活闸（`~Win32UiaBridge` 的第一件事就是把它置 false）。
     ///

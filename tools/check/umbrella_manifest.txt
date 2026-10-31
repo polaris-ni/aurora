@@ -54,6 +54,7 @@ aurora/core/headers.h
 aurora/core/image.h
 aurora/core/literals.h
 aurora/core/log.h
+aurora/core/main_queue.h
 aurora/core/platform.h
 aurora/core/result.h
 aurora/core/strict_mode.h
@@ -84,6 +85,8 @@ aurora/i18n/localized_string.h
 aurora/i18n/message_catalog.h
 aurora/i18n/message_id.h
 aurora/i18n/plural.h
+aurora/icon/icon.h
+aurora/icon/icon_svg.h
 aurora/imperative.h
 aurora/layout/flex.h
 aurora/layout/flex_layouter.h
@@ -120,8 +123,8 @@ aurora/net/http_session.h
 aurora/net/http_sse.h
 aurora/net/http_stream.h
 aurora/net/observability.h
-aurora/net/poll.h
 aurora/net/policy.h
+aurora/net/poll.h
 aurora/net/proxy.h
 aurora/net/random.h
 aurora/net/resolver.h
@@ -190,6 +193,7 @@ aurora/widget/expansion_panel.h
 aurora/widget/form.h
 aurora/widget/grid.h
 aurora/widget/grid_view.h
+aurora/widget/icon_widget.h
 aurora/widget/image_widget.h
 aurora/widget/inspect.h
 aurora/widget/inspector_panel.h
@@ -235,9 +239,6 @@ aurora/widget/title_bar.h
 aurora/widget/toast.h
 aurora/widget/toolbar.h
 aurora/widget/widget.h
-aurora/icon/icon.h
-aurora/icon/icon_svg.h
-aurora/widget/icon_widget.h
 aurora/window/cursor_map.h
 aurora/window/frame_pacing.h
 aurora/window/platform.h

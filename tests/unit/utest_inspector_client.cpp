@@ -26,6 +26,7 @@
 
 #include "aurora/core/platform.h"
 #include "framework/aurora_test.h"
+#include "framework/main_queue_pump.h"
 
 #ifndef AURORA_PLATFORM_WASM
 
@@ -218,6 +219,10 @@ AURORA_TEST_CASE(end_to_end_handshake_headless_server) {
     AURORA_TEST_SKIP("AURORA_BUILD_INSPECTOR_SERVER=OFF: InspectorServer is not built, no end-to-end handshake");
 #else
     namespace e2e = aurora::tools::e2e;
+
+    // 树/抓帧端点经 `marshal_opt` 回投进程级唯一队列——headless 用例没有真帧循环，
+    // 领一枚值班级替身（`DutyPump`：租约 + 后台排水线程）；用例线程阻塞在 HTTP 应答上，不能自排。
+    aurora::test::mq::DutyPump pump;
 
     auto tree = std::make_shared<aurora::Column>();
     tree->add(aurora::Node{std::make_shared<aurora::Text>("e2e client handshake")});

@@ -98,7 +98,11 @@ using aurora::test::scripts::write_then_hold;
 }
 
 /// @brief 取协程结果的外层（协程本身不抛，外层恒成功）。
+///
+/// 先 REQUIRE「协程已收尾」再读：未收尾时 `result()` 读的是空结果槽（帧外内存），
+/// 直接读会段错误而不是报出一条失败判据（口径同 `pump_stream`）。
 [[nodiscard]] auto inner(CoroTask<Result<StreamOutcome>> &task) -> Result<StreamOutcome> {
+    AURORA_TEST_REQUIRE_MSG(task.is_done(), "coro task not finished when result was read");
     const auto outer = task.result();
     AURORA_TEST_REQUIRE_MSG(bool(outer), outer ? std::string{} : outer.error().message);
     return outer.value();
@@ -128,6 +132,8 @@ using aurora::test::scripts::write_then_hold;
     AURORA_TEST_CHECK(aurora::test::net::drive_until(
                           "send done", [&task] { return task.is_done(); }, std::chrono::milliseconds{3000})
                           .satisfied);
+    // 未收尾时 `result()` 读的是空结果槽（帧外内存），先 REQUIRE 收尾再读（口径同 `pump_stream`）。
+    AURORA_TEST_REQUIRE_MSG(task.is_done(), "coro task not finished when result was read");
     const auto outer = task.result();
     AURORA_TEST_REQUIRE_MSG(bool(outer), outer ? std::string{} : outer.error().message);
     return outer.value();
@@ -845,7 +851,12 @@ AURORA_TEST_CASE(stream_times_out_a_stalled_peer) {
         Request::get(loopback_url(peer.port())).timeouts(Timeouts{.read_idle = std::chrono::milliseconds{50}}), sink);
     AURORA_TEST_CHECK(
         aurora::test::net::drive_until("peer accepted", [&peer] { return peer.accepts() > 0; }).satisfied);
-    engine.advance(std::chrono::milliseconds{50});
+    // 一步推进再泵宿主：connect 的完成经进程级唯一队列要泵才执行，read_idle 看门狗在
+    // 那之后才登记；一次性推满时限会漏掉登记晚于到期的看门狗，预算给到时限两倍（口径同 `pump_stream`）。
+    for (std::int64_t spent = 0; spent < 100 && !task.is_done(); spent += 10) {
+        (void)engine.advance(std::chrono::milliseconds{10});
+        aurora::test::net::pump_idle(std::chrono::milliseconds{5});
+    }
     AURORA_TEST_CHECK(aurora::test::net::drive_until(
                           "open_stream done", [&task] { return task.is_done(); }, std::chrono::milliseconds{3000})
                           .satisfied);

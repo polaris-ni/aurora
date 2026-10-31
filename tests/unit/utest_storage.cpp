@@ -19,6 +19,7 @@
 #include "aurora/storage/storage.h"
 #include "framework/aurora_test.h"
 #include "framework/json_literals.h"
+#include "framework/main_queue_pump.h"
 
 namespace aurora::test_cases::utest_storage {
 
@@ -402,7 +403,10 @@ AURORA_TEST_CASE(on_change_unsubscribe_stops_delivery) {
 AURORA_TEST_CASE(async_roundtrip_put_get_value_remove_list) {
     AURORA_TEST_REQUIRE_THREADS();
     // 异步通道：async_put/async_get/async_get_value/async_remove/async_list 经线程池执行，
-    // 回调（无主线程投递器时在 worker 直接调用）以 promise/future 同步等待。
+    // 用户完成一律经进程级唯一队列（`MainQueue`）回投主线程。无头用例没有真帧循环，
+    // 故领一枚值班级替身（`DutyPump`：在岗 + 后台排空），续体在排水线程 `set_value`；
+    // 本用例只以 promise/future 同步等待结果，线程无关。
+    aurora::test::mq::DutyPump duty;
     auto s = make_mem_storage();
 
     std::promise<Result<void>> put_p;

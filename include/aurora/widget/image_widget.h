@@ -29,7 +29,7 @@ enum class ImageLoadState : std::uint8_t {
 /// @brief 图片获取器（需求 SPEC.API.DECLARATIVE-DUAL-API.001 fetcher 方案）：URL → 字节流的异步任务工厂。
 ///
 /// 库核心**不内置 HTTP**：App 提供实现（如 WinHTTP/curl/浏览器 fetch 包装），返回
-/// `Task<std::vector<std::uint8_t>>`（内部经 `async` 跑线程池，`then` 回主线程投递器）。
+/// `Task<std::vector<std::uint8_t>>`（内部经 `async` 跑线程池，`then` 回进程级唯一队列）。
 using ImageFetcher = std::function<Task<std::vector<std::uint8_t>>(std::string_view url)>;
 
 /// @brief 进程级默认 fetcher（读写口；`Environment` 注入 `ImageFetcher` 优先于此值）。
@@ -104,8 +104,9 @@ class ImageView : public Widget, public ImageViewProps {
     ///
     /// fetcher 解析优先级：显式实参 > 进程级默认（`set_default_image_fetcher`）> `Environment`
     /// 注入（`on_mount` 时经 `ctx.environment<ImageFetcher>()` 补尝试）。
-    /// 线程契约：回填回调线程由 `Task` 主线程投递器决定——`Application::run` 已接线
-    /// （经 `drain_posted` 主线程执行）；无投递器（headless）时在 worker 内联执行。
+    /// 线程契约：回填回调经进程级唯一队列在值班主线程执行——`Application::run` 已接线
+    /// （每帧 `drain_posted` 排空）；无在岗循环（headless 未领租约）时回投被打烊取消（丢弃并计数），
+    /// 绝不在承接的 worker 线程内联执行。
     /// @param url    图片 URL（同时作为 `ImageCache` 缓存键）
     /// @param fetcher 显式 fetcher（可选；测试注入 mock 的入口）
     /// @return 持有加载中实例的 shared_ptr（回填经弱引用守卫，实例销毁后安全丢弃）

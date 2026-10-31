@@ -3,7 +3,8 @@
 /// 测试说明: 主机名解析的短路、规范化与投递契约回归：数字字面量在
 ///           钩子之前短路（故能证明「本机字面量永不查网」）、空主机名是用法错误而不是网络故障、
 ///           产出恒去重且保持首次出现次序（不同端口算不同条目）、平台腿失败与「查到了但零条可用
-///           记录」都落 `net-dns-failed`、异步完成恰一次且发生在调用线程之外、空回调不发起任何查表。
+///           记录」都落
+///           `net-dns-failed`、异步查表在调用线程之外执行而完成恰一次且经进程级唯一队列回投主线程、空回调不发起任何查表。
 ///           另有一例走真实平台腿：`*.invalid` 是 RFC 6761 保留域，合规解析器必须回 NXDOMAIN，
 ///           离线机器的失败同样是失败，故该判据不依赖网络可达性。
 /// 除真实平台腿一例，其余用例经注入接缝完成，不依赖 DNS、不读环境变量，三平台与 wasm 口径一致。
@@ -23,6 +24,7 @@
 #include "aurora/net/engine.h"
 #include "aurora/net/resolver.h"
 #include "framework/aurora_test.h"
+#include "framework/main_queue_pump.h"  // DutyOnly：值班级主循环替身（在岗 + 本线程排空）
 
 namespace aurora::test_cases::utest_net_resolver {
 namespace {
@@ -160,11 +162,11 @@ AURORA_TEST_CASE(platform_leg_fails_for_the_reserved_invalid_tld) {
 #endif
 }
 
-AURORA_TEST_CASE(async_resolve_delivers_exactly_once_off_the_calling_thread) {
+AURORA_TEST_CASE(async_resolve_looks_up_off_thread_and_completes_on_main) {
 #ifdef AURORA_PLATFORM_WASM
     // 浏览器运行时的异步解析没有引擎交付路径（无引擎腿一律回不可用，钩子根本没机会跑），
-    // 本用例「钩子在另一线程执行、回调在另一线程抵达」的前提在该腿不成立——与兄弟用例
-    // 同一口径整体跳过，而非把平台的不可用伪装成一次失败的查表。
+    // 本用例「钩子在另一线程执行」的前提在该腿不成立——与兄弟用例同一口径整体跳过，而非把
+    // 平台的不可用伪装成一次失败的查表。
     AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
 #else
     AURORA_TEST_REQUIRE_THREADS();
@@ -172,9 +174,14 @@ AURORA_TEST_CASE(async_resolve_delivers_exactly_once_off_the_calling_thread) {
     std::atomic_int hook_calls{0};
     std::atomic_int callback_calls{0};
     std::atomic_int lookup_thread_is_not_caller{0};
-    std::atomic_int callback_thread_is_not_caller{0};
+    std::atomic_int callback_thread_is_main{0};
     std::atomic_int answer_size{0};
-    std::atomic_flag done = ATOMIC_FLAG_INIT;
+    std::atomic<bool> done{false};
+
+    // 值班级替身领一枚空唤醒租约：查表完成的 post_to_main 才过发起闸、落进进程级唯一队列；
+    // 排空由本用例线程自任（`pump_until`），模拟生产中永在的 `Application` 主循环捞队列——
+    // 回调由此落在主线程（「就地执行」回退废除后，完成一律回投值班级主线程）。
+    aurora::test::mq::DutyOnly duty;
 
     HookScope scope([&](std::string_view, std::uint16_t) -> Result<std::vector<Endpoint>> {
         ++hook_calls;
@@ -184,21 +191,21 @@ AURORA_TEST_CASE(async_resolve_delivers_exactly_once_off_the_calling_thread) {
     // 声明在钩子之后，故析构在先：先把引擎线程收敛掉，再摘钩子，不留「线程还在读槽」的窗口。
     EngineConverge converge;
 
-    // 回调在另一条线程执行，故此处只记录事实、断言留回本用例线程做（测试框架的失败登记不做跨线程同步）。
+    // 回调在主线程执行（经队列排空），仍只记录事实、断言留回本用例线程统一做。
     Resolver::resolve("api.example", 8080, [&](Result<std::vector<Endpoint>> result) {
         ++callback_calls;
-        callback_thread_is_not_caller = std::this_thread::get_id() == main_thread ? 0 : 1;
+        callback_thread_is_main = std::this_thread::get_id() == main_thread ? 1 : 0;
         answer_size = result && result.value().size() == 1 ? 1 : -1;
-        done.test_and_set();
+        done.store(true);
     });
 
-    AURORA_TEST_CHECK_TRUE(wait_until(done));
+    AURORA_TEST_CHECK_TRUE(duty.pump_until([&]() -> bool { return done.load(); }));
     AURORA_TEST_CHECK_EQ(callback_calls.load(), 1);
     AURORA_TEST_CHECK_EQ(hook_calls.load(), 1);
     AURORA_TEST_CHECK_EQ(answer_size.load(), 1);
-    // 阻塞的查表腿与完成回调都不占用调用线程——这是「异步」的全部意义。
+    // 阻塞的查表腿不占用调用线程（异步），完成却回投主线程——这正是「绝不静默跨线程写」的落点。
     AURORA_TEST_CHECK_EQ(lookup_thread_is_not_caller.load(), 1);
-    AURORA_TEST_CHECK_EQ(callback_thread_is_not_caller.load(), 1);
+    AURORA_TEST_CHECK_EQ(callback_thread_is_main.load(), 1);
 #endif
 }
 

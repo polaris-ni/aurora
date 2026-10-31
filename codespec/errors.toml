@@ -337,7 +337,7 @@ retryable = false
 message = "NL-to-UI generation result is empty (no valid widget)"
 hint = "Provide a more specific natural language description or constraints"
 
-# ---- runtime: runtime environment and lifecycle state errors (3) ----
+# ---- runtime: runtime environment and lifecycle state errors (4) ----
 
 [[error]]
 enum = "RuntimeCoroutineException"
@@ -368,6 +368,16 @@ severity = "error"
 retryable = true
 message = "Async task timed out (not completed within {ms}ms)"
 hint = "Increase the timeout threshold or optimize async task duration"
+
+[[error]]
+enum = "RuntimeCancelled"
+slug = "runtime-cancelled"
+domain = "runtime"
+kind = "cancelled"
+severity = "error"
+retryable = false
+message = "Async task was cancelled before delivery: no on-duty main loop"
+hint = "Initiate async work only while an Application frame loop is on duty, or drain a MainQueue lease you hold yourself; use blocking_wait to consume results without a loop"
 
 # ---- io: file and byte-stream read/write errors (generic domain) (5) ----
 

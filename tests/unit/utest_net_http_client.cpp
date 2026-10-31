@@ -126,7 +126,11 @@ using aurora::test::scripts::write_then_hold;
 }
 
 /// @brief 取协程结果的内存活 Response 的 Result 层（协程本身不抛，外层恒成功）。
+///
+/// 先 REQUIRE「协程已收尾」再读：`CoroTask::result()` 在未收尾时读的是空结果槽（帧外内存），
+/// 直接读会段错误而不是报出一条失败判据（口径同 `pump_send` 的注释）。
 [[nodiscard]] auto inner(CoroTask<Result<Response>> &task) -> Result<Response> {
+    AURORA_TEST_REQUIRE_MSG(task.is_done(), "coro task not finished when result was read");
     const auto outer = task.result();
     AURORA_TEST_REQUIRE_MSG(bool(outer), outer ? std::string{} : outer.error().message);
     return outer.value();
@@ -975,8 +979,14 @@ AURORA_TEST_CASE(send_times_out_whole_request) {
     // 先泵到连接与写出落地（对端已 accept、读请求挂起）。
     AURORA_TEST_CHECK(
         aurora::test::net::drive_until("peer accepted", [&peer] { return peer.accepts() > 0; }).satisfied);
-    // 推进脚本化时钟到整请求时限：到期取消令牌，挂起的读以 net-cancelled 收尾，收尾据 timed_out 改道。
-    engine.advance(std::chrono::milliseconds{50});
+    // 一步推进再泵宿主：connect 的完成经进程级唯一队列要泵才执行，其后的写出、读阶段
+    // 看门狗都在那之后才登记——一次把时钟推满时限会把登记晚于到期的看门狗漏掉（口径同 `pump_until`）。
+    // 预算给到时限的两倍：看门狗在步进循环内登记时，时钟已烧进若干步。
+    // 到期取消令牌，挂起的读以 net-cancelled 收尾，收尾据 timed_out 改道。
+    for (std::int64_t spent = 0; spent < 100 && !task.is_done(); spent += 10) {
+        (void)engine.advance(std::chrono::milliseconds{10});
+        aurora::test::net::pump_idle(std::chrono::milliseconds{5});
+    }
     AURORA_TEST_CHECK(aurora::test::net::drive_until(
                           "send done", [&task] { return task.is_done(); }, std::chrono::milliseconds{500})
                           .satisfied);
@@ -1003,7 +1013,13 @@ AURORA_TEST_CASE(send_times_out_read_idle) {
         Request::get(loopback_url(peer.port())).timeouts(Timeouts{.read_idle = std::chrono::milliseconds{50}}));
     AURORA_TEST_CHECK(
         aurora::test::net::drive_until("peer accepted", [&peer] { return peer.accepts() > 0; }).satisfied);
-    engine.advance(std::chrono::milliseconds{50});
+    // 一步推进再泵宿主（机理同 `send_times_out_whole_request`）：read_idle 看门狗在 connect 完成
+    // 回主线程、请求写出之后才登记——它登记时虚拟时钟可能已烧进若干步，故预算给到时限的两倍，
+    // 保证「登记永远晚于第一拍」也必然被推到到期。
+    for (std::int64_t spent = 0; spent < 100 && !task.is_done(); spent += 10) {
+        (void)engine.advance(std::chrono::milliseconds{10});
+        aurora::test::net::pump_idle(std::chrono::milliseconds{5});
+    }
     AURORA_TEST_CHECK(aurora::test::net::drive_until(
                           "send done", [&task] { return task.is_done(); }, std::chrono::milliseconds{500})
                           .satisfied);

@@ -3,8 +3,8 @@
 // 分层纪律：`getaddrinfo` 属平台 socket 头，仓内唯一落点是 `src/aurora/net/socket.cpp`
 // （不变量），故本文件只做「字面量短路 → 取列表 → 规范化」的编排，平台腿经
 // `net::detail::platform_lookup` 调用。异步腿复用 `net::Engine` 的常驻线程做阻塞查询，完成
-// 投递走 `aurora::detail::post_to_main`——与 `Task<T>` 同一条主线程通道，因此宿主装了自有
-// 投递器时网络完成与 UI 事件共用一个队列（不新增第三种排队形态）。
+// 投递走 `aurora::detail::post_to_main`——与 `Task<T>` 同一条进程级唯一队列，
+// 网络完成与 UI 事件共用一个队列（不新增第三种排队形态）；无在岗循环即打烊取消。
 //
 // 注意公共头的依赖方向：本 .cpp 可以消费 `state/`（实现侧），`net/resolver.h` 不行——解析器
 // 在 L1，`Resource` 一类绑定层在 L4，把 `Task` 写进公共头会让下层反向依赖上层。
@@ -49,7 +49,7 @@ auto dedup(std::vector<Endpoint> list) -> std::vector<Endpoint> {
     return out;
 }
 
-/// @brief 把结果交给回调，投递点恒为主线程投递器（未装即当前线程就地执行）。
+/// @brief 把结果交给回调，投递点恒为进程级唯一队列（无值班/打烊 = 取消并计数，绝不就地执行）。
 ///
 /// 「恰好一次」由这里唯一保证：交出即清空持有的回调，故两条投递路径（引擎线程完成、引擎
 /// 不可用就地失败）即便都会触发也只执行一次。

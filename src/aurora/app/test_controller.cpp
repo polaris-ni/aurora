@@ -2,12 +2,13 @@
 // test_controller.cpp — 无头 widget 测试驱动实现（见 include/aurora/app/test_controller.h）。
 //
 // 帧序对齐 `Application::run`（specification/06-app-platform.md §3）：
-//   tick 手势计时 → Animator::tick(dt) → Scheduler::tick(dt) → Window::present_root
-// 与真实帧循环的两点差异（皆为「无窗口系统」所需）：
+//   排空回投（take_batch）→ tick 手势计时 → Animator::tick(dt) → Scheduler::tick(dt) → Window::present_root
+// 与真实帧循环的差异（皆为「无窗口系统」所需）：
 //   ① dt 取固定步长而非真实时钟（保证用例确定性）；
-//   ② 不做跨线程回投排水的 drain_posted（无平台事件来源）。
+//   ② 值班租约领自 `MainQueue` 但 `wake` 为空——无平台睡眠可捅，回投靠帧头排水发现；
+//      worker 投递后若不 pump，任务滞留队列属预期（无自动唤醒，测试自握节奏）。
 // `pump_and_settle` 的收敛判据与 Application 的帧调度决策同源：present_root 的
-// idle 跳帧 + Animator 无活跃动画。
+// idle 跳帧 + Animator 无活跃动画 + 队列无滞留回投（回投当帧即排空）。
 // ============================================================================
 
 #include "aurora/app/test_controller.h"
@@ -17,6 +18,7 @@
 #include <algorithm>
 #include <chrono>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -25,6 +27,7 @@
 #include "aurora/animation/animator.h"
 #include "aurora/app/scheduler.h"
 #include "aurora/core/error_codes.gen.h"
+#include "aurora/core/main_queue.h"
 #include "aurora/core/result.h"
 #include "aurora/inspector/inspector_api.h"
 #include "aurora/widget/widget.h"
@@ -94,6 +97,10 @@ struct TestController::Impl {
     std::unique_ptr<Window> window;
     Animator animator;
     Scheduler scheduler;
+    /// @brief 值班租约（合法持有者穷举之一，见 core/main_queue.h）：`wake` 传空——
+    /// 无头循环不睡在平台等待里，回投由帧头 `take_batch` 主动发现。并发构造第二个
+    /// 控制器（或套在 `Application::run` 内）= 并发 run，硬失败。
+    std::optional<MainQueue::Lease> duty;
 
     Impl(Node r, Config c) : root(std::move(r)), cfg(std::move(c)) {
         // 尺寸回退：非法值（<=0）退到 800×600，避免整树被布局到 0×0。
@@ -118,9 +125,26 @@ struct TestController::Impl {
         Scheduler::set_current(&scheduler);
         // 组件级动画挂载点：图表 grow-in 在 mount 时经 current() 注册（无则降级到终态）。
         Animator::set_current(&animator);
+
+        // 值班上岗：异步回投（then/协程 resume/net 续体）据此找到本控制器；世代号随构造分配。
+        duty = MainQueue::on_duty([] {});
+        if (!duty.has_value()) {
+            on_strict_failure("TestController: another main loop is already on duty (concurrent run)");
+        }
     }
 
+    // 收尾排空会执行已入队闭包（可能抛），与 `Application::loop_end` 同口径：收尾路径不外抛。
+    // NOLINTNEXTLINE(bugprone-exception-escape)
     ~Impl() {
+        // 收尾时序与 `Application::loop_end` 同构：先还租约（此后一切投递只会被打烊取消），
+        // 再在打烊窗口内排空残留回投——析构路径上的任务不得逃逸为孤儿项。
+        if (duty.has_value()) {
+            duty->release();
+        }
+        {
+            const auto closing = MainQueue::closing_scope();
+            drain();
+        }
         // 若仍有其它 Scheduler / Animator 期待成为 current，此处置空以避免本对象析构后残留悬垂指针。
         Scheduler::set_current(nullptr);
         Animator::set_current(nullptr);
@@ -131,8 +155,18 @@ struct TestController::Impl {
     Impl(Impl &&) = delete;
     auto operator=(Impl &&) -> Impl & = delete;
 
-    /// @brief 单帧：tick 三类驱动器 → present（脏驱动，可能整帧跳过）。
+    /// @brief 排空进程级唯一队列（与 `Application::drain_posted` 同语义）。
+    auto drain() -> void {
+        for (auto &fn : MainQueue::take_batch()) {
+            if (fn) {
+                fn();
+            }
+        }
+    }
+
+    /// @brief 单帧：排空回投 → tick 三类驱动器 → present（脏驱动，可能整帧跳过）。
     [[nodiscard]] auto pump_one() -> Result<void> {
+        drain();  // 帧头排水：后台回投当帧生效（回投里改 State → 当帧标脏 → 当帧刷新）
         root.widget().tick(std::chrono::steady_clock::now());
         animator.tick(cfg.frame_seconds);
         scheduler.tick(cfg.frame_seconds);
@@ -187,8 +221,9 @@ auto TestController::pump_and_settle(int max_frames) -> int {
         if (!impl_->pump_one().ok()) {
             return i + 1;  // 出错帧仍计入，调用方据 present 结果另行断言
         }
-        // 收敛判据（与 Application 的「活跃信号」同源）：本帧 idle 跳帧 + 无运行中动画。
-        if (impl_->window->is_idle_frame() && !impl_->animator.has_active()) {
+        // 收敛判据（与 Application 的「活跃信号」同源）：本帧 idle 跳帧 + 无运行中动画
+        // + 队列无滞留回投（worker 迟到结果入队即视为未收敛，下一帧帧头排水后再判）。
+        if (impl_->window->is_idle_frame() && !impl_->animator.has_active() && !MainQueue::has_pending()) {
             return i + 1;
         }
     }

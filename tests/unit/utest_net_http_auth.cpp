@@ -25,6 +25,7 @@
 #include "aurora/state/coroutine.h"
 #include "framework/async_wait.h"
 #include "framework/aurora_test.h"
+#include "framework/net_wait.h"
 
 namespace aurora::test_cases::utest_net_http_auth {
 namespace {
@@ -73,6 +74,19 @@ auto challenge(bool proxy, std::vector<AuthMechanism> mechanisms) -> AuthChallen
     return asked;
 }
 
+/// @brief 有界泵到协程收尾：续体经进程级唯一队列回投，等待方须自己领值班并排水。
+///
+/// 内置件从不挂起（帧在创建表达式内即收尾），谓词首判即中，替身只领一拍空租约、不留孤儿项。
+/// @tparam Task 协程任务（`is_done()` 问法）。
+/// @param subject 等待主题，进超时文本。
+/// @param task 待收尾的协程。
+/// @return 收尾事实（预算内命中为真）。
+template <typename Task>
+[[nodiscard]] auto drive_done(std::string_view subject, const Task &task) -> aurora::test::WaitOutcome {
+    const aurora::test::net::MainQueueLoop duty;
+    return aurora::test::net::drive_until(subject, [&task] { return task.is_done(); });
+}
+
 /// @brief 按双层解包取出已收尾帧的答复。
 ///
 /// 双层是本层的固定形态（`CoroTask<Result<T>>::result()` 求得 `Result<Result<T>>`）：外层是「这帧协程有没有
@@ -80,7 +94,7 @@ auto challenge(bool proxy, std::vector<AuthMechanism> mechanisms) -> AuthChallen
 /// @param task 提供方的协程任务（未收尾时有界等待；谓词先判后睡，故内置件零睡眠）。
 /// @return 答复；任一层失败即致命失败。
 [[nodiscard]] auto settled(const AuthTask &task) -> AuthDecision {
-    const auto outcome = aurora::test::wait_until("auth provider frame", [&task]() -> bool { return task.is_done(); });
+    const auto outcome = drive_done("auth provider frame", task);
     AURORA_TEST_REQUIRE_MSG(outcome.satisfied, outcome.report());
     const auto outer = task.result();
     // 消息实参在宏里无条件求值，故 `error()` 只在失败分支取——成功态取它是 `bad_variant_access`。
@@ -286,8 +300,7 @@ AURORA_TEST_CASE(a_failed_exchange_propagates_the_provider_error) {
     const auto asked = challenge(false, {mechanism(AuthScheme::Basic, "Basic", "api")});
 
     const auto task = provider.authenticate(asked);
-    const auto outcome =
-        aurora::test::wait_until("failing provider frame", [&task]() -> bool { return task.is_done(); });
+    const auto outcome = drive_done("failing provider frame", task);
     AURORA_TEST_REQUIRE_MSG(outcome.satisfied, outcome.report());
     const auto outer = task.result();
     AURORA_TEST_REQUIRE(outer.ok());  // 外层成功：帧跑完了

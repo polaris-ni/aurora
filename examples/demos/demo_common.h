@@ -233,9 +233,6 @@ inline auto run_demo(au::Node root, const std::string &title, float w, float h) 
     au::enable_dpi_awareness();  // 必须在 AllocConsole/建窗前，否则 DPI 感知失败（scale=1.0，高分屏发虚）
     au::init_console();  // 最早设置 UTF-8 控制台代码页，避免中文乱码
 
-    au::FocusManager fm;
-    fm.set_root(&root.widget());
-
     au::WindowOptions wopts;
     wopts.size = au::Size{.width = w, .height = h};
     wopts.title = title;
@@ -257,54 +254,19 @@ inline auto run_demo(au::Node root, const std::string &title, float w, float h) 
     }
 
     auto win = std::move(win_res.value());
+
+    // `Window` 不再自带帧循环。统一交 `Application` 驱动——它接管事件派发、焦点管理、
+    // 帧序（tick/动画/调度/呈现）与跨线程回投排空，静态 demo 空闲时经 wait_events 深睡、CPU 趋近 0。
+    au::Application app{au::Scene{root}, std::move(win), wopts};
 #ifdef AURORA_BUILD_INSPECTOR_SERVER
     // 远程检视 opt-in：设置 AURORA_INSPECTOR_PORT 环境变量即随 demo 启动 InspectorServer，
     // 供 aurora_e2e_client / aurora_mcp 经回环 REST 驱动本窗口；未设置则不启动（demo 默认安静）。
     // 端口解析与回调接线统一走 `start_demo_inspector`（自建 Application 的载体同源复用）。
     auto inspector = start_demo_inspector([&root]() -> au::Node { return au::Node{root}; },
-                                          [&win]() -> au::Surface * { return &win->surface(); });
+                                          [&app]() -> au::Surface * { return &app.window()->surface(); });
 #endif
-    win->surface().set_event_handler([&](au::Event &e) -> void {
-        auto &wd = root.widget();
-        // 鼠标派发必须携带 FocusManager：否则点击 Text/TextInput 时 request_focus() 静默 no-op，
-        // 焦点始终为空，后续键盘事件（Ctrl+C 复制 / Ctrl+A 全选等）永远到不了控件。
-        if (auto *me = dynamic_cast<au::MouseEvent *>(&e)) {
-            au::EventDispatcher::dispatch(wd, *me, &fm);
-        } else if (auto *ke = dynamic_cast<au::KeyEvent *>(&e)) {
-            au::EventDispatcher::dispatch(wd, *ke, fm);
-        } else if (auto *se = dynamic_cast<au::ScrollEvent *>(&e)) {
-            au::EventDispatcher::dispatch(wd, *se);
-        } else if (auto *te = dynamic_cast<au::TextInputEvent *>(&e)) {
-            au::EventDispatcher::dispatch(wd, *te, fm);
-        } else if (auto *ce = dynamic_cast<au::TextCompositionEvent *>(&e)) {
-            // IME 组合事件（CJK）：缺这一支则中文输入法的 preedit 与上屏全被丢弃，
-            // 控件里既不下划线预编辑串也不落字（键被输入法吃掉，界面无任何反应）。
-            au::EventDispatcher::dispatch(wd, *ce, fm);
-        }
-    });
 
     AURORA_LOG_INFO("demo", "[run_demo] window shown: ", title, "(close window to exit)");
-    // 事件驱动帧循环：经 Window::run 在帧末 wait_events 阻塞，
-    // 静态 demo idle 时 CPU 趋近 0（旧忙轮询恒占满一个核）；有脏区时按 60Fps 预算节流。
-    // demo 无 Animator/Scheduler（需要动画的 demo 用 Application，不走 run_demo），
-    // 故决策只看 has_pending_dirty；输入事件随时打断等待，交互延迟不变。
-    win->run([&]() -> void {
-        const auto t0 = std::chrono::steady_clock::now();
-        // 每帧先驱动根的子树计时：长按阈值、甩动惯性、播放时钟等一切挂在 `Widget::tick` 上的
-        // 每帧逻辑都依赖这一跳（`Application` 路径由 `tick_all` 做同样的事；`Window::run` 不持有
-        // 根控件，故只能在帧回调里补）。缺这一跳则 demo 里的动画类控件恒停在首帧。
-        root.widget().tick(t0);
-        // 注意：不可在此手调 begin_frame——present_root 内部按需 begin，
-        // 部分脏区帧会刻意跳过 begin 以保留上帧像素；外层多调一次会把缓冲刷成底色，
-        // 造成脏区外全白（如拖选文字时白屏）。
-        (void)win->present_root(root);
-        const double elapsed_ms =
-            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
-        // `anim_active` 取「本帧实际发生了渲染」：自驱动控件（视频/甩动）在 tick 里标脏 → 下一帧
-        // 仍需按 60Fps 节拍续跑；真正空闲的静态 demo 仍走无限深睡，idle CPU 不因此上升。
-        win->set_next_wait(au::compute_wait_timeout(win->has_pending_dirty(), /*anim_active=*/!win->is_idle_frame(),
-                                                    /*next_deadline_ms=*/-1.0, /*frame_budget_ms=*/1000.0 / 60.0,
-                                                    elapsed_ms, win->surface().paces_frames()));
-    });
+    app.run();
     return 0;
 }

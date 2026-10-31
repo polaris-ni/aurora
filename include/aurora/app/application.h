@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <memory>
-#include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -18,6 +18,7 @@
 #include "aurora/app/window_host.h"
 #include "aurora/commands.h"
 #include "aurora/core/log.h"
+#include "aurora/core/main_queue.h"
 #include "aurora/core/platform.h"  // NOLINT
 #include "aurora/core/strict_mode.h"
 #include "aurora/core/thread.h"
@@ -688,14 +689,9 @@ class Application {
         }
     }
 
-    /// @brief 排水跨线程回投队列（主线程，每帧开头/退出前调用）。
+    /// @brief 排水进程级唯一队列（主线程，每帧开头/收尾调用）。
     auto drain_posted() -> void {
-        std::vector<std::function<void()>> q;
-        {
-            std::scoped_lock lk(posted_mutex_);
-            q.swap(posted_);
-        }
-        for (auto &fn : q) {
+        for (auto &fn : MainQueue::take_batch()) {
             if (fn) {
                 fn();
             }
@@ -710,7 +706,7 @@ class Application {
     /// @param app 本次帧循环所属的应用（nullptr = 摘除登记）。
     static auto set_loop_application(Application *app) -> void;
 
-    /// @brief 循环起手：严格模式、Scheduler 当前指针、主线程回投器、时间基准与帧计数复位。
+    /// @brief 循环起手：严格模式、Scheduler 当前指针、主线程回投值班租约、时间基准与帧计数复位。
     auto loop_begin() -> void {
         prev_strict_ = aurora::strict_mode();
         aurora::set_strict_mode(strict_);
@@ -718,18 +714,16 @@ class Application {
         loop_frames_ = 0;
         Scheduler::set_current(&sched_);
         // 帧循环所属应用登记：自绘选择器三入口据此判「有无 Application 上下文」
-        // （无上下文即等价非交互：WARN 回空，不挂起）。配对摘除见 loop_end。
+        // （无上下文即等价非交互：WARN 回空，不挂入）。配对摘除见 loop_end。
         set_loop_application(this);
-        // 跨线程回投：后台线程的 then 回调入队 + 唤醒睡眠中的主循环，
-        // 下一帧开头在主线程排水执行（兼具线程安全与不丢唤醒）。多窗口下须唤醒**全部**窗口的
-        // 等待通道——任一窗口睡在自己的 Surface 上都可能延迟回投的执行。
-        Task<bool>::set_main_poster([this](std::function<void()> fn) -> void {
-            {
-                std::scoped_lock lk(posted_mutex_);
-                posted_.push_back(std::move(fn));
-            }
-            request_wake_all();
-        });
+        // 跨线程回投：领取进程级唯一队列的值班租约——后台线程的 then 回调入队 + 唤醒睡眠中的
+        // 主循环，下一帧开头在主线程排水执行（兼具线程安全与不丢唤醒）。多窗口下须唤醒**全部**
+        // 窗口的等待通道——任一窗口睡在自己的 Surface 上都可能延迟回投的执行。
+        // 租约领取失败 = 并发 run（进程已允许多实例、只允一个 run）：硬失败，杜绝两个循环抢同一队列。
+        duty_ = MainQueue::on_duty([this] { request_wake_all(); });
+        if (!duty_.has_value()) {
+            on_strict_failure("Application::loop_begin: another main loop is already on duty (concurrent run)");
+        }
 #ifdef AURORA_PLATFORM_WASM
         raf_owner_ = this;  // rAF 蹦床守卫：只有持有循环的应用实例可被推进
 #endif
@@ -783,16 +777,23 @@ class Application {
         return opts_.max_frames <= 0 || loop_frames_ < opts_.max_frames;
     }
 
-    /// @brief 循环收尾：卸载回投器并排尽残留（仍在主线程）、清当前指针、还原严格模式。
-    ///        rAF 末帧同样走此处，退出后回到「无 poster 直接调用」的默认行为。
+    /// @brief 循环收尾：还值班租约 → 开打烊窗口把残留回投排尽（仍在主线程）→ 关窗 → 清当前指针 → 还原严格模式。
+    ///        rAF 末帧同样走此处，退出后回到「无值班的发起即硬失败」的默认行为。
     auto loop_end() -> void {
 #ifdef AURORA_PLATFORM_WASM
         if (raf_owner_ == this) {
             raf_owner_ = nullptr;
         }
 #endif
-        Task<bool>::set_main_poster(nullptr);
-        drain_posted();
+        // 时序纪律（见 core/main_queue.h）：先还租约（epoch→0），此后一切投递只会被打烊取消；
+        // 再在打烊窗口内排水——窗口内 `post` 因 epoch==0 恒拒，队列只减不增，一次捞即净。
+        if (duty_.has_value()) {
+            duty_->release();
+        }
+        {
+            const auto closing = MainQueue::closing_scope();  // 析构即关窗：此后无值班发起回到硬失败
+            drain_posted();
+        }
         Scheduler::set_current(nullptr);
         Animator::set_current(nullptr);
         set_loop_application(nullptr);  // 摘除帧循环所属登记（与 loop_begin 配对）
@@ -869,8 +870,9 @@ class Application {
     std::function<void(WindowState)> on_window_state_;  ///< 可见性状态命令式回调。
     std::function<void(WindowMode)> on_window_mode_;  ///< 几何态命令式回调。
     std::function<void(ColorScheme)> on_os_color_scheme_;  ///< OS 明暗偏好命令式回调（同值不触发）。
-    std::mutex posted_mutex_;  ///< 跨线程回投队列锁。
-    std::vector<std::function<void()>> posted_;  ///< 待主线程执行的回投工作。
+    /// @brief 进程级唯一队列的值班租约（`loop_begin` 领取、`loop_end` 归还）；有值即在岗。
+    /// 并发 run 由 `MainQueue::on_duty` 的 CAS 结构性拒绝（见 loop_begin）。
+    std::optional<MainQueue::Lease> duty_;
 };
 
 /// @brief 流式应用构建器（specification/06-app-platform.md

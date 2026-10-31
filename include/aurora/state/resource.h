@@ -21,10 +21,11 @@
 /// 触发内核析构，内核析构里取消前序未完成作业；完成回调持的是内核弱引用，内核已失效时直接
 /// 丢弃——两条路径都不产生悬垂访问。限制照搬 `Task`：取消无法中断作业体本身，只丢弃结果。
 ///
-/// **必须先安装主线程投递器**（`Task<T>::set_main_poster`，真实事件循环已装）：本头的状态写入
-/// 发生在完成回调所在线程，未安装投递器时回调在承接作业的 worker 线程直调，写 `State` 就跨了
-/// 「main-thread only」的约定。无事件循环的场景（headless / 单测）要么自装投递器，要么只在
-/// 单线程作业形态下使用。
+/// **须在岗循环内使用**（`MainQueue` 有值班者，真实事件循环 / 领租约的 TestController / CLI 自持租约）：
+/// 本头的状态写入经进程级唯一队列回主线程执行。晚于打烊落地的完成回调被「打烊取消」（丢弃并计数），
+/// 绝不在承接作业的 worker 线程直调——跨线程写 `State` 的旧隐患在机制层已不可能。发起异步作业本身
+/// 也须有值班循环（无值班的发起是编程错误，见 `async()` 的发起闸门）；纯单线程 / 无头场景请领取一枚
+/// 空唤醒租约（见 core/main_queue.h），或改用 `Task::blocking_wait` 同步取结果。
 ///
 /// @code
 /// auto user = aurora::Resource<Profile>::from(
@@ -258,7 +259,8 @@ class ResourceCore : public std::enable_shared_from_this<ResourceCore<T>> {
             snapshot_ = next;
             armed = job_;  // 复制句柄（共享同一 AsyncState），出锁后挂接
         }
-        // 先落 Loading 再挂回调：未装投递器时回调可能同步直投，顺序反过来会把结果压回 Loading。
+        // 先落 Loading 再挂回调：结果若已先行落定，`then` 会当场补投——回调必须看见
+        // 「Loading 已就位」的状态，否则补投会把结果压回 Loading 之后又盖不回去。
         signal_.set(std::move(next));
         if (armed) {
             armed->then(completion(gen));
@@ -349,15 +351,29 @@ class StreamCore : public std::enable_shared_from_this<StreamCore<T>> {
         }
     }
 
-    /// @brief 报错终止：未提交的批次丢弃，状态进 Failed，已提交数据保留。
+    /// @brief 报错终止：在途未提交批**先入账**（已抵达的交付不因合批投递未落地而凭空蒸发），
+    ///        状态进 Failed，宿主经 `items()` 仍看得见失败前的全部条目。
     /// @param err 失败详情。
     auto fail(const Error &err) -> void {
         StreamSnapshot<T> next;
         {
             std::scoped_lock<std::mutex> lock(mutex_);
-            terminal_ = true;
+            // 在途批入账：与 flush 的取批同判据（Append 追加，整包快照只留最新一条）。
+            // flush 经进程级唯一队列回投——迟到终态与合批投递在同一次派发里抢跑时，
+            // 不清空才守得住「已提交数据保留」这句契约的本义：交付已抵达，入账只差一次合批投递。
+            if (!terminal_ && !pending_.empty()) {
+                if (opts_.policy == StreamPolicy::Append) {
+                    snapshot_.items.insert(snapshot_.items.end(), std::make_move_iterator(pending_.begin()),
+                                           std::make_move_iterator(pending_.end()));
+                } else {
+                    snapshot_.items.clear();
+                    snapshot_.items.push_back(std::move(pending_.back()));
+                }
+                snapshot_.batch_bytes = pending_bytes_;
+            }
             pending_.clear();
             pending_bytes_ = 0;
+            terminal_ = true;
             snapshot_.phase = ResourcePhase::Failed;
             snapshot_.error = err;
             next = snapshot_;
@@ -419,7 +435,7 @@ class StreamCore : public std::enable_shared_from_this<StreamCore<T>> {
 /// 登记依赖，作业落定只重跑读它的组件。句柄可自由拷贝，全部拷贝共享同一内核；与宿主卸载 /
 /// 重新赋值联动的取消由内核析构负责。
 /// @tparam T 作业值类型。
-/// @note Thread: 读取限主线程（`State` 的约定）；写入见本头文件头的投递器说明
+/// @note Thread: 读取限主线程（`State` 的约定）；写入见本头文件头的值班队列说明
 /// @note Side-effects: none
 /// @note Rebuildable: no
 template <typename T>
@@ -516,10 +532,11 @@ class Resource {
 /// 一次性资源装不下「一条接一条来」的语义，故本类型把写入端与读取端分开：写入端（逐条事件
 /// 的生产者、分块产出的后台作业）`push()`，读取端像普通信号一样读 `items()`。
 ///
-/// **帧内合并**：每次 `push()` 只累加批次，并把「提交」经主线程投递器排队；队列排空前到达的
+/// **帧内合并**：每次 `push()` 只累加批次，并把「提交」经进程级唯一队列（`MainQueue`）排队；
+/// 队列排空前到达的
 /// 全部交付合并成一次状态写入，即一次定点刷新。故宿主卡顿期间的多次交付损失的是提交次数，
-/// 不是数据——`batch_bytes()` 给出的是这一批的累计字节，不是最后一条的大小。未安装投递器时
-/// 逐条直投（headless 场景每条约等于一次提交）。
+/// 不是数据——`batch_bytes()` 给出的是这一批的累计字节，不是最后一条的大小。无在岗循环时
+/// 提交被打烊取消（丢弃并计数），不会在任何线程直写状态。
 /// @tparam T 单条数据类型。
 /// @note Thread: 读取与提交限主线程；`push()` / `fail()` 从其它线程调用前须自行回投主线程
 /// @note Side-effects: none
@@ -542,7 +559,7 @@ class StreamResource {
     /// @param wire_bytes 该条数据的线上字节数，供 `batch_bytes()` 累计；非线上流传 0。
     auto push(T item, std::size_t wire_bytes = 0) -> void { core_->push(std::move(item), wire_bytes); }
 
-    /// @brief 报错终止（写入端）：丢弃未提交批次，状态进 Failed，已提交数据保留。
+    /// @brief 报错终止（写入端）：在途未提交批先入账，状态进 Failed，已抵达的交付全部保留。
     /// @param err 失败详情。
     auto fail(const Error &err) -> void { core_->fail(err); }
 

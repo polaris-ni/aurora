@@ -18,62 +18,35 @@
 #include <utility>
 #include <vector>
 
+#include "aurora/core/main_queue.h"
 #include "aurora/state/coroutine.h"
 #include "framework/aurora_test.h"
+#include "framework/main_queue_pump.h"  // wait_until / DutyOnly / DutyPump 共享替身
 
 namespace aurora::test_cases::utest_coroutine {
 
 namespace m = aurora::testing::matchers;
 
+using aurora::test::mq::DutyOnly;
+using aurora::test::mq::DutyPump;
+using aurora::test::mq::wait_until;
+
 namespace {
 
-// @brief 有界轮询：每 1ms 轮询一次 pred，超时返回最后一次判定（禁止无界阻塞）。
-template <typename Pred>
-// pred 在轮询循环中被多次调用，转发（std::move/forward）会导致后续迭代使用已移动对象，故有意不转发。
-// NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
-auto wait_until(Pred &&pred, std::chrono::milliseconds budget = std::chrono::milliseconds{2000}) -> bool {
-    const auto deadline = std::chrono::steady_clock::now() + budget;
-    while (std::chrono::steady_clock::now() < deadline) {
-        if (pred()) {
-            return true;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds{1});
-    }
-    return pred();
-}
-
-/// @brief 用例退出（含 REQUIRE 中止）时把主线程投递器恢复为默认直调，避免污染同进程后续用例。
-struct MainPosterGuard {
-    MainPosterGuard() = default;
-    MainPosterGuard(const MainPosterGuard &) = delete;
-    auto operator=(const MainPosterGuard &) -> MainPosterGuard & = delete;
-    MainPosterGuard(MainPosterGuard &&) = delete;
-    auto operator=(MainPosterGuard &&) -> MainPosterGuard & = delete;
-    ~MainPosterGuard() { aurora::Task<int>::set_main_poster(nullptr); }
-};
-
-/// @brief 排空主线程投递队列直到 `done()` 成立（每轮先换出批次再在用例线程执行，锁外调用）。
-///
-/// 队列就是「帧还没收尾」的可控现场：续体排在队列里，不排空就不会收尾，于是登记观察者的先后次序
-/// 能用单线程时序钉死。空队列时睡 1 ms 再看（禁止忙等），预算用完仍不成立就把失败交回调用方的 REQUIRE。
-/// @param queue_mutex 队列锁。
-/// @param queued 投递队列（与安装的投递器同一份存储）。
+/// @brief 排空全局投递队列直到 `done()` 成立（每轮 `take_batch` 后在本线程执行；空队列睡 1ms）。
 /// @param done 收尾判据。
 /// @param budget 等待预算。
 /// @return 判据成立为真。
-[[nodiscard]] auto drain_until_done(std::mutex &queue_mutex, std::vector<std::function<void()>> &queued,
-                                    const std::function<bool()> &done,
+[[nodiscard]] auto drain_until_done(const std::function<bool()> &done,
                                     std::chrono::milliseconds budget = std::chrono::milliseconds{2000}) -> bool {
     const auto deadline = std::chrono::steady_clock::now() + budget;
     bool satisfied = false;
     while (std::chrono::steady_clock::now() < deadline) {
-        std::vector<std::function<void()>> batch;
-        {
-            std::scoped_lock lock(queue_mutex);
-            batch.swap(queued);
-        }
-        for (std::function<void()> &fn : batch) {
-            fn();
+        auto batch = MainQueue::take_batch();
+        for (auto &fn : batch) {
+            if (fn) {
+                fn();
+            }
         }
         satisfied = done();
         if (satisfied) {
@@ -90,6 +63,7 @@ struct MainPosterGuard {
 
 AURORA_TEST_CASE(co_async_delivers_value_to_await) {
     AURORA_TEST_REQUIRE_THREADS();
+    DutyPump duty;  // resume 经后台排水落定（发起协程前租约已在手）
     std::promise<Result<int>> box;
     // 闭包为用例局部变量，协程在返回帧销毁前经 wait_until 确认完成，闭包存活期覆盖协程生命周期。
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-capturing-lambda-coroutines)
@@ -113,6 +87,7 @@ AURORA_TEST_CASE(co_async_delivers_value_to_await) {
 
 AURORA_TEST_CASE(co_async_captures_fn_exception_as_error) {
     AURORA_TEST_REQUIRE_THREADS();
+    DutyPump duty;
     // fn 抛异常：invoke_safe 转为 runtime-async-exception 错误，co_await 表达式不抛。
     std::promise<Error> box;
     // 闭包为用例局部变量，协程在返回帧销毁前经 wait_until 确认完成，闭包存活期覆盖协程生命周期。
@@ -138,6 +113,7 @@ AURORA_TEST_CASE(co_async_captures_fn_exception_as_error) {
 
 AURORA_TEST_CASE(co_async_preserves_result_error_from_fn) {
     AURORA_TEST_REQUIRE_THREADS();
+    DutyPump duty;
     // fn 返回错误 Result：原样透传，不经异常包装。
     std::promise<Error> box;
     // 闭包为用例局部变量，协程在返回帧销毁前经 wait_until 确认完成，闭包存活期覆盖协程生命周期。
@@ -240,16 +216,12 @@ AURORA_TEST_CASE(synchronous_coroutine_completes_with_result) {
     AURORA_TEST_CHECK_EQ(r.value(), 42);
 }
 
-AURORA_TEST_CASE(continuation_resumes_through_main_poster) {
+AURORA_TEST_CASE(continuation_resumes_through_main_queue) {
     AURORA_TEST_REQUIRE_THREADS();
-    // 投递器把 resume 排队，由用例线程排空：验证续体经主线程投递器恢复。
-    std::mutex queue_mutex;
-    std::vector<std::function<void()>> queued;
-    Task<int>::set_main_poster([&](std::function<void()> fn) -> void {
-        std::scoped_lock lock(queue_mutex);
-        queued.push_back(std::move(fn));
-    });
-    MainPosterGuard guard;
+    // 空唤醒租约令 resume 投进全局队列且不自动排空：由用例线程捞起执行——验证续体经
+    // 进程级唯一队列回到值班线程恢复（滞留队列就是「帧还没收尾」的可控现场）。
+    DutyOnly duty;
+    AURORA_TEST_REQUIRE_TRUE(duty.duty.has_value());
 
     std::promise<int> box;
     // 闭包为用例局部变量，续体仅由本用例线程排空队列后恢复，且协程完成在用例退出前有轮询确认，
@@ -263,19 +235,13 @@ AURORA_TEST_CASE(continuation_resumes_through_main_poster) {
     const auto task = launch(coro());
 
     // worker 完成 fn 后把 resume 排进队列：轮询等待（有界）。
-    AURORA_TEST_REQUIRE(wait_until([&]() -> bool {
-        std::scoped_lock lock(queue_mutex);
-        return !queued.empty();
-    }));
+    AURORA_TEST_REQUIRE(wait_until([]() -> bool { return MainQueue::pending_count() > 0; }));
 
-    // 用例线程排空 → 续体在「主线程」恢复。
-    std::vector<std::function<void()>> batch;
-    {
-        std::scoped_lock lock(queue_mutex);
-        batch.swap(queued);
-    }
-    for (std::function<void()> &fn : batch) {
-        fn();
+    // 用例线程排空 → 续体在值班线程恢复。
+    for (auto &fn : MainQueue::take_batch()) {
+        if (fn) {
+            fn();
+        }
     }
 
     auto fut = box.get_future();
@@ -286,6 +252,7 @@ AURORA_TEST_CASE(continuation_resumes_through_main_poster) {
 
 AURORA_TEST_CASE(on_done_reports_the_value_the_frame_ends_with) {
     AURORA_TEST_REQUIRE_THREADS();
+    DutyPump duty;  // resume 与收尾回调经后台排水落定，用例只等 future
     std::promise<Result<int>> box;
     auto task = []() -> CoroTask<int> {
         Result<int> r = co_await co_async([]() -> int { return 11; });
@@ -318,6 +285,7 @@ AURORA_TEST_CASE(on_done_fires_at_registration_when_the_frame_already_ended) {
 
 AURORA_TEST_CASE(on_done_carries_the_error_of_a_frame_ended_by_exception) {
     AURORA_TEST_REQUIRE_THREADS();
+    DutyPump duty;
     std::promise<Result<int>> box;
     auto task = []() -> CoroTask<int> {
         (void)co_await co_async([]() -> int { return 1; });
@@ -336,14 +304,9 @@ AURORA_TEST_CASE(on_done_carries_the_error_of_a_frame_ended_by_exception) {
 
 AURORA_TEST_CASE(on_done_keeps_only_the_last_registration) {
     AURORA_TEST_REQUIRE_THREADS();
-    // 投递器把续体排进队列：不排空就不会收尾，两次登记的先后次序因此是单线程可控的。
-    std::mutex queue_mutex;
-    std::vector<std::function<void()>> queued;
-    Task<int>::set_main_poster([&](std::function<void()> fn) -> void {
-        std::scoped_lock lock(queue_mutex);
-        queued.push_back(std::move(fn));
-    });
-    MainPosterGuard guard;
+    // 空唤醒租约令 resume 滞留全局队列：不排空就不会收尾，两次登记的先后次序因此是单线程可控的。
+    DutyOnly duty;
+    AURORA_TEST_REQUIRE_TRUE(duty.duty.has_value());
 
     std::atomic<int> first{0};
     std::atomic<int> second{0};
@@ -353,7 +316,7 @@ AURORA_TEST_CASE(on_done_keeps_only_the_last_registration) {
     }();
     task.on_done([&first](const Result<int> &) -> void { first.fetch_add(1, std::memory_order_relaxed); });
     task.on_done([&second](const Result<int> &) -> void { second.fetch_add(1, std::memory_order_relaxed); });
-    AURORA_TEST_REQUIRE(drain_until_done(queue_mutex, queued, [&task]() -> bool { return task.is_done(); }));
+    AURORA_TEST_REQUIRE(drain_until_done([&task]() -> bool { return task.is_done(); }));
     AURORA_TEST_CHECK_EQ(first.load(), 0);  // 只保留最后登记的一枚
     AURORA_TEST_CHECK_EQ(second.load(), 1);
 
@@ -365,12 +328,13 @@ AURORA_TEST_CASE(on_done_keeps_only_the_last_registration) {
     }();
     another.on_done([&cleared](const Result<int> &) -> void { cleared.fetch_add(1, std::memory_order_relaxed); });
     another.on_done({});
-    AURORA_TEST_REQUIRE(drain_until_done(queue_mutex, queued, [&another]() -> bool { return another.is_done(); }));
+    AURORA_TEST_REQUIRE(drain_until_done([&another]() -> bool { return another.is_done(); }));
     AURORA_TEST_CHECK_EQ(cleared.load(), 0);
 }
 
 AURORA_TEST_CASE(on_done_releases_its_own_capture_once_it_has_fired) {
     AURORA_TEST_REQUIRE_THREADS();
+    DutyPump duty;
     // 观察者是「摘出即清空」而不是留在共享状态里：留着它，会话持有共享状态、共享状态又持有会话
     // 就成了自持环——适配器再也放不掉那条交换。sentinel 的引用计数就是这一条的可读判据。
     auto sentinel = std::make_shared<std::atomic<int>>(0);
@@ -393,6 +357,7 @@ AURORA_TEST_CASE(on_done_releases_its_own_capture_once_it_has_fired) {
 
 AURORA_TEST_CASE(on_done_hands_over_a_move_only_payload) {
     AURORA_TEST_REQUIRE_THREADS();
+    DutyPump duty;
     // 单所有权载荷（`net::WebSocket` 那一族句柄）只能搬不能拷，故观察者拿到的必须是结果槽的**可变引用**：
     // 签名退成 `const Result<T> &` 时，下面那两句 `std::move(outcome.value())` 就是在调用一枚不存在的拷贝
     // 构造，「把一次升级交出的会话接成资源」这件事从这一层就断掉。载荷取 `unique_ptr`——搬走与否当场可读。

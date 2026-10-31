@@ -15,8 +15,9 @@
 /// 不变量）。真正的「阻塞直到某些句柄就绪」经三枚可注入接缝表达：
 /// - `Poller`：把一组 `WaitSource` 等待到就绪（由 net 引擎层或测试安装；未安装时
 ///   `wait_and_dispatch()` 返回 `net-platform-unavailable`，即 wasm 那种「不提供假降级」）。
-/// - `Dispatcher`：把一次就绪回调投回主线程（缺省为就地同步执行，与 `post_to_main` 无 poster
-///   时的口径一致；宿主可注入 `post_to_main` 形态）。
+/// - `Dispatcher`：把一次就绪回调投回主线程。宿主要「回主线程」语义时装 `MainQueue::post` 形态
+///   （net 引擎即如此，见 `src/aurora/net/engine.cpp`）；缺省为就地同步执行——那是对调用线程
+///   无主线程约束的注入口（测试/引擎线程自用），不再是「无 poster 即静默回退」的老口径。
 /// - `ChangeNotify`：条目集合变动（登记/注销）后通知常驻等待方重取快照（判据见成员声明处）。
 ///
 /// 无 fd 等待语义的腿（wasm）在构造期即置 `event_source_supported()` 为假：`register_source()`

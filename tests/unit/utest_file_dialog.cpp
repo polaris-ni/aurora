@@ -32,6 +32,7 @@
 #include "aurora/app/detail/file_picker.h"
 #include "aurora/app/file_dialog.h"
 #include "aurora/core/log.h"
+#include "aurora/core/main_queue.h"
 #include "aurora/widget/text.h"
 #include "aurora/widget/text_input.h"
 #include "framework/aurora_test.h"
@@ -123,21 +124,16 @@ struct PickerSeamGuard {
 
 /// @brief RAII：用例末把进程级单例还原到本 guard 构造时的快照——用例故意预装「外层」
 ///        单例以证 run_modal 的逐项还原，不把全局态泄漏给后续用例。
+///        值班租约不在此列：全局队列只有一个，run_modal 自领自还、无槽可快照。
 struct SingletonSnapshot {
     SingletonSnapshot()
         : sched(Scheduler::current()), anim(Animator::current()), app(file_dialog::detail::current_application_slot()),
-          focus(current_focus_manager()), strict(aurora::strict_mode()) {
-        {
-            std::scoped_lock lk(detail::main_poster_mutex());
-            poster = detail::main_poster();
-        }
-    }
+          focus(current_focus_manager()), strict(aurora::strict_mode()) {}
     SingletonSnapshot(const SingletonSnapshot &) = delete;
     auto operator=(const SingletonSnapshot &) & -> SingletonSnapshot & = delete;
     SingletonSnapshot(SingletonSnapshot &&) = delete;
     auto operator=(SingletonSnapshot &&) & -> SingletonSnapshot & = delete;
     ~SingletonSnapshot() {
-        Task<bool>::set_main_poster(std::move(poster));
         Scheduler::set_current(sched);
         Animator::set_current(anim);
         set_current_focus_manager(focus);
@@ -151,7 +147,6 @@ struct SingletonSnapshot {
     Application *app = nullptr;
     FocusManager *focus = nullptr;
     StrictMode strict = StrictMode::Off;
-    std::function<void(std::function<void()>)> poster;
 };
 
 #if defined(AURORA_PLATFORM_LINUX) || defined(AURORA_PLATFORM_MACOS)
@@ -976,21 +971,24 @@ AURORA_TEST_CASE(run_modal_installs_and_restores_singletons) {
     file_dialog::detail::current_application_slot() = &outer;
     set_current_focus_manager(&outer.focus());
     aurora::set_strict_mode(StrictMode::On);
-    bool outer_poster_called = false;
-    Task<bool>::set_main_poster([&outer_poster_called](const std::function<void()> &fn) -> void {
-        outer_poster_called = true;
-        fn();
-    });
 
     bool inside_ok = true;
+    std::atomic<bool> queue_ran{false};
     app.run_modal([&]() -> bool {
         inside_ok = inside_ok && (file_dialog::detail::current_application_slot() == &app);
         inside_ok = inside_ok && file_dialog::detail::modal_dispatch_suppressed();
         inside_ok = inside_ok && (Scheduler::current() != &outer_sched) && (Scheduler::current() != nullptr);
         inside_ok = inside_ok && (Animator::current() != &outer_anim) && (Animator::current() != nullptr);
+        // 模态自领值班租约后（无槽可快照，共享同一全局队列），投递当帧排水执行。
+        inside_ok = inside_ok && MainQueue::has_on_duty();
+        if (const auto epoch = MainQueue::current_epoch(); epoch != 0) {
+            static_cast<void>(
+                MainQueue::try_post([&queue_ran]() -> void { queue_ran.store(true, std::memory_order_release); }));
+        }
         return true;
     });
     AURORA_TEST_CHECK_TRUE(inside_ok);
+    AURORA_TEST_CHECK_TRUE(queue_ran.load(std::memory_order_acquire));  // 模态帧头排空了全局队列
 
     // 出口逐项还原（与入口快照相等）——置空式收尾会把外层打成半身不遂。
     AURORA_TEST_CHECK_TRUE(Scheduler::current() == &outer_sched);
@@ -999,10 +997,8 @@ AURORA_TEST_CASE(run_modal_installs_and_restores_singletons) {
     AURORA_TEST_CHECK_FALSE(file_dialog::detail::modal_dispatch_suppressed());
     AURORA_TEST_CHECK_TRUE(current_focus_manager() == &outer.focus());
     AURORA_TEST_CHECK_TRUE(aurora::strict_mode() == StrictMode::On);
-    // 主回投器还原：经当前 poster 投递应命中外层安装的那个。
-    outer_poster_called = false;
-    aurora::detail::post_to_main([]() -> void {});
-    AURORA_TEST_CHECK_TRUE(outer_poster_called);
+    // 值班租约自还：模态外无循环，队列回到「无值班」默认态。
+    AURORA_TEST_CHECK_FALSE(MainQueue::has_on_duty());
 }
 
 AURORA_TEST_CASE(run_modal_drives_frames_until_done) {

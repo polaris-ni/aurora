@@ -43,8 +43,6 @@ auto main() -> int {
     au::init_console();
 
     au::Node root = build_root();
-    au::FocusManager fm;
-    fm.set_root(&root.widget());
 
 #ifdef AURORA_BACKEND_GLFW
     au::GlfwOptions opts;
@@ -66,30 +64,10 @@ auto main() -> int {
     }
 
     if (win) {
-        win->surface().set_event_handler([&](au::Event &e) -> void {
-            auto &wd = root.widget();
-            if (auto *me = dynamic_cast<au::MouseEvent *>(&e)) {
-                au::EventDispatcher::dispatch(wd, *me, &fm);
-            } else if (auto *ke = dynamic_cast<au::KeyEvent *>(&e)) {
-                au::EventDispatcher::dispatch(wd, *ke, fm);
-            } else if (auto *se = dynamic_cast<au::ScrollEvent *>(&e)) {
-                au::EventDispatcher::dispatch(wd, *se);
-            } else if (auto *te = dynamic_cast<au::TextInputEvent *>(&e)) {
-                au::EventDispatcher::dispatch(wd, *te, fm);
-            }
-        });
-
+        // 帧循环统一由 `Application` 驱动（接管事件派发、焦点、脏区呈现与等待决策）。
         AURORA_LOG_INFO("demo", "[demo_gpu] GPU window shown (close window to exit)");
-        win->run([&]() -> void {
-            const auto t0 = std::chrono::steady_clock::now();
-            (void)win->present_root(root);
-            const double elapsed_ms =
-                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
-            win->set_next_wait(au::compute_wait_timeout(win->has_pending_dirty(), /*anim_active=*/false,
-                                                        /*next_deadline_ms=*/-1.0,
-                                                        /*frame_budget_ms=*/1000.0 / 60.0, elapsed_ms,
-                                                        win->surface().paces_frames()));
-        });
+        au::Application app{au::Scene{root}, std::move(win), static_cast<au::WindowOptions>(opts)};
+        app.run();
         return 0;
     }
     AURORA_LOG_WARN("demo", "[demo_gpu] GLFW backend unavailable, falling back to headless PNG render");

@@ -19,6 +19,7 @@
 
 #include "aurora/core/platform.h"
 #include "framework/aurora_test.h"
+#include "framework/main_queue_pump.h"
 
 #ifdef AURORA_BUILD_INSPECTOR_SERVER
 
@@ -106,6 +107,9 @@ auto body_of(const std::string &resp) -> std::string {
 }
 
 /// @brief 每用例一台随机端口服务器；start 失败（无回环 socket 环境）则整例跳过。
+///
+/// 树类端点经 `marshal_opt` 把读取回投进程级唯一队列——本夹具没有真帧循环，须自带
+/// 值班级替身（`DutyPump`：领租约 + 后台排水线程）。用例线程此刻阻塞在 HTTP 应答上，不能自排。
 class ScopedServer {
   public:
     ScopedServer() : started_(server_.start(0)) {
@@ -126,6 +130,7 @@ class ScopedServer {
     [[nodiscard]] auto port() const -> std::uint16_t { return server_.port(); }
 
   private:
+    aurora::test::mq::DutyPump pump_;  ///< 值班 + 后台排水（先声明：先启动、最后析构收尾）
     InspectorServer server_{tree_getter};
     bool started_ = false;
 };

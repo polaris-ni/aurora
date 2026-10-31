@@ -1,13 +1,14 @@
 /// 测试类型: integration
 /// 目标单元: include/aurora/window/window.h + include/aurora/navigation/{route,navigator,router}.h
 /// 测试说明: 导航 + 窗口跨模块集成——HeadlessSurface 帧生命周期、create_window(HeadlessOptions)
-/// 渲染根子树、run 有限帧循环、Route/Router/Navigator 栈语义与回调计数、
+/// 渲染根子树、Application 驱动有限帧循环（max_frames 帧预算）、Route/Router/Navigator 栈语义与回调计数、
 /// Navigator 切页后经 Window::present_root 逐页上屏
 
 #include <memory>
 #include <string>
 #include <utility>
 
+#include "aurora/app/application.h"
 #include "aurora/core/color.h"
 #include "aurora/modifier/modifier.h"
 #include "aurora/navigation/navigator.h"
@@ -64,26 +65,28 @@ AURORA_TEST_CASE(window_present_root_renders_subtree) {
     AURORA_TEST_CHECK_EQ(win->title(), std::string{"renamed"});
 }
 
-AURORA_TEST_CASE(window_run_frame_loop_counts_max_frames) {
+AURORA_TEST_CASE(app_run_frame_loop_counts_max_frames) {
+    // `Window` 不再自带帧循环，有限帧驱动由 `Application`（max_frames 帧预算）承担。
     HeadlessOptions opts;
     opts.size = Size{.width = 100.0F, .height = 100.0F};
     opts.title = "loop";
+    opts.max_frames = 4;
+    opts.power_saving = false;  // 无 OS 等待通道：忙轮询，帧数确定
     auto res = create_window(opts);
     AURORA_TEST_REQUIRE_TRUE(res.ok());
     auto win = std::move(res.value());
 
     int frames = 0;
     Node page = make_page("x");
-    win->run(
-        [&]() -> void {
-            ++frames;
-            // 同页无状态变更：脏追踪会整帧跳过，强制重绘以模拟持续渲染的帧循环计数。
-            win->force_full_redraw();
-            (void)win->present_root(page);
-        },
-        4);
+    Application app{Scene{page}, std::move(win), opts};
+    app.set_on_frame([&]() -> void {
+        ++frames;
+        // 同页无状态变更：脏追踪会整帧跳过，强制重绘以模拟持续渲染的帧循环计数。
+        app.window()->force_full_redraw();
+    });
+    app.run();
     AURORA_TEST_CHECK_EQ(frames, 4);
-    AURORA_TEST_CHECK_EQ(win->surface().frame_count(), 4);
+    AURORA_TEST_CHECK_EQ(app.window()->surface().frame_count(), 4);
 }
 
 #else

@@ -20,6 +20,7 @@
 // clang-format on
 
 #include "aurora/core/diagnostics.h"
+#include "aurora/core/main_queue.h"
 #include "aurora/core/version.h"
 #include "aurora/event/dispatcher.h"
 #include "aurora/state/async.h"
@@ -1744,21 +1745,14 @@ auto Win32UiaBridge::wait_on_main(std::function<void()> work, const std::shared_
     if (on_owner_thread()) {
         return run_guarded(work);
     }
-    std::function<void(std::function<void()>)> poster;
-    {
-        std::scoped_lock lock(detail::main_poster_mutex());
-        poster = detail::main_poster();
-    }
-    // 就地路径②：进程级回投器未安装（无头 / 单测 / 事件循环未起）——与 `post_to_main` 的
-    // 无 poster 语义一致（裁定③）。
-    if (!poster) {
-        return run_guarded(work);
-    }
     auto done = std::make_shared<std::promise<bool>>();
     auto ready = done->get_future();
     auto alive = alive_;
     const auto owner = owner_thread_;  // 按值捕获可拷贝的线程 id（`std::thread` 本体不可拷贝）
-    poster([work = std::move(work), done, abandoned, alive, owner]() -> void {
+    // 边界降级（旧「就地路径②」的正名）：无值班 = 无头/单测/事件循环已打烊——RPC 线程绝不可
+    // 就地碰主人线程的树，`try_post` 返回 false 即在此诚实回败，调用方统一映射为
+    // `UIA_E_ELEMENTNOTAVAILABLE`。外部无障碍客户端的迟到请求不带走宿主进程（不硬失败）。
+    const bool queued = MainQueue::try_post([work = std::move(work), done, abandoned, alive, owner]() -> void {
         bool ran = false;
         // 队列项执行前的三道闸，任一不过即不碰树（详见头文件文档）。判主线程放在最前：
         // 它是唯一与 `this` 无关的判据（只比已按值捕获的 thread id）。
@@ -1775,6 +1769,9 @@ auto Win32UiaBridge::wait_on_main(std::function<void()> work, const std::shared_
                               "Win32UiaBridge::wait_on_main", "a11y-task-drained-twice");
         }
     });
+    if (!queued) {
+        return false;
+    }
     if (ready.wait_for(std::chrono::milliseconds(timeout_ms)) != std::future_status::ready) {
         return false;  // 主线程未在预算内排空：调用方降级，晚到的项被放弃闸拦住
     }

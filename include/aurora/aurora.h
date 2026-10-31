@@ -62,6 +62,7 @@
 #include "aurora/core/image.h"
 #include "aurora/core/literals.h"
 #include "aurora/core/log.h"
+#include "aurora/core/main_queue.h"
 #include "aurora/core/platform.h"
 #include "aurora/core/result.h"
 #include "aurora/core/strict_mode.h"

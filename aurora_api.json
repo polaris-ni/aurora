@@ -5867,6 +5867,16 @@
       "hint": "Increase the timeout threshold or optimize async task duration"
     },
     {
+      "enum": "RuntimeCancelled",
+      "slug": "runtime-cancelled",
+      "domain": "runtime",
+      "kind": "cancelled",
+      "severity": "error",
+      "retryable": false,
+      "message": "Async task was cancelled before delivery: no on-duty main loop",
+      "hint": "Initiate async work only while an Application frame loop is on duty, or drain a MainQueue lease you hold yourself; use blocking_wait to consume results without a loop"
+    },
+    {
       "enum": "IOFileNotFound",
       "slug": "io-file-not-found",
       "domain": "io",

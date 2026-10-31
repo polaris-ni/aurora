@@ -74,39 +74,31 @@ auto wait_until(Pred &&pred, std::chrono::milliseconds budget = std::chrono::mil
 /// 「已排进主线程但尚未执行」的投递现场，可以据此造出「迟到结果」与「宿主已亡」两种时序。
 class PosterQueue {
   public:
-    PosterQueue() {
-        Task<int>::set_main_poster([this](std::function<void()> fn) -> void {
-            std::scoped_lock<std::mutex> lock(mutex_);
-            queued_.push_back(std::move(fn));
-        });
-    }
-    /// @brief 禁拷贝：投递器是进程级单例，两份替身会互相顶替。
+    PosterQueue() : duty_(MainQueue::on_duty([]() -> void {})) {}
+    /// @brief 禁拷贝：值班租约是进程级独占凭证，两份会互相顶替。
     PosterQueue(const PosterQueue &) = delete;
     /// @brief 禁拷贝赋值：理由同拷贝构造。
     auto operator=(const PosterQueue &) -> PosterQueue & = delete;
-    /// @brief 禁移动：投递器捕获的是 `this`，搬走即悬垂。
+    /// @brief 禁移动：租约在手期间队列即在岗，搬走语义混乱。
     PosterQueue(PosterQueue &&) = delete;
     /// @brief 禁移动赋值：理由同移动构造。
     auto operator=(PosterQueue &&) -> PosterQueue & = delete;
-    ~PosterQueue() { Task<int>::set_main_poster(nullptr); }
-
-    /// @brief 排队项数。
-    /// @return 尚未执行的投递闭包数。
-    [[nodiscard]] auto size() -> std::size_t {
-        std::scoped_lock<std::mutex> lock(mutex_);
-        return queued_.size();
+    ~PosterQueue() {
+        if (duty_.has_value()) {
+            duty_->release();
+        }
     }
+
+    /// @brief 滞留项数（已入队未执行）。
+    /// @return 全局队列中尚未被 `drain` 取走的闭包数。
+    [[nodiscard]] auto size() -> std::size_t { return MainQueue::pending_count(); }
 
     /// @brief 排空当前队列（执行期间新入队的项在后续轮次继续执行，最多 8 轮防自旋）。
     /// @return 实际执行的闭包数。
     auto drain() -> std::size_t {
         std::size_t ran = 0;
         for (int round = 0; round < 8; ++round) {
-            std::vector<std::function<void()>> batch;
-            {
-                std::scoped_lock<std::mutex> lock(mutex_);
-                batch.swap(queued_);
-            }
+            auto batch = MainQueue::take_batch();
             if (batch.empty()) {
                 break;
             }
@@ -139,8 +131,7 @@ class PosterQueue {
     }
 
   private:
-    std::mutex mutex_;  ///< 保护 queued_
-    std::vector<std::function<void()>> queued_;  ///< 待执行的主线程闭包
+    std::optional<MainQueue::Lease> duty_;  ///< 在岗租约（空 wake）：令 `async()` 发起过闸、回投入全局队列待排空
 };
 
 /// @brief 用例选项：短超时（看守线程占用有界）+ 默认不去抖。
@@ -472,19 +463,22 @@ AURORA_TEST_CASE(stream_fail_is_terminal_and_keeps_committed_items) {
     pq.drain();
     AURORA_TEST_REQUIRE_EQ(stream.items().size(), std::size_t{1});
 
+    // 在途未提交批先入账：交付已抵达，入账只差一次合批投递——迟到终态不得把它凭空抹掉。
+    stream.push("in-flight", 5);
     stream.fail(make_error(ErrorCode::GeneralInvalidArgument, std::string{"stream broke"}));
     AURORA_TEST_CHECK(stream.phase() == ResourcePhase::Failed);
     const std::optional<Error> err = stream.error();
     AURORA_TEST_REQUIRE(err.has_value());
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access): 上一行 REQUIRE 已断言持有值，其宏展开对路径分析不透明
     AURORA_TEST_CHECK_STREQ(err->message, "stream broke");
-    AURORA_TEST_CHECK_EQ(stream.items().size(), std::size_t{1});  // 已提交数据不因失败丢弃
+    AURORA_TEST_CHECK_EQ(stream.items().size(), std::size_t{2});  // 已提交 + 在途那一条，都留着
 
     stream.push("dropped", 8);  // 终态之后的交付被丢弃
     pq.drain();
     AURORA_TEST_CHECK(stream.phase() == ResourcePhase::Failed);
-    AURORA_TEST_CHECK_EQ(stream.items().size(), std::size_t{1});
-    AURORA_TEST_CHECK_STREQ(stream.items().front(), "kept");
+    AURORA_TEST_CHECK_EQ(stream.items().size(), std::size_t{2});
+    AURORA_TEST_CHECK_STREQ(stream.items()[0], "kept");
+    AURORA_TEST_CHECK_STREQ(stream.items()[1], "in-flight");
 }
 
 }  // namespace aurora::test_cases::utest_state_resource

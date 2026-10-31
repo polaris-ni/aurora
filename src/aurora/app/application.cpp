@@ -427,11 +427,8 @@ auto Application::wait_once(const std::chrono::steady_clock::time_point &frame_s
     if (!opts_.power_saving) {
         return;  // 关闭省电：退回旧忙轮询行为
     }
-    {
-        std::scoped_lock lk(posted_mutex_);
-        if (!posted_.empty()) {
-            return;  // 已有待排水的回投工作：不睡，立即进入下一帧
-        }
+    if (MainQueue::has_pending()) {
+        return;  // 已有待排水的回投工作：不睡，立即进入下一帧
     }
     const double budget_ms = opts_.max_fps > 0 ? 1000.0 / opts_.max_fps : 0.0;
     const double elapsed_ms =
@@ -596,29 +593,32 @@ auto Application::run_modal(const std::function<bool()> &done) -> void {
     // Application、TestController 或「无」，置空式收尾会把外层打成半身不遂。
     Scheduler *const prev_sched = Scheduler::current();
     Animator *const prev_anim = Animator::current();
-    std::function<void(std::function<void()>)> prev_poster;
-    {
-        std::scoped_lock lk(detail::main_poster_mutex());
-        prev_poster = detail::main_poster();
-    }
     FocusManager *const prev_focus = current_focus_manager();
     const StrictMode prev_strict = aurora::strict_mode();
     Application *const prev_app = file_dialog::detail::current_application_slot();
+    // 值班复用 vs 自持：模态多在外层 `run()` 在岗时进入（租约已由 loop_begin 持有，直接复用同一
+    // 全局队列，`step_frame` 每帧排水）；仅当无在岗（独立驱动/选择器测试）才为模态期领取一枚自有
+    // 租约，退出按 `loop_end` 同口径收尾。跨线程回投的投递不再各循环自建队列，杜绝抢占歧义。
+    std::optional<MainQueue::Lease> modal_duty;
+    if (!MainQueue::has_on_duty()) {
+        modal_duty = MainQueue::on_duty([this] { request_wake_all(); });
+        if (!modal_duty.has_value()) {
+            // 单主线程下 `has_on_duty` 到 `on_duty` 无竞态，取不到即逻辑不变量被破坏。
+            on_strict_failure("Application::run_modal: main queue duty unexpectedly taken at modal entry");
+        }
+    }
     // RAII 还原：即使 step_frame 抛出（各步均有 fail-open 契约，理论不可达）也归还单例。
     struct SingletonRestore {  // NOLINT(cppcoreguidelines-special-member-functions): 局部 RAII
                                // 还原器，按引用捕获现场、不复制
         Scheduler *sched;
         Animator *anim;
-        std::function<void(std::function<void()>)> poster;
         FocusManager *focus;
         StrictMode strict;
         Application *app;
-        // 抛出面：set_main_poster 体内是 std::function 移动赋值（条件 noexcept）+ 加锁，
-        // 其余四项为平凡指针 / 枚举赋值；模态收尾期无分配需求，实际不可抛
+        // 抛出面：其余四项为平凡指针 / 枚举赋值；模态收尾期无分配需求，实际不可抛
         // （同 ScrollStorage::Scope::~Scope 的处置口径）。
         // NOLINTNEXTLINE(bugprone-exception-escape)
         ~SingletonRestore() {
-            Task<bool>::set_main_poster(std::move(poster));  // 空 poster = 卸载（与 loop_end 同口径）
             Scheduler::set_current(sched);
             Animator::set_current(anim);
             set_current_focus_manager(focus);
@@ -626,22 +626,10 @@ auto Application::run_modal(const std::function<bool()> &done) -> void {
             file_dialog::detail::current_application_slot() = app;
             file_dialog::detail::modal_dispatch_suppressed() = false;
         }
-    } restore{.sched = prev_sched,
-              .anim = prev_anim,
-              .poster = std::move(prev_poster),
-              .focus = prev_focus,
-              .strict = prev_strict,
-              .app = prev_app};
+    } restore{.sched = prev_sched, .anim = prev_anim, .focus = prev_focus, .strict = prev_strict, .app = prev_app};
 
     Scheduler::set_current(&sched_);
     Animator::set_current(&anim_);
-    Task<bool>::set_main_poster([this](std::function<void()> fn) -> void {
-        {
-            std::scoped_lock lk(posted_mutex_);
-            posted_.push_back(std::move(fn));
-        }
-        request_wake_all();
-    });
     file_dialog::detail::current_application_slot() = this;
     file_dialog::detail::modal_dispatch_suppressed() = true;
     ++modal_depth_;
@@ -654,8 +642,15 @@ auto Application::run_modal(const std::function<bool()> &done) -> void {
         wait_once(frame_start);
     }
 
+    // 自持租约（无外层在岗的独立模态）：按 loop_end 同口径收尾——先还（epoch→0）、再打烊窗口内排尽；
+    // 复用作废旧租约则把残留留给外层循环排空（与旧「模态不改投外层」一致）。
+    if (modal_duty.has_value()) {
+        modal_duty->release();
+        const auto closing = MainQueue::closing_scope();
+        drain_posted();
+    }
     --modal_depth_;
-    // 单例还原由 restore 析构完成（模态期安装的四个写口 + 入口快照逐项归还）。
+    // 单例还原由 restore 析构完成（模态期安装的写口 + 入口快照逐项归还）。
 }
 
 }  // namespace aurora

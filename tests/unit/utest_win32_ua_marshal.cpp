@@ -1,21 +1,20 @@
 /// @file utest_win32_ua_marshal.cpp
 /// 测试类型: unit
 /// 目标单元: src/aurora/window/detail/win32_ua.cpp
-/// 测试说明: UIA provider 的主线程回投内核。证明「跨线程读/动确实换到主人线程执行」、
-///           主人线程与无回投器两条就地路径不变、超时降级为零值且晚到的队列项被放弃闸拦住、
+/// 测试说明: UIA provider 的主线程回投内核（进程级唯一队列版）。证明「跨线程读/动确实换到
+///           主人线程执行」、主人线程就地路径不变、无值班时边界降级为零值且闭包绝不就地执行、
+///           超时降级为零值且晚到的队列项被放弃闸拦住、
 ///           桥析构后仍在队列里的项不再解引用本桥，以及 provider 侧的快照读/导航读都经回投。
 
 #include <atomic>
 #include <chrono>
-#include <condition_variable>
 #include <cstdint>
-#include <deque>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <thread>
 #include <utility>
 
+#include "aurora/core/main_queue.h"
 #include "aurora/core/platform.h"
 #include "aurora/state/async.h"
 #include "framework/aurora_test.h"
@@ -50,60 +49,48 @@ class ProbeRoot final : public LeafWidget {
     auto on_paint(Painter & /*p*/, const Rect & /*bounds*/, const BuildContext & /*ctx*/) -> void override {}
 };
 
-/// @brief 「只入队、由用例主线程排水」的投递器：装上它，`eval_on_main` 才真的换线程执行。
-/// 析构时复原原投递器，避免污染同进程内的其它用例。
-struct QueuedPoster {
-    QueuedPoster() {
-        std::scoped_lock lock(aurora::detail::main_poster_mutex());
-        // 刻意在持锁后才读：早读会拿到随后被别的安装者换掉的投递器。
-        previous = aurora::detail::main_poster();  // NOLINT(cppcoreguidelines-prefer-member-initializer)
-        aurora::detail::main_poster() = [this](std::function<void()> fn) -> void {
-            {
-                std::scoped_lock task_lock(mutex);
-                tasks.push_back(std::move(fn));
-            }
-            cv.notify_all();
-        };
+/// @brief 「只入队、由主人线程排水」的值班租约：领一枚空唤醒租约，`eval_on_main`
+/// 的回投滞留进程级唯一队列，由用例（主人）线程逐个排空执行。析构还券。
+struct DutyLease {
+    DutyLease() = default;
+    std::optional<MainQueue::Lease> duty{MainQueue::on_duty([]() -> void {})};
+    DutyLease(const DutyLease &) = delete;
+    auto operator=(const DutyLease &) -> DutyLease & = delete;
+    DutyLease(DutyLease &&) = delete;
+    auto operator=(DutyLease &&) -> DutyLease & = delete;
+    ~DutyLease() {
+        if (duty.has_value()) {
+            duty->release();
+        }
     }
-    ~QueuedPoster() {
-        std::scoped_lock lock(aurora::detail::main_poster_mutex());
-        aurora::detail::main_poster() = previous;
-    }
-    QueuedPoster(const QueuedPoster &) = delete;
-    auto operator=(const QueuedPoster &) -> QueuedPoster & = delete;
-    QueuedPoster(QueuedPoster &&) = delete;
-    auto operator=(QueuedPoster &&) -> QueuedPoster & = delete;
 
     /// @brief 等到有任务入队（**不**执行）；`timeout_ms` 内没有返回 false。
     auto wait_for_task(int timeout_ms) -> bool {
-        std::unique_lock lock(mutex);
-        return cv.wait_for(lock, std::chrono::milliseconds(timeout_ms), [this] { return !tasks.empty(); });
+        for (int i = 0; i < timeout_ms; ++i) {
+            if (MainQueue::pending_count() > 0) {
+                return true;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds{1});
+        }
+        return MainQueue::pending_count() > 0;
     }
 
-    /// @brief 在当前线程执行一个排队任务（本函数所在线程即用例的主人线程）。
+    /// @brief 在当前线程执行一个排队任务（本函数所在线程即用例的主人线程）；多余项回投队列。
     auto drain_one(int timeout_ms = 5000) -> bool {
-        std::function<void()> task;
-        {
-            std::unique_lock lock(mutex);
-            if (!cv.wait_for(lock, std::chrono::milliseconds(timeout_ms), [this] { return !tasks.empty(); })) {
-                return false;
-            }
-            task = std::move(tasks.front());
-            tasks.pop_front();
+        if (!wait_for_task(timeout_ms)) {
+            return false;
+        }
+        auto batch = MainQueue::take_batch();
+        const std::function<void()> task = std::move(batch.front());
+        for (auto it = batch.begin() + 1; it != batch.end(); ++it) {
+            static_cast<void>(MainQueue::try_post(std::move(*it)));
         }
         task();
         return true;
     }
 
-    [[nodiscard]] auto pending() const -> std::size_t {
-        std::scoped_lock lock(mutex);
-        return tasks.size();
-    }
-
-    mutable std::mutex mutex;
-    std::condition_variable cv;
-    std::deque<std::function<void()>> tasks;
-    std::function<void(std::function<void()>)> previous;
+    /// @brief 滞留项数（已入队未执行）。
+    [[nodiscard]] auto pending() -> std::size_t { return MainQueue::pending_count(); }
 };
 
 }  // namespace
@@ -111,7 +98,7 @@ struct QueuedPoster {
 // 目标：非主人线程的回投必须在主人线程执行，结果按值带回调用线程。
 AURORA_TEST_CASE(cross_thread_eval_runs_on_the_owner_thread) {
     detail::Win32UiaBridge bridge(nullptr);
-    QueuedPoster poster;
+    DutyLease lease;
     const std::thread::id owner = std::this_thread::get_id();
 
     std::thread::id ran_on{};
@@ -124,7 +111,7 @@ AURORA_TEST_CASE(cross_thread_eval_runs_on_the_owner_thread) {
             },
             2000U);
     });
-    AURORA_TEST_REQUIRE_TRUE(poster.drain_one(3000));
+    AURORA_TEST_REQUIRE_TRUE(lease.drain_one(3000));
     caller.join();
 
     AURORA_TEST_CHECK_TRUE(ran_on == owner);  // 闭包落在主人线程，而非调用线程
@@ -134,7 +121,7 @@ AURORA_TEST_CASE(cross_thread_eval_runs_on_the_owner_thread) {
 // 目标：主人线程自己调回投口时就地执行、零入队（宿主接线与 `UiaDisconnectProvider` 重入不受代价）。
 AURORA_TEST_CASE(owner_thread_eval_runs_inline_without_queuing) {
     detail::Win32UiaBridge bridge(nullptr);
-    QueuedPoster poster;
+    DutyLease lease;
 
     int calls = 0;
     const int returned = bridge.eval_on_main<int>(
@@ -146,11 +133,13 @@ AURORA_TEST_CASE(owner_thread_eval_runs_inline_without_queuing) {
 
     AURORA_TEST_CHECK_EQ(returned, 3);
     AURORA_TEST_CHECK_EQ(calls, 1);
-    AURORA_TEST_CHECK_TRUE(poster.pending() == 0U);  // 一次都没入队，故不需要帧循环
+    AURORA_TEST_CHECK_TRUE(lease.pending() == 0U);  // 一次都没入队，故不需要帧循环
 }
 
-// 目标：进程级回投器未安装（无头 / 单测）→ 与 `post_to_main` 同语义，就地执行。
-AURORA_TEST_CASE(missing_poster_falls_back_to_inline_execution) {
+// 目标：无值班循环（主人线程不在环）→ 契约边界诚实降级：零值 `R{}`（provider 侧映射
+// UIA_E_ELEMENTNOTAVAILABLE），闭包绝不就地执行——旧「未装投递器就地跑」正是 RPC 线程
+// 越权碰 widget 树的通道，判据 3 钉死其退场。
+AURORA_TEST_CASE(missing_duty_degrades_to_zero_value_without_inline) {
     detail::Win32UiaBridge bridge(nullptr);
     const std::thread::id owner = std::this_thread::get_id();
     std::thread::id worker{};  // `join()` 会把 thread 对象的 id 复位，故由调用线程自己记下
@@ -167,15 +156,16 @@ AURORA_TEST_CASE(missing_poster_falls_back_to_inline_execution) {
     });
     caller.join();
 
-    AURORA_TEST_CHECK_EQ(returned, 11);
+    AURORA_TEST_CHECK_EQ(returned, 0);  // 降级为零值，进程存活、不 terminate
     AURORA_TEST_CHECK_TRUE(worker != owner);
-    AURORA_TEST_CHECK_TRUE(ran_on == worker);  // 无排水方：只能在调用线程就地跑
+    AURORA_TEST_CHECK_TRUE(ran_on == std::thread::id{});  // 闭包从未被执行
+    AURORA_TEST_CHECK_EQ(MainQueue::pending_count(), std::size_t{0});  // 也从未入队
 }
 
 // 目标：超时预算内没排空即降级为零值；**且**晚到的队列项不得补做（用户以为没发生的事不能事后发生）。
 AURORA_TEST_CASE(timeout_returns_zero_value_and_drops_the_late_task) {
     detail::Win32UiaBridge bridge(nullptr);
-    QueuedPoster poster;
+    DutyLease lease;
     std::atomic<bool> ran{false};
     int returned = -1;
     {
@@ -191,13 +181,13 @@ AURORA_TEST_CASE(timeout_returns_zero_value_and_drops_the_late_task) {
     }
     AURORA_TEST_CHECK_EQ(returned, 0);  // R{} ⇒ provider 侧映射为 UIA_E_ELEMENTNOTAVAILABLE
     AURORA_TEST_CHECK_FALSE(ran.load());
-    AURORA_TEST_REQUIRE_TRUE(poster.drain_one(1000));  // 此刻才排空
+    AURORA_TEST_REQUIRE_TRUE(lease.drain_one(1000));  // 此刻才排空
     AURORA_TEST_CHECK_FALSE(ran.load());  // 放弃闸必须拦住补做
 }
 
 // 目标：桥先于在途队列项析构时，存活闸拦住闭包（这是回投内核唯一的 use-after-free 通道）。
 AURORA_TEST_CASE(bridge_destruction_drops_a_still_queued_task) {
-    QueuedPoster poster;
+    DutyLease lease;
     auto bridge = std::make_unique<detail::Win32UiaBridge>(nullptr);
     std::atomic<bool> ran{false};
     int returned = -1;
@@ -209,9 +199,9 @@ AURORA_TEST_CASE(bridge_destruction_drops_a_still_queued_task) {
             },
             2000U);
     });
-    AURORA_TEST_REQUIRE_TRUE(poster.wait_for_task(3000));  // 已入队、尚未执行
+    AURORA_TEST_REQUIRE_TRUE(lease.wait_for_task(3000));  // 已入队、尚未执行
     bridge.reset();  // 析构：存活闸落下
-    AURORA_TEST_REQUIRE_TRUE(poster.drain_one(3000));  // 队列项被拒绝 → 立即唤醒等待方
+    AURORA_TEST_REQUIRE_TRUE(lease.drain_one(3000));  // 队列项被拒绝 → 立即唤醒等待方
     caller.join();
 
     AURORA_TEST_CHECK_FALSE(ran.load());
@@ -226,7 +216,7 @@ AURORA_TEST_CASE(provider_reads_project_through_the_marshal) {
         AURORA_TEST_SKIP("COM apartment or UIAutomationCore.dll unavailable: bridge inactive, no snapshot projection");
         return;
     }
-    QueuedPoster poster;
+    DutyLease lease;
     ProbeRoot root;
     bridge.set_root(&root);
     bridge.sync_if_dirty();  // 主人线程：先把首帧快照建出来
@@ -256,9 +246,9 @@ AURORA_TEST_CASE(provider_reads_project_through_the_marshal) {
         remote.unknown_known = bridge.navigate_target(id + 987'654'321ULL, detail::NavigationKind::Parent).has_value();
     });
     // 调用方在一条线程上连发三次回投，主人线程逐个排空。
-    AURORA_TEST_REQUIRE_TRUE(poster.drain_one(3000));
-    AURORA_TEST_REQUIRE_TRUE(poster.drain_one(3000));
-    AURORA_TEST_REQUIRE_TRUE(poster.drain_one(3000));
+    AURORA_TEST_REQUIRE_TRUE(lease.drain_one(3000));
+    AURORA_TEST_REQUIRE_TRUE(lease.drain_one(3000));
+    AURORA_TEST_REQUIRE_TRUE(lease.drain_one(3000));
     caller.join();
 
     AURORA_TEST_CHECK_TRUE(remote.had_node);
@@ -281,8 +271,8 @@ AURORA_TEST_CASE(owner_thread_eval_runs_inline_without_queuing) {
     AURORA_TEST_SKIP("AURORA_BACKEND_WIN32/D3D11 is not enabled (non-Windows); the UIA bridge TU is compiled out");
 }
 
-// 目标：进程级回投器未安装 → 与 `post_to_main` 同语义，就地执行。
-AURORA_TEST_CASE(missing_poster_falls_back_to_inline_execution) {
+// 目标：无值班循环 → 边界降级为零值，闭包不就地执行。
+AURORA_TEST_CASE(missing_duty_degrades_to_zero_value_without_inline) {
     AURORA_TEST_SKIP("AURORA_BACKEND_WIN32/D3D11 is not enabled (non-Windows); the UIA bridge TU is compiled out");
 }
 

@@ -379,17 +379,6 @@ AURORA_TEST_CASE(window_gpu_path_does_not_take_hud_only_shortcut) {
     AURORA_TEST_CHECK_EQ(surf.present_count, 2);
 }
 
-AURORA_TEST_CASE(window_run_executes_on_frame_exactly_max_frames_times) {
-    auto stub = std::make_unique<RecordingSurface>();
-    RecordingSurface &surf = *stub;
-    Window w{std::move(stub)};
-    int frames = 0;
-    // max_frames>0 有限循环：每帧 pump 事件 + 调 on_frame，到量即止（无头确定性驱动）。
-    w.run([&frames]() -> void { ++frames; }, 3);
-    AURORA_TEST_CHECK_EQ(frames, 3);
-    AURORA_TEST_CHECK_EQ(surf.pump_count, 3);
-}
-
 AURORA_TEST_CASE(create_window_rejects_null_surface) {
     // 文档化契约：空 Surface 注入返回 Error（不崩溃），错误归属调用方。
     const auto result = create_window(std::unique_ptr<Surface>{});

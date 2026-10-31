@@ -87,7 +87,11 @@ using aurora::test::scripts::write_then_hold;
 }
 
 /// @brief 取协程结果的外层（协程本身不抛，外层恒成功）。
+///
+/// 先 REQUIRE「协程已收尾」再读：未收尾时 `result()` 读的是空结果槽（帧外内存），直接读会
+/// 段错误而不是报出一条失败判据。
 [[nodiscard]] auto inner(CoroTask<Result<SseOutcome>> &task) -> Result<SseOutcome> {
+    AURORA_TEST_REQUIRE_MSG(task.is_done(), "coro task not finished when result was read");
     const auto outer = task.result();
     AURORA_TEST_REQUIRE_MSG(bool(outer), outer ? std::string{} : outer.error().message);
     return outer.value();
@@ -846,6 +850,8 @@ AURORA_TEST_CASE(sse_subscription_neither_reads_nor_writes_the_cache) {
     AURORA_TEST_REQUIRE(peer.valid());
 
     const auto url = loopback_url(peer.port());
+    // 本例的 seed/probe 两次物化交换不经 `subscribe_and_drive`（那自带 HostDriven），值班替身就地自领。
+    const aurora::test::net::MainQueueLoop duty;
     auto seed = client.send(Request::get(url));
     AURORA_TEST_CHECK(aurora::test::net::drive_until(
                           "seed send done", [&seed] { return seed.is_done(); }, std::chrono::milliseconds{3000})

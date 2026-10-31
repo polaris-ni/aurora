@@ -25,6 +25,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -32,6 +33,7 @@
 #include <vector>
 
 #include "aurora/core/error_codes.h"
+#include "aurora/core/main_queue.h"
 #include "aurora/core/result.h"
 #include "aurora/net/cancellation.h"
 #include "aurora/net/detail/http_await.h"
@@ -56,53 +58,48 @@ using aurora::test::FakeEngine;
 using aurora::test::FakeEngineScope;
 using aurora::testing::require_value;
 
-/// @brief 排队式主线程投递器：续体只入队不执行，由用例线程排空。
-/// @note Thread: 装与拆限用例线程（进程级单例投递器）
-/// @note Side-effects: 改写进程级主线程投递器的指向
+/// @brief 排队式值班租约：领一枚空唤醒租约，续体只入进程级全局队列不执行，
+/// 由用例线程排空——全局队列就是「帧还没收尾」的可控现场。
+/// @note Thread: 领与还限用例线程（租约为进程级独占凭证）
+/// @note Side-effects: 登记/摘除全局队列的值班位
 class PosterQueue {
   public:
-    PosterQueue() {
-        aurora::Task<int>::set_main_poster([this](std::function<void()> fn) -> void {
-            std::scoped_lock<std::mutex> lock(mutex_);
-            queued_.push_back(std::move(fn));
-        });
-    }
+    PosterQueue() : duty_(MainQueue::on_duty([]() -> void {})) {}
     PosterQueue(const PosterQueue &) = delete;
     auto operator=(const PosterQueue &) -> PosterQueue & = delete;
     PosterQueue(PosterQueue &&) = delete;
     auto operator=(PosterQueue &&) -> PosterQueue & = delete;
-    ~PosterQueue() { aurora::Task<int>::set_main_poster(nullptr); }
-
-    /// @brief 尚未执行的投递项数。
-    /// @return 队列长度。
-    [[nodiscard]] auto size() -> std::size_t {
-        std::scoped_lock<std::mutex> lock(mutex_);
-        return queued_.size();
+    ~PosterQueue() {
+        if (duty_.has_value()) {
+            duty_->release();
+        }
     }
 
-    /// @brief 排空队列（含恢复期间新排入的项）。
+    /// @brief 尚未执行的投递项数。
+    /// @return 全局队列长度。
+    [[nodiscard]] auto size() -> std::size_t { return MainQueue::pending_count(); }
+
+    /// @brief 排空全局队列（含恢复期间新排入的项）。
     /// @return 本次执行的闭包数。
     auto drain() -> std::size_t {
         std::size_t ran = 0;
         for (;;) {
-            std::function<void()> fn;
-            {
-                std::scoped_lock<std::mutex> lock(mutex_);
-                if (queued_.empty()) {
-                    break;
-                }
-                fn = std::move(queued_.front());
-                queued_.erase(queued_.begin());
+            auto batch = MainQueue::take_batch();
+            if (batch.empty()) {
+                break;
             }
-            fn();
-            ++ran;
+            for (std::function<void()> &fn : batch) {
+                if (fn) {
+                    fn();
+                }
+                ++ran;
+            }
         }
         return ran;
     }
 
   private:
-    std::mutex mutex_;  ///< 保护队列（投递器可能被任何线程调用）
-    std::vector<std::function<void()>> queued_;  ///< 已排入、待执行的闭包
+    std::optional<MainQueue::Lease> duty_;  ///< 在岗租约（空 wake）：回投入全局队列待排空
 };
 
 /// @brief 一条只记录请求、由用例决定何时交付的假流：读写出口与 `StreamTransport` 同构。

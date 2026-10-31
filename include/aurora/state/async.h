@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <exception>
 #include <functional>
 #include <memory>
@@ -11,6 +12,7 @@
 #include <utility>
 #include <vector>
 
+#include "aurora/core/main_queue.h"
 #include "aurora/core/result.h"
 #include "aurora/core/thread_pool.h"
 
@@ -22,8 +24,10 @@ namespace detail {
 /// @tparam T 任务值类型（由 `TaskValueOfT` 从 fn 返回类型萃取）。
 template <typename T>
 struct AsyncState {
-    std::mutex mutex;  ///< 保护 result/on_done/on_cancel/delivered 的读写
-    std::function<void(const Result<T> &)> on_done;  ///< 完成回调：结果就绪且可投递时被调用
+    std::mutex mutex;  ///< 保护 result/on_done/on_cancel/delivered/epoch 的读写
+    std::condition_variable ready;  ///< result 就绪或被取消时唤醒 `blocking_wait` 等待方
+    /// @brief 完成回调：结果就绪且可投递时被调用
+    std::function<void(const Result<T> &)> on_done;
     /// @brief 取消观察者：`cancel()` 置位后恰触发一次（形态与 `net::Cancellation::on_cancel` 同构）。
     ///
     /// 取消这件事对本层历来只有「结果不再投递」这一半效果；本字段把它补成可订阅的事实，
@@ -32,37 +36,33 @@ struct AsyncState {
     std::optional<Result<T>> result;  ///< 后台计算完成后的结果（未就绪则为空）
     std::atomic<bool> cancelled{false};  ///< 取消标志：置位后不再向回调投递
     bool delivered{false};  ///< 已向回调投递（成功/取消/超时）避免重复
+    std::uint64_t initiation_epoch{0};  ///< 发起时捕获的值班世代；投递须携带它（落地验世）
 };
 
-/// @brief 主线程投递器互斥锁（进程级单例存储）。
-/// @return 进程级静态 mutex 的引用。
-inline auto main_poster_mutex() -> auto & {
-    static std::mutex m;
-    return m;
-}
-/// @brief 主线程投递器本体（进程级单例存储）。
-/// @return 投递函数对象的引用；为空函数表示未安装 poster。
-inline auto main_poster() -> auto & {
-    // 惰性构造的函数内 static：首次调用才建，跨 TU 初始化顺序问题在此不存在（本检查的担心面）。
-    // 仅浏览器口径命中——native 遍同一份代码不报（CODING_STANDARDS.md §5.2 的口径差异）。
-    // NOLINTNEXTLINE(bugprone-dynamic-static-initializers)
-    static std::function<void(std::function<void()>)> p;
-    return p;
-}
+/// @brief 经进程级唯一队列回投主线程（`aurora::MainQueue` 的形态别名，保留旧调用名）。
+///
+/// 无值班/世代失配 = 打烊取消：任务**不执行**、记计数诊断、不 terminate——绝无「就地执行」
+/// 回退（旧语义会在 worker 线程跑回调 = 静默跨线程写 State，本头改造正为根除它）。
+/// @param fn 待回投主线程的可调用对象；由值班循环在主线程执行。
+inline auto post_to_main(std::function<void()> fn) -> void { MainQueue::post(std::move(fn)); }
 
-/// @brief 经主线程投递器执行 `fn`；无 poster 时直接调用（headless / 测试）。
-/// @param fn 待回投主线程的可调用对象；未安装 poster 时在承接线程同步执行。
-inline auto post_to_main(std::function<void()> fn) -> void {
-    std::function<void(std::function<void()>)> poster;
-    {
-        std::scoped_lock lock(main_poster_mutex());
-        poster = main_poster();
+/// @brief 发起侧的三分闸门（`async()` 与 `Task::then()` 共用；specification/01-core.md §8.2）。
+///
+///  1. 在岗 ⇒ 返回当前世代号，发起时捕获、投递闭包随身携带（落地晚于打烊 = 取消）；
+///  2. 打烊窗口（`loop_end` 收尾排水中）⇒ 返回 0 = **出生即取消**——收尾续体链式再发起是
+///     合法竞态（长轮询/重试链接力），正常关窗不得打成崩溃；调用方须立即构造已取消状态；
+///  3. 其余无值班 ⇒ 纯编程错误 ⇒ `on_contract_violation` 硬失败在元凶栈上（FATAL 日志，
+///     默认 terminate，测试经 `set_strict_failure_handler` 注入捕获）。
+/// @return 在岗世代号；0 = 出生即取消（调用方据此短路）。
+inline auto initiate_or_epoch() -> std::uint64_t {
+    const auto epoch = MainQueue::current_epoch();
+    if (epoch != 0) {
+        return epoch;  // 在岗：正常发起，携带本世世代
     }
-    if (poster) {
-        poster(std::move(fn));
-    } else {
-        fn();  // 无事件循环：直接调用（测试 / 无头场景）
+    if (MainQueue::is_closing()) {
+        return 0;  // 打烊窗口：出生即取消，交由调用方短路成已取消状态
     }
+    on_contract_violation("async: task initiated with no main loop on duty (run inside an Application frame loop)");
 }
 
 /// @brief 超时看守登记项：到期时刻 + 触发动作（类型擦除，动作自持对应 `AsyncState`）。
@@ -137,13 +137,14 @@ inline auto sweep_due_timeouts(std::chrono::steady_clock::time_point now) -> std
     return due.size();
 }
 
-/// @brief 让超时生效：结果仍未投递且未取消时，写入 `async-timeout` 错误并经主线程投递器回调。
+/// @brief 让超时生效：结果仍未投递且未取消时，写入 `async-timeout` 错误并经进程级唯一队列回投回调。
 /// @tparam T 任务值类型。
 /// @param state 与后台 job 共享的异步状态（共享指针，看守自持以活到触发为止）。
 template <typename T>
 auto expire_timeout(const std::shared_ptr<AsyncState<T>> &state) -> void {
     std::function<void(const Result<T> &)> to_call;
     std::optional<Result<T>> err;
+    std::uint64_t epoch = 0;
     {
         std::scoped_lock<std::mutex> lock(state->mutex);
         if (state->delivered || state->cancelled) {
@@ -153,11 +154,25 @@ auto expire_timeout(const std::shared_ptr<AsyncState<T>> &state) -> void {
         state->result = make_error(ErrorCode::RuntimeAsyncTimeout, "async task timed out");
         err = state->result;
         to_call = state->on_done;
+        epoch = state->initiation_epoch;
+        state->ready.notify_all();  // 唤醒可能在 `blocking_wait` 的等待方
     }
     if (to_call && err) {
         auto r = std::move(*err);
-        post_to_main([to_call, r]() mutable -> void { to_call(r); });
+        MainQueue::post([to_call, r]() mutable -> void { to_call(r); }, epoch);
     }
+}
+
+/// @brief 首写即定地落一个终值结果并唤醒 `blocking_wait`：已有终值（超时/取消先到）则不覆盖。
+/// @tparam T 任务值类型。
+/// @param st 共享状态（调用方**须持 `st.mutex`**）。
+/// @param r 待落的终值。
+template <typename T>
+auto set_result_once_locked(AsyncState<T> &st, Result<T> r) -> void {
+    if (!st.result.has_value()) {
+        st.result = std::move(r);
+    }
+    st.ready.notify_all();
 }
 
 /// @brief 若可投递（结果就绪 + 已注册回调 + 未取消/未投递），复制出并标记 delivered；
@@ -243,7 +258,7 @@ auto invoke_safe(F &&f) {
 /// 在单线程 UI 约束下，把「后台计算」与「主线程结果回写」解耦：
 /// - `async(fn)` 立即返回一个 `Task<T>`，在**有界线程池**（`ThreadPool::default_pool()`）
 /// 的后台 worker 执行 `fn`；不再为每次调用 `std::thread().detach()` 起 OS 线程。
-/// - 结果就绪后，经 `then(onDone)` 把回调调度回「主线程」（通过主线程投递器），
+/// - 结果就绪后，经 `then(onDone)` 把回调调度回「主线程」（通过进程级唯一队列 `MainQueue`），
 /// 可回写 `State<T>` 以触发响应式定点刷新（与现有信号系统无缝衔接）。
 ///
 /// 取消语义：`cancel()` 标记任务为已取消，后台线程仍会执行完毕（无法中断任意函数），
@@ -256,8 +271,10 @@ auto invoke_safe(F &&f) {
 /// 若 `d` 内任务未 `deliver`，则向 `then` 回调投递 `make_error(ErrorCode::RuntimeAsyncTimeout, ...)`（slug 为
 /// `"async-timeout"`）。 与 `cancel` 同限制——无法中断任意 `fn`，仅丢弃/改道结果。
 ///
-/// 未安装主线程投递器时，`then` 回调在承接 worker 线程同步执行；安装 poster 后才保证回到主线程；
-/// 真实事件循环可调用 `Task<T>::set_main_poster` 把回调投入主线程队列，避免跨线程访问 widget。
+/// 回投经进程级唯一队列 `aurora::MainQueue`（specification/01-core.md §8.2）：结果就绪后由在岗
+/// 主循环在**主线程**执行 `then` 回调，避免跨线程访问 widget。发起异步须有循环在岗——
+/// 无值班的发起（打烊窗口除外）是编程错误，在发起栈上硬失败；晚于打烊落地的结果被「打烊取消」
+/// （丢弃并计数，绝不在承接 worker 线程就地执行）。循环外要结果请用 `Task::blocking_wait`。
 /// @tparam T 任务值类型（`then` 回调接收 `Result<T>`）。
 /// @note Thread: thread-safe with mutex
 /// @note Side-effects: none
@@ -270,10 +287,25 @@ class Task {
     /// @param state 与后台 job 共享的 `AsyncState<T>`（shared_ptr 共享所有权）。
     explicit Task(std::shared_ptr<detail::AsyncState<T>> state) : state_(std::move(state)) {}
 
-    /// @brief 注册完成回调（结果经主线程投递器回调）。返回自身以便链式。
+    /// @brief 注册完成回调（结果经进程级唯一队列回投主线程）。返回自身以便链式。
+    ///
+    /// 发起闸门（三分，见 `detail::initiate_or_epoch`）：在岗 ⇒ 正常登记并保证回主线程执行；
+    /// 打烊窗口 ⇒ 该回调永不触发（状态即刻呈已取消）；其余无值班 ⇒ 编程错误硬失败。
     /// @param cb 完成回调；结果就绪后以该结果调用（若结果已先行 deliver 过则补投到新回调）。
     /// @return 引用 `*this`（链式调用）。
     auto then(DoneFn cb) -> Task & {
+        const auto epoch = detail::initiate_or_epoch();
+        if (epoch == 0) {
+            // 打烊窗口注册：无处安放的回调——按「出生即取消」落定（结果即便已到也不补投：
+            // 无在岗执行者，投递只会被打烊取消——与其静默，不如把取消记在状态上）。
+            std::scoped_lock<std::mutex> lock(state_->mutex);
+            state_->cancelled.store(true, std::memory_order_release);
+            state_->delivered = true;
+            detail::set_result_once_locked(
+                *state_, Result<T>{make_error(ErrorCode::RuntimeCancelled,
+                                              "async callback registered while the main loop is closing")});
+            return *this;
+        }
         // 待投递闭包：空 = 无需补投。用 `std::function<void()>` 而非「回调 + std::optional<结果>」
         // 两件局部量，是为了让结果的拷贝发生在锁内、且不再经 optional→optional 的那次中转——
         // libstdc++ 的 `_Optional_payload`（union 载荷 + 独立 engaged 标志）会让路径敏感的
@@ -285,6 +317,10 @@ class Task {
         {
             std::scoped_lock<std::mutex> lock(state_->mutex);
             state_->on_done = std::move(cb);
+            if (state_->initiation_epoch == 0) {
+                // 直接以状态构造的 Task（不经 async 工厂）在本世补盖戳：投递比对以它为准。
+                state_->initiation_epoch = epoch;
+            }
             // 若结果此前已 deliver（成功/超时/取消）但当时 on_done 为空，则补投到新回调。
             if (state_->delivered && !state_->cancelled && state_->result.has_value()) {
                 DoneFn to_call = state_->on_done;
@@ -293,7 +329,7 @@ class Task {
             }
         }
         if (replay) {
-            detail::post_to_main(std::move(replay));
+            MainQueue::post(std::move(replay), state_->initiation_epoch);
         } else {
             try_deliver();
         }
@@ -358,7 +394,7 @@ class Task {
     /// 返回自身以便链式。
     ///
     /// 两条实现路径按线程池模式分流，语义一致（到点改道结果、不中断 `fn`）：
-    /// - worker 池：看守是一个睡 `d` 的后台池任务（原有形态），到点自行投递，经主线程投递器回投。
+    /// - worker 池：看守是一个睡 `d` 的后台池任务（原有形态），到点自行投递，经进程级唯一队列回投。
     /// - **deferred 池**：无后台线程可睡——睡在池任务里等于睡在主线程泵上，且看守排在被看守
     ///   任务之后（同队 FIFO），永远不可能先跑。故只登记到期时刻，由帧尾 `sweep_due_timeouts`
     ///   扫描触发；等待中的宿主循环经 `next_timeout_deadline_ms` 把期限并入唤醒决策，不深睡过头。
@@ -382,20 +418,33 @@ class Task {
         return *this;
     }
 
-    static auto set_main_poster(std::function<void(std::function<void()>)> poster)
-        -> void {  ///< 主线程投递器安装口（事件循环调用）；线程安全
-        std::scoped_lock lock(detail::main_poster_mutex());
-        detail::main_poster() = std::move(poster);
+    /// @brief 同步等待任务的**终值结果**（在调用线程阻塞），不经投递通道、与值班/世代无关。
+    ///
+    /// 用途是「循环外也要拿到结果」的合法出口（CLI / 单测 / 结果本就不用于 UI）：
+    /// **打烊取消的是投递、不是结果**——worker 落 `result` 与是否在岗无关，故句柄持有者
+    /// 在打烊后照样取得本值；「出生即取消」的任务已把取消错误写进结果，本调用立即返回它。
+    /// 不会死锁：`then` 回调是经投递排队、只有排水才执行，本调用不等它们（代价是停摆一帧）。
+    /// @warning 不要在循环内用它等待 `then` 回调——那是投递语义，要排水才走；本调用只等结果。
+    /// @warning 取消（`cancel()`）不中断 `fn`：任务被取消后 `fn` 仍会跑完并落值，本调用会等到那时。
+    /// @return 首个终值结果（成功值 / 超时错误 / 取消错误）。
+    [[nodiscard]] auto blocking_wait() -> Result<T> {
+        std::unique_lock<std::mutex> lock(state_->mutex);
+        state_->ready.wait(lock, [this]() -> bool { return state_->result.has_value(); });
+        // 谓词 `has_value()` 成立即返回，故此处必已落值；静态检查看不进 `condition_variable::wait`
+        // 的谓词，`*` 与 `value()` 都会被判成未检查访问。
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+        return *state_->result;
     }
 
   private:
     /// @brief 若结果已就绪且已注册回调，则投递（去重：仅首次 deliver 调用）。
+    /// 携带发起世带：落地若晚于打烊（世代失配）即被打烊取消，绝不在承接 worker 线程就地执行。
     auto try_deliver() -> void {
         std::function<void(const Result<T> &)> to_call;
         auto maybe = detail::take_for_delivery(*state_, to_call);
         if (maybe) {
             auto r = std::move(*maybe);
-            detail::post_to_main([to_call, r]() mutable -> void { to_call(r); });
+            MainQueue::post([to_call, r]() mutable -> void { to_call(r); }, state_->initiation_epoch);
         }
     }
 
@@ -403,7 +452,11 @@ class Task {
 };
 
 /// @brief 启动异步任务：在后台线程池执行 `fn`（返回 `T` 或 `Result<T>`），返回 `Task<ValueT>`。
-/// 返回的 Task 支持 `then()` 回主线程、`cancel()` 取消、`with_timeout()` 超时。
+/// 返回的 Task 支持 `then()` 回主线程、`cancel()` 取消、`with_timeout()` 超时、`blocking_wait()` 同步取结果。
+///
+/// 发起闸门（三分，见 `detail::initiate_or_epoch`）：在岗 ⇒ 捕获本世世代、正常排工；
+/// 打烊窗口 ⇒ **出生即取消**（不排工，即刻呈已取消，`then` 永不触发、`blocking_wait` 得取消错误）；
+/// 其余无值班 ⇒ 编程错误硬失败（循环外发起异步却指望主线程消费，正是要拦的形态）。
 /// @tparam F 后台可调用对象类型。
 /// @param fn 后台任务体；在 `ThreadPool::default_pool()` 的 worker 上执行。
 /// @return `Task<ValueT>` 句柄（ValueT 由 `TaskValueOfT` 从 fn 返回类型萃取）。
@@ -412,21 +465,35 @@ auto async(F &&fn) {
     using ValueT = detail::TaskValueOfT<std::invoke_result_t<F>>;
 
     auto state = std::make_shared<detail::AsyncState<ValueT>>();
+    const std::uint64_t epoch = detail::initiate_or_epoch();
+    if (epoch == 0) {
+        // 出生即取消：不排工，结果即刻落一枚取消错误并唤醒可能在等的 blocking_wait。
+        std::scoped_lock<std::mutex> lock(state->mutex);
+        state->cancelled.store(true, std::memory_order_release);
+        state->delivered = true;
+        detail::set_result_once_locked(
+            *state,
+            Result<ValueT>{make_error(ErrorCode::RuntimeCancelled, "async task cancelled at birth: loop closing")});
+        return Task<ValueT>{std::move(state)};
+    }
+    state->initiation_epoch = epoch;
+
     auto state_capture = state;
     auto f = std::forward<F>(fn);
 
     // NOLINTNEXTLINE(bugprone-exception-escape) 回调由 invoke_safe/execute 内 try/catch 兜底，抛异常不会逃出线程边界
-    ThreadPool::default_pool().execute([state = std::move(state_capture), f = std::move(f)]() mutable -> void {
+    ThreadPool::default_pool().execute([state = std::move(state_capture), f = std::move(f), epoch]() mutable -> void {
         {
             Result<ValueT> r = detail::invoke_safe(std::move(f));
             std::scoped_lock<std::mutex> lock(state->mutex);
-            state->result = std::move(r);
+            detail::set_result_once_locked(*state, std::move(r));  // 首写即定 + 唤醒 blocking_wait
         }
         std::function<void(const Result<ValueT> &)> to_call;
         auto maybe = detail::take_for_delivery(*state, to_call);
         if (maybe) {
             auto out = std::move(*maybe);
-            detail::post_to_main([to_call, out]() mutable -> void { to_call(out); });
+            // 携带发起世代投递：晚于打烊即被打烊取消，绝不在本 worker 线程就地执行回调。
+            MainQueue::post([to_call, out]() mutable -> void { to_call(out); }, epoch);
         }
     });
 

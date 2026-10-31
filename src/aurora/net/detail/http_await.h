@@ -7,16 +7,17 @@
 // （`net/transport.h`：把 Task 写进 L1 公共头会让下层反向依赖 L4）。HTTP 发起侧（L3）面向应用、要协程形态，
 // 于是桥接落在**库内**这一层：把回调翻成 `co_await` 求得 `Result<T>`，公共头只暴露协程签名而不把 awaiter
 // 外露。三个约束必须守住：
-// - **续体经 `post_to_main` 恢复**：与 `state::co_async` 同一条回投通道，保证「完成恒在主线程」，
-//   上层协程体内可安全触碰响应式状态；无 poster（headless / 测试）时退化为同步恢复。
+// - **续体经 `post_to_main` 恢复**：与 `state::co_async` 同一条回投通道（进程级唯一队列），
+//   保证「完成恒在值班主线程」，上层协程体内可安全触碰响应式状态；无值班循环时投递被
+//   「打烊取消」——协程随循环终结，绝不就地跨线程恢复。
 // - **awaiter 的生命周期由协程帧担保**：`co_await` 的 awaiter 临时活到该表达式结束（含恢复之后），
 //   故 `await_suspend` 里捕获的 `this` 在回调触发那一刻必然存活；结果先落 `result_`、再投恢复，
 //   `await_resume` 取用时恒有值。
 // - **同步完成不抢挂起点**：`await_suspend` 返回 `bool`。发起器在本次调用内就交回结局（循环套接字上的
 //   写、窗口非正的读、已取消的退避都走这条）时返回 `false`，协程在挂起表达式内就地前进；此时的完成
-//   绝不能经 `post_to_main` 投递——无主投递器时那条路是就地执行，等于在 `await_suspend` 尚未返回时
-//   重入协程帧，挂起点之后的代码跑第二遍，协程经一条路收尾释放帧后，另一条路迟到的回调再恢复已释放
-//   的帧即成 heap-use-after-free。发起器已返回（armed）后抵达的回调才一律走投递器。
+//   绝不能经 `post_to_main` 投递——本帧还在 `await_suspend` 里、尚未真正挂起，排水一旦提前 resume，
+//   等于在挂起表达式返回后又跑一遍挂起点之后的代码，协程经一条路收尾释放帧后，另一条路迟到的回调
+//   再恢复已释放的帧即成 heap-use-after-free。发起器已返回（armed）后抵达的回调才一律走投递器。
 // - **不吞取消**：`Cancellation` 被 cancel 后，在途操作的回调以 `net-cancelled` 恰一次抵达，awaiter 原样
 //   把它作为 `Result<T>` 交回协程，由上层决定改道成 `http-timeout` 还是 `net-cancelled`——本层不解释取消。
 //
@@ -33,6 +34,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -85,12 +87,12 @@ class CallbackAwaiter {
     ///
     /// 返回值遵守 awaiter 协议对「同步完成」的约定：发起器在本次调用内就交回结局（循环套接字上的
     /// 写、窗口非正的读、已取消的退避都会走这条）时返回 `false`，协程在挂起表达式内就地前进。
-    /// 此时绝不能经 `post_to_main` 恢复：未装主投递器时那条路是就地执行，等于在 `await_suspend`
-    /// 尚未返回时重入协程帧——挂起点之后的代码会跑第二遍（重复登记在途操作、二次进入重试环），
+    /// 此时绝不能经 `post_to_main` 恢复：本帧还没挂起，排水一旦提前 `resume()`，等于在
+    /// `await_suspend` 尚未返回时重入协程帧——挂起点之后的代码会跑第二遍（重复登记在途操作、二次进入重试环），
     /// 协程经其中一条路收尾后帧已释放，另一条路迟到的回调再恢复已释放的帧即成
     /// heap-use-after-free（asan 作业实测：expect-continue 用例崩在本文件发起器内）。
     /// @param handle 待恢复的协程句柄；异步完成的结果落地后经 `post_to_main` 恢复之。
-    /// @return `true` = 保持挂起，等异步完成经投递器恢复；`false` = 发起期间已同步完成，就地恢复。
+    /// @return `true` = 保持挂起，等异步完成经全局队列恢复；`false` = 发起期间已同步完成，就地恢复。
     auto await_suspend(std::coroutine_handle<> handle) -> bool {
         handle_ = handle;
         start_([this](Result<T> result) -> void {
@@ -116,7 +118,7 @@ class CallbackAwaiter {
     /// @brief 发起器已返回的闸。
     ///
     /// `false` 期间抵达的完成只落 `result_`、不投恢复（同步完成：恢复交给 `await_suspend` 的返回值）；
-    /// 置 `true` 之后抵达的一律经 `post_to_main` 恢复。防的是「就地执行的投递器 + 发起期间同步完成」
+    /// 置 `true` 之后抵达的一律经 `post_to_main` 恢复。防的是「本帧尚未挂起就被提前 resume」
     /// 在 `await_suspend` 内重入协程帧的那条路，完整机理见 `await_suspend` 的文档。
     bool armed_{false};
 };

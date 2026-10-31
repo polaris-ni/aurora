@@ -851,12 +851,6 @@ class Window {
         return first_frame_ || layout_dirty_ || !dirty_.is_empty();
     }
 
-    /// @brief 设置本帧末尾的等待请求（由 `Application::run` 每帧经 `compute_wait_timeout`
-    /// 决策后写入；`Window::run` 在 on_frame 之后消费）。语义同 `Surface::wait_events`：
-    /// `<0` 无限等待 / `0` 不等（默认，未设置则保持旧忙轮询行为）/ `>0` 等待毫秒数。
-    /// @param timeout_ms 本帧末尾的等待毫秒数（语义同上，一次性消费）。
-    auto set_next_wait(double timeout_ms) -> void { next_wait_ms_ = timeout_ms; }
-
     /// @brief 绑定本窗口的帧统计实例（多窗口：每窗口独立统计，`FrameStats::instance()`
     /// 在多窗口下会混入其他窗口数据）。
     ///
@@ -902,91 +896,6 @@ class Window {
         };
     }
 
-  public:
-    /// @brief 运行帧循环：pump 事件 → 调 on_frame 回调（渲染根）→ 按需阻塞等待。
-    /// 直到 should_close 或达到 max_frames（<0 表示无限，直到关闭）。on_frame 由 `Application` 注入
-    /// （调用 `present_root`，其内部负责 present），保持 `Window` 与渲染循环解耦；
-    /// `Window::run` 不再额外 present，避免每帧重复提交。
-    ///
-    /// 事件驱动帧循环：on_frame 末尾经 `set_next_wait` 写入本帧
-    /// 等待决策，循环在帧末 `Surface::wait_events` 阻塞到事件/超时，取代忙轮询；
-    /// 等待请求一次性消费（未重新设置则不等），直调 `Window::run` 的低阶调用方
-    /// （测试/自拼帧循环）行为不变。等待时长记入 `FrameStats`（wakeups / sleep ratio）。
-    ///
-    /// @param on_frame 每帧调用的渲染回调（由宿主注入，内部完成 present）；为空对象时该帧跳过渲染。
-    /// @param max_frames 帧数预算：> 0 时跑满该帧数退出，≤ 0（默认 -1）表示不限，直到窗口请求关闭。
-    AURORA_MAIN_THREAD auto run(const std::function<void()> &on_frame, int max_frames = -1) -> void {
-        // 本循环就是这条线程的主线程事件循环：给后台线程（InspectorServer 的 worker）装上回投器，
-        // 使其对 widget 树的读取排在帧与帧之间执行。缺此安装时 `inspector` 的 marshal 会退回
-        // 「在当前线程直读」，与 present/重排并发改树相撞即触发访问违例（0xC0000005）。
-        struct RunQueue {
-            std::mutex mutex;
-            std::vector<std::function<void()>> tasks;
-            bool running = true;
-        };
-        auto queue = std::make_shared<RunQueue>();
-        Surface *const surf = surface_.get();
-        auto drain = [queue]() -> void {
-            std::vector<std::function<void()>> batch;
-            {
-                std::scoped_lock lk(queue->mutex);
-                batch.swap(queue->tasks);
-            }
-            for (auto &task : batch) {
-                if (task) {
-                    task();
-                }
-            }
-        };
-        std::function<void(std::function<void()>)> prev_poster;
-        {
-            std::scoped_lock lk(aurora::detail::main_poster_mutex());
-            prev_poster = aurora::detail::main_poster();
-            aurora::detail::main_poster() = [queue, surf](std::function<void()> fn) -> void {
-                std::function<void()> inline_fn;
-                {
-                    std::scoped_lock lk2(queue->mutex);
-                    if (queue->running) {
-                        queue->tasks.push_back(std::move(fn));
-                    } else {
-                        inline_fn = std::move(fn);  // 循环已退出：无人排水，就地执行（与无回投器时同义）
-                    }
-                }
-                if (inline_fn) {
-                    inline_fn();
-                } else {
-                    surf->request_wake();  // 唤醒睡在 wait_events 的循环，即刻排水
-                }
-            };
-        }
-        int n = 0;
-        while (!should_close()) {
-            drain();
-            pump_events();
-            if (on_frame) {
-                on_frame();
-            }
-            ++n;
-            if (max_frames > 0 && n >= max_frames) {
-                break;
-            }
-            const double wait_ms = next_wait_ms_;
-            next_wait_ms_ = 0.0;  // 一次性消费：未重新设置则不等待（旧行为兜底）
-            if (wait_ms != 0.0 && !should_close()) {
-                const auto t0 = std::chrono::steady_clock::now();
-                surface_->wait_events(wait_ms);
-                const auto t1 = std::chrono::steady_clock::now();
-                FrameStats::instance().record_wait(std::chrono::duration<double, std::milli>(t1 - t0).count());
-            }
-        }
-        {
-            std::scoped_lock lk(aurora::detail::main_poster_mutex());
-            aurora::detail::main_poster() = std::move(prev_poster);  // 交还给外层循环（可能为 nullptr）
-            queue->running = false;
-        }
-    }
-
-  private:
     std::unique_ptr<Surface> surface_;  ///< 组合的后端（不可知）
     std::string title_{"Aurora"};
     /// @brief 本窗口的宿主身份（见 `detail::next_host_id`），每帧随 `prepare_context` 写入
@@ -1046,7 +955,6 @@ class Window {
     bool system_redraw_ = false;  ///< 本次 present_root 由系统重绘请求驱动（WM_PAINT 等）：跳帧时仍须重新上屏。
     bool gpu_fallback_ = false;  ///< GPU 后端首帧失败后的永久软件路径标记（本 Window 生命周期内不再尝试 GPU）。
     bool idle_frame_ = false;  ///< 最近一次 present_root 是否为 idle 跳过（无脏区、未渲染）。
-    double next_wait_ms_ = 0.0;  ///< 本帧末尾的等待请求（一次性消费，0=不等）。
     FrameStats *stats_ = &FrameStats::instance();  ///< 帧统计实例（默认进程级单例；多窗口各窗绑定自己的实例）。
 
     // ---- 分层 HUD 叠加层 ----

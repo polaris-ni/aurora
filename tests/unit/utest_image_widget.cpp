@@ -9,11 +9,13 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <utility>
 #include <vector>
 
+#include "aurora/core/main_queue.h"
 #include "aurora/image/image_codec.h"
 #include "aurora/layout/layout_engine.h"
 #include "aurora/state/async.h"
@@ -199,39 +201,37 @@ AURORA_TEST_CASE(from_file_missing_path_falls_back_to_empty) {
     AURORA_TEST_CHECK_NEAR(iv.size().height, 100.0F, 1e-4F);
 }
 
-/// @brief 测试基础设施：安装「排队式主线程投递器」，由用例线程手动排水（与
-/// Application::run 的 drain_posted 同构），使控件回填在测试线程确定性执行。
+/// @brief 测试基础设施：领一枚空唤醒的值班租约，回投滞留进程级唯一队列，
+/// 由用例线程手动排水（与 Application::run 的 drain_posted 同构），使控件回填在测试线程确定性执行。
 class PosterGuard {
   public:
-    PosterGuard() {
-        Task<bool>::set_main_poster([this](std::function<void()> fn) -> void {
-            std::scoped_lock lock(mutex_);
-            queue_.push_back(std::move(fn));
-        });
+    PosterGuard() : duty_(MainQueue::on_duty([]() -> void {})) {}
+    ~PosterGuard() {
+        if (duty_.has_value()) {
+            duty_->release();
+        }
     }
-    ~PosterGuard() { Task<bool>::set_main_poster(nullptr); }
     PosterGuard(const PosterGuard &) = delete;
     auto operator=(const PosterGuard &) -> PosterGuard & = delete;
     PosterGuard(PosterGuard &&) = delete;
     auto operator=(PosterGuard &&) -> PosterGuard & = delete;
+    /// @brief 排空全局队列（执行期间新入队的项在后续轮次继续执行，直到队列空）。
     auto drain() -> void {
         for (;;) {
-            std::function<void()> fn;
-            {
-                std::scoped_lock lock(mutex_);
-                if (queue_.empty()) {
-                    return;
-                }
-                fn = std::move(queue_.front());
-                queue_.erase(queue_.begin());
+            auto batch = MainQueue::take_batch();
+            if (batch.empty()) {
+                return;
             }
-            fn();
+            for (std::function<void()> &fn : batch) {
+                if (fn) {
+                    fn();
+                }
+            }
         }
     }
 
   private:
-    std::mutex mutex_;
-    std::vector<std::function<void()>> queue_;
+    std::optional<MainQueue::Lease> duty_;  ///< 在岗租约（空 wake）：发起过闸、回投入全局队列待排空
 };
 
 /// @brief 排水直至控件进入期望状态（worker 写 result → 投递入队 → 排水执行 存在微秒级窗口，
