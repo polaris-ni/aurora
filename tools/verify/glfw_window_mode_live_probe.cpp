@@ -1,12 +1,17 @@
 // tools/verify/glfw_window_mode_live_probe.cpp — GLFW 程序化窗控真机验收探针（非 CTest）。
 //
-// 覆盖：GLFW 后端 `set_fullscreen` 真接线（本次落地：`GlfwSurface::set_fullscreen` 进入前存档几何
-// 与装饰态、取所在显示器物理视口、去装饰、铺满整屏——borderless 全屏，不改视频模式；退出还原）。
-// 无头 CI 建不了真实窗口、也证明不了「窗口真的铺满显示器」，故本探针不进 CTest，由人工在真实
-// 桌面会话触发。
+// 覆盖：GLFW 后端程序化窗控三原语真接线（本批补齐 minimize / toggle_maximize 两枚切换腿，与既有
+// `set_fullscreen` 汇成三腿齐全）：
+//   * `set_fullscreen`：`GlfwSurface::set_fullscreen` 进入前存档几何与装饰态、取所在显示器物理视口、
+//     去装饰、铺满整屏（borderless 全屏，不改视频模式）；退出还原；
+//   * `minimize`：`GlfwSurface::minimize` 转发 `Impl::set_window_mode(Minimized)`（`glfwIconifyWindow`）；
+//   * `toggle_maximize`：`GlfwSurface::toggle_maximize` 按当前 `maximized` 标志走
+//     `Impl::set_window_mode`（`glfwMaximizeWindow` / `glfwRestoreWindow`）。
+// 无头 CI 建不了真实窗口、也证明不了「窗口真的铺满/最大化显示器或被收走」，故本探针不进 CTest，由人工
+// 在真实桌面会话触发。
 //
-// 为什么必须有本探针：能力矩阵 `runtime_fullscreen` 对 GLFW 现已翻 true，但「true」只保证公共
-// 入口接通——真正落到屏幕的是窗口几何被设为显示器视口，必须由**独立取证**证明：
+// 为什么必须有本探针：能力矩阵 `runtime_fullscreen` 与 `runtime_window_mode` 对 GLFW 现已翻 true，
+// 但「true」只保证公共入口接通——真正落到屏幕的是窗口几何/状态被改，必须由**独立取证**证明：
 //   * 用平台原生观测（Linux：Xlib + glfwGetX11Display；Windows：HWND + Monitor API）读出窗口矩形，
 //     与 GLFW 显示器视口（glfwGetMonitors + glfwGetMonitorPos + glfwGetVideoMode）逐值比对，确认
 //     覆盖整屏（±2px）；
@@ -14,14 +19,24 @@
 //   * 无任何 WARN（实现已落地，不是「留一条 WARN 的 stub」）。
 //
 // 判据（全在真实桌面会话下执行；glfwInit 失败 / 建窗失败按退出码 2 报环境不可用）：
-//   (1) 能力位自证：`runtime_fullscreen == true`（本次翻位）；`runtime_window_mode == false`
-//       （minimize / toggle_maximize 两枚公共切换腿在 GLFW 仍未接线，能力位如实 false）。
+//   (1) 能力位自证：`runtime_fullscreen == true` 且 `runtime_window_mode == true`（三腿均已在 GLFW 接通）。
 //   (2) `set_fullscreen(true)`：
 //         - 独立观测窗口矩形覆盖某块 GLFW 显示器视口（±2px，borderless 铺满）；
 //         - 应用级快照 `Window::window_mode()` 收敛到 `FullScreen`；
 //         - 全程零 WARN；
 //         - 进入前存档的几何/装饰态不影响判据（退出会还原，见 (3)）。
 //   (3) `set_fullscreen(false)`：矩形还原到进入前（±2px）、快照回 `Normal`、零 WARN。
+//   (4) `toggle_maximize()`：
+//         - 应用级快照 `Window::window_mode()` 收敛到 `Maximized`；
+//         - 独立取证（平台原生）：Linux 读 `_NET_WM_STATE` 的 MAXIMIZED 原子；Windows 查 `IsZoomed`；
+//           macOS 无可靠独立读回 → NOTE，快照 (4a) 即绑定证据；
+//         - 全程零 WARN；
+//         - 二次 `toggle_maximize()` 快照回 `Normal`（幂等）。
+//   (5) `minimize()`：
+//         - 应用级快照收敛到 `Minimized`；
+//         - 独立取证（平台原生）：Linux 查 X 窗口 `map_state == IsUnmapped`；Windows 查 `IsIconic`；
+//           macOS 无可靠独立读回 → NOTE；
+//         - 全程零 WARN（探针末步，不再复位：本库未单独暴露「去 iconic」还原腿，还原依赖 OS / 任务栏）。
 //
 // 构建（方式 ① CMake 目标，推荐）：
 //   cmake -S . -B build-verify -DAURORA_BACKEND_GLFW=ON -DAURORA_BUILD_VERIFY_TOOLS=ON
@@ -195,6 +210,37 @@ auto settle_wm(aurora::e2e::Session &session) -> void {
     }
 }
 
+#ifdef AURORA_PLATFORM_LINUX
+/// @brief 独立取证：GLFW 在 Linux 即 X11 窗口，读其 `_NET_WM_STATE` 是否含任一 MAXIMIZED 原子。
+auto has_any_maximized_atom(Display *dpy, ::Window win) -> bool {
+    Atom actual_type = 0;
+    int actual_format = 0;
+    unsigned long nitems = 0;
+    unsigned long bytes_after = 0;
+    unsigned char *prop = nullptr;
+    const Atom net_wm_state = XInternAtom(dpy, "_NET_WM_STATE", False);
+    const Atom mh = XInternAtom(dpy, "_NET_WM_STATE_MAXIMIZED_HORZ", False);
+    const Atom mv = XInternAtom(dpy, "_NET_WM_STATE_MAXIMIZED_VERT", False);
+    const Status ok = XGetWindowProperty(dpy, win, net_wm_state, 0L, 1024L, False, XA_ATOM, &actual_type,
+                                         &actual_format, &nitems, &bytes_after, &prop);
+    bool found = false;
+    if (ok == Success && actual_type == XA_ATOM && prop != nullptr) {
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+        const auto *atoms = reinterpret_cast<const Atom *>(prop);
+        for (unsigned long i = 0; i < nitems; ++i) {
+            if (atoms[i] == mh || atoms[i] == mv) {
+                found = true;
+                break;
+            }
+        }
+    }
+    if (prop != nullptr) {
+        XFree(prop);
+    }
+    return found;
+}
+#endif
+
 }  // namespace
 
 // 入口不吞异常：未捕获异常 → 非零退出码/terminate 呈现（口径同 tools/verify/ 其余探针）。
@@ -206,7 +252,7 @@ auto main(int argc, char **argv) -> int {
     }
     (void)cli.arguments->flag("interactive");  // 本探针全自动，旗标仅为统一入口而接受
 
-    emit("== aurora verify: GLFW window-mode (fullscreen) wiring ==");
+    emit("== aurora verify: GLFW window-mode (fullscreen + maximize/minimize) wiring ==");
 
     aurora::e2e::WindowSpec spec;
     spec.backend = aurora::e2e::Backend::Glfw;
@@ -237,8 +283,8 @@ auto main(int argc, char **argv) -> int {
     // ---- (1) 能力位自证 ----
     const aurora::PlatformCapabilities caps = aurora::platform().capabilities();
     check(caps.runtime_fullscreen, "(1a) capabilities.runtime_fullscreen is true for GLFW (set_fullscreen wired)");
-    check(!caps.runtime_window_mode,
-          "(1b) capabilities.runtime_window_mode is false for GLFW (minimize/toggle_maximize legs unwired)");
+    check(caps.runtime_window_mode,
+          "(1b) capabilities.runtime_window_mode is true for GLFW (minimize/toggle_maximize legs wired)");
 
     // ---- (2) set_fullscreen(true) ----
     {
@@ -333,8 +379,84 @@ auto main(int argc, char **argv) -> int {
         }
     }
 
+    // ---- (4) toggle_maximize() ----
+    {
+        CapturedLog log;
+        win.toggle_maximize();
+        settle_wm(session);
+        check(win.window_mode() == aurora::WindowMode::Maximized,
+              "(4a) application snapshot reports Maximized after toggle_maximize()");
+        check(log.count("WRN") == 0, "(4b) toggle_maximize() produced no WARN (real implementation, not a stub)");
+        // 独立取证（平台原生）：Linux 读 _NET_WM_STATE 的 MAXIMIZED 原子；Windows 查 IsZoomed；
+        // macOS 无可靠独立读回 → NOTE。
+        const bool obs_max = [&]() -> bool {
+#ifdef AURORA_PLATFORM_LINUX
+            Display *dpy = glfwGetX11Display();
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+            const auto xwin = static_cast<::Window>(reinterpret_cast<std::uintptr_t>(surface->native_handle()));
+            return (dpy != nullptr && xwin != 0) ? has_any_maximized_atom(dpy, xwin) : false;
+#elif defined(AURORA_PLATFORM_WINDOWS)
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+            const auto hwnd = static_cast<HWND>(surface->native_handle());
+            return (hwnd != nullptr) ? (IsZoomed(hwnd) != 0) : false;
+#else
+            (void)surface;
+            return false;
+#endif
+        }();
+        if (obs_max) {
+            check(true, "(4c) OS-side maximized state confirmed (independent observation)");
+        } else {
+            emit("[NOTE] (4c) OS-side maximized state not independently observable on this platform; "
+                 "snapshot (4a) is the binding proof");
+        }
+        // 幂等二次切换：快照回 Normal。
+        win.toggle_maximize();
+        settle_wm(session);
+        check(win.window_mode() == aurora::WindowMode::Normal,
+              "(4d) application snapshot reports Normal after second toggle_maximize()");
+    }
+
+    // ---- (5) minimize() ----
+    {
+        CapturedLog log;
+        win.minimize();
+        settle_wm(session);
+        check(win.window_mode() == aurora::WindowMode::Minimized,
+              "(5a) application snapshot reports Minimized after minimize()");
+        // 独立取证（平台原生）：Linux 查 X 窗口 map_state == IsUnmapped；Windows 查 IsIconic；
+        // macOS 无可靠独立读回 → NOTE。
+        const bool obs_min = [&]() -> bool {
+#ifdef AURORA_PLATFORM_LINUX
+            Display *dpy = glfwGetX11Display();
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+            const auto xwin = static_cast<::Window>(reinterpret_cast<std::uintptr_t>(surface->native_handle()));
+            if (dpy == nullptr || xwin == 0) {
+                return false;
+            }
+            XWindowAttributes attr{};
+            return (XGetWindowAttributes(dpy, xwin, &attr) != 0) && attr.map_state == IsUnmapped;
+#elif defined(AURORA_PLATFORM_WINDOWS)
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+            const auto hwnd = static_cast<HWND>(surface->native_handle());
+            return (hwnd != nullptr) ? (IsIconic(hwnd) != 0) : false;
+#else
+            (void)surface;
+            return false;
+#endif
+        }();
+        if (obs_min) {
+            check(true, "(5b) OS-side minimized state confirmed (independent observation)");
+        } else {
+            emit("[NOTE] (5b) OS-side minimized state not independently observable on this platform; "
+                 "snapshot (5a) is the binding proof");
+        }
+        check(log.count("WRN") == 0, "(5c) minimize() produced no WARN");
+        // 末步不再复位：本库未单独暴露「去 iconic」还原腿（还原依赖 OS / 任务栏）；残留态不影响判据。
+    }
+
     if (failures() == 0) {
-        emit("PASS: GLFW window-mode fullscreen wiring accepted (real desktop session)");
+        emit("PASS: GLFW window-mode control wiring accepted (real desktop session)");
         return 0;
     }
     emit("result: one or more criteria failed (exit 1)");

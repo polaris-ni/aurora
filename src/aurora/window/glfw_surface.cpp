@@ -847,6 +847,20 @@ auto GlfwSurface::set_fullscreen(bool on) -> void {
         pimpl_->set_fullscreen(on);
     }
 }
+
+auto GlfwSurface::minimize() -> void {
+    if (pimpl_ != nullptr) {
+        pimpl_->set_window_mode(WindowMode::Minimized);
+    }
+}
+
+auto GlfwSurface::toggle_maximize() -> void {
+    if (pimpl_ != nullptr) {
+        // 按当前 maximized 标志算目标态（Normal <-> Maximized），与 Impl::set_window_mode 的
+        // glfwMaximizeWindow / glfwRestoreWindow 请求语义一致；回调回来经 update_window_mode() 定档。
+        pimpl_->set_window_mode(pimpl_->maximized ? WindowMode::Normal : WindowMode::Maximized);
+    }
+}
 auto GlfwSurface::set_scale_change_handler(ScaleChangeHandler h) -> void {
     pimpl_->scale_change_handler = std::move(h);
 }

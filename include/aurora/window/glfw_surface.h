@@ -203,6 +203,15 @@ class GlfwSurface : public Surface {
     /// 与 `set_window_mode(FullScreen)` 同源；进入前存档几何与装饰态，退出还原，幂等。
     /// @param on true 进入全屏，false 还原到进入前几何。
     auto set_fullscreen(bool on) -> void override;
+    /// @brief 程序化最小化：转发 `Impl::set_window_mode(Minimized)`（`glfwIconifyWindow`）。
+    ///
+    /// 与 WindowChrome 最小化钮同源；还原腿依赖 OS（任务栏点击 / 还原）。`WindowMode` 快照由 GLFW
+    /// iconify 回调经 `update_window_mode()` 定档上报。
+    auto minimize() -> void override;
+    /// @brief 程序化切换最大化：按当前 `maximized` 标志走 `Impl::set_window_mode`
+    ///        （Normal <-> Maximized；`glfwMaximizeWindow` / `glfwRestoreWindow` 请求语义，
+    ///        回调回来经 `update_window_mode()` 定档上报，与 Wayland configure 同构）。
+    auto toggle_maximize() -> void override;
 
   private:
     struct Impl;

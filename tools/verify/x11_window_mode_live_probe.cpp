@@ -1,20 +1,24 @@
 // tools/verify/x11_window_mode_live_probe.cpp — X11 程序化窗控真机验收探针（非 CTest）。
 //
-// 覆盖：X11 后端 `set_fullscreen` 真接线（本次落地：`X11Surface::set_fullscreen` 转发
-// `set_window_mode(FullScreen)`，后者经 EWMH `_NET_WM_STATE_FULLSCREEN` 原子交给 WM 接管全屏
-// 与进出屏几何还原）。无头 CI 建不了真实 X server、也发不出「WM 把窗口铺满显示器」这一事实，
-// 故本探针不进 CTest，由人工在真实 X 会话（含运行中的 WM）触发。
+// 覆盖：X11 后端程序化窗控三原语真接线（本批补齐 minimize / toggle_maximize 两枚切换腿，与既有
+// `set_fullscreen` 汇成三腿齐全）：
+//   * `set_fullscreen`：`X11Surface::set_fullscreen` 转发 `set_window_mode(FullScreen)`，经 EWMH
+//     `_NET_WM_STATE_FULLSCREEN` 原子交给 WM 接管全屏与进出屏几何还原；
+//   * `minimize`：`X11Surface::minimize` 转发 `set_window_mode(Minimized)`（`XIconifyWindow`）；
+//   * `toggle_maximize`：`X11Surface::toggle_maximize` 按当前 mode 调 `set/unset_maximized`
+//     （`_NET_WM_STATE_MAXIMIZED_*` 原子目标态请求，与 CSD 钮同源）。
+// 无头 CI 建不了真实 X server、也发不出「WM 把窗口铺满/最大化/收走窗口」这些事实，故本探针不进
+// CTest，由人工在真实 X 会话（含运行中的 WM）触发。
 //
-// 为什么必须有本探针：能力矩阵 `runtime_fullscreen` 对 X11 现已翻 true，但「true」只保证公共
-// 入口接通——真正落到 WM 的是 `_NET_WM_STATE_FULLSCREEN` 原子，必须由**独立取证**证明：
+// 为什么必须有本探针：能力矩阵 `runtime_fullscreen` 与 `runtime_window_mode` 对 X11 现已翻 true，
+// 但「true」只保证公共入口接通——真正落到 WM 的是 `_NET_WM_STATE_*` 原子（FULLSCREEN / MAXIMIZED）
+// 与 iconify 的 unmap 事实，必须由**独立取证**证明：
 //   * 读窗口属性 `_NET_WM_STATE`，确认 FULLSCREEN 原子在列（WM 侧实际状态，非库内自证）；
 //   * 应用级快照 `Window::window_mode()` 经 WM 回报收敛到 `FullScreen`；
 //   * 无任何 WARN（实现已落地，不是「留一条 WARN 的 stub」）。
 //
 // 判据（全在真实 X 会话下执行；无 DISPLAY / 建窗失败 / 无 WM 按退出码 2 报环境不可用）：
-//   (1) 能力位自证：`runtime_fullscreen == true`（本次翻位）；`runtime_window_mode == false`
-//       （minimize / toggle_maximize 两枚公共切换腿在 X11 仍未接线，能力位如实 false，调用是
-//       可观测的 no-op 而非静默失效）。
+//   (1) 能力位自证：`runtime_fullscreen == true` 且 `runtime_window_mode == true`（三腿均已在 X11 接通）。
 //   (2) `set_fullscreen(true)`：
 //         - `_NET_WM_STATE` 属性含 `_NET_WM_STATE_FULLSCREEN` 原子（独立取证：WM 已受理）；
 //         - 应用级快照 `Window::window_mode()` 收敛到 `FullScreen`；
@@ -23,6 +27,17 @@
 //           因 X11 后端未链 XRandr、探针无从枚举显示器，故降级为 NOTE，不判 FAIL——
 //           `_NET_WM_STATE_FULLSCREEN` 原子才是绑定的全屏证据。
 //   (3) `set_fullscreen(false)`：原子移除、快照回 `Normal`、零 WARN、几何还原到进入前（best-effort）。
+//   (4) `toggle_maximize()`：
+//         - `_NET_WM_STATE` 属性含 `_NET_WM_STATE_MAXIMIZED_HORZ` + `_NET_WM_STATE_MAXIMIZED_VERT`
+//           原子（独立取证：WM 已受理 maximize 请求）；
+//         - 应用级快照 `Window::window_mode()` 收敛到 `Maximized`；
+//         - 全程零 WARN；
+//         - 二次 `toggle_maximize()` 移除两枚原子、快照回 `Normal`（幂等）。
+//   (5) `minimize()`：
+//         - 应用级快照收敛到 `Minimized`；
+//         - 独立取证：X 窗口 `map_state == IsUnmapped`（iconify 后 WM 已 unmap，不依赖
+//           `_NET_WM_STATE_HIDDEN` 支持——各 WM 实现不一）；
+//         - 全程零 WARN（探针末步，不再复位：本库未单独暴露「去 iconic」还原腿，还原依赖 OS / 任务栏）。
 //
 // 构建（方式 ① CMake 目标，推荐）：
 //   cmake -S . -B build-verify -G Ninja -DCMAKE_BUILD_TYPE=Release -DAURORA_BACKEND_X11=ON
@@ -177,7 +192,7 @@ auto main(int argc, char **argv) -> int {
     }
     (void)cli.arguments->flag("interactive");  // 本探针全自动，旗标仅为统一入口而接受
 
-    emit("== aurora verify: X11 window-mode (fullscreen) wiring ==");
+    emit("== aurora verify: X11 window-mode (fullscreen + maximize/minimize) wiring ==");
 
     aurora::e2e::WindowSpec spec;
     spec.backend = aurora::e2e::Backend::X11;
@@ -222,8 +237,8 @@ auto main(int argc, char **argv) -> int {
     // ---- (1) 能力位自证 ----
     const aurora::PlatformCapabilities caps = aurora::platform().capabilities();
     check(caps.runtime_fullscreen, "(1a) capabilities.runtime_fullscreen is true for X11 (set_fullscreen wired)");
-    check(!caps.runtime_window_mode,
-          "(1b) capabilities.runtime_window_mode is false for X11 (minimize/toggle_maximize legs unwired)");
+    check(caps.runtime_window_mode,
+          "(1b) capabilities.runtime_window_mode is true for X11 (minimize/toggle_maximize legs wired)");
 
     // ---- (2) set_fullscreen(true) ----
     {
@@ -276,8 +291,45 @@ auto main(int argc, char **argv) -> int {
         }
     }
 
+    // ---- (4) toggle_maximize() ----
+    {
+        CapturedLog log;
+        const Atom max_h = XInternAtom(dpy, "_NET_WM_STATE_MAXIMIZED_HORZ", False);
+        const Atom max_v = XInternAtom(dpy, "_NET_WM_STATE_MAXIMIZED_VERT", False);
+        win.toggle_maximize();
+        settle_wm(session);
+        const bool maxed = has_net_wm_state(dpy, xwin, max_h) && has_net_wm_state(dpy, xwin, max_v);
+        check(maxed, "(4a) _NET_WM_STATE contains MAXIMIZED_HORZ + MAXIMIZED_VERT after toggle_maximize()");
+        check(win.window_mode() == aurora::WindowMode::Maximized,
+              "(4b) application snapshot reports Maximized after toggle_maximize()");
+        check(log.count("WRN") == 0, "(4c) toggle_maximize() produced no WARN (real implementation, not a stub)");
+        // 幂等二次切换：移除两枚原子、快照回 Normal。
+        win.toggle_maximize();
+        settle_wm(session);
+        const bool unmaxed = !has_net_wm_state(dpy, xwin, max_h) && !has_net_wm_state(dpy, xwin, max_v);
+        check(unmaxed, "(4d) MAXIMIZED atoms removed after second toggle_maximize()");
+        check(win.window_mode() == aurora::WindowMode::Normal,
+              "(4e) application snapshot reports Normal after second toggle_maximize()");
+    }
+
+    // ---- (5) minimize() ----
+    {
+        CapturedLog log;
+        win.minimize();
+        settle_wm(session);
+        check(win.window_mode() == aurora::WindowMode::Minimized,
+              "(5a) application snapshot reports Minimized after minimize()");
+        // 独立取证：iconify 后 X 窗口被 unmap（map_state == IsUnmapped），与 WM 状态一致；
+        // 不依赖 `_NET_WM_STATE_HIDDEN` 支持（各 WM 实现不一）。
+        XWindowAttributes attr{};
+        const bool unmapped = (XGetWindowAttributes(dpy, xwin, &attr) != 0) && attr.map_state == IsUnmapped;
+        check(unmapped, "(5b) X window is unmapped after minimize() (independent OS-side observation)");
+        check(log.count("WRN") == 0, "(5c) minimize() produced no WARN");
+        // 末步不再复位：本库未单独暴露「去 iconic」还原腿（还原依赖 OS / 任务栏）；残留态不影响判据。
+    }
+
     if (failures() == 0) {
-        emit("PASS: X11 window-mode fullscreen wiring accepted (real X session with WM)");
+        emit("PASS: X11 window-mode control wiring accepted (real X session with WM)");
         return 0;
     }
     emit("result: one or more criteria failed (exit 1)");

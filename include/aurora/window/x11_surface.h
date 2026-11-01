@@ -124,6 +124,17 @@ class X11Surface final : public Surface {
     /// 几何还原），`set_fullscreen` 与 `set_window_mode(FullScreen)` 同源，幂等。
     /// @param on true 进入全屏，false 还原到进入前几何（由 WM 完成）。
     auto set_fullscreen(bool on) -> void override;
+    /// @brief 程序化最小化：转发 `set_window_mode(Minimized)`（`XIconifyWindow` 经 WM 收走窗口）。
+    ///
+    /// 与 CSD 最小化钮同源；幂等由 WM 受理态保证。还原腿依赖 OS（任务栏/WM 还原），本库不另存
+    /// 最小化意图——`set_window_mode(Normal)` / `toggle_maximize()` 落到 WM 的「去 iconic」请求。
+    auto minimize() -> void override;
+    /// @brief 程序化切换最大化：按当前 `d.mode` 调 `set/unset_maximized`（EWMH
+    ///        `_NET_WM_STATE_MAXIMIZED_*` 原子目标态请求，与 CSD 钮 `csd_toggle_maximize` 同源）。
+    ///
+    /// 直算目标态（Normal <-> Maximized），不做「读当前再补一次翻转」——异步 WM 下后者次序不可靠。
+    /// 幂等由 `set_window_mode` 保证。
+    auto toggle_maximize() -> void override;
     /// @brief 撤销本后端的关闭请求（关闭闸门否决时调用）：`WM_DELETE_WINDOW` 与 CSD 关闭钮
     ///        置的位可清（ICCCM 语义下客户端本就可以不销毁窗口）；`DestroyNotify` 置的位
     ///        **拒绝清**（XID 已失效，清位会造出收不掉的僵尸宿主并触发 BadWindow）。

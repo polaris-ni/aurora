@@ -1104,6 +1104,22 @@ auto X11Surface::set_fullscreen(bool on) -> void {
     set_window_mode(on ? WindowMode::FullScreen : WindowMode::Normal);
 }
 
+auto X11Surface::minimize() -> void {
+    // 与 set_window_mode(Minimized) 同源：XIconifyWindow 经 WM 收走窗口（unmap + 任务栏留痕）。
+    // 还原腿依赖 OS（任务栏点击 / WM 还原），本库不另存最小化意图。
+    set_window_mode(WindowMode::Minimized);
+}
+
+auto X11Surface::toggle_maximize() -> void {
+    Impl &d = *impl_;
+    if (d.dpy == nullptr) {
+        return;
+    }
+    // 与 CSD 钮 csd_toggle_maximize 同口径：按本地 mode 快照算目标态（Normal <-> Maximized）。
+    // 直算目标态而非「读当前再补一次翻转」——异步 WM 下后者的次序不可靠；幂等由 set_window_mode 保证。
+    set_window_mode(d.mode == WindowMode::Maximized ? WindowMode::Normal : WindowMode::Maximized);
+}
+
 auto X11Surface::set_present_dirty(const std::vector<Rect> &device_rects) -> void {
     impl_->present_dirty = device_rects;
 }

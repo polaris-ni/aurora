@@ -208,9 +208,9 @@ AURORA_TEST_CASE(capability_matrix_pins_wired_backends) {
 
 AURORA_TEST_CASE(window_control_capability_matrix_pins_entry_wiring) {
     // 程序化窗控两枚能力位，口径是「公共入口是否全部接通」而非「OS 有没有机制」：
-    // 三原语腿（minimize/toggle_maximize/set_window_mode）——Win32 / D3D11（同一宿主）与
-    // Wayland / MacOS（四槽原已齐全）为 true；X11 / Glfw 的 set_window_mode 有覆写但三枚
-    // 切换腿未接，按整入口口径如实 false；Wasm / Headless 非 OS 能力，恒 false。
+    // 三原语腿（minimize/toggle_maximize/set_window_mode）六家桌面后端全接——Win32 / D3D11（同一宿主）、
+    // Wayland / MacOS（四槽原已齐全）、X11（XIconifyWindow + _NET_WM_STATE_MAXIMIZED_*）、Glfw
+    // （glfwIconifyWindow + glfwMaximizeWindow）——均为 true；Wasm / Headless 非 OS 能力，恒 false。
     auto window_mode_bit = [](SurfaceKind kind) -> bool {
         Platform p;
         p.surface = kind;
@@ -220,7 +220,9 @@ AURORA_TEST_CASE(window_control_capability_matrix_pins_entry_wiring) {
     AURORA_TEST_CHECK_TRUE(window_mode_bit(SurfaceKind::D3D11));
     AURORA_TEST_CHECK_TRUE(window_mode_bit(SurfaceKind::Wayland));
     AURORA_TEST_CHECK_TRUE(window_mode_bit(SurfaceKind::MacOS));
-    for (const SurfaceKind kind : {SurfaceKind::X11, SurfaceKind::Glfw, SurfaceKind::Wasm, SurfaceKind::Headless}) {
+    AURORA_TEST_CHECK_TRUE(window_mode_bit(SurfaceKind::X11));
+    AURORA_TEST_CHECK_TRUE(window_mode_bit(SurfaceKind::Glfw));
+    for (const SurfaceKind kind : {SurfaceKind::Wasm, SurfaceKind::Headless}) {
         AURORA_TEST_CHECK_FALSE(window_mode_bit(kind));
     }
 

@@ -73,11 +73,12 @@ struct PlatformCapabilities {
     /// @brief 程序化窗控三原语（`minimize()` / `toggle_maximize()` / `set_window_mode()`）已接到 OS。
     ///
     /// 能力位答的是「**公共入口是否全部接通**」，不是「OS 有没有这个机制」（与 `runtime_visibility`
-    /// 同款口径）——`X11` 的 `_NET_WM_STATE_MAXIMIZED_*` 机制在但公共切换腿未落桥，仍如实 false。
-    /// Win32 / D3D11 共用同一 `Win32Host`（`SC_*` 目标态 + `WM_SIZE` 回报定档）故同翻；
+    /// 同款口径）。Win32 / D3D11 共用同一 `Win32Host`（`SC_*` 目标态 + `WM_SIZE` 回报定档）故同翻；
     /// `Wayland` 走 xdg_toplevel 的 set_minimized/set_maximized，`MacOS` 走 AppKit
-    /// `miniaturize:` / `zoom:`；`Glfw` / `Wasm` / `Headless` 恒 false（Headless 的
-    /// `set_window_mode` 是测试 seam，不代表 OS 能力）。
+    /// `miniaturize:` / `zoom:`；`X11` 的 minimize 经 `XIconifyWindow`、toggle_maximize 经
+    /// `_NET_WM_STATE_MAXIMIZED_*` 目标态请求（与 CSD 钮同源），`Glfw` 经 `glfwIconifyWindow` /
+    /// `glfwMaximizeWindow`（回调回来定档上报）——六家桌面后端三腿皆齐，故全 true；`Wasm` 无窗口概念、
+    /// `Headless` 的 `set_window_mode` 是测试 seam（不代表 OS 能力），恒 false。
     bool runtime_window_mode = false;
     /// @brief 全屏切换（`set_fullscreen()` 与 `set_window_mode(FullScreen)`）已接到 OS。
     ///
@@ -146,9 +147,12 @@ struct Platform {
     /// （当前为 Win32 / D3D11 / MacOS：MacOS 经 `NSApp` 激活态与 `setLevel` 置顶；其余后端为
     /// 「可查询的不支持」，公共 setter 是可观测的 no-op 而非静默失效）；
     /// `runtime_window_mode` / `runtime_fullscreen` 按「公共入口是否全部接通」置位——两者均为
-    /// Win32 / D3D11 / Wayland / MacOS 为 true（`runtime_window_mode` 四家四槽原已齐全；
-    /// `runtime_fullscreen` 中 Win32 / D3D11 经 `Win32Host::set_fullscreen` 的 borderless 实现、
-    /// Wayland / MacOS 经各后端既有通道，X11 / Glfw 公共切换腿仍未接线故 false，应用先查询再决定画不画全屏钮）；
+    /// 六家桌面后端（Win32 / D3D11 / Wayland / MacOS / X11 / Glfw）全 true（`runtime_window_mode`
+    /// 三原语腿现已全部接通：Win32/D3D11 经 `Win32Host`、`Wayland`/`MacOS` 经各后端既有通道、
+    /// `X11` 经 `XIconifyWindow` + `_NET_WM_STATE_MAXIMIZED_*`、`Glfw` 经 `glfwIconifyWindow` /
+    /// `glfwMaximizeWindow`；`runtime_fullscreen` 中 Win32 / D3D11 经 `Win32Host::set_fullscreen` 的
+    /// borderless 实现、Wayland / MacOS 经各后端既有通道、X11 经 `_NET_WM_STATE_FULLSCREEN` 原子、
+    /// Glfw 经 borderless 铺满显示器）；Wasm / Headless 非 OS 能力，恒 false，应用先查询再决定画不画全屏钮；
     /// `native_print_session` / `url_scheme_registration` / `file_association` / `run_at_login`
     /// 与 `SurfaceKind` 无关（入口是进程级自由函数），按平台桥的编译期接线整体置位；Linux 的
     /// `native_print_session` 恒 false（不引入 libcups）。
@@ -201,11 +205,13 @@ struct Platform {
         c.runtime_always_on_top =
             (surface == SurfaceKind::Win32 || surface == SurfaceKind::D3D11 || surface == SurfaceKind::MacOS);
         // 程序化窗控三原语：Win32 / D3D11 接线（同一 `Win32Host` 的 `SC_*` 目标态 + `WM_SIZE`
-        // 回报定档）；Wayland / MacOS 四槽原已齐全，照常为 true。其余后端为「可查询的不支持」：
-        // X11 / Glfw 的 `set_window_mode` 有覆写但三枚切换腿未接（能力位答「公共入口是否全部
-        // 接通」，故整体仍 false）；Wasm 无窗口概念；Headless 的 `set_window_mode` 是测试 seam。
+        // 回报定档）；Wayland / MacOS 四槽原已齐全；X11 / Glfw 经本批落地（minimize 经
+        // `XIconifyWindow` / `glfwIconifyWindow`，toggle_maximize 经 `_NET_WM_STATE_MAXIMIZED_*` /
+        // `glfwMaximizeWindow`）亦全接——六家桌面后端均 true。Wasm 无窗口概念；Headless 的
+        // `set_window_mode` 是测试 seam（不代表 OS 能力），恒 false。
         c.runtime_window_mode = (surface == SurfaceKind::Win32 || surface == SurfaceKind::D3D11 ||
-                                 surface == SurfaceKind::Wayland || surface == SurfaceKind::MacOS);
+                                 surface == SurfaceKind::Wayland || surface == SurfaceKind::MacOS ||
+                                 surface == SurfaceKind::X11 || surface == SurfaceKind::Glfw);
         // 全屏切换：Win32 / D3D11（同一 Win32Host 的 borderless 全屏：monitor 枚举 + 还原几何 +
         // WM_SIZE 定档上报）/ Wayland / MacOS 四家已接到 OS；X11 经 `set_window_mode(FullScreen)` 发
         // `_NET_WM_STATE_FULLSCREEN` 原子（WM 接管几何还原），`set_fullscreen` 覆写转发同源；Glfw 经
