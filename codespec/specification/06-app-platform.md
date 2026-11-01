@@ -506,16 +506,16 @@ au::App().window(win ? std::move(win.value()) : nullptr)
 
 `runtime_visibility` 与 `runtime_always_on_top` 表「OS 提供运行期窗口显隐 / 置顶机制，且本库已把 §3.6 的四枚开关接到该机制」。当前 `Win32`、`D3D11` 与 `MacOS` 为 true：Win32 / D3D11 共用同一宿主（`ShowWindow(SW_SHOWNA / SW_HIDE)` 与 `SetWindowPos(HWND_TOPMOST / HWND_NOTOPMOST)`，故同翻；wgpu 是渲染偏好而非独立 `SurfaceKind`，不另列）；macOS 落 `orderFrontRegardless` / `orderOut:` 与 `setLevel:(NSFloatingWindowLevel / NSNormalWindowLevel)`。其余恒 false 且各有一句实情：`X11` 的 `XMapWindow` / `XUnmapWindow` 与 `Glfw` 的 `glfwShowWindow` / `glfwHideWindow` **机制在但本库未落桥**，`Wayland` 既没有「隐藏顶层窗口」也没有「置顶」的核心协议（只有 minimize），`Headless` 是记录值 seam 而非 OS 机制——**未接线的方向不预先声称**。缺位时 `set_visible` / `set_always_on_top` 是**可观测的 no-op**（`is_visible()` 恒为基类默认 true、`is_always_on_top()` 恒为 false），应用据此先查询再降级，而不是「按了热键窗口没反应还以为是热键坏了」。逐 `SurfaceKind` 期望表由 `utest_window_runtime_control` 锚定（「未接线先翻位」的变异对应用例转红）。
 
-`runtime_window_mode` 与 `runtime_fullscreen` 表「程序化窗控公共入口是否全部接通」——答的是**公共入口**（`Surface` 覆写），不是「OS 有没有这个机制」：`X11` 的 `_NET_WM_STATE_MAXIMIZED_*` / `_NET_WM_STATE_FULLSCREEN` 机制在但公共切换槽未覆写，仍如实 false，待公共切换腿补齐后再翻位。逐位矩阵：
+`runtime_window_mode` 与 `runtime_fullscreen` 表「程序化窗控公共入口是否全部接通」——答的是**公共入口**（`Surface` 覆写），不是「OS 有没有这个机制」：`X11` 的 `_NET_WM_STATE_MAXIMIZED_*` / `_NET_WM_STATE_FULLSCREEN` 机制在；`runtime_window_mode` 因 `minimize` / `toggle_maximize` 两枚公共切换腿在 X11 / Glfw 未覆写，仍如实 false（待补齐后再翻位）；`runtime_fullscreen` 则因 `set_fullscreen` 覆写 + `set_window_mode(FullScreen)` 已在 X11（发 `_NET_WM_STATE_FULLSCREEN` 原子、WM 接管几何还原）/ Glfw（borderless 铺满所在显示器、存/还原几何与装饰态、不改视频模式）落地，翻为 true。逐位矩阵：
 
 | `SurfaceKind` | `runtime_window_mode`（`minimize` / `toggle_maximize` / `set_window_mode`） | `runtime_fullscreen`（`set_fullscreen` / 直设 `FullScreen`） |
 |:---|:---|:---|
 | `Win32` / `D3D11` | true（同一 `Win32Host` 的 `SC_*` 目标态 + `WM_SIZE` 回报定档） | true（borderless 全屏：monitor 枚举 + 还原几何 + `WM_SIZE` 定档上报，由 `Win32Host::set_fullscreen` 统一处理） |
-| `X11` / `Glfw` | false（`set_window_mode` 槽有覆写但三枚公共切换腿未接，按整入口口径整体 false） | false（同左；Glfw 另无 monitor 通道） |
+| `X11` / `Glfw` | false（`set_window_mode` 槽有覆写但 `minimize` / `toggle_maximize` 两枚公共切换腿未接，按整入口口径整体 false） | true（X11 经 `set_window_mode(FullScreen)` 发 `_NET_WM_STATE_FULLSCREEN` 原子、WM 接管几何还原，`set_fullscreen` 覆写转发同源；Glfw 经 borderless 铺满所在显示器，存/还原几何 + 装饰态，不改视频模式） |
 | `Wayland` / `MacOS` | true（两家四槽原已齐全） | true（同左） |
 | `Wasm` / `Headless` | false（Headless 的 `set_window_mode` 是测试 seam，不代表 OS 能力） | false（同左） |
 
-能力位为 false 时对应公共入口是**可观测的 no-op**（`minimize` / `toggle_maximize` / `set_fullscreen` 落基类空实现），应用据此先查询再决定画不画窗控钮 / 全屏钮；Win32 / D3D11 的全屏档已是真实 borderless 实现（见上表矩阵），不靠 WARN 兜底。逐 `SurfaceKind` 期望表由 `utest_window_runtime_control` 锚定；Win32 家族四槽的真接线由 `tools/verify/win32_window_mode_live_probe.cpp` 以 OS 实值（`IsIconic` / `IsZoomed` / `GetWindowRect`）真机取证（无头 CI 建不了真窗口，探针不进 CTest）。
+能力位为 false 时对应公共入口是**可观测的 no-op**（`minimize` / `toggle_maximize` / `set_fullscreen` 落基类空实现），应用据此先查询再决定画不画窗控钮 / 全屏钮；Win32 / D3D11 与 X11 / Glfw 的全屏档已是真实实现（Win32 / D3D11 为 borderless 全屏、X11 发 `_NET_WM_STATE_FULLSCREEN` 原子、Glfw 为 borderless 铺满，见上表矩阵），不靠 WARN 兜底。逐 `SurfaceKind` 期望表由 `utest_window_runtime_control` 锚定；Win32 家族四槽的真接线由 `tools/verify/win32_window_mode_live_probe.cpp` 以 OS 实值（`IsIconic` / `IsZoomed` / `GetWindowRect`）真机取证（无头 CI 建不了真窗口，探针不进 CTest）。
 
 **桌面外壳集成四枚位**（`native_print_session` / `url_scheme_registration` / `file_association` / `run_at_login`）表「OS 提供该机制、且本库已把桥接好了」。与上面各位的差别只有一处：这四个入口是**进程级自由函数**（`include/aurora/app/` 下五个新头），与 `SurfaceKind` 无关，故按编译期平台整体置位、不随 Surface 变化——Windows / Linux 上即便是 `Headless` Surface 也照常持有这些 OS 机制。逐平台取值：
 

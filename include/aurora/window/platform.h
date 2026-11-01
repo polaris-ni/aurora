@@ -143,7 +143,8 @@ struct Platform {
     /// 未接线的方向不预先声称支持）；`recent_documents_os_projection` 仅在已落 OS 投影桥的后端下为
     /// true；`native_menu_bar` 与之同口径（当前均为 Win32 / D3D11 / MacOS，macOS 两条桥同批落地）；
     /// `runtime_visibility` 与 `runtime_always_on_top` 同样仅在已接运行期窗口开关的后端下为 true
-    /// （当前仅 Win32 / D3D11，其余后端为「可查询的不支持」，公共 setter 是可观测的 no-op 而非静默失效）；
+    /// （当前为 Win32 / D3D11 / MacOS：MacOS 经 `NSApp` 激活态与 `setLevel` 置顶；其余后端为
+    /// 「可查询的不支持」，公共 setter 是可观测的 no-op 而非静默失效）；
     /// `runtime_window_mode` / `runtime_fullscreen` 按「公共入口是否全部接通」置位——两者均为
     /// Win32 / D3D11 / Wayland / MacOS 为 true（`runtime_window_mode` 四家四槽原已齐全；
     /// `runtime_fullscreen` 中 Win32 / D3D11 经 `Win32Host::set_fullscreen` 的 borderless 实现、
@@ -206,10 +207,13 @@ struct Platform {
         c.runtime_window_mode = (surface == SurfaceKind::Win32 || surface == SurfaceKind::D3D11 ||
                                  surface == SurfaceKind::Wayland || surface == SurfaceKind::MacOS);
         // 全屏切换：Win32 / D3D11（同一 Win32Host 的 borderless 全屏：monitor 枚举 + 还原几何 +
-        // WM_SIZE 定档上报）/ Wayland / MacOS 四家已接到 OS。X11 有 `_NET_WM_STATE_FULLSCREEN`
-        // 但公共切换腿未接线；Glfw 无 monitor 通道——二者如实 false，应用先查询再决定是否提供全屏入口。
+        // WM_SIZE 定档上报）/ Wayland / MacOS 四家已接到 OS；X11 经 `set_window_mode(FullScreen)` 发
+        // `_NET_WM_STATE_FULLSCREEN` 原子（WM 接管几何还原），`set_fullscreen` 覆写转发同源；Glfw 经
+        // borderless 铺满所在显示器（存/还原几何 + 装饰态，不改视频模式）落地——四家桌面后端 + Glfw 全
+        // true；Wasm / Headless 非 OS 能力，恒 false，应用先查询再决定是否提供全屏入口。
         c.runtime_fullscreen = (surface == SurfaceKind::Win32 || surface == SurfaceKind::D3D11 ||
-                                 surface == SurfaceKind::Wayland || surface == SurfaceKind::MacOS);
+                                 surface == SurfaceKind::Wayland || surface == SurfaceKind::MacOS ||
+                                 surface == SurfaceKind::X11 || surface == SurfaceKind::Glfw);
         // 桌面外壳集成四枚位：入口是进程级自由函数（`include/aurora/app/` 的五个新头），与
         // `SurfaceKind` 无关——平台桥按编译期 OS 宏接线（见 `src/aurora/app/detail/` 的三套
         // `*_shell_integration.cpp`），故这里按平台整体置位，不随 Surface 变化；Headless 在

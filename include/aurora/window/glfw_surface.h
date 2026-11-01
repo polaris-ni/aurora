@@ -195,9 +195,14 @@ class GlfwSurface : public Surface {
     [[nodiscard]] auto capture_window(const std::string &path) -> Result<bool> override;
     /// @brief 程序化设定几何态（幂等）：Normal / Maximized / Minimized 经 glfwRestoreWindow /
     ///        glfwMaximizeWindow / glfwIconifyWindow 落地（回调回来定档上报，与 Wayland 同构）；
-    ///        FullScreen 无实现（monitor 切换通道未建），调用时留一条 WARN。
+    ///        FullScreen 经 borderless 全屏（铺满所在显示器，存/还原几何 + 装饰态，不改视频模式）。
     /// @param m 目标几何态。
     auto set_window_mode(WindowMode m) -> void override;
+    /// @brief 程序化设置全屏：进入/退出 borderless 全屏（铺满所在显示器，不改视频模式）。
+    ///
+    /// 与 `set_window_mode(FullScreen)` 同源；进入前存档几何与装饰态，退出还原，幂等。
+    /// @param on true 进入全屏，false 还原到进入前几何。
+    auto set_fullscreen(bool on) -> void override;
 
   private:
     struct Impl;

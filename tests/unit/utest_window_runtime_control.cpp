@@ -225,7 +225,9 @@ AURORA_TEST_CASE(window_control_capability_matrix_pins_entry_wiring) {
     }
 
     // 全屏腿——Win32 / D3D11（borderless 全屏：monitor 枚举 + 还原几何）/ Wayland / MacOS 四家已接
-    // 到 OS；X11 有 _NET_WM_STATE_FULLSCREEN 但公共切换腿未接线（机制在≠接线）；Glfw 无 monitor 通道。
+    // 到 OS；X11 经 set_window_mode(FullScreen) 发 _NET_WM_STATE_FULLSCREEN 原子（WM 接管几何还原）、
+    // set_fullscreen 覆写转发同源；Glfw 经 borderless 铺满所在显示器（不改视频模式）落地——六家桌面后端
+    // + Glfw 全 true；Wasm / Headless 非 OS 能力，恒 false。
     auto fullscreen_bit = [](SurfaceKind kind) -> bool {
         Platform p;
         p.surface = kind;
@@ -235,8 +237,9 @@ AURORA_TEST_CASE(window_control_capability_matrix_pins_entry_wiring) {
     AURORA_TEST_CHECK_TRUE(fullscreen_bit(SurfaceKind::D3D11));
     AURORA_TEST_CHECK_TRUE(fullscreen_bit(SurfaceKind::Wayland));
     AURORA_TEST_CHECK_TRUE(fullscreen_bit(SurfaceKind::MacOS));
-    for (const SurfaceKind kind : {SurfaceKind::X11, SurfaceKind::Glfw, SurfaceKind::Wasm,
-                                   SurfaceKind::Headless}) {
+    AURORA_TEST_CHECK_TRUE(fullscreen_bit(SurfaceKind::X11));
+    AURORA_TEST_CHECK_TRUE(fullscreen_bit(SurfaceKind::Glfw));
+    for (const SurfaceKind kind : {SurfaceKind::Wasm, SurfaceKind::Headless}) {
         AURORA_TEST_CHECK_FALSE(fullscreen_bit(kind));
     }
 

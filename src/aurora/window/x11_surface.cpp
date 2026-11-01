@@ -1098,6 +1098,12 @@ auto X11Surface::set_window_mode(WindowMode m) -> void {
     }
 }
 
+auto X11Surface::set_fullscreen(bool on) -> void {
+    // X11 全屏经 EWMH `_NET_WM_STATE_FULLSCREEN` 原子交给 WM 接管，进出屏的几何还原也由 WM 完成；
+    // `set_window_mode(FullScreen)` 已发该原子，这里仅作语义化转发，幂等由 set_window_mode 保证。
+    set_window_mode(on ? WindowMode::FullScreen : WindowMode::Normal);
+}
+
 auto X11Surface::set_present_dirty(const std::vector<Rect> &device_rects) -> void {
     impl_->present_dirty = device_rects;
 }

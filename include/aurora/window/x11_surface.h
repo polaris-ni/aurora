@@ -118,6 +118,12 @@ class X11Surface final : public Surface {
     /// （取代 CSD 钮的 TOGGLE 切换语义）；`Minimized` 走 `XIconifyWindow`。
     /// @param m 目标几何态。
     auto set_window_mode(WindowMode m) -> void override;
+    /// @brief 程序化设置全屏：转发 `set_window_mode(FullScreen / Normal)`。
+    ///
+    /// X11 的 `FullScreen` 经 EWMH `_NET_WM_STATE_FULLSCREEN` 原子交给 WM 接管（含进出全屏的
+    /// 几何还原），`set_fullscreen` 与 `set_window_mode(FullScreen)` 同源，幂等。
+    /// @param on true 进入全屏，false 还原到进入前几何（由 WM 完成）。
+    auto set_fullscreen(bool on) -> void override;
     /// @brief 撤销本后端的关闭请求（关闭闸门否决时调用）：`WM_DELETE_WINDOW` 与 CSD 关闭钮
     ///        置的位可清（ICCCM 语义下客户端本就可以不销毁窗口）；`DestroyNotify` 置的位
     ///        **拒绝清**（XID 已失效，清位会造出收不掉的僵尸宿主并触发 BadWindow）。
