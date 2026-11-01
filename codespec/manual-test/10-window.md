@@ -32,6 +32,8 @@
 | `tools/verify/x11_csd_live_probe.cpp` | `aurora_verify_x11_csd` | **X11 后端**的客户端自绘装饰（CSD）离屏像素级判据：`ClientSide` 撤 WM 口沿后标题栏带真绘出、`content_inset` 上报栏高、`Auto`/`Frameless` 零入侵口径（探针，非 demo） |
 | `tools/verify/win32_csd_live_probe.cpp` | `aurora_verify_win32_csd` | **Win32 后端**的客户端自绘装饰（CSD）离屏像素级判据：`WM_NCCALCSIZE` 吞框（最大化拉回工作区）、五档策略的 `content_inset` / 像素 / `WM_NCHITTEST` 热区回归、按钮释放触发与拖离取消、降级归零、热更（探针，非 demo） |
 | `tools/verify/win32_window_mode_live_probe.cpp` | `aurora_verify_win32_window_mode` | **Win32 / D3D11 家族**程序化窗控四槽公共入口（minimize / toggle_maximize / set_window_mode / set_fullscreen）的 OS 实值判据：`IsIconic` / `IsZoomed` / `GetWindowRect` 独立取证、上报链同链、目标态幂等、全屏档覆盖所在显示器整屏且退出还原、无 WARN，三档装饰（default / borderless / frameless）逐条重跑（探针，非 demo） |
+| `tools/verify/x11_window_mode_live_probe.cpp` | `aurora_verify_x11_window_mode` | **X11 后端**程序化窗控全屏真机验收：`set_fullscreen` 经 EWMH `_NET_WM_STATE_FULLSCREEN` 原子独立取证（WM 已受理）+ 应用快照 `FullScreen` + 零 WARN + 几何覆盖（单显示器硬断言、多显示器降级 NOTE）；能力位 `runtime_fullscreen` 翻 true 的自证（探针，非 demo） |
+| `tools/verify/glfw_window_mode_live_probe.cpp` | `aurora_verify_glfw_window_mode` | **GLFW 后端**程序化窗控全屏真机验收：原生几何观测（Linux Xlib / Windows HWND）比对 GLFW 显示器视口覆盖整屏（±2px）+ 应用快照 `FullScreen` + 零 WARN + 退出还原；能力位 `runtime_fullscreen` 翻 true 的自证（探针，非 demo） |
 
 **第三个载体的构建口径与前两个不同，须单独构建目录**（探针受两个开关门控，二者在本模块的默认
 `build/` 里都不满足，故前两个载体的构建步骤不能覆盖它）：
@@ -58,6 +60,23 @@ cmake --build build-verify-x11 --target aurora_verify_x11_csd
 cmake -S . -B build-verify-win32 -G Ninja -DAURORA_BACKEND_WIN32=ON -DAURORA_ENABLE_DEBUG=ON -DAURORA_BUILD_VERIFY_TOOLS=ON
 cmake --build build-verify-win32 --target aurora_verify_win32_csd
 ```
+
+**X11 窗控全屏探针**：仅须 `AURORA_BACKEND_X11=ON` 与 `AURORA_BUILD_VERIFY_TOOLS=ON`（不读像素，无需
+`AURORA_ENABLE_DEBUG`），在真实 X 会话（含运行中的 WM）下运行：
+
+```
+cmake -S . -B build-verify-x11 -G Ninja -DAURORA_BACKEND_X11=ON -DAURORA_BUILD_VERIFY_TOOLS=ON
+cmake --build build-verify-x11 --target aurora_verify_x11_window_mode
+```
+
+**GLFW 窗控全屏探针**：仅须 `AURORA_BACKEND_GLFW=ON` 与 `AURORA_BUILD_VERIFY_TOOLS=ON`（不读像素，无需
+`AURORA_ENABLE_DEBUG`），在真实桌面会话（Linux / Windows）下运行：
+
+```
+cmake -S . -B build-verify-glfw -G Ninja -DAURORA_BACKEND_GLFW=ON -DAURORA_BUILD_VERIFY_TOOLS=ON
+cmake --build build-verify-glfw --target aurora_verify_glfw_window_mode
+```
+
 
 探针的判据段（`content_inset` / 标题栏带像素 / 零入侵）为**自动段**，退出码语义同上；悬停 / 按压 /
 拖拽 / 双击的**人工目视段**由用例步骤承载（见 TC-WINDOW-014），不受探针退出码覆盖。

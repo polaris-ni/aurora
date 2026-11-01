@@ -93,6 +93,14 @@ if (AURORA_BUILD_VERIFY_TOOLS)
     if (AURORA_BACKEND_X11)
         aurora_add_verify_probe(aurora_verify_x11_geometry "${_aurora_verify_dir}/x11_geometry_live_probe.cpp")
         list(APPEND _aurora_verify_targets aurora_verify_x11_geometry)
+
+    # ---- X11 程序化窗控全屏（真实 X server + 运行中的 WM）：`set_fullscreen` 真接线验收 ——
+    # 独立取证窗口属性 `_NET_WM_STATE` 含 `_NET_WM_STATE_FULLSCREEN` 原子（WM 已受理）、应用级快照
+    # 收敛 `FullScreen`、零 WARN；退出原子移除且几何还原。无头 CI 建不了真实 X server、也发不出
+    # 「WM 把窗口铺满显示器」这一事实，故不进 CTest。几何覆盖因 X11 后端未链 XRandr，多显示器下
+    # 降级为 NOTE，原子判据为绑定证据。构建须 -DAURORA_BACKEND_X11=ON。
+    aurora_add_verify_probe(aurora_verify_x11_window_mode "${_aurora_verify_dir}/x11_window_mode_live_probe.cpp")
+    list(APPEND _aurora_verify_targets aurora_verify_x11_window_mode)
     endif ()
 
     # ---- X11 Xdnd 拖入 / 拖出桥（真实 X 服务器）：`XdndAware` 广告 + 四态派发 + 动作协商 +
@@ -415,6 +423,13 @@ if (AURORA_BUILD_VERIFY_TOOLS)
     # 跨屏拖动触发 content scale 变更只能由人操作，故人工段未做记 PENDING MANUAL（退出码 3）。
     aurora_add_verify_probe(aurora_verify_glfw_dpi "${_aurora_verify_dir}/glfw_dpi_live_probe.cpp")
     list(APPEND _aurora_verify_targets aurora_verify_glfw_dpi)
+
+    # ---- GLFW 程序化窗控全屏（跨平台真实窗口）：`set_fullscreen` 的 borderless 铺满真接线验收 ——
+    # 主段独立观测窗口几何（Linux：Xlib + glfwGetX11Display；Windows：HWND + Monitor API；macOS
+    # 降级 NOTE）比对 GLFW 显示器视口，确认覆盖整屏（±2px）；应用级快照收敛 FullScreen、零 WARN；
+    # 退出几何还原。无头 CI 建不了真实窗口，故不进 CTest。构建须 -DAURORA_BACKEND_GLFW=ON。
+    aurora_add_verify_probe(aurora_verify_glfw_window_mode "${_aurora_verify_dir}/glfw_window_mode_live_probe.cpp")
+    list(APPEND _aurora_verify_targets aurora_verify_glfw_window_mode)
 
     # ---- GLFW GPU 特性（跨平台真实窗口）：常驻流式纹理与 GPU 层缓存真机核对 ----
     # 自动段核对能力位/契约位/流式逐版本像素/层缓存跨帧持久性；--interactive 人工目视。
