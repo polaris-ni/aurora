@@ -137,11 +137,11 @@ class Win32Surface final : public Surface {
     /// @brief 程序化设定几何态（Win32：原样转发宿主 `SC_*` 目标态语义，不做翻转）。
     ///
     /// 几何恢复腿（按落盘 `WindowGeometry::mode` 直设）与 `Maximized → FullScreen` 这类
-    /// 直设都靠本槽；`FullScreen` 分支由宿主留 WARN（本后端无全屏实现）。
+    /// 直设都靠本槽；`FullScreen` 分支经宿主 `Win32Host::set_fullscreen` 走真实 borderless 全屏（能力位 `runtime_fullscreen` 已翻 true）。
     /// @param m 目标几何态。
     auto set_window_mode(WindowMode m) -> void override { win_->set_window_mode(m); }
 
-    /// @brief 程序化设置全屏（Win32：进入转为 `FullScreen` 目标态由宿主留 WARN；退出为 no-op）。
+    /// @brief 程序化设置全屏：转发共享宿主 `Win32Host::set_fullscreen`，走真实 borderless 全屏（能力位 `runtime_fullscreen` 已翻 true）。
     ///
     /// 进入/退出 borderless 全屏：转发到共享宿主 `Win32Host::set_fullscreen`（monitor 枚举 /
     /// 还原几何 / 定档由宿主统一处理），`runtime_fullscreen` 已翻 true。

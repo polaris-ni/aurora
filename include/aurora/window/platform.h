@@ -144,9 +144,10 @@ struct Platform {
     /// true；`native_menu_bar` 与之同口径（当前均为 Win32 / D3D11 / MacOS，macOS 两条桥同批落地）；
     /// `runtime_visibility` 与 `runtime_always_on_top` 同样仅在已接运行期窗口开关的后端下为 true
     /// （当前仅 Win32 / D3D11，其余后端为「可查询的不支持」，公共 setter 是可观测的 no-op 而非静默失效）；
-    /// `runtime_window_mode` / `runtime_fullscreen` 按「公共入口是否全部接通」置位——前者 Win32 /
-    /// D3D11 / Wayland / MacOS 为 true（后两家四槽原已齐全），后者仅 Wayland / MacOS 为 true
-    /// （Win32 / D3D11 无全屏实现留 WARN，X11 / Glfw 公共切换腿未接线）；
+    /// `runtime_window_mode` / `runtime_fullscreen` 按「公共入口是否全部接通」置位——两者均为
+    /// Win32 / D3D11 / Wayland / MacOS 为 true（`runtime_window_mode` 四家四槽原已齐全；
+    /// `runtime_fullscreen` 中 Win32 / D3D11 经 `Win32Host::set_fullscreen` 的 borderless 实现、
+    /// Wayland / MacOS 经各后端既有通道，X11 / Glfw 公共切换腿仍未接线故 false，应用先查询再决定画不画全屏钮）；
     /// `native_print_session` / `url_scheme_registration` / `file_association` / `run_at_login`
     /// 与 `SurfaceKind` 无关（入口是进程级自由函数），按平台桥的编译期接线整体置位；Linux 的
     /// `native_print_session` 恒 false（不引入 libcups）。
