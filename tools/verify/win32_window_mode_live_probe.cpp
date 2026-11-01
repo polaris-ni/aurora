@@ -9,7 +9,7 @@
 //   * `IsIconic` / `IsZoomed` / `GetWindowRect` 是 OS 侧独立取证面，不读库内状态自证；
 //   * 上报链（应用级快照与回调）由 `WM_SIZE` → 宿主定档 → `Application` sink 驱动，
 //     只有真消息循环下才发生；
-//   * 全屏档的「可查询的不支持」要求那条 WARN 真的从宿主发出。
+//   * 全屏档（borderless）要求窗口真的覆盖所在显示器整屏并被 `WM_SIZE` 定档上报、无 WARN 兜底。
 //
 // 判据（每档装饰逐条重跑）：
 //   (1) `minimize()` → `IsIconic` 为真、应用级快照为 `Minimized`、`set_on_window_mode`
@@ -18,8 +18,8 @@
 //       窗口矩形回到调用前逐值（±1px）且快照 `Normal`；
 //   (3) `set_window_mode(Maximized)` 连调两次 → 两次后仍 `IsZoomed`、期间上报值不变
 //       （目标态幂等，不翻转）；`set_window_mode(Normal)` 还原；
-//   (4) `set_fullscreen(true)` → 窗口矩形逐值不变（±1px）、能力位 `runtime_fullscreen`
-//       为 false、恰一条 WARN；`set_fullscreen(false)` 不再产生 WARN。
+//   (4) `set_fullscreen(true)` → 窗口覆盖所在显示器整屏（±1px）、应用级快照为 `FullScreen`、无
+//       WARN；`set_fullscreen(false)` → 矩形还原到进入前逐值、快照 `Normal`、无 WARN。
 //
 // 构建（方式 ① 推荐，Windows 上无需手写编译命令）：
 //   cmake -S . -B build-verify -G Ninja -DCMAKE_BUILD_TYPE=Release -DAURORA_BACKEND_WIN32=ON
@@ -170,10 +170,10 @@ auto run_one_decoration(aurora::DecorationPolicy decoration, const std::string &
     app.set_on_window_mode([&reported](aurora::WindowMode m) -> void { reported.push_back(m); });
     pump_messages();
 
-    // 能力位自证：本家族公共入口已接通三原语、全屏档是可查询的不支持。
+    // 能力位自证：本家族公共入口已接通四原语，全屏档现已接 OS。
     const aurora::PlatformCapabilities caps = aurora::platform().capabilities();
     check(caps.runtime_window_mode, "(" + label + ") capabilities.runtime_window_mode is true for this backend");
-    check(!caps.runtime_fullscreen, "(" + label + ") capabilities.runtime_fullscreen is false for this backend");
+    check(caps.runtime_fullscreen, "(" + label + ") capabilities.runtime_fullscreen is true for this backend");
 
     // (1) minimize()：OS 实值 + 应用级快照 + 回调恰一次。
     reported.clear();
@@ -221,23 +221,35 @@ auto run_one_decoration(aurora::DecorationPolicy decoration, const std::string &
     pump_messages();
     check(IsZoomed(hwnd) == FALSE, "(" + label + ") set_window_mode(Normal) un-zoomed the window");
 
-    // (4) set_fullscreen：矩形不动 + 恰一条 WARN + off 无 WARN。
-    const RECT pre_fullscreen = window_rect(hwnd);
+    // (4) set_fullscreen（borderless 真实现）：进入覆盖整屏、退出还原矩形；能力位 true、无 WARN。
     {
         CapturedLog log;
+        const RECT pre_fullscreen = window_rect(hwnd);
         app.window()->set_fullscreen(true);
         pump_messages();
-        check(rect_close(window_rect(hwnd), pre_fullscreen),
-              "(" + label + ") set_fullscreen(true) left the window rect untouched (+-1px)");
-        check(log.count("WRN") == 1,
-              "(" + label + ") set_fullscreen(true) produced exactly one WARN (no silent swallow)");
-    }
-    {
-        CapturedLog log;
+        // 进入：窗口覆盖所在显示器整屏（与 rcMonitor 对齐，±1px）。
+        HMONITOR mon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+        MONITORINFO mi{};
+        mi.cbSize = sizeof(mi);
+        RECT monitor_rect{};
+        if (GetMonitorInfoA(mon, &mi) != FALSE) {
+            monitor_rect = mi.rcMonitor;
+        }
+        check(rect_close(window_rect(hwnd), monitor_rect),
+              "(" + label + ") set_fullscreen(true) covered the whole monitor (rcMonitor, +-1px)");
+        check(app.window_mode().get() == aurora::WindowMode::FullScreen,
+              "(" + label + ") set_fullscreen(true) reported FullScreen to the application snapshot");
+        check(log.count("WRN") == 0,
+              "(" + label + ") set_fullscreen(true) produced no WARN (real implementation, not a stub)");
+        // 退出：矩形还原到进入前逐值、快照回 Normal。
         app.window()->set_fullscreen(false);
         pump_messages();
+        check(rect_close(window_rect(hwnd), pre_fullscreen),
+              "(" + label + ") set_fullscreen(false) restored the pre-fullscreen window rect (+-1px)");
+        check(app.window_mode().get() == aurora::WindowMode::Normal,
+              "(" + label + ") set_fullscreen(false) reported Normal to the application snapshot");
         check(log.count("WRN") == 0,
-              "(" + label + ") set_fullscreen(false) is a quiet no-op (never entered fullscreen)");
+              "(" + label + ") set_fullscreen(false) produced no WARN");
     }
     return true;  // Application 析构销毁窗口
 }

@@ -277,7 +277,7 @@ drain_posted → pump_all_once → on_frame_ → poll_close_requests → tick_al
 |:---|:---|:---|
 | Wayland | `xdg_toplevel` 的 set/unset_maximized 与 set/unset_fullscreen 按目标态组合（`Normal` 只拆当前已挂的态）；实现内立即 `notify_window_mode`，稍后到达的 configure 以相同值幂等收敛（本地态仍由 configure 单独驱动） | 真实现 |
 | X11 | EWHM `_NET_WM_STATE` **ADD / REMOVE 目标态** ClientMessage——CSD 三钮原 `_NET_WM_STATE_TOGGLE` 切换语义已一并重构为按本地 mode 快照算目标态；`Minimized` 走 `XIconifyWindow`；属性通告到达后经既有路径更新并上报。注意这是**宿主方法**：`minimize` / `toggle_maximize` / `set_fullscreen` 三枚公共切换槽无覆写（落基类 no-op），公共切换腿另立缺口（机制在 ≠ 接线，见 §5 能力位口径） | 真实现（`set_window_mode` 槽） |
-| Win32 | `SC_RESTORE` / `SC_MAXIMIZE` / `SC_MINIMIZE` 经窗口过程（与用户走系统菜单同路径），`WM_SIZE` 回来定档上报。注意这是**宿主方法**：公共槽由 `Win32Surface` 覆写转发（`minimize` → `SC_MINIMIZE`；`toggle_maximize` 以 OS 实值 `IsZoomed` 判档；`set_window_mode` 原样转发；`set_fullscreen(true)` 转 `FullScreen` 留 WARN、off 为 no-op） | 真实现 |
+| Win32 | `SC_RESTORE` / `SC_MAXIMIZE` / `SC_MINIMIZE` 经窗口过程（与用户走系统菜单同路径），`WM_SIZE` 回来定档上报。注意这是**宿主方法**：公共槽由 `Win32Surface` 覆写转发（`minimize` → `SC_MINIMIZE`；`toggle_maximize` 以 OS 实值 `IsZoomed` 判档；`set_window_mode` 原样转发；`set_fullscreen` 转发 `Win32Host::set_fullscreen` 做 borderless 全屏——monitor 枚举 + 还原几何 + `WM_SIZE` 定档上报） | 真实现 |
 | D3D11 | 同一 `Win32Host` 宿主，`D3D11Surface` 四枚公共槽内联转发与 `Win32Surface` 逐字同口径（此前落基类 no-op，已补） | 真实现 |
 | GLFW | `glfwRestoreWindow` / `glfwMaximizeWindow` / `glfwIconifyWindow`，回调回来定档上报。注意这是**宿主方法**：`minimize` / `toggle_maximize` / `set_fullscreen` 三枚公共切换槽无覆写（落基类 no-op），公共切换腿另立缺口 | 真实现（`set_window_mode` 槽） |
 | Headless | 记录目标态 + `notify_window_mode` 同步上报：无 OS 语义、零副作用、可断言（无头几何恢复用例的观测面） | 真实现（测试 seam） |
@@ -295,7 +295,7 @@ drain_posted → pump_all_once → on_frame_ → poll_close_requests → tick_al
 **已知缺口（均不在本批，不得暗示已修）**：
 
 - Wayland 的 `set_position` 在协议层不可设（见上条「Linux 几何 setter 现状」）——Wayland 上位置恢复仍是 no-op；尺寸恢复是**提议**语义（合成器可拒绝），真机读数须区分「提议已送达」与「确实按目标尺寸落地」；
-- Win32 与 GLFW 的 `FullScreen` 无实现（monitor 切换通道未建），调用时留一条 WRN（tag `"window"`）；
+- Win32 / D3D11 的 `FullScreen` 已由 `Win32Host::set_fullscreen` 真实现（borderless 全屏：monitor 枚举 + 还原几何 + `WM_SIZE` 定档上报，退出还原到进入前几何）；GLFW 的 `FullScreen` 仍无实现（monitor 切换通道未建），调用时落基类 no-op；
 - `WgpuX11Surface` / `WgpuWin32Surface` 两个同源面**不转发任何几何原语**（`minimize` / `toggle_maximize` / `set_fullscreen` 历来不转发，此前同批补转发的还有 `WgpuWaylandSurface` 与 `D3D11Surface`——D3D11 已补四槽转发，见上表）——统一既有缺口，不在本批；
 - `X11` / `GLFW` 的三枚公共切换槽（`minimize` / `toggle_maximize` / `set_fullscreen`）无 `Surface` 覆写（落基类 no-op）：两家 `set_window_mode` 槽已真实现、CSD 钮走内部目标态路径，但应用自绘标题栏的公共切换腿未接；能力位按「公共入口是否全部接通」口径如实为 false（§5），待公共切换腿补齐后再翻位；
 - 应用级 `window_mode()` State 只聚合主窗（`register_host` 的 mode sink 仅在宿主即主窗时转发）：既有口径、非本批引入，仅在 §6.2 补记，行为不改。
@@ -510,12 +510,12 @@ au::App().window(win ? std::move(win.value()) : nullptr)
 
 | `SurfaceKind` | `runtime_window_mode`（`minimize` / `toggle_maximize` / `set_window_mode`） | `runtime_fullscreen`（`set_fullscreen` / 直设 `FullScreen`） |
 |:---|:---|:---|
-| `Win32` / `D3D11` | true（同一 `Win32Host` 的 `SC_*` 目标态 + `WM_SIZE` 回报定档） | false（无全屏实现，`set_fullscreen(true)` 留唯一 WARN） |
+| `Win32` / `D3D11` | true（同一 `Win32Host` 的 `SC_*` 目标态 + `WM_SIZE` 回报定档） | true（borderless 全屏：monitor 枚举 + 还原几何 + `WM_SIZE` 定档上报，由 `Win32Host::set_fullscreen` 统一处理） |
 | `X11` / `Glfw` | false（`set_window_mode` 槽有覆写但三枚公共切换腿未接，按整入口口径整体 false） | false（同左；Glfw 另无 monitor 通道） |
 | `Wayland` / `MacOS` | true（两家四槽原已齐全） | true（同左） |
 | `Wasm` / `Headless` | false（Headless 的 `set_window_mode` 是测试 seam，不代表 OS 能力） | false（同左） |
 
-能力位为 false 时对应公共入口是**可观测的 no-op**（`minimize` / `toggle_maximize` / `set_fullscreen` 落基类空实现；Win32 家族的全屏档另有那条 WARN 兜底），应用据此先查询再决定画不画窗控钮 / 全屏钮。逐 `SurfaceKind` 期望表由 `utest_window_runtime_control` 锚定；Win32 家族四槽的真接线由 `tools/verify/win32_window_mode_live_probe.cpp` 以 OS 实值（`IsIconic` / `IsZoomed` / `GetWindowRect`）真机取证（无头 CI 建不了真窗口，探针不进 CTest）。
+能力位为 false 时对应公共入口是**可观测的 no-op**（`minimize` / `toggle_maximize` / `set_fullscreen` 落基类空实现），应用据此先查询再决定画不画窗控钮 / 全屏钮；Win32 / D3D11 的全屏档已是真实 borderless 实现（见上表矩阵），不靠 WARN 兜底。逐 `SurfaceKind` 期望表由 `utest_window_runtime_control` 锚定；Win32 家族四槽的真接线由 `tools/verify/win32_window_mode_live_probe.cpp` 以 OS 实值（`IsIconic` / `IsZoomed` / `GetWindowRect`）真机取证（无头 CI 建不了真窗口，探针不进 CTest）。
 
 **桌面外壳集成四枚位**（`native_print_session` / `url_scheme_registration` / `file_association` / `run_at_login`）表「OS 提供该机制、且本库已把桥接好了」。与上面各位的差别只有一处：这四个入口是**进程级自由函数**（`include/aurora/app/` 下五个新头），与 `SurfaceKind` 无关，故按编译期平台整体置位、不随 Surface 变化——Windows / Linux 上即便是 `Headless` Surface 也照常持有这些 OS 机制。逐平台取值：
 

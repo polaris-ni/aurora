@@ -81,10 +81,10 @@ struct PlatformCapabilities {
     bool runtime_window_mode = false;
     /// @brief 全屏切换（`set_fullscreen()` 与 `set_window_mode(FullScreen)`）已接到 OS。
     ///
-    /// 口径同 `runtime_window_mode`：`Wayland` / `MacOS` 两家四槽已齐故为 true；
-    /// Win32 / D3D11 无全屏实现（monitor 枚举 / 还原几何 / 定档来源均未落，`set_fullscreen(true)`
-    /// 留一条 WARN），`X11` 虽有 `_NET_WM_STATE_FULLSCREEN` 但公共切换腿未接线，`Glfw` 无
-    /// monitor 通道——以上均如实 false，应用先查询再决定画不画全屏钮。
+    /// 口径同 `runtime_window_mode`：`Win32` / `D3D11`（同一 `Win32Host` 的 borderless 全屏：
+    /// monitor 枚举 + 还原几何 + `WM_SIZE` 定档上报）/ `Wayland` / `MacOS` 四家已齐故为 true；
+    /// `X11` 虽有 `_NET_WM_STATE_FULLSCREEN` 但公共切换腿未接线，`Glfw` 无 monitor 通道——
+    /// 二者如实 false，应用先查询再决定画不画全屏钮。
     bool runtime_fullscreen = false;
     /// @brief 存在 OS 打印会话机制，且本库已接线 `PrintSession`（Windows GDI 打印会话 / macOS AppKit
     /// 打印操作）。Linux 恒 false：本库不引入 libcups（第三方形态全是 vendored 源码，系统动态库是
@@ -204,10 +204,11 @@ struct Platform {
         // 接通」，故整体仍 false）；Wasm 无窗口概念；Headless 的 `set_window_mode` 是测试 seam。
         c.runtime_window_mode = (surface == SurfaceKind::Win32 || surface == SurfaceKind::D3D11 ||
                                  surface == SurfaceKind::Wayland || surface == SurfaceKind::MacOS);
-        // 全屏切换：仅 Wayland / MacOS 接到 OS。Win32 / D3D11 无全屏实现（`set_fullscreen(true)`
-        // 留唯一一条 WARN）；X11 有 `_NET_WM_STATE_FULLSCREEN` 但公共切换腿未接线；Glfw 无
-        // monitor 通道——均如实 false，应用先查询再决定是否提供全屏入口。
-        c.runtime_fullscreen = (surface == SurfaceKind::Wayland || surface == SurfaceKind::MacOS);
+        // 全屏切换：Win32 / D3D11（同一 Win32Host 的 borderless 全屏：monitor 枚举 + 还原几何 +
+        // WM_SIZE 定档上报）/ Wayland / MacOS 四家已接到 OS。X11 有 `_NET_WM_STATE_FULLSCREEN`
+        // 但公共切换腿未接线；Glfw 无 monitor 通道——二者如实 false，应用先查询再决定是否提供全屏入口。
+        c.runtime_fullscreen = (surface == SurfaceKind::Win32 || surface == SurfaceKind::D3D11 ||
+                                 surface == SurfaceKind::Wayland || surface == SurfaceKind::MacOS);
         // 桌面外壳集成四枚位：入口是进程级自由函数（`include/aurora/app/` 的五个新头），与
         // `SurfaceKind` 无关——平台桥按编译期 OS 宏接线（见 `src/aurora/app/detail/` 的三套
         // `*_shell_integration.cpp`），故这里按平台整体置位，不随 Surface 变化；Headless 在

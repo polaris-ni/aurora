@@ -173,7 +173,7 @@ namespace aurora {
 }
 
 // pimpl：全部 Win32/GDI 状态与消息处理都在这里；公共头仅持有 unique_ptr<Impl>。
-struct Win32Host::Impl {
+struct Win32Host::Impl {  // NOLINT(clang-analyzer-optin.performance.Padding)
     HWND hwnd = nullptr;
     HINSTANCE hinst = nullptr;
     Size size{.width = 0.0F, .height = 0.0F};
@@ -192,6 +192,9 @@ struct Win32Host::Impl {
     bool tracking_leave = false;  ///< 是否已登记 WM_MOUSELEAVE 通知（TrackMouseEvent 一次性，hover 清除用）。
     bool active = true;  ///< 是否前台激活（WM_ACTIVATE 非 WA_INACTIVE）。初值 true：创建即激活。
     bool maximized = false;  ///< 是否最大化（WM_SIZE SIZE_MAXIMIZED）。
+    bool fullscreen = false;  ///< 是否处于 borderless 全屏（覆盖所在显示器整屏，含任务栏带）。
+    DWORD saved_style = 0;  ///< 进入全屏前的窗口样式（退出时还原）。
+    RECT saved_rect{};  ///< 进入全屏前的窗口矩形（退出时还原几何）。
     WindowMode mode = WindowMode::Normal;  ///< 当前几何态（状态变化时上报）。
     WindowState state = WindowState::Visible;  ///< 当前可见性状态（变化时上报）。
     WindowStateHandler window_state_handler;
@@ -753,7 +756,12 @@ auto Win32Host::Impl::handle_size(HWND hwnd_in, WPARAM wp, LPARAM lp) -> LRESULT
         size = Size{.width = logical.x, .height = logical.y};
     }
     // 几何态变化（最小化/最大化/还原）上报，仅模式实际改变时通知。
-    const WindowMode want = classify_size_mode(wp);
+    // borderless 全屏改样式后 WM_SIZE 仍按 SIZE_RESTORED 定档，故全屏态以 `fullscreen` 标志覆盖，
+    // 避免被 classify_size_mode 误报成 Normal。
+    WindowMode want = classify_size_mode(wp);
+    if (fullscreen) {
+        want = WindowMode::FullScreen;
+    }
     if (want != mode) {
         mode = want;
         minimized = (want == WindowMode::Minimized);
@@ -1409,9 +1417,64 @@ auto Win32Host::cancel_close() -> void {
     }
 }
 
+auto Win32Host::set_fullscreen(bool on) -> void {
+    if (pimpl_ == nullptr || pimpl_->hwnd == nullptr) {
+        return;
+    }
+    Impl &d = *pimpl_;
+    if (d.fullscreen == on) {
+        return;  // 幂等：重复进入/退出不闪动、不冗余上报
+    }
+    if (on) {
+        // 存档还原几何：进入前样式与窗口矩形（退出时原样还原）。
+        d.saved_style = static_cast<DWORD>(GetWindowLongPtrA(d.hwnd, GWL_STYLE));
+        GetWindowRect(d.hwnd, &d.saved_rect);
+        // 枚举窗口所在显示器，取整屏目标矩形（rcMonitor 覆盖任务栏带，达成真全屏）。
+        HMONITOR mon = MonitorFromWindow(d.hwnd, MONITOR_DEFAULTTONEAREST);
+        RECT target = d.saved_rect;
+        MONITORINFO mi{};
+        mi.cbSize = sizeof(mi);
+        if (GetMonitorInfoA(mon, &mi) != FALSE) {
+            target = mi.rcMonitor;
+        }
+        // Borderless 全屏：去标题/可调边框/系统菜单可见性，转 WS_POPUP 覆盖整屏。
+        const DWORD new_style =
+            (d.saved_style | WS_POPUP) & ~(WS_CAPTION | WS_THICKFRAME | WS_BORDER | WS_DLGFRAME);
+        SetWindowLongPtrA(d.hwnd, GWL_STYLE, static_cast<LONG_PTR>(new_style));
+        SetWindowPos(d.hwnd, HWND_TOP, target.left, target.top, target.right - target.left,
+                     target.bottom - target.top, SWP_FRAMECHANGED | SWP_NOACTIVATE);
+        d.fullscreen = true;
+    } else {
+        // 还原样式与几何（不抢前台：HWND_TOPMOST 不用于还原）。
+        SetWindowLongPtrA(d.hwnd, GWL_STYLE, static_cast<LONG_PTR>(d.saved_style));
+        SetWindowPos(d.hwnd, nullptr, d.saved_rect.left, d.saved_rect.top,
+                     d.saved_rect.right - d.saved_rect.left, d.saved_rect.bottom - d.saved_rect.top,
+                     SWP_FRAMECHANGED | SWP_NOZORDER | SWP_NOACTIVATE);
+        d.fullscreen = false;
+    }
+    // 定档上报：handle_size 因 fullscreen 标志会收敛到同值，此处显式收口（size 已随 WM_SIZE 更新）。
+    const WindowMode want = on ? WindowMode::FullScreen : WindowMode::Normal;
+    if (d.mode != want) {
+        d.mode = want;
+        if (d.window_mode_handler) {
+            d.window_mode_handler(want);
+        }
+        d.update_window_state();
+    }
+    if (d.present_request) {
+        d.present_request();
+        ++d.present_count;
+    }
+}
+
 auto Win32Host::set_window_mode(WindowMode m) -> void {
     if (pimpl_ == nullptr || pimpl_->hwnd == nullptr) {
         return;
+    }
+    // 非 FullScreen 目标态若当前处于全屏，先退出全屏还原样式/几何，再走各自的 SC_* 通道，
+    // 避免全屏样式下 SC_MAXIMIZE/SC_RESTORE 语义错乱（saved_rect 在退出时还原）。
+    if (m != WindowMode::FullScreen && pimpl_->fullscreen) {
+        set_fullscreen(false);
     }
     // SC_* 是请求语义：结果由 WM_SIZE → handle_size 定档（IsZoomed / SIZE_MINIMIZED）并上报，
     // 与用户操作系统菜单同路径。
@@ -1426,8 +1489,7 @@ auto Win32Host::set_window_mode(WindowMode m) -> void {
             PostMessageA(pimpl_->hwnd, WM_SYSCOMMAND, SC_MINIMIZE, 0);
             break;
         case WindowMode::FullScreen:
-            // 本后端无 monitor 切换通道（FullScreen 只作为 CSD 布局判据存在）：留痕，不装懂。
-            AURORA_LOG_WARN("window", "Win32Host::set_window_mode: FullScreen is not implemented on this backend");
+            set_fullscreen(true);
             break;
     }
 }

@@ -65,6 +65,7 @@
 ## 不做清单
 
 - **不补 Win32 全屏实现**：monitor 枚举、还原几何、`classify_size_mode` 定档与 CSD 揭示条共管属独立特性；本批只做能力位 + 一条 WARN。
+  - **后续（2026-11-01）已落地**：Win32 / D3D11 的 borderless 全屏由 `Win32Host::set_fullscreen` 实现（monitor 枚举 + 还原几何 + `WM_SIZE` 定档上报），`runtime_fullscreen` 对 Win32 / D3D11 翻 `true`，`win32_window_mode_live_probe` 的判据 (4) 改为校验真全屏而非「恰一条 WARN」。见同一会话的后续提交。
 - **不补 X11 / GLFW 的三枚切换腿**：两家 `set_window_mode` 已真实现、CSD 钮走内部目标态路径，公共切换原语另立缺口；本批让两格能力位如实为 `false`，应用先查询再决定画不画钮。
 - **不补 `WgpuWin32Surface` / `WgpuX11Surface` 的几何原语转发**：独立后端族，既有缺口单列，不在本批半修。
 - **不把 `Window::set_window_mode` 改成转发**：见变更内容第 5 条的回环理由。

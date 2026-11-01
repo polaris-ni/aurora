@@ -143,15 +143,10 @@ class Win32Surface final : public Surface {
 
     /// @brief 程序化设置全屏（Win32：进入转为 `FullScreen` 目标态由宿主留 WARN；退出为 no-op）。
     ///
-    /// 本后端无全屏实现（monitor 枚举 / 还原几何 / 定档来源均未落），`on=true` 不静默吞掉——
-    /// 走宿主唯一一条 WARN；`on=false` 时从未进入全屏、无可退出。可先查询
-    /// `platform().capabilities().runtime_fullscreen` 决定是否提供全屏入口。
-    /// @param on true 请求进入全屏（记一条 WARN），false 无操作。
-    auto set_fullscreen(bool on) -> void override {
-        if (on) {
-            win_->set_window_mode(WindowMode::FullScreen);
-        }
-    }
+    /// 进入/退出 borderless 全屏：转发到共享宿主 `Win32Host::set_fullscreen`（monitor 枚举 /
+    /// 还原几何 / 定档由宿主统一处理），`runtime_fullscreen` 已翻 true。
+    /// @param on true 进入全屏，false 还原到进入前几何。
+    auto set_fullscreen(bool on) -> void override { win_->set_fullscreen(on); }
 
     /// @brief 增量上屏脏区（设备坐标）：非空时 present() 仅 blit 脏矩形并界，而非整窗——
     /// 大窗口下整窗 SetDIBitsToDevice 是拖选帧的绝对大头（5760×3132px 实测 ~130ms，

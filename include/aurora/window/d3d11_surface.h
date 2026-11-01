@@ -210,13 +210,10 @@ class D3D11Surface : public Surface {
     ///
     /// 本后端无全屏实现（monitor 枚举 / 还原几何 / 定档来源均未落），`on=true` 不静默吞掉——
     /// 走宿主唯一一条 WARN；`on=false` 时从未进入全屏、无可退出。可先查询
-    /// `platform().capabilities().runtime_fullscreen` 决定是否提供全屏入口。
-    /// @param on true 请求进入全屏（记一条 WARN），false 无操作。
-    auto set_fullscreen(bool on) -> void override {
-        if (on) {
-            win_->set_window_mode(WindowMode::FullScreen);
-        }
-    }
+    /// 进入/退出 borderless 全屏：与 `Win32Surface` 同源转发共享宿主 `Win32Host::set_fullscreen`
+    /// （runtime_fullscreen 已翻 true）。
+    /// @param on true 进入全屏，false 还原到进入前几何。
+    auto set_fullscreen(bool on) -> void override { win_->set_fullscreen(on); }
 
     /// @brief 接收本帧脏矩形（设备坐标）；present 时仅增量上传这些区域，空向量 = 全量上传。
     /// @param device_rects 本帧脏矩形列表（设备坐标）。
