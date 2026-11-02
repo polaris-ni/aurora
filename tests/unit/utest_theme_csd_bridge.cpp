@@ -1,7 +1,8 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/theming/csd_style_bridge.h + theming/color_scheme.h + theming/theme.h
-/// 测试说明: 覆盖明暗三级优先解析顺序、工厂置 scheme 与 CSD 角色列、typed 派生与 Adwaita 预设逐值一致的
-/// 基准契约（含 Unspecified ≡ 明色列使 from_bare 由暗转明）、以及逐字段覆写经 theme.csd 流入派生结果。
+/// 测试说明: 覆盖明暗三级优先解析顺序、工厂置 scheme 与 CSD 角色列、typed 派生与预设逐值一致的基准契约
+/// （含 Unspecified ≡ 明色列使 from_bare 由暗转明）、风格轴 → 八档预设的两轴映射矩阵、from_style 工厂
+/// 主题派生与对应预设逐值相同（八档全覆盖）、以及逐字段覆写经 theme.csd 流入派生结果。
 
 #include "aurora/theming/csd_style_bridge.h"
 #include "framework/aurora_test.h"
@@ -54,6 +55,79 @@ AURORA_TEST_CASE(derived_title_bar_style_matches_presets) {
     // 行为变化：scheme=Unspecified（with_defaults）基座现按明色（全系统「Unspecified ≡ 明色列」单一口径）。
     const TitleBarStyle from_bare = title_bar_style_from_theme(Theme::with_defaults());
     AURORA_TEST_CHECK_EQ(from_bare.bg_active, adwaita_light.bg_active);
+}
+
+AURORA_TEST_CASE(csd_preset_for_maps_both_axes) {
+    // 两轴 → 八档预设的映射矩阵（15 格逐格钉）：Unspecified 一律折到明色列，Material 与
+    // Gnome 两支同落 Adwaita——后者是本库无据回落档的既有观感来源，故派生通道零 diff。
+    using CS = ColorScheme;
+    using ST = ThemeStyle;
+    AURORA_TEST_CHECK_EQ(csd_preset_for(ST::Material, CS::Light), CsdPreset::AdwaitaLight);
+    AURORA_TEST_CHECK_EQ(csd_preset_for(ST::Material, CS::Dark), CsdPreset::AdwaitaDark);
+    AURORA_TEST_CHECK_EQ(csd_preset_for(ST::Material, CS::Unspecified), CsdPreset::AdwaitaLight);
+    AURORA_TEST_CHECK_EQ(csd_preset_for(ST::Gnome, CS::Light), CsdPreset::AdwaitaLight);
+    AURORA_TEST_CHECK_EQ(csd_preset_for(ST::Gnome, CS::Dark), CsdPreset::AdwaitaDark);
+    AURORA_TEST_CHECK_EQ(csd_preset_for(ST::Gnome, CS::Unspecified), CsdPreset::AdwaitaLight);
+    AURORA_TEST_CHECK_EQ(csd_preset_for(ST::Windows, CS::Light), CsdPreset::WindowsLight);
+    AURORA_TEST_CHECK_EQ(csd_preset_for(ST::Windows, CS::Dark), CsdPreset::WindowsDark);
+    AURORA_TEST_CHECK_EQ(csd_preset_for(ST::Windows, CS::Unspecified), CsdPreset::WindowsLight);
+    AURORA_TEST_CHECK_EQ(csd_preset_for(ST::MacOs, CS::Light), CsdPreset::MacLight);
+    AURORA_TEST_CHECK_EQ(csd_preset_for(ST::MacOs, CS::Dark), CsdPreset::MacDark);
+    AURORA_TEST_CHECK_EQ(csd_preset_for(ST::MacOs, CS::Unspecified), CsdPreset::MacLight);
+    AURORA_TEST_CHECK_EQ(csd_preset_for(ST::Kde, CS::Light), CsdPreset::BreezeLight);
+    AURORA_TEST_CHECK_EQ(csd_preset_for(ST::Kde, CS::Dark), CsdPreset::BreezeDark);
+    AURORA_TEST_CHECK_EQ(csd_preset_for(ST::Kde, CS::Unspecified), CsdPreset::BreezeLight);
+}
+
+AURORA_TEST_CASE(from_style_derivation_matches_each_preset) {
+    // 八档全覆盖（四风格 × 明暗，Material 与 Gnome 同档故取 Gnome 代表 Adwaita）：工厂主题的
+    // `csd` 组由同一预设搬运，故「from_style 再派生」与「直接取预设」逐值相同——配色七支之外，
+    // 基座带来的几何（栏高 / 按钮语言 / 标题度量）也必须一致。
+    struct Cell {
+        ThemeStyle style;
+        ColorScheme scheme;
+        CsdPreset preset;
+    };
+    const Cell cells[] = {
+        {.style = ThemeStyle::Gnome, .scheme = ColorScheme::Light, .preset = CsdPreset::AdwaitaLight},
+        {.style = ThemeStyle::Gnome, .scheme = ColorScheme::Dark, .preset = CsdPreset::AdwaitaDark},
+        {.style = ThemeStyle::Windows, .scheme = ColorScheme::Light, .preset = CsdPreset::WindowsLight},
+        {.style = ThemeStyle::Windows, .scheme = ColorScheme::Dark, .preset = CsdPreset::WindowsDark},
+        {.style = ThemeStyle::MacOs, .scheme = ColorScheme::Light, .preset = CsdPreset::MacLight},
+        {.style = ThemeStyle::MacOs, .scheme = ColorScheme::Dark, .preset = CsdPreset::MacDark},
+        {.style = ThemeStyle::Kde, .scheme = ColorScheme::Light, .preset = CsdPreset::BreezeLight},
+        {.style = ThemeStyle::Kde, .scheme = ColorScheme::Dark, .preset = CsdPreset::BreezeDark},
+    };
+    for (const Cell &c : cells) {
+        const TitleBarStyle got = title_bar_style_from_theme(Theme::from_style(c.style, c.scheme));
+        const TitleBarStyle want = TitleBarStyle::from_preset(c.preset);
+        AURORA_TEST_CHECK_EQ(got.bg_active, want.bg_active);
+        AURORA_TEST_CHECK_EQ(got.bg_inactive, want.bg_inactive);
+        AURORA_TEST_CHECK_EQ(got.fg_active, want.fg_active);
+        AURORA_TEST_CHECK_EQ(got.fg_inactive, want.fg_inactive);
+        AURORA_TEST_CHECK_EQ(got.hover_tint, want.hover_tint);
+        AURORA_TEST_CHECK_EQ(got.pressed_tint, want.pressed_tint);
+        AURORA_TEST_CHECK_EQ(got.close_hover, want.close_hover);
+        AURORA_TEST_CHECK_EQ(got.button_layout, want.button_layout);
+        AURORA_TEST_CHECK_NEAR(got.height, want.height, 1e-4F);
+        AURORA_TEST_CHECK_NEAR(got.metrics.title_font_size_pt, want.metrics.title_font_size_pt, 1e-4F);
+        AURORA_TEST_CHECK_EQ(got.metrics.title_font_weight, want.metrics.title_font_weight);
+        AURORA_TEST_CHECK_EQ(got.center_title, want.center_title);
+    }
+}
+
+AURORA_TEST_CASE(theme_style_field_drives_csd_base) {
+    // 风格轴是身份位：只改 `style` 就换基座（不重写 csd 时，配色仍从 csd 组取，故只换几何）。
+    Theme t = Theme::light();
+    t.style = ThemeStyle::Windows;
+    const TitleBarStyle s = title_bar_style_from_theme(t);
+    const TitleBarStyle adwaita = TitleBarStyle::from_preset(CsdPreset::AdwaitaLight);
+    AURORA_TEST_CHECK_NEAR(s.height, 32.0F, 1e-4F);  // Windows 档栏高钉值，非 Adwaita 基准 36
+    AURORA_TEST_CHECK_EQ(s.button_layout, TitleBarButtonLayout::Windows);
+    AURORA_TEST_CHECK_FALSE(s.center_title);
+    // 配色未随基座换档（theme.csd 仍是明色 Adwaita 列）——这是「配色走角色组、几何走预设」
+    // 两段式派生的直接后果；工厂主题 from_style 会把两者一起给出。
+    AURORA_TEST_CHECK_EQ(s.bg_active, adwaita.bg_active);
 }
 
 AURORA_TEST_CASE(csd_field_override_flows_through_derivation) {
