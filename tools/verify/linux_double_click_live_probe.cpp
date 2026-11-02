@@ -51,6 +51,7 @@
 #include <cstring>
 #include <optional>
 #include <string>
+#include <utility>
 
 #include "aurora/event/event.h"
 #include "verify_args.h"
@@ -194,7 +195,7 @@ using FnGObjectUnref = void (*)(void *);
     // NOLINTNEXTLINE(cert-env33, bugprone-command-processor)
     std::string raw;
     {
-        // NOLINTNEXTLINE(readability-isolate-declaration)
+        // NOLINTNEXTLINE(readability-isolate-declaration, bugprone-command-processor)
         FILE *pipe = ::popen(command.c_str(), "r");
         if (pipe == nullptr) {
             return std::nullopt;
@@ -216,7 +217,7 @@ using FnGObjectUnref = void (*)(void *);
             std::size_t j = i;
             long value = 0;
             while (j < raw.size() && raw[j] >= '0' && raw[j] <= '9') {
-                value = value * 10 + (raw[j] - '0');
+                value = (value * 10) + (raw[j] - '0');
                 ++j;
             }
             parsed = static_cast<int>(value);
@@ -271,7 +272,7 @@ auto main(int argc, char **argv) -> int {
     const std::optional<int> witness = witness_double_click_ms();
     if (witness.has_value()) {
         emit("[WITNESS] GSettings double-click read independently = " + std::to_string(*witness) + " ms");
-        check(value == static_cast<std::uint32_t>(*witness),
+        check(std::cmp_equal(value, *witness),
               "os_double_click_ms() follows the system value read from GLib GSettings (" + std::to_string(value) +
                   " == " + std::to_string(*witness) + ")");
     } else {
@@ -291,7 +292,7 @@ auto main(int argc, char **argv) -> int {
             warn("gsettings CLI (" + std::to_string(*cli_witness) + ") disagrees with the GLib GSettings read (" +
                  std::to_string(*witness) +
                  "); both are independent of the library, investigate the desktop environment");
-        } else if (!witness.has_value() && *cli_witness != static_cast<int>(aurora::AURORA_DEFAULT_CLICK_WINDOW_MS)) {
+        } else if (!witness.has_value() && std::cmp_not_equal(*cli_witness, aurora::AURORA_DEFAULT_CLICK_WINDOW_MS)) {
             warn("gsettings CLI sees " + std::to_string(*cli_witness) +
                  " ms but the library could not read GSettings (fell back to the constant) — possible "
                  "dlopen/session gap worth checking on this machine");

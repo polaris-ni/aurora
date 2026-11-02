@@ -3,7 +3,7 @@
 #include "aurora/core/platform.h"
 #include "aurora/event/event.h"
 
-#if defined(AURORA_PLATFORM_WINDOWS)
+#ifdef AURORA_PLATFORM_WINDOWS
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -41,7 +41,7 @@ struct GlibSettingsApi {
 };
 
 [[nodiscard]] auto glib_settings_api() -> const GlibSettingsApi & {
-    static const GlibSettingsApi api = [] {
+    static const GlibSettingsApi API = [] {
         GlibSettingsApi a;
         void *gio = ::dlopen("libgio-2.0.so.0", RTLD_LAZY | RTLD_LOCAL);
         if (gio == nullptr) {
@@ -78,7 +78,7 @@ struct GlibSettingsApi {
         a.ok = ok;
         return a;
     }();
-    return api;
+    return API;
 }
 
 [[nodiscard]] auto linux_double_click_ms() -> std::uint32_t {
@@ -103,7 +103,7 @@ struct GlibSettingsApi {
 #endif
 
 auto os_double_click_ms() -> std::uint32_t {
-#if defined(AURORA_PLATFORM_WINDOWS)
+#ifdef AURORA_PLATFORM_WINDOWS
     // 已是毫秒，返回系统真实值（通常 100–1000）。失败（极罕见）回退到库内兜底常量。
     const UINT ms = ::GetDoubleClickTime();
     if (ms == 0U) {

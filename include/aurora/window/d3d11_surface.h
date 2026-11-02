@@ -202,7 +202,8 @@ class D3D11Surface : public Surface {
     /// @brief 程序化设定几何态（Win32：原样转发宿主 `SC_*` 目标态语义，不做翻转）。
     ///
     /// 几何恢复腿（按落盘 `WindowGeometry::mode` 直设）与 `Maximized → FullScreen` 这类
-    /// 直设都靠本槽；`FullScreen` 分支经宿主 `Win32Host::set_fullscreen` 走真实 borderless 全屏（能力位 `runtime_fullscreen` 已翻 true）。
+    /// 直设都靠本槽；`FullScreen` 分支经宿主 `Win32Host::set_fullscreen` 走真实 borderless 全屏（能力位
+    /// `runtime_fullscreen` 已翻 true）。
     /// @param m 目标几何态。
     auto set_window_mode(WindowMode m) -> void override { win_->set_window_mode(m); }
 

@@ -35,7 +35,8 @@ inline constexpr std::uint32_t AURORA_DEFAULT_CLICK_WINDOW_MS = 500;
 ///   （`org.gnome.desktop.peripherals.mouse` → `double-click`）读取真实系统值，缺库/无会话时回退同常量。
 ///
 /// 应用可显式写 `click_window_ms` 覆盖系统值（置 0 关闭连击判定、置极大值使窗口恒开），
-/// 再读本函数回填即可恢复「跟随系统」。Linux 已先经 GLib GSettings 读取真实系统值，其余平台回退常量；新增平台分支只改本函数。
+/// 再读本函数回填即可恢复「跟随系统」。Linux 已先经 GLib GSettings
+/// 读取真实系统值，其余平台回退常量；新增平台分支只改本函数。
 /// @return 连击时间窗（毫秒），恒为正（≥1）。
 [[nodiscard]] auto os_double_click_ms() -> std::uint32_t;
 
