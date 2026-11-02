@@ -159,8 +159,8 @@ auto backend_register_scheme(std::string_view scheme, std::string_view display_n
                               "' is not declared in CFBundleURLTypes of the application's Info.plist; macOS cannot "
                               "register a scheme at runtime without that static declaration");
     }
-    const OSStatus status =
-        LSSetDefaultHandlerForURLScheme((__bridge CFStringRef)scheme_text, (__bridge CFStringRef)ns_string(*bundle));
+    const OSStatus status = LSSetDefaultHandlerForURLScheme((__bridge CFStringRef)scheme_text,
+                                                            (__bridge CFStringRef)ns_string(bundle.value()));
     if (status != noErr) {
         return make_error(ErrorCode::UrlSchemeFailed, "url-scheme: Launch Services rejected the registration for '" +
                                                           std::string(scheme) + "' (OSStatus " +
@@ -189,7 +189,7 @@ auto backend_unregister_scheme(std::string_view scheme, const AppIdentity &ident
     if (!bundle) {
         return bundle.error();
     }
-    if (owner.value() != *bundle) {
+    if (owner.value() != bundle.value()) {
         return make_error(ErrorCode::UrlSchemeFailed, "url-scheme: '" + std::string(scheme) +
                                                           "' is registered by another application: " + owner.value());
     }
@@ -327,78 +327,6 @@ auto backend_run_at_login_set(bool enabled, const AppIdentity &identity) -> Resu
 struct PrintPage {
     Image image;
 };
-
-// 打印视图：按页范围排版，把每页位图绘到纸张内容区（ObjC 接口不是 Doxygen 文档对象）。
-@interface AuroraPrintView : NSView {
-    NSArray *_images;  ///< NSImage 数组（按提交顺序）
-    CGFloat _pageWidth;  ///< 纸张宽（点）
-    CGFloat _pageHeight;  ///< 纸张高（点）
-    CGFloat _insetLeft;  ///< 左边距（点）
-    CGFloat _insetTop;  ///< 上边距（点）
-    CGFloat _insetRight;  ///< 右边距（点）
-    CGFloat _insetBottom;  ///< 下边距（点）
-}
-- (instancetype)initWithImages:(NSArray *)images
-                     pageWidth:(CGFloat)pageWidth
-                    pageHeight:(CGFloat)pageHeight
-                     insetLeft:(CGFloat)insetLeft
-                      insetTop:(CGFloat)insetTop
-                    insetRight:(CGFloat)insetRight
-                   insetBottom:(CGFloat)insetBottom;
-@end
-
-@implementation AuroraPrintView
-
-- (instancetype)initWithImages:(NSArray *)images
-                     pageWidth:(CGFloat)pageWidth
-                    pageHeight:(CGFloat)pageHeight
-                     insetLeft:(CGFloat)insetLeft
-                      insetTop:(CGFloat)insetTop
-                    insetRight:(CGFloat)insetRight
-                   insetBottom:(CGFloat)insetBottom {
-    self = [super initWithFrame:NSMakeRect(0, 0, pageWidth, pageHeight * (CGFloat)[images count])];
-    if (self != nil) {
-        _images = [images copy];
-        _pageWidth = pageWidth;
-        _pageHeight = pageHeight;
-        _insetLeft = insetLeft;
-        _insetTop = insetTop;
-        _insetRight = insetRight;
-        _insetBottom = insetBottom;
-    }
-    return self;
-}
-
-- (void)dealloc {
-    [_images release];
-    [super dealloc];
-}
-
-- (BOOL)isFlipped {
-    return YES;
-}
-
-- (BOOL)knowsPageRange:(NSRangePointer)range {
-    *range = NSMakeRange(1, (NSUInteger)[_images count]);
-    return YES;
-}
-
-- (NSRect)rectForPage:(NSInteger)page {
-    return NSMakeRect(0, (CGFloat)(page - 1) * _pageHeight, _pageWidth, _pageHeight);
-}
-
-- (void)drawRect:(NSRect)dirtyRect {
-    const auto page = (NSInteger)std::floor(NSMinY(dirtyRect) / _pageHeight);
-    if (page < 0 || page >= (NSInteger)[_images count]) {
-        return;
-    }
-    NSImage *image = [_images objectAtIndex:(NSUInteger)page];
-    const NSRect content = NSMakeRect(_insetLeft, (CGFloat)page * _pageHeight + _insetTop,
-                                      _pageWidth - _insetLeft - _insetRight, _pageHeight - _insetTop - _insetBottom);
-    [image drawInRect:content fromRect:NSZeroRect operation:NSCompositingOperationCopy fraction:1.0];
-}
-
-@end
 
 /// @brief macOS 打印会话：累计页位图，`finish` 时交给 AppKit 打印操作（不弹系统面板）。
 class MacPrintSession final : public desktop_shell::PrintSessionBackend {
@@ -554,30 +482,6 @@ auto backend_open_print_session(std::string_view target_id, const PageSpec &spec
 /// @brief 已登记的 Apple Event 处理器（非 ARC：手动持有 / 释放）。
 id g_url_event_handler = nil;
 
-// `kAEGetURL` 处理器：把 URL 交给首实例的入队回调（ObjC 接口不是 Doxygen 文档对象）。
-@interface AuroraUrlEventHandler : NSObject
-- (void)handleGetUrlEvent:(NSAppleEventDescriptor *)event withReplyEvent:(NSAppleEventDescriptor *)replyEvent;
-@end
-
-@implementation AuroraUrlEventHandler
-
-- (void)handleGetUrlEvent:(NSAppleEventDescriptor *)event withReplyEvent:(NSAppleEventDescriptor *)replyEvent {
-    (void)replyEvent;
-    NSString *uri = [[event paramDescriptorForKeyword:keyDirectObject] stringValue];
-    if (uri == nil) {
-        return;
-    }
-    const std::string text = to_utf8(uri);
-    if (text.empty()) {
-        return;
-    }
-    if (auto &sink = instance_sink(); sink) {
-        sink(text);
-    }
-}
-
-@end
-
 auto backend_acquire_instance(const AppIdentity &identity, const std::vector<std::string> &uris,
                               const std::function<void(std::string)> &sink) -> Result<SingleInstanceOutcome> {
     (void)identity;
@@ -645,5 +549,104 @@ auto macos_shell_integration_ensure() -> bool {
 }
 
 }  // namespace aurora::detail
+
+// Objective-C 接口必须位于全局作用域：Clang 的 Objective-C++ 前端会拒绝位于 C++ 命名空间内的
+// `@interface`/`@implementation`。其方法体引用的 C++ 辅助函数通过 `aurora::detail::` 限定访问。
+
+// 打印视图：按页范围排版，把每页位图绘到纸张内容区（ObjC 接口不是 Doxygen 文档对象）。
+@interface AuroraPrintView : NSView {
+    NSArray *_images;  ///< NSImage 数组（按提交顺序）
+    CGFloat _pageWidth;  ///< 纸张宽（点）
+    CGFloat _pageHeight;  ///< 纸张高（点）
+    CGFloat _insetLeft;  ///< 左边距（点）
+    CGFloat _insetTop;  ///< 上边距（点）
+    CGFloat _insetRight;  ///< 右边距（点）
+    CGFloat _insetBottom;  ///< 下边距（点）
+}
+- (instancetype)initWithImages:(NSArray *)images
+                     pageWidth:(CGFloat)pageWidth
+                    pageHeight:(CGFloat)pageHeight
+                     insetLeft:(CGFloat)insetLeft
+                      insetTop:(CGFloat)insetTop
+                    insetRight:(CGFloat)insetRight
+                   insetBottom:(CGFloat)insetBottom;
+@end
+
+@implementation AuroraPrintView
+
+- (instancetype)initWithImages:(NSArray *)images
+                     pageWidth:(CGFloat)pageWidth
+                    pageHeight:(CGFloat)pageHeight
+                     insetLeft:(CGFloat)insetLeft
+                      insetTop:(CGFloat)insetTop
+                    insetRight:(CGFloat)insetRight
+                   insetBottom:(CGFloat)insetBottom {
+    self = [super initWithFrame:NSMakeRect(0, 0, pageWidth, pageHeight * (CGFloat)[images count])];
+    if (self != nil) {
+        _images = [images copy];
+        _pageWidth = pageWidth;
+        _pageHeight = pageHeight;
+        _insetLeft = insetLeft;
+        _insetTop = insetTop;
+        _insetRight = insetRight;
+        _insetBottom = insetBottom;
+    }
+    return self;
+}
+
+- (void)dealloc {
+    [_images release];
+    [super dealloc];
+}
+
+- (BOOL)isFlipped {
+    return YES;
+}
+
+- (BOOL)knowsPageRange:(NSRangePointer)range {
+    *range = NSMakeRange(1, (NSUInteger)[_images count]);
+    return YES;
+}
+
+- (NSRect)rectForPage:(NSInteger)page {
+    return NSMakeRect(0, (CGFloat)(page - 1) * _pageHeight, _pageWidth, _pageHeight);
+}
+
+- (void)drawRect:(NSRect)dirtyRect {
+    const auto page = (NSInteger)std::floor(NSMinY(dirtyRect) / _pageHeight);
+    if (page < 0 || page >= (NSInteger)[_images count]) {
+        return;
+    }
+    NSImage *image = [_images objectAtIndex:(NSUInteger)page];
+    const NSRect content = NSMakeRect(_insetLeft, (CGFloat)page * _pageHeight + _insetTop,
+                                      _pageWidth - _insetLeft - _insetRight, _pageHeight - _insetTop - _insetBottom);
+    [image drawInRect:content fromRect:NSZeroRect operation:NSCompositingOperationCopy fraction:1.0];
+}
+
+@end
+
+// `kAEGetURL` 处理器：把 URL 交给首实例的入队回调（ObjC 接口不是 Doxygen 文档对象）。
+@interface AuroraUrlEventHandler : NSObject
+- (void)handleGetUrlEvent:(NSAppleEventDescriptor *)event withReplyEvent:(NSAppleEventDescriptor *)replyEvent;
+@end
+
+@implementation AuroraUrlEventHandler
+
+- (void)handleGetUrlEvent:(NSAppleEventDescriptor *)event withReplyEvent:(NSAppleEventDescriptor *)replyEvent {
+    (void)replyEvent;
+    NSString *uri = [[event paramDescriptorForKeyword:keyDirectObject] stringValue];
+    if (uri == nil) {
+        return;
+    }
+    const std::string text = aurora::detail::to_utf8(uri);
+    if (text.empty()) {
+        return;
+    }
+    if (auto &sink = aurora::detail::instance_sink(); sink) {
+        sink(text);
+    }
+}
+
+@end
 
 #endif  // AURORA_PLATFORM_MACOS && AURORA_BACKEND_MACOS
