@@ -36,6 +36,36 @@
 #include "aurora/core/log.h"
 #include "aurora/core/result.h"
 
+// Objective-C 接口必须位于全局作用域：Clang 的 Objective-C++ 前端会拒绝位于 C++ 命名空间内的
+// `@interface`/`@implementation`。同时 `@interface` 须置于命名空间内的使用点之前，否则自定义
+// 初始化器（`initWithImages:...` / `init`）会因方法签名不可见而告警。故两个 `@interface` 在此
+// 全局作用域声明；`@implementation` 仍置于文件末尾的全局作用域，方法体引用的 C++ 辅助函数通过
+// `aurora::detail::` 限定访问。
+
+// 打印视图：按页范围排版，把每页位图绘到纸张内容区（ObjC 接口不是 Doxygen 文档对象）。
+@interface AuroraPrintView : NSView {
+    NSArray *_images;  ///< NSImage 数组（按提交顺序）
+    CGFloat _pageWidth;  ///< 纸张宽（点）
+    CGFloat _pageHeight;  ///< 纸张高（点）
+    CGFloat _insetLeft;  ///< 左边距（点）
+    CGFloat _insetTop;  ///< 上边距（点）
+    CGFloat _insetRight;  ///< 右边距（点）
+    CGFloat _insetBottom;  ///< 下边距（点）
+}
+- (instancetype)initWithImages:(NSArray *)images
+                     pageWidth:(CGFloat)pageWidth
+                    pageHeight:(CGFloat)pageHeight
+                     insetLeft:(CGFloat)insetLeft
+                      insetTop:(CGFloat)insetTop
+                    insetRight:(CGFloat)insetRight
+                   insetBottom:(CGFloat)insetBottom;
+@end
+
+// `kAEGetURL` 处理器：把 URL 交给首实例的入队回调（ObjC 接口不是 Doxygen 文档对象）。
+@interface AuroraUrlEventHandler : NSObject
+- (void)handleGetUrlEvent:(NSAppleEventDescriptor *)event withReplyEvent:(NSAppleEventDescriptor *)replyEvent;
+@end
+
 namespace aurora::detail {
 
 namespace {
@@ -550,27 +580,10 @@ auto macos_shell_integration_ensure() -> bool {
 
 }  // namespace aurora::detail
 
-// Objective-C 接口必须位于全局作用域：Clang 的 Objective-C++ 前端会拒绝位于 C++ 命名空间内的
-// `@interface`/`@implementation`。其方法体引用的 C++ 辅助函数通过 `aurora::detail::` 限定访问。
+// Objective-C `@interface` 已移至文件顶部全局作用域（命名空间内使用点之前）；此处仅保留
+// `@implementation`（全局作用域）。方法体仅使用 Objective-C / C 类型，不引用 aurora::detail。
 
-// 打印视图：按页范围排版，把每页位图绘到纸张内容区（ObjC 接口不是 Doxygen 文档对象）。
-@interface AuroraPrintView : NSView {
-    NSArray *_images;  ///< NSImage 数组（按提交顺序）
-    CGFloat _pageWidth;  ///< 纸张宽（点）
-    CGFloat _pageHeight;  ///< 纸张高（点）
-    CGFloat _insetLeft;  ///< 左边距（点）
-    CGFloat _insetTop;  ///< 上边距（点）
-    CGFloat _insetRight;  ///< 右边距（点）
-    CGFloat _insetBottom;  ///< 下边距（点）
-}
-- (instancetype)initWithImages:(NSArray *)images
-                     pageWidth:(CGFloat)pageWidth
-                    pageHeight:(CGFloat)pageHeight
-                     insetLeft:(CGFloat)insetLeft
-                      insetTop:(CGFloat)insetTop
-                    insetRight:(CGFloat)insetRight
-                   insetBottom:(CGFloat)insetBottom;
-@end
+// 打印视图 @implementation：按页范围排版，把每页位图绘到纸张内容区。
 
 @implementation AuroraPrintView
 
@@ -625,10 +638,7 @@ auto macos_shell_integration_ensure() -> bool {
 
 @end
 
-// `kAEGetURL` 处理器：把 URL 交给首实例的入队回调（ObjC 接口不是 Doxygen 文档对象）。
-@interface AuroraUrlEventHandler : NSObject
-- (void)handleGetUrlEvent:(NSAppleEventDescriptor *)event withReplyEvent:(NSAppleEventDescriptor *)replyEvent;
-@end
+// `kAEGetURL` 处理器 `@implementation`：把 URL 交给首实例的入队回调（@interface 已移至文件顶部）。
 
 @implementation AuroraUrlEventHandler
 
