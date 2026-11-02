@@ -372,7 +372,7 @@ jobs:
       # 包裹 ctest，让依赖系统剪贴板的用例真正执行而非 SKIP；Windows/macOS 剪贴板原生可用，直跑 ctest。
       - name: Install virtual display + clipboard tools (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update -y && sudo apt-get install -y xvfb xclip xsel
+        run: sudo apt-get update -y && sudo apt-get install -y xvfb xclip xsel gsettings-desktop-schemas
 
       - name: Test
         env:
@@ -610,7 +610,7 @@ jobs:
       # 包裹 ctest，让依赖系统剪贴板的用例真正执行而非 SKIP；Windows/macOS 剪贴板原生可用，直跑 ctest。
       - name: Install virtual display + clipboard tools (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update -y && sudo apt-get install -y xvfb xclip xsel
+        run: sudo apt-get update -y && sudo apt-get install -y xvfb xclip xsel gsettings-desktop-schemas
 
       - name: Test
         env:
@@ -760,7 +760,7 @@ jobs:
         if: matrix.run-tests
         # matrix.apt-pkgs：个别腿需要额外开发包（tls-openssl-shared 腿要 OpenSSL 的头与动态库），
         # 其余腿未定义该字段时展开为空串，安装列表退化为公共部分。
-        run: sudo apt-get update -y && sudo apt-get install -y xvfb xclip xsel ${{ matrix.apt-pkgs }}
+        run: sudo apt-get update -y && sudo apt-get install -y xvfb xclip xsel gsettings-desktop-schemas ${{ matrix.apt-pkgs }}
 
       - name: Test (under virtual X display)
         if: matrix.run-tests
@@ -959,7 +959,7 @@ jobs:
       # 并用 xvfb-run 包裹 ctest，让依赖系统剪贴板的用例（如 itest_text_selection 的
       # Ctrl+C 复制）真正执行，而非因「剪贴板不可用」永久 SKIP。
       - name: Install virtual display + clipboard tools
-        run: sudo apt-get update -y && sudo apt-get install -y xvfb xclip xsel
+        run: sudo apt-get update -y && sudo apt-get install -y xvfb xclip xsel gsettings-desktop-schemas
 
       - name: Test (under virtual X display)
         # -LE e2e：本作业是纯 Headless 默认后端面（X11/GLFW 默认 OFF），E2E 无真实后端可跑、
@@ -1005,7 +1005,7 @@ jobs:
       # headless runner 无 X display、无剪贴板工具：装 xvfb + xclip/xsel 提供虚拟显示，
       # 让 coverage 聚合目标内的 ctest 中依赖系统剪贴板的用例真正执行而非 SKIP。
       - name: Install virtual display + clipboard tools
-        run: sudo apt-get update -y && sudo apt-get install -y xvfb xclip xsel
+        run: sudo apt-get update -y && sudo apt-get install -y xvfb xclip xsel gsettings-desktop-schemas
 
       - name: Build + ctest + gcov summary (coverage target, under virtual X display)
         run: xvfb-run -a cmake --build build --target coverage --parallel
