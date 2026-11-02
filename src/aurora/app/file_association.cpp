@@ -22,7 +22,7 @@ namespace aurora {
 namespace {
 
 /// @brief 取当前可用的文件关联平台桥（判据同 URL 方案：通路登记即运行期事实）。
-[[nodiscard]] auto active_backend() -> const desktop_shell::FileAssociationBackend * {
+[[nodiscard]] auto file_association_backend() -> const desktop_shell::FileAssociationBackend * {
     const auto *backend = desktop_shell::file_association_backend();
     if (backend != nullptr) {
         return backend;
@@ -55,7 +55,7 @@ auto associated_application(std::string_view extension) -> Result<AssociationInf
     if (!normalized) {
         return normalized.error();
     }
-    const auto *backend = active_backend();
+    const auto *backend = file_association_backend();
     if (backend == nullptr) {
         return make_error(ErrorCode::FileAssociationUnsupported);
     }
@@ -83,7 +83,7 @@ auto register_file_association(const AssociationDeclaration &declaration, const 
             ErrorCode::GeneralInvalidArgument,
             "file-association: AppIdentity.executable_path is empty, the OS command template cannot be built");
     }
-    const auto *backend = active_backend();
+    const auto *backend = file_association_backend();
     if (backend == nullptr) {
         return make_error(ErrorCode::FileAssociationUnsupported);
     }
@@ -102,7 +102,7 @@ auto unregister_file_association(std::string_view extension, const AppIdentity &
         return make_error(ErrorCode::GeneralInvalidArgument,
                           "file-association: AppIdentity.executable_path is empty, ownership cannot be verified");
     }
-    const auto *backend = active_backend();
+    const auto *backend = file_association_backend();
     if (backend == nullptr) {
         return make_error(ErrorCode::FileAssociationUnsupported);
     }

@@ -20,7 +20,7 @@ namespace aurora {
 namespace {
 
 /// @brief 取当前可用的登录项平台桥（判据同 URL 方案：通路登记即运行期事实）。
-[[nodiscard]] auto active_backend() -> const desktop_shell::RunAtLoginBackend * {
+[[nodiscard]] auto run_at_login_backend() -> const desktop_shell::RunAtLoginBackend * {
     const auto *backend = desktop_shell::run_at_login_backend();
     if (backend != nullptr) {
         return backend;
@@ -38,7 +38,7 @@ namespace {
 }  // namespace
 
 auto run_at_login(const AppIdentity &identity) -> RunAtLoginState {
-    const auto *backend = active_backend();
+    const auto *backend = run_at_login_backend();
     if (backend == nullptr) {
         return RunAtLoginState{.status = RunAtLoginStatus::Unsupported,
                                .detail = "run-at-login: no login-item mechanism is wired for this platform"};
@@ -51,7 +51,7 @@ auto set_run_at_login(bool enabled, const AppIdentity &identity) -> Result<void>
         return make_error(ErrorCode::GeneralInvalidArgument,
                           "run-at-login: AppIdentity needs an executable path or a bundle identifier");
     }
-    const auto *backend = active_backend();
+    const auto *backend = run_at_login_backend();
     if (backend == nullptr) {
         return make_error(ErrorCode::RunAtLoginUnsupported);
     }

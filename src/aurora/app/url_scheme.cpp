@@ -24,7 +24,7 @@ namespace {
 ///
 /// 判据是**通路是否在**而非能力位：能力位是编译期后端申报，通路登记才是运行期事实；两者分开
 /// 让折算层可被无头单测注入（与 `recent_documents` 的同款判据一致）。
-[[nodiscard]] auto active_backend() -> const desktop_shell::UrlSchemeBackend * {
+[[nodiscard]] auto url_scheme_backend() -> const desktop_shell::UrlSchemeBackend * {
     const auto *backend = desktop_shell::url_scheme_backend();
     if (backend != nullptr) {
         return backend;
@@ -70,7 +70,7 @@ auto register_url_scheme(std::string_view scheme, std::string_view display_name,
         return make_error(ErrorCode::GeneralInvalidArgument,
                           "url-scheme: AppIdentity.executable_path is empty, the OS command template cannot be built");
     }
-    const auto *backend = active_backend();
+    const auto *backend = url_scheme_backend();
     if (backend == nullptr) {
         return make_error(ErrorCode::UrlSchemeUnsupported);
     }
@@ -86,7 +86,7 @@ auto unregister_url_scheme(std::string_view scheme, const AppIdentity &identity)
         return make_error(ErrorCode::GeneralInvalidArgument,
                           "url-scheme: AppIdentity.executable_path is empty, ownership cannot be verified");
     }
-    const auto *backend = active_backend();
+    const auto *backend = url_scheme_backend();
     if (backend == nullptr) {
         return make_error(ErrorCode::UrlSchemeUnsupported);
     }
@@ -98,7 +98,7 @@ auto registered_url_scheme_owner(std::string_view scheme) -> Result<std::string>
     if (!normalized) {
         return normalized.error();
     }
-    const auto *backend = active_backend();
+    const auto *backend = url_scheme_backend();
     if (backend == nullptr) {
         return make_error(ErrorCode::UrlSchemeUnsupported);
     }

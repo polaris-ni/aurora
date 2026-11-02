@@ -23,7 +23,7 @@ namespace aurora {
 namespace {
 
 /// @brief 取当前可用的单实例平台桥；未接线返回 nullptr（公共入口如实按首实例起步）。
-[[nodiscard]] auto active_backend() -> const desktop_shell::SingleInstanceBackend * {
+[[nodiscard]] auto single_instance_backend() -> const desktop_shell::SingleInstanceBackend * {
     const auto *backend = desktop_shell::single_instance_backend();
     if (backend != nullptr) {
         return backend;
@@ -72,7 +72,7 @@ auto SingleInstance::acquire(const AppIdentity &identity) -> Result<SingleInstan
         uris.push_back(*uri);
     }
 
-    const auto *backend = active_backend();
+    const auto *backend = single_instance_backend();
     if (backend == nullptr) {
         // 无跨进程通道（Headless / Wasm / 未接线后端）：如实按首实例起步，不谎报「已转发」。
         acquired_ = true;
@@ -112,7 +112,7 @@ auto SingleInstance::set_on_uri_received(std::function<void(std::string_view)> c
 }
 
 auto SingleInstance::poll() -> void {
-    if (const auto *backend = active_backend(); backend != nullptr && backend->poll) {
+    if (const auto *backend = single_instance_backend(); backend != nullptr && backend->poll) {
         backend->poll();
     }
     while (!pending_uris_.empty() && on_uri_) {
@@ -125,7 +125,7 @@ auto SingleInstance::poll() -> void {
 auto SingleInstance::release() -> void {
     // 未持有时是空操作：既不该触碰平台桥（可能触发按需自举），也不该让「释放」次数虚增。
     if (acquired_) {
-        if (const auto *backend = active_backend(); backend != nullptr && backend->release) {
+        if (const auto *backend = single_instance_backend(); backend != nullptr && backend->release) {
             backend->release();
         }
     }
