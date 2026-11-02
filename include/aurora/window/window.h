@@ -933,6 +933,16 @@ class Window {
     ///        （消费时顺带做一次整子树缓存失效，见 `Widget::invalidate_subtree_caches`）。
     bool locale_pending_ = false;
     ColorScheme os_scheme_ = ColorScheme::Unspecified;  ///< OS 明暗偏好快照（由 Application 推入）。
+    /// @brief 根主题解算缓存的键值对：两枚输入档位 + 该组合的解算结果。
+    ///
+    /// 键取**解算后的档位**而非 setter 的可选值：`style_` 为空时结果取决于进程级探测档，
+    /// 后者每进程只读一次（见 `Theme::default_style()`），因此键一旦成立即稳定。
+    struct RootThemeCache {
+        ThemeStyle style = ThemeStyle::Material;  ///< 解算用的风格档（探测档已并入）。
+        ColorScheme scheme = ColorScheme::Light;  ///< 解算用的明暗档（`Unspecified` ≡ 明色）。
+        Theme value;  ///< 该档位组合的解算结果。
+    };
+    mutable std::optional<RootThemeCache> root_theme_cache_;  ///< 见 `resolved_root_theme()` 的缓存注记。
     DirtyRegionTracker dirty_;  ///< 绘制脏追踪器（specification/06-app-platform.md §3.2）。
     bool dirty_tracking_ = true;  ///< 脏追踪开关（默认开启：idle 跳帧 + layout/paint 分离）。
     bool layout_dirty_ = true;  ///< 布局脏：尺寸/结构/约束变化或 mark_needs_layout 触发，下一帧需重排。
@@ -1158,13 +1168,25 @@ class Window {
     ///       `from_style(Material, Dark)` ≡ `Theme::dark()`（除扩展注册表外的九个值面逐字段全等，
     ///       断言在 `utest_theme_presets`），故「探测不到原生风格」的环境（无头构建、WASM）
     ///       解算结果与改动前逐值相同。
-    [[nodiscard]] auto resolved_root_theme() const -> Theme {
+    /// @note 解算结果按**输入档位对**缓存，帧路径因此不调 `Theme::from_style`：本函数每帧经
+    ///       `prepare_context` 调用，而 `Theme` 是 936 字节的聚合（含 `TypeScale` 的 15 枚字体族
+    ///       名串），逐帧重建会把堆分配留在稳态帧里。缓存不靠 setter 失效——键就是
+    ///       `(风格档, 明暗档)` 两枚输入，任一 setter 换档后下一帧自然重建，无遗漏路径可言；
+    ///       显式 `theme_` 走短路分支，不读写该缓存。
+    [[nodiscard]] auto resolved_root_theme() const -> const Theme & {
         if (theme_.has_value()) {
             return *theme_;
         }
         const ThemeStyle style = style_.value_or(Theme::default_style());
         const ColorScheme scheme = (os_scheme_ == ColorScheme::Dark) ? ColorScheme::Dark : ColorScheme::Light;
-        return Theme::from_style(style, scheme);
+        if (!root_theme_cache_ || root_theme_cache_->style != style || root_theme_cache_->scheme != scheme) {
+            root_theme_cache_ = RootThemeCache{
+                .style = style,
+                .scheme = scheme,
+                .value = Theme::from_style(style, scheme),
+            };
+        }
+        return root_theme_cache_->value;
     }
 
     /// @brief 构建根 BuildContext 并挂载/安装脏汇聚点（如需要）。
