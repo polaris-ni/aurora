@@ -2,8 +2,10 @@
 
 #include <functional>
 #include <string>
+#include <utility>
 
 #include "aurora/event/focus.h"
+#include "aurora/theming/theme.h"
 #include "aurora/widget/button.h"
 #include "aurora/widget/containers.h"
 #include "aurora/widget/descriptor.h"
@@ -203,26 +205,120 @@ class Dialog : public Container {
 
 // ---------- 便捷工厂 ----------
 
+namespace detail {
+
+/// @brief 按主题惯例落定对话框标题的对齐（`conventions.dialog_title_alignment` 的唯一消费点）。
+///
+/// 两档：`Leading` 与正文同侧起排（接线批之前的行为，也是当前五套标定档的共同取值——没有任何
+/// 一档把标题改成居中，见 `src/aurora/theming/theme_presets.cpp` 的惯例覆写行）；`Centered` 相对
+/// 卡片居中，其自由空间由外层 Column 的 `CrossAxisAlignment::Stretch` 提供（见
+/// `dialog_stretches_children`）。
+///
+/// @param title 标题文本。
+/// @param theme 生效主题：只读 `conventions.dialog_title_alignment`。
+/// @return 标题 Text 节点（18 号加粗，与接线前同规格）。
+[[nodiscard]] inline auto dialog_title_text(const std::string &title, const Theme &theme) -> Node {
+    Text text(title);  // 控件不可拷贝，只能就地构造后移动进 Node（见 widget.h 的所有权口径）
+    text.font_size(18).bold();
+    text.set_align(theme.conventions.dialog_title_alignment == DialogTitleAlignment::Centered ? TextAlign::Center
+                                                                                              : TextAlign::Left);
+    return {std::move(text)};
+}
+
+/// @brief 按主题惯例组装对话框动作按钮：本文件的两个工厂与 `LayoutConventions` 之间唯一的接线点。
+///
+/// 三档排布（枚举语义见 theming/layout_conventions.h）：
+/// - `AcceptFirst`：水平行、接受钮在左。Material / Windows / KDE 档取此，且工厂产出的树与接线批
+///   之前**逐位同构**（同一层 Row、同一间距、不多包一层），零回归判据靠这一条兜住。
+/// - `AcceptLast`：水平行、拒绝钮在左、整行靠卡片右缘（GNOME/Adwaita 的 [取消] 左、[确认] 右）。
+/// - `VerticalRightAligned`：竖排、接受钮在上、两钮右缘对齐并整体靠卡片右缘（macOS 口径）。
+///
+/// 宽度口径（非默认档的既有取舍，写明白胜过留坑）：End 对齐要有自由空间，就得有「卡片宽」。工厂
+/// 不拥有卡片宽——真实对话框由宿主定宽，本库 `Dialog` 给内容的是 0.8 倍视口盒。故非默认档的动作
+/// 容器取 `MainAxisSize::Max` 撑满该内容盒、再用 `main_axis = End` 把钮推到右缘，配套外层 Column
+/// 用 `CrossAxisAlignment::Stretch` 让标题/正文同占卡片宽（见 `dialog_stretches_children`）。
+/// 代价是非默认档的卡片不再「贴内容宽」；默认档不包层也不撑宽，形态与接线前逐位一致。
+/// 注：`Stretch` 只放大子项盒、不重跑子项内部布局（`src/aurora/layout/flex_layouter.cpp` 的定位
+/// pass），所以 Text 靠自身 `TextAlign` 就能借到这份宽度，而按钮组必须自己 `Max` 才推得动。
+///
+/// 间距一律读令牌：钮间距 = `theme.spacing.medium`、钮组与正文之间由外层 Column 的
+/// `theme.spacing.large` 承担。Material 基线档实测 8 / 12，与接线前的两个字面量同值。
+///
+/// @param theme 生效主题：只读 `conventions` 与 `spacing`，不读色。
+/// @param accept 接受钮（结果为正的那个，如 OK / Yes）。
+/// @param reject 拒绝钮（取消侧）；空节点表示单钮对话框。
+/// @return 动作按钮的承载节点。单钮 + `AcceptFirst` 原样返回 accept（不多包一层）；其余组合包一层
+///         撑满 + End 容器——包的层只在非默认档出现，故默认档的盒与命中链逐位不变。
+[[nodiscard]] inline auto dialog_actions(const Theme &theme, Node accept, Node reject = {}) -> Node {
+    const auto order = theme.conventions.dialog_button_order;
+    const float gap = theme.spacing.medium;
+    const Flex fill_right{.main_axis = MainAxisAlignment::End, .main_axis_size = MainAxisSize::Max};
+
+    if (!reject) {
+        if (order == DialogButtonOrder::AcceptFirst) {
+            return accept;  // 与接线前同构：按钮直接作 Column 子项
+        }
+        auto row = Row(RowProps{.children = {std::move(accept)}, .flex = fill_right});
+        return {std::move(row)};
+    }
+
+    if (order == DialogButtonOrder::VerticalRightAligned) {
+        auto stack = Column(ColumnProps{
+            .children = {std::move(accept), std::move(reject)},
+            .flex = Flex{.direction = FlexDirection::Column, .cross_axis = CrossAxisAlignment::End},
+            .gap = gap,
+        });
+        auto row = Row(RowProps{.children = {Node{std::move(stack)}}, .flex = fill_right});
+        return {std::move(row)};
+    }
+
+    if (order == DialogButtonOrder::AcceptLast) {
+        std::swap(accept, reject);  // 拒绝钮换到行首、接受钮落到行尾（Adwaita 的 [取消] 左、[确认] 右）
+        auto row = Row(RowProps{.children = {std::move(accept), std::move(reject)}, .flex = fill_right, .gap = gap});
+        return {std::move(row)};
+    }
+
+    auto row = Row(RowProps{.children = {std::move(accept), std::move(reject)}, .gap = gap});
+    return {std::move(row)};
+}
+
+/// @brief 本轮惯例是否需要把子项盒拉到卡片同宽（决定外层 Column 的交叉轴对齐取 Stretch 还是 Start）。
+///
+/// 只有 `AcceptFirst` + `Leading`（Material 基线档，也是接线前的实际行为）不需要基准宽度；其余档
+/// 里的标题居中与动作右靠都要求子项盒等于卡片宽，否则没有自由空间可用。取 Stretch 时卡片宽 =
+/// `Dialog` 供给的内容盒宽（0.8 倍视口），与 `dialog_actions` 里动作容器的 `MainAxisSize::Max`
+/// 同向；默认档两者都不启用，故盒子逐位不变。
+///
+/// @param theme 生效主题：只读 `conventions.dialog_button_order` 与 `dialog_title_alignment`。
+/// @return 需要 Stretch 时 true；默认档为 false（保持接线前的盒逐位不变）。
+[[nodiscard]] inline auto dialog_stretches_children(const Theme &theme) -> bool {
+    return theme.conventions.dialog_button_order != DialogButtonOrder::AcceptFirst ||
+           theme.conventions.dialog_title_alignment != DialogTitleAlignment::Leading;
+}
+
+}  // namespace detail
+
 /// @brief 构建警告对话框（标题 + 消息 + 确定按钮）。
 /// @param title 标题文本（18 号加粗）。
 /// @param message 消息正文（14 号）。
 /// @param on_ok 点击 OK 按钮时同步调用的闭包；传空则按钮不挂回调。
-/// @return 内容节点（垂直 Column，间距 12：标题 + 消息 + 标签为 "OK" 的按钮），可直接交给 `Dialog` 承载。
-[[nodiscard]] inline auto alert(const std::string &title, const std::string &message, std::function<void()> on_ok = {})
-    -> Node {
+/// @param theme 生效主题：决定动作按钮排布与标题对齐（`conventions`）及两处间距（`spacing`）。
+///        默认 `Theme::defaults()`，即本机风格档 × 未表态明暗；宿主已知生效主题时应把它传进来。
+/// @return 内容节点（垂直 Column，间距取 `theme.spacing.large`：标题 + 消息 + 标签为 "OK" 的按钮），
+///         可直接交给 `Dialog` 承载。
+[[nodiscard]] inline auto alert(const std::string &title, const std::string &message, std::function<void()> on_ok = {},
+                                const Theme &theme = Theme::defaults()) -> Node {
     auto ok_btn = Button(ButtonProps{.label = "OK"});
     if (on_ok) {
         ok_btn.set_on_click(std::move(on_ok));
     }
 
     auto content = Column(ColumnProps{
-        .children =
-            {
-                std::move(Text(title).font_size(18).bold()),
-                std::move(Text(message).font_size(14)),
-                std::move(ok_btn),
-            },
-        .gap = 12,
+        .children = {detail::dialog_title_text(title, theme), std::move(Text(message).font_size(14)),
+                     detail::dialog_actions(theme, std::move(ok_btn))},
+        .flex = Flex{.cross_axis = detail::dialog_stretches_children(theme) ? CrossAxisAlignment::Stretch
+                                                                            : CrossAxisAlignment::Start},
+        .gap = theme.spacing.large,
     });
     return {std::move(content)};
 }
@@ -231,9 +327,14 @@ class Dialog : public Container {
 /// @param title 标题文本（18 号加粗）。
 /// @param message 消息正文（14 号）。
 /// @param on_result 结果回调：点 "Yes" 传 true、点 "No" 传 false；传空则两个按钮都不挂回调。
-/// @return 内容节点（垂直 Column，间距 12：标题 + 消息 + 一行 "Yes"/"No" 按钮，行内间距 8）。
+/// @param theme 生效主题：决定动作按钮排布（`conventions.dialog_button_order` 三档）、标题对齐与
+///        两处间距。默认 `Theme::defaults()`；宿主已知生效主题时应把它传进来。
+/// @return 内容节点（垂直 Column，间距取 `theme.spacing.large`：标题 + 消息 + 动作按钮组）。
+///         按钮组在 `AcceptFirst` / `AcceptLast` 档是水平 Row（间距 `theme.spacing.medium`），
+///         在 `VerticalRightAligned` 档是右靠的竖排 Column。
 [[nodiscard]] inline auto confirm(const std::string &title, const std::string &message,
-                                  const std::function<void(bool)> &on_result = {}) -> Node {
+                                  const std::function<void(bool)> &on_result = {},
+                                  const Theme &theme = Theme::defaults()) -> Node {
     auto yes_btn = Button(ButtonProps{.label = "Yes"});
     auto no_btn = Button(ButtonProps{.label = "No"});
     if (on_result) {
@@ -241,19 +342,12 @@ class Dialog : public Container {
         no_btn.set_on_click([on_result]() -> void { on_result(false); });
     }
 
-    auto buttons = Row(RowProps{
-        .children = {std::move(yes_btn), std::move(no_btn)},
-        .gap = 8,
-    });
-
     auto content = Column(ColumnProps{
-        .children =
-            {
-                std::move(Text(title).font_size(18).bold()),
-                std::move(Text(message).font_size(14)),
-                std::move(buttons),
-            },
-        .gap = 12,
+        .children = {detail::dialog_title_text(title, theme), std::move(Text(message).font_size(14)),
+                     detail::dialog_actions(theme, std::move(yes_btn), std::move(no_btn))},
+        .flex = Flex{.cross_axis = detail::dialog_stretches_children(theme) ? CrossAxisAlignment::Stretch
+                                                                            : CrossAxisAlignment::Start},
+        .gap = theme.spacing.large,
     });
     return {std::move(content)};
 }

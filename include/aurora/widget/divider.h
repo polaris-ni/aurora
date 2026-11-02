@@ -19,7 +19,7 @@ enum class Orientation : std::uint8_t {
 /// @brief 分隔线属性（聚合，AI 用指定初始化器填写）。
 struct DividerProps {
     Orientation orientation = Orientation::Horizontal;  ///< 分隔线方向，默认横向。
-    float thickness = 1.0F;  ///< 线厚（dp），默认 1.0。
+    std::optional<float> thickness;  ///< 线厚（dp）；空 = 跟随主题 `controls.separator_thickness`。
     std::optional<Color> color = std::nullopt;  ///< 线颜色；空 = 跟随主题 outline_variant（ThemeScope 换肤即生效）。
     float indent = 0.0F;  ///< 起点缩进 dp（横向为左缩进，纵向为上缩进）
     float end_indent = 0.0F;  ///< 终点缩进 dp（横向为右缩进，纵向为下缩进）
@@ -27,7 +27,8 @@ struct DividerProps {
 
 /// @brief 分隔线（叶控件）：绘制一条视觉分隔线（headless 占位渲染）。
 ///
-/// 横向填满父宽度、纵向填满父高度，厚度由 `thickness` 决定，颜色由 `color` 决定。
+/// 横向填满父宽度、纵向填满父高度，厚度与颜色都按两态取值：`thickness` / `color` 显式设过即用
+/// 显式值，未设分别跟随主题 `controls.separator_thickness` 与 `roles.outline_variant`。
 /// @note Thread: main-thread only
 /// @note Rebuildable: yes, via from_json
 ///
@@ -37,7 +38,8 @@ class Divider : public LeafWidget, public DividerProps {
     ///        才可聚焦（覆写基类 public virtual；分级默认见 specification/05 §4.2）。
     /// @return 具备输入语义时为 true，否则 false。
     [[nodiscard]] auto wants_focus() const -> bool override { return has_input_semantics(); }
-    /// @brief 默认构造：横向、1.0 dp 厚、未设色（跟随主题 outline_variant）、无缩进。
+    /// @brief 默认构造：横向、未设线厚（跟随主题 `controls.separator_thickness`）、未设色（跟随主题
+    ///        outline_variant）、无缩进。
     Divider() = default;
     /// @brief 配置块构造（specification/04-widget.md §2.5）。
     /// @param props 分隔线属性块，整份拷入 DividerProps 基类字段。
@@ -66,6 +68,14 @@ class Divider : public LeafWidget, public DividerProps {
         return color.value_or(inherit_theme(ctx).roles.outline_variant);
     }
 
+    /// @brief 解析生效线厚：未显式设值时经 ctx 取主题度量档 `controls.separator_thickness`
+    ///        （换风格档即随标定档变化），显式设值优先——与 `resolve_color` 同一套两态语义。
+    /// @param ctx 构建上下文：供主题取度量档；无注入时 `inherit_theme` 回落 Material 基线。
+    /// @return 生效线厚（dp）；显式设 0 即「要一条不画出来的线」，与「未设置」不同义。
+    [[nodiscard]] auto resolve_thickness(const BuildContext &ctx) const -> float {
+        return thickness.value_or(inherit_theme(ctx).controls.separator_thickness);
+    }
+
     /// @brief 类型名，供序列化与运行时自描述使用。
     /// @return C 字符串 "Divider"。
     [[nodiscard]] auto type_name() const -> const char * override { return "Divider"; }
@@ -86,9 +96,9 @@ class Divider : public LeafWidget, public DividerProps {
                      .enum_values = {"Horizontal", "Vertical"}},
                     {.name = "thickness",
                      .type = "float",
-                     .default_value = "1.0",
+                     .default_value = "\"theme.controls.separator_thickness\"",
                      .required = false,
-                     .note = "Line thickness (dp)",
+                     .note = "Line thickness (dp; follows theme controls.separator_thickness when unset)",
                      .json_type = "number",
                      .enum_values = {},
                      .min_value = "0"},
@@ -151,7 +161,10 @@ class Divider : public LeafWidget, public DividerProps {
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
         props.set("orientation", orientation == Orientation::Vertical ? "vertical" : "horizontal");
-        props.set("thickness", thickness);
+        // 线厚同颜色口径：只在显式设置时输出，键缺失即「跟随主题度量档」。
+        if (thickness.has_value()) {
+            props.set("thickness", *thickness);
+        }
         // 线颜色仅在显式设置时输出：保留「跟随主题」语义（与 Button/Text 同口径）。
         if (color.has_value()) {
             props.set("color", color_to_json(*color));
@@ -183,29 +196,29 @@ class Divider : public LeafWidget, public DividerProps {
     }
 
   protected:
-    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
+    auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
+        const float t = resolve_thickness(ctx);  // 未显式设值 → 跟随主题度量档
         if (orientation == Orientation::Vertical) {
-            return c.constrain(Size{.width = thickness, .height = c.max.height});
+            return c.constrain(Size{.width = t, .height = c.max.height});
         }
-        return c.constrain(Size{.width = c.max.width, .height = thickness});
+        return c.constrain(Size{.width = c.max.width, .height = t});
     }
 
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
         const Color line = resolve_color(ctx);  // 未显式设色 → 跟随主题 outline_variant
+        const float t = resolve_thickness(ctx);  // 未显式设值 → 跟随主题 separator_thickness
         if (orientation == Orientation::Vertical) {
             const float y0 = bounds.origin.y + indent;
             const float h = bounds.size.height - indent - end_indent;
             if (h > 0.0F) {
-                const Rect r{.origin = Point{.x = bounds.origin.x, .y = y0},
-                             .size = Size{.width = thickness, .height = h}};
+                const Rect r{.origin = Point{.x = bounds.origin.x, .y = y0}, .size = Size{.width = t, .height = h}};
                 p.fill_rect(r, line);
             }
         } else {
             const float x0 = bounds.origin.x + indent;
             const float w = bounds.size.width - indent - end_indent;
             if (w > 0.0F) {
-                const Rect r{.origin = Point{.x = x0, .y = bounds.origin.y},
-                             .size = Size{.width = w, .height = thickness}};
+                const Rect r{.origin = Point{.x = x0, .y = bounds.origin.y}, .size = Size{.width = w, .height = t}};
                 p.fill_rect(r, line);
             }
         }

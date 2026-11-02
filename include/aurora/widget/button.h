@@ -20,14 +20,17 @@ namespace aurora {
 /// @brief Button 属性（聚合）。未显式设置的 optional 颜色按状态自动派生（hover/pressed
 /// 由背景色调暗得到，禁用态用统一灰化）；背景色 / 文字色未显式设置时跟随主题
 /// （`roles.primary` / `roles.on_primary`），与 Checkbox 「缺省跟随主题」语义一致。
+/// 圆角与内边距同为 optional：**未显式设置时跟随主题的形状 / 间距令牌**（`shapes.small` 与
+/// `spacing.large` / `spacing.small`），切风格档即随标定档变化；显式设值（含 `ButtonProps{}`
+/// 聚合里给出数值）优先，两态语义与颜色字段一致。
 struct ButtonProps {
     ReadOnlyState<LocalizedString> label;  ///< 按钮文字来源（只读；常量或 `State` 隐式接入）
     ReadOnlyState<std::optional<Color>> color;  ///< 背景色来源；空 = 跟随主题 primary（ThemeScope 换肤即生效）
     std::optional<Color> on_color;  ///< 文字色；空 = 跟随主题 on_primary
     Font font = Font{};  ///< 字体
-    float corner_radius = 6.0F;  ///< 圆角半径（dp），>0 时背景与圆角裁剪
-    EdgeInsets padding =
-        EdgeInsets{.left = 12.0F, .top = 6.0F, .right = 12.0F, .bottom = 6.0F};  ///< 文字与背景之间的内边距
+    std::optional<float> corner_radius;  ///< 圆角半径（dp）；空 = 跟随主题 `shapes.small`，>0 时背景与圆角裁剪
+    std::optional<EdgeInsets>
+        padding;  ///< 文字与背景之间的内边距；空 = 跟随主题（水平 `spacing.large`、垂直 `spacing.small`）
     bool enabled = true;  ///< 是否可点击（禁用态降级绘制并忽略点击）
     /// @brief 状态/样式扩展（对标 Flutter ButtonStyle / Qt QPushButton）：以下悬停/按下/边框/
     ///        禁用/最小尺寸字段均有默认派生值，未显式设置时按背景与状态计算。
@@ -59,7 +62,9 @@ struct ButtonProps {
 ///
 class Button : public LeafWidget, public ButtonProps {
   public:
-    /// @brief 默认构造：全部属性取 `ButtonProps` 的聚合默认值（蓝底白字、圆角 6、内边距 12/6）。
+    /// @brief 默认构造：全部属性取 `ButtonProps` 的聚合默认值——颜色跟随主题（`roles.primary` 底 +
+    ///        `roles.on_primary` 字），圆角与内边距同样跟随主题（`shapes.small` 与
+    ///        `spacing.large` / `spacing.small`；Material 档下实测为 6 与 12/6）。
     Button() = default;
     /// @brief 以一份完整属性聚合构造按钮（属性整体接管，避免逐字段赋值）。
     /// @param props 按钮属性快照，移动进本实例的 `ButtonProps` 基类子对象
@@ -144,15 +149,17 @@ class Button : public LeafWidget, public ButtonProps {
         return *this;
     }
 
-    /// @brief 设置圆角半径（链式）。
-    /// @param r 圆角半径（dp）；>0 时背景与裁剪按圆角绘制
+    /// @brief 设置圆角半径（链式）；设定即脱离主题形状档。
+    /// @param r 圆角半径（dp）；>0 时背景与裁剪按圆角绘制，0 为直角
     /// @return 引用 `*this` 以继续链式配置
+    /// @note 不调用本 setter 时圆角跟随主题 `shapes.small`（见 `resolve_corner_radius`）；
+    ///       传 0 是「显式要直角」，与「未设置」不是同一件事。
     auto set_corner_radius(float r) -> Button & {
         corner_radius = r;
         return *this;
     }
 
-    /// @brief 设置内边距（链式）。
+    /// @brief 设置内边距（链式）；设定即脱离主题间距档。
     /// @param e 文字与背景之间的四边内边距
     /// @return 引用 `*this` 以继续链式配置
     auto set_padding(const EdgeInsets &e) -> Button & {
@@ -284,17 +291,17 @@ class Button : public LeafWidget, public ButtonProps {
                      .min_value = "0"},
                     {.name = "corner_radius",
                      .type = "float",
-                     .default_value = "6.0",
+                     .default_value = "\"theme.shapes.small\"",
                      .required = false,
-                     .note = "Corner radius (dp)",
+                     .note = "Corner radius (dp; follows theme shapes.small when unset)",
                      .json_type = "number",
                      .enum_values = {},
                      .min_value = "0"},
                     {.name = "padding",
                      .type = "EdgeInsets",
-                     .default_value = "{12,6,12,6}",
+                     .default_value = "\"theme.spacing(large/small)\"",
                      .required = false,
-                     .note = "Padding",
+                     .note = "Padding (follows theme spacing when unset)",
                      .json_type = "object"},
                     {.name = "enabled",
                      .type = "bool",
@@ -403,8 +410,13 @@ class Button : public LeafWidget, public ButtonProps {
             props.set("on_color", color_to_json(*on_color));
         }
         props.set("font_size", font.size_pt);
-        props.set("corner_radius", corner_radius);
-        props.set("padding", edge_insets_to_json(padding));
+        // 圆角 / 内边距同颜色口径：只在显式设置时输出，键缺失即「跟随主题档」（见 resolve_*）。
+        if (corner_radius.has_value()) {
+            props.set("corner_radius", *corner_radius);
+        }
+        if (padding.has_value()) {
+            props.set("padding", edge_insets_to_json(*padding));
+        }
         props.set("enabled", Json{enabled});
         // optional 颜色未显式设置不输出：保留「自动派生」语义
         if (hover_color.has_value()) {
@@ -449,6 +461,7 @@ class Button : public LeafWidget, public ButtonProps {
         if (props.contains("font_size")) {
             font.size_pt = props.at("font_size")->as_or<float>(0.0F);
         }
+        // 键缺失时保持「未显式设置」：不填 Material 字面量，否则换风格档就不再跟随主题。
         if (props.contains("corner_radius")) {
             corner_radius = props.at("corner_radius")->as_or<float>(0.0F);
         }
@@ -525,11 +538,13 @@ class Button : public LeafWidget, public ButtonProps {
         }
         // 显示串唯一来源：与绘制共用 resolved_label()，不再直读 label.get().text。
         const std::string display = resolved_label(ctx);
+        // 内边距与绘制同源：显式设过用显式值，否则随主题间距档（见 resolve_padding）。
+        const EdgeInsets pad = resolve_padding(ctx);
         cached_display_text_ = display;
         cached_text_width_ = render::FontEngine::measure_width(display, f);
         cached_text_height_ = render::FontEngine::measure_height(f);
-        const float w = std::max(cached_text_width_ + padding.left + padding.right, min_width);
-        const float h = std::max(cached_text_height_ + padding.top + padding.bottom, min_height);
+        const float w = std::max(cached_text_width_ + pad.left + pad.right, min_width);
+        const float h = std::max(cached_text_height_ + pad.top + pad.bottom, min_height);
         return c.constrain(Size{.width = w, .height = h});
     }
 
@@ -562,15 +577,41 @@ class Button : public LeafWidget, public ButtonProps {
                        : disabled_text_color.value_or(Color{130, 130, 130, 255});
     }
 
+    /// @brief 解算本帧生效的圆角半径：显式设过取显式值，未设取主题形状档。
+    /// @param ctx 构建上下文：提供主题作用域，未显式设置 `corner_radius` 时取
+    ///        `inherit_theme(ctx).shapes.small`。
+    /// @return 用于背景填充与描边的半径（dp）；`0` 走直角，`< 0` 不可能出现（显式值原样透出，
+    ///         主题档为标定值）。
+    [[nodiscard]] virtual auto resolve_corner_radius(const BuildContext &ctx) const -> float {
+        return corner_radius.value_or(inherit_theme(ctx).shapes.small);
+    }
+
+    /// @brief 解算本帧生效的内边距：显式设过取显式值，未设取主题间距档。
+    ///
+    /// 未显式设置时按「水平取 `spacing.large`、垂直取 `spacing.small`」拼装四边——Material 档下
+    /// 即 12/6/12/6，与本件接线前的字面量逐值相同；切风格档只换档、不换拼装规则。
+    /// @param ctx 构建上下文：提供主题作用域。
+    /// @return 文字与背景之间的四边内边距（dp）。
+    [[nodiscard]] virtual auto resolve_padding(const BuildContext &ctx) const -> EdgeInsets {
+        if (padding.has_value()) {
+            return *padding;
+        }
+        const auto &s = inherit_theme(ctx).spacing;
+        return EdgeInsets{.left = s.large, .top = s.small, .right = s.large, .bottom = s.small};
+    }
+
     /// @brief 绘制背景（圆角填充）。
     /// @param p 绘制器。
     /// @param bounds 按钮区域。
     /// @param bg 当前状态解析出的背景色。
-    virtual auto paint_background(Painter &p, const Rect &bounds, Color bg) -> void;
+    /// @param radius 本帧生效圆角半径（= `resolve_corner_radius(ctx)`，由 `on_paint` 解算一次后
+    ///        传给背景与边框两阶段，故二者不会因同帧内主题换档而分叉）。
+    virtual auto paint_background(Painter &p, const Rect &bounds, Color bg, float radius) -> void;
     /// @brief 绘制边框（border_width>0 且 border_color 已设置时）。
     /// @param p 绘制器。
     /// @param bounds 按钮区域。
-    virtual auto paint_border(Painter &p, const Rect &bounds) -> void;
+    /// @param radius 本帧生效圆角半径（与 `paint_background` 同一份，理由同彼）。
+    virtual auto paint_border(Painter &p, const Rect &bounds, float radius) -> void;
     /// @brief 解析当前应显示的标签串（i18n 求值）：绘制与布局的**唯一显示串来源**。
     ///
     /// 与 `Text::resolved_text` 同口径：`Environment` 注入了 `Locale` 就按它解析，否则回落

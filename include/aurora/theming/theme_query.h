@@ -12,6 +12,9 @@ namespace aurora {
 /// 沿构建好的控件树自顶向下 DFS，遇到 `ThemeProvider` 即更新"当前生效主题"，返回指定 widget
 /// 在树中所处位置的**最近生效主题**。默认兜底为 `Theme::with_defaults()`。
 ///
+/// 兜底档恒 ≡ Material 基线：本通道不读风格档探测结果，平台风格只经 `Window` 根注入或树内
+/// `ThemeScope` 进入（与 `theme_scope.h` 的 `inherit_theme` 同口径，三处兜底同源）。
+///
 /// @param root 遍历起点节点，DFS 从其控件（`root.widget()`）开始向下逐层展开。
 /// @param target 待查询的控件，按地址与树中控件比对，首次命中即取其当前生效主题并停止遍历。
 /// @return `target` 位置最近的生效主题；树中无 `ThemeProvider` 或 `target` 不在树内时为

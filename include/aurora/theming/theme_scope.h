@@ -42,15 +42,24 @@ class ThemeScope : public Provider<Theme> {
 
 /// @brief 读取最近祖先 `ThemeScope` 注入的主题（specification/07-environment-modifier.md §5.1 显式主题传递）。
 ///
-/// 在 widget 的 `on_paint`/`on_layout` 中调用以获取当前主题令牌（颜色、字体），
+/// 在 widget 的 `on_paint`/`on_layout` 中调用以获取当前主题令牌（颜色、形状、间距、度量、字体），
 /// 从而让绘制随主题变化。无注入主题时返回默认浅色主题，保证永不崩溃。
 ///
-/// @param ctx 当前构建上下文（由 layout/paint 传入）。
-/// @return 最近祖先注入的 Theme；未注入则 `Theme::light()`。
+/// **返回引用而非值**：`Theme` 现在携带 `TypeScale`（15 枚 `Font`，各持一个族名字符串），按值返回
+/// 会让「读一枚令牌字段」变成整份主题拷贝——绘制路径每帧多次命中，拷贝即新增堆分配。改为引用后
+/// 取令牌是直接字段访问；需要跨越 `ctx` 生命周期使用主题值（存进成员、闭包捕获）的调用方显式
+/// 拷贝（`const Theme t = inherit_theme(ctx);` 不变）。
 ///
-[[nodiscard]] inline auto inherit_theme(const BuildContext &ctx) -> Theme {
+/// @param ctx 当前构建上下文（由 layout/paint 传入）。
+/// @return 最近祖先注入的 Theme 的引用；未注入则指向 Material 基线档（与 `Theme::light()` 逐值相同，
+///         进程内一份，无兜底失败态）。
+/// @note 兜底档恒 ≡ Material 基线：风格探测得到的平台档只经 `Window` 根注入或显式 `set_theme` 进入，
+///       不经本兜底进入（判据同源：无宿主 / 无窗口的语境与「无窗口后端即回落 Material」同解）。
+/// @note Thread: 兜底那一份由函数内静态量承担，首次初始化由语言保证线程安全，读取路径无锁。
+[[nodiscard]] inline auto inherit_theme(const BuildContext &ctx) -> const Theme & {
+    static const Theme LIGHT_FALLBACK = Theme::light();  // 无注入时的 Material 基线档（一份，进程内复用）
     const auto *t = ctx.environment<Theme>();
-    return t != nullptr ? *t : Theme::light();
+    return t != nullptr ? *t : LIGHT_FALLBACK;
 }
 
 }  // namespace aurora

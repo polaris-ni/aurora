@@ -71,9 +71,11 @@ class Checkbox : public LeafWidget {
         return *this;
     }
 
-    /// @brief 设置方框边长 dp（链式）。
+    /// @brief 设置方框边长 dp（链式）；设定即脱离主题度量档。
     /// @param s 方框边长（dp），同时作为布局返回的宽高基准。
     /// @return 自身引用，便于链式调用。
+    /// @note 不调用本 setter 时边长跟随主题 `controls.indicator_size`（见 `resolve_size`）；
+    ///       显式设值与「未设置」是两态，后者才随风格档变化。
     auto set_size(float s) -> Checkbox & {
         size_ = s;
         return *this;
@@ -195,9 +197,9 @@ class Checkbox : public LeafWidget {
                      .json_type = "array"},
                     {.name = "size",
                      .type = "float",
-                     .default_value = "20.0",
+                     .default_value = "\"theme.controls.indicator_size\"",
                      .required = false,
-                     .note = "Box size (dp)",
+                     .note = "Box size (dp; follows theme controls.indicator_size when unset)",
                      .json_type = "number",
                      .enum_values = {},
                      .min_value = "0"},
@@ -289,7 +291,9 @@ class Checkbox : public LeafWidget {
         }
         props.set("border_color", color_to_json(border_color_));
         props.set("check_color", color_to_json(check_color_));
-        props.set("size", size_);
+        if (size_.has_value()) {
+            props.set("size", *size_);  // 未设置不输出：保留「跟随主题度量档」语义
+        }
         props.set("corner_radius", corner_radius_);
         props.set("border_width", border_width_);
         props.set("enabled", Json{enabled_});
@@ -327,8 +331,17 @@ class Checkbox : public LeafWidget {
     }
 
   protected:
-    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
-        return c.constrain(Size{.width = size_, .height = size_});
+    /// @brief 解算本帧生效的方框边长：显式设过取显式值，未设取主题度量档
+    ///        `controls.indicator_size`（与 `resolve_palette` 的「未设色跟随主题」同口径）。
+    /// @param ctx 构建上下文：提供主题作用域。
+    /// @return 方框边长（dp），同时是布局返回的宽高基准。
+    [[nodiscard]] virtual auto resolve_size(const BuildContext &ctx) const -> float {
+        return size_.value_or(inherit_theme(ctx).controls.indicator_size);
+    }
+
+    auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
+        const float side = resolve_size(ctx);
+        return c.constrain(Size{.width = side, .height = side});
     }
 
     /// @brief 三态配色（勾选填充 / 未勾选描边 / 勾号），由 `resolve_palette` 一次性算出。
@@ -431,7 +444,7 @@ class Checkbox : public LeafWidget {
     std::optional<Color> active_color_;  ///< 勾选态填充色；空 = 跟随主题 primary
     Color border_color_ = Color{140, 140, 146, 255};  ///< 未勾选边框色
     Color check_color_ = colors::AURORA_WHITE;  ///< 勾号颜色
-    float size_ = 20.0F;  ///< 方框边长 dp
+    std::optional<float> size_;  ///< 方框边长 dp；空 = 跟随主题 controls.indicator_size
     float corner_radius_ = -1.0F;  ///< 圆角半径 dp；< 0 自动 = 边长 × 0.2
     float border_width_ = 1.5F;  ///< 未勾选描边宽 dp
     bool enabled_ = true;  ///< 禁用态灰化并忽略点击

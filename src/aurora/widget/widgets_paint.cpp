@@ -201,9 +201,9 @@ auto Text::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> 
     }
 }
 
-auto Button::paint_background(Painter &p, const Rect &bounds, Color bg) -> void {
-    if (corner_radius > 0.0F) {
-        p.fill_rounded_rect(bounds, corner_radius, bg);
+auto Button::paint_background(Painter &p, const Rect &bounds, Color bg, float radius) -> void {
+    if (radius > 0.0F) {
+        p.fill_rounded_rect(bounds, radius, bg);
     } else {
         p.fill_rect(bounds, bg);
     }
@@ -218,13 +218,13 @@ auto Button::baseline_distance(const BuildContext & /*ctx*/) const -> std::optio
     return ((size().height - th) * 0.5F) + render::FontEngine::measure_ascent(f);
 }
 
-auto Button::paint_border(Painter &p, const Rect &bounds) -> void {
+auto Button::paint_border(Painter &p, const Rect &bounds, float radius) -> void {
     if (border_width <= 0.0F || !border_color.has_value()) {
         return;
     }
     const Color bc = enabled ? *border_color : border_color->with_alpha(128);  // 禁用态边框半透淡化
-    if (corner_radius > 0.0F) {
-        p.draw_rounded_border(bounds, corner_radius, border_width, bc);
+    if (radius > 0.0F) {
+        p.draw_rounded_border(bounds, radius, border_width, bc);
     } else {
         p.draw_rect(bounds, bc);
     }
@@ -249,9 +249,11 @@ auto Button::paint_label(Painter &p, const Rect &bounds, Color text_color, const
 
 auto Button::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void {
     // 绘制分阶段（继承扩展点）：背景 → 边框 → 文字；状态色由 resolve_* 钩子解析
-    // （未显式设色时经 ctx 取主题角色）。
-    paint_background(p, bounds, resolve_background(ctx));
-    paint_border(p, bounds);
+    // （未显式设色时经 ctx 取主题角色）。圆角同理：本帧解算一次（显式值优先，未设取主题
+    // shapes.small），同一份值同时喂背景与边框两阶段，避免同帧换档时两阶段取到不同半径。
+    const float radius = resolve_corner_radius(ctx);
+    paint_background(p, bounds, resolve_background(ctx), radius);
+    paint_border(p, bounds, radius);
     // 本帧只解析一次：量宽与落笔共用 display 这一份副本。
     paint_label(p, bounds, resolve_text_color(ctx), resolved_label(ctx));
 }
