@@ -594,6 +594,11 @@ class Session {
         host_ = std::make_unique<WindowHost>(next_host_window_id(), Scene{Node{}}, std::move(created.value()));
         host_->attach_surface();
         window_ = host_->window();  // 非拥有别名：既有窗口/表面访问面保持原签名
+        // 钉住风格档：golden 比对与采样点断言都是绝对色判据，按 `codespec/specification/07-environment-modifier.md`
+        // §5.2 的测试约定须显式固定主题。两轴模型落地后，未钉的根主题会随 runner 的 OS 家族落到各自的原生
+        // 风格档，而基线 PNG 是一次性生成的静态资产——不钉就会把「换了 runner」与「改了控件」两种原因混进
+        // 同一条像素差异里。明暗轴不在此钉：它由 `Application` / 宿主推入，各场景沿用既有口径。
+        window_->set_theme_style(ThemeStyle::Material);
     }
 
     /// @brief 首帧前把本会话的驱动器挂为进程内当前实例（`Animator::current()` 是 mount 期注册点）。
