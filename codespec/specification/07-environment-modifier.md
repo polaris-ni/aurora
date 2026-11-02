@@ -230,6 +230,16 @@ margin 在 Maximized / FullScreen / tiled 态塌缩为 0（贴边无可拖缝隙
 
 `Window`（`window/window.h`）持有主题状态，暴露 `set_theme(const Theme&)`（应用显式设置，最高优先）、`theme()`、`set_theme_style(ThemeStyle)` / `theme_style()`（只钉风格轴，明暗仍跟随 OS）与 `set_os_color_scheme(ColorScheme)`（供宿主推入 OS 档位的设定器）。`prepare_context` 每帧向根 `BuildContext` 注入 `Theme`（`root_env_.set<Theme>(resolved_root_theme())`），与 `MediaQuery` / `WindowState` / `WindowMode` / `WindowChrome` 同址注入，机制完全对称——子树无 `ThemeScope` 时经 `inherit_theme(ctx)` 读到此值。
 
+**换档落地的两半（`set_theme` / `set_theme_style` / `set_os_color_scheme` 三枚 setter 共用）**：换档要同时关掉两条独立的复用通道，缺一半就出现「逻辑对了、屏幕没变」。
+
+- **向下失效**——脏标记只有向上通道，而子树的后代在「约束未变」时短路复用布局缓存与 Display List；故 setter 置一枚 `theme_pending_` 挂起标志，`prepare_context` 在注入那一帧对呈现根调用 `Widget::invalidate_subtree_caches()`（与 §6.5 locale 的挂起标志同一机制、同一函数）。
+- **整帧标脏**——配色变化推不出任何有限脏区（每一枚像素都可能变），故 setter 同批调用 `force_full_redraw()`（`layout_dirty_ = true` + 脏面 `mark_all()`）。只挂失效不标脏，增量脏区不会重绘；只标脏不失效，重排仍读旧档缓存。
+- **同值短路**——`set_theme_style` / `set_os_color_scheme` 遇相同档位直接返回，两半都不做：宿主 `attach_surface` 时会原样再推一次当前 OS 档，若短不了就每次开窗白清一次整子树缓存、白重绘一帧。`set_theme` 无短路（它携带整棵主题，逐值比较的成本高于收益）。
+
+因此 `WindowHost::on_os_color_scheme` 不再自己补 `force_full_redraw`——整帧标脏与整子树失效都在 setter 内成对完成，宿主层重复一次会让同档重推绕过 setter 的短路白重绘一帧。判据在 `itest_theme_root_injection`：常驻树上换档帧断言「重排发生且读到新档」（关脏追踪观察失效那一半）、换档帧断言 `has_pending_dirty()`（开脏追踪观察像素那一半）、同值重推两半皆无。
+
+**已知不对称（现状，非设计）**：`set_locale` 只有向下失效那一半、没有整帧标脏。文本换档同样改的是每一枚字形，理论上需要同样的整帧重绘；本条只记录口径，未随本批改动。
+
 **两轴解算**：`resolved_root_theme()` 在显式 `theme_` 缺席时返回 `Theme::from_style(风格档, 明暗档)`——风格轴取 `set_theme_style` 钉住的档位，未钉时取 `Theme::default_style()` 的探测档；明暗轴取宿主推入的 `os_scheme_`，其中 `Unspecified` ≡ 明色，故注入主题的 `scheme` 恒为 `Light` / `Dark` 具体档、不为 `Unspecified`（这一条与下面三级链的口径同源）。`set_theme` 与 `set_theme_style` 同时给出时前者生效（它携带完整两轴取值，短路排在风格解算之前）。零回归边界：`from_style(Material, Light)` ≡ `Theme::light()`、`from_style(Material, Dark)` ≡ `Theme::dark()`，故风格档落回 `Material` 的那几类环境（无窗口后端的构建——含测试宿主与无头 CI；`PlatformKind::Web`；以及未映射进平台家族且读不到外壳证据的目标）解算结果与两轴模型引入前逐值相同。注意 Linux 一行的 `Unknown` / `Other` **不**回落 `Material` 而是取 `Gnome`（理由见 `theming/theme_style.h` 判据表注释：本库既有的 `os_color_scheme()` Linux 支读 GTK `settings.ini`，已经默认这台机器在跑 GTK 系桌面，Adwaita 是与该启发式同源的基线，而非另造一档「无主风格」）。
 
 **解算结果的缓存**：`Theme` 是含 15 枚字体族名串的 936 字节聚合（`sizeof` 实测，见 `CHANGELOG.md` 的 [Unreleased] Notes），而本函数每帧被 `prepare_context` 调用，故按**解算后的 `(风格档, 明暗档)` 档位对**缓存、同组合内不再调 `Theme::from_style`——帧路径因此不含主题构造。缓存不靠 setter 失效：任一 setter 换档即改变键、下一帧自然重建，显式 `theme_` 走短路分支根本不读写缓存。断言在 `itest_theme_root_injection`（删去键中的明暗比对后，OS 档翻转、seam 生产链路与双轴钉档三格同时转红）。
@@ -238,9 +248,9 @@ margin 在 Maximized / FullScreen / tiled 态塌缩为 0（贴边无可拖缝隙
 
 **三级优先链**（应用未显式设置时）：显式 `set_theme` > OS 档（经 `set_os_color_scheme` 推入）> 明色。OS 未表态（`Unspecified`，headless/CI 常见）回落明色，故「`Unspecified` ≡ 明色列」是全系统单一口径：根注入链底、CSD 桥基座（见 5.3）与 `inherit_theme` 的无注入兜底（`Theme::light()`，`theming/theme_scope.h`）同解。注入的主题 `scheme` 携带解析后的最终档（`Light` / `Dark`，不为 `Unspecified`）。
 
-**OS 偏好的推入路径**：`platform.h` 反向依赖 `window.h`，故 `Window` 不直读 `os_color_scheme()`；由 `WindowHost`（app 层）在 `attach_surface` 创建窗口时推入 `set_os_color_scheme(os_color_scheme())`，与 `set_window_state` / `set_window_mode` 的同位推送同构。读取口径：注册表 / 配置文件访问有副作用，**不在每帧直读**——创建时读一次。运行期变更：Win32 后端在 `WndProc` 捕获 `WM_SETTINGCHANGE`（明暗外观切换以 `ImmersiveColorSet` 标识；宿主构造期播种一次档位基线，只上报相对基线的变化，避免把已推入档位当新变化重报），经 `Surface::set_os_color_scheme_handler`（与 `set_scale_change_handler` 同构的基类 seam）上抛 `WindowHost`，转发为 `Window::set_os_color_scheme` + 强制整帧重排重绘——「跟随系统深浅色」下一帧生效，无轮询。macOS 走同一条 seam：内容视图的 `viewDidChangeEffectiveAppearance` 在用户切换系统明暗（或应用外观跟随变化）时被 AppKit 送达，`MacOSSurface::Impl::sync_color_scheme` 读 `macos_os_color_scheme()` 并在与基线不同时经 `notify_os_color_scheme_change` 上抛，同样落到 `Window::set_os_color_scheme` + 重绘；`Unspecified` 既不参与去重也不上报（不知道不猜）。`WindowHost::teardown` 同步解绑该句柄（消息泵在宿主回收后仍可收到 `WM_SETTINGCHANGE`，捕获 `this` 未解绑即 use-after-free）。Linux 无对等系统信号，策略文档化为「创建时读 + 应用可随时 `set_theme` 显式接管」，不假装实时。
+**OS 偏好的推入路径**：`platform.h` 反向依赖 `window.h`，故 `Window` 不直读 `os_color_scheme()`；由 `WindowHost`（app 层）在 `attach_surface` 创建窗口时推入 `set_os_color_scheme(os_color_scheme())`，与 `set_window_state` / `set_window_mode` 的同位推送同构。读取口径：注册表 / 配置文件访问有副作用，**不在每帧直读**——创建时读一次。运行期变更：Win32 后端在 `WndProc` 捕获 `WM_SETTINGCHANGE`（明暗外观切换以 `ImmersiveColorSet` 标识；宿主构造期播种一次档位基线，只上报相对基线的变化，避免把已推入档位当新变化重报），经 `Surface::set_os_color_scheme_handler`（与 `set_scale_change_handler` 同构的基类 seam）上抛 `WindowHost`，转发为 `Window::set_os_color_scheme`——「跟随系统深浅色」下一帧生效，无轮询；整帧重排重绘与整子树缓存失效都在该 setter 内成对完成（见上面「换档落地的两半」），宿主层不再补置脏。macOS 走同一条 seam：内容视图的 `viewDidChangeEffectiveAppearance` 在用户切换系统明暗（或应用外观跟随变化）时被 AppKit 送达，`MacOSSurface::Impl::sync_color_scheme` 读 `macos_os_color_scheme()` 并在与基线不同时经 `notify_os_color_scheme_change` 上抛，同样落到 `Window::set_os_color_scheme`；`Unspecified` 既不参与去重也不上报（不知道不猜）。`WindowHost::teardown` 同步解绑该句柄（消息泵在宿主回收后仍可收到 `WM_SETTINGCHANGE`，捕获 `this` 未解绑即 use-after-free）。Linux 无对等系统信号，策略文档化为「创建时读 + 应用可随时 `set_theme` 显式接管」，不假装实时。
 
-**框架那一半之外另有一条应用级转发**：`WindowHost::on_os_color_scheme` 在完成「推 `Window` + 整帧置脏」之后，再向 `WindowHost::set_os_scheme_sink`（`Application` 在 `register_host` 对**每个**宿主安装）报一次原值，由 `Application::os_color_scheme_state()`（`ReadOnlyState<ColorScheme>`）与命令式回调 `set_on_os_color_scheme()` 消费——三级优先链、`force_full_redraw`、Win32 的逐宿主基线去重与 `Surface::set_os_color_scheme_handler` 的独占单槽语义**全部不变**，本层只加「应用级会看到」这一层；应用侧旁听走 sink，不去抢那一枚槽（抢了会顶掉框架的根主题跟随）。四条口径：跨宿主去重（N 扇窗各收一次同值切换在应用级只算一次，比较在转发处做而非指望 `State::set`——它对相等值照样发信号）、回调恒在主线程（消息泵线程同步转发，不引入后端或探测线程）、初值 `Unspecified` 不隐式 seed（启动期解算走显式的 `refresh_os_color_scheme()`，宿主登记时框架自己那一读只推 `Window` 快照）、**原值透传不回落**（「系统不表态回哪一档」是应用策略，框架回落会让应用永久失去区分「系统说亮」与「系统没说」的能力）。聚合范围与 `window_state()` / `window_mode()` 的「只投影主窗」相反，完整契约见 [`06-app-platform.md`](06-app-platform.md) §6.2。
+**框架那一半之外另有一条应用级转发**：`WindowHost::on_os_color_scheme` 在完成「推 `Window`」之后，再向 `WindowHost::set_os_scheme_sink`（`Application` 在 `register_host` 对**每个**宿主安装）报一次原值，由 `Application::os_color_scheme_state()`（`ReadOnlyState<ColorScheme>`）与命令式回调 `set_on_os_color_scheme()` 消费——三级优先链、setter 内成对的整帧标脏与整子树失效、Win32 的逐宿主基线去重与 `Surface::set_os_color_scheme_handler` 的独占单槽语义**全部不变**，本层只加「应用级会看到」这一层；应用侧旁听走 sink，不去抢那一枚槽（抢了会顶掉框架的根主题跟随）。四条口径：跨宿主去重（N 扇窗各收一次同值切换在应用级只算一次，比较在转发处做而非指望 `State::set`——它对相等值照样发信号）、回调恒在主线程（消息泵线程同步转发，不引入后端或探测线程）、初值 `Unspecified` 不隐式 seed（启动期解算走显式的 `refresh_os_color_scheme()`，宿主登记时框架自己那一读只推 `Window` 快照）、**原值透传不回落**（「系统不表态回哪一档」是应用策略，框架回落会让应用永久失去区分「系统说亮」与「系统没说」的能力）。聚合范围与 `window_state()` / `window_mode()` 的「只投影主窗」相反，完整契约见 [`06-app-platform.md`](06-app-platform.md) §6.2。
 
 **两轴在「读一次」上的差异是有意的**：明暗档运行期跟随 OS（上面那条上报链），风格档则不跟随——`Theme::default_style()` 的读数落进程级静态缓存，用户在会话中途换桌面外壳（GNOME ↔ Plasma）不改当前进程的风格，需重启应用。理由两条：外壳切换在 XDG 侧是会话级事件、库侧既不该订阅也不该轮询；且风格档决定的是整套令牌，运行期翻档会让一棵已排好的树整体换族名与度量，成本远高于换明暗色。口径都在本条，代码侧的注记（`Theme::default_style()` 函数头与 `src/aurora/theming/detail/theme_probe.cpp` 文件头）指向这里。
 
@@ -460,7 +470,7 @@ locale 沿 `Environment` 向下传播，两个注入点：
 
 - `Widget::invalidate_subtree_caches()` —— 清本控件**及全部后代**的布局缓存与 DL 缓存；
 - `Provider<T>::on_signal_dirty()` 覆写默认标脏口径，换值那一帧对子树调用它（`Theme` / `MediaQuery` 同源受益）；
-- `Window::set_locale` 走挂起标志，在注入那一帧对呈现根调用它。
+- `Window::set_locale` 走挂起标志，在注入那一帧对呈现根调用它。`Window` 的三枚主题 setter（`set_theme` / `set_theme_style` / `set_os_color_scheme`）用同一机制的同一函数，另加一枚 `force_full_redraw` 负责像素那一半——口径与差异见 §5.2「换档落地的两半」。
 
 代价是 O(子树) 且只在换帧发生一次，与首帧同量级；稳态帧不经过这条路径，缓存收益不受影响。
 环境值依赖自身布局的控件另有第二条口径：覆写 `can_cache_layout()` 返回 false（见 `04-widget.md`）。
