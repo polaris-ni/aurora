@@ -76,6 +76,22 @@ struct Theme {
         return t;
     }
 
+    /// @brief 按「风格 × 明暗」两轴组合给出标定主题。
+    ///
+    /// 一枚风格内含明暗两列取值，故本函数不要求先选明暗再选风格；`Unspecified` 表示本主题
+    /// 对明暗不表态，此时取该风格的**明色列**（与 `resolve_color_scheme` 及 CSD 桥的
+    /// 「`Unspecified` ≡ 明色列」单一口径一致），`scheme` 字段仍保持 `Unspecified` 原样。
+    ///
+    /// 取值口径：只覆盖**有出处**的角色与度量，其余沿用 Material 基线值——不臆造无据数值。
+    /// 出处分级（官方一手 / 真机实测 / 官方公式派生）随值写在实现体的注释里。
+    ///
+    /// @param style 风格轴取值（见 `ThemeStyle`）。
+    /// @param scheme 明暗档；`Unspecified` 取该风格明色列且不表态。
+    /// @return 该组合的标定主题。`from_style(Material, Light)` 逐位等于 `light()`、
+    ///         `from_style(Material, Dark)` 逐位等于 `dark()`、
+    ///         `from_style(Material, Unspecified)` 逐位等于 `with_defaults()`。
+    [[nodiscard]] static auto from_style(ThemeStyle style, ColorScheme scheme = ColorScheme::Unspecified) -> Theme;
+
     /// @brief 返回所有字段取声明默认值的主题：light 基准列 + 无扩展、`scheme` 不表态。
     /// @return 逐字段取默认成员值的主题实例（裸主题即明色基线，非无色空壳）。
     [[nodiscard]] static auto with_defaults() -> Theme { return Theme{}; }

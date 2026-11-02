@@ -7,9 +7,11 @@ namespace aurora {
 /// @brief 对话框动作按钮的排布惯例（同一组按钮，谁在前、怎么对齐）。
 ///
 /// 只表排布，不表文案、不表语义角色——「接受」指结果为正的那个按钮（如 OK / Yes / 确定），
-/// 「拒绝」指取消侧。三档覆盖三大设计语言的现实分歧：Windows 把接受钮放在最左，
-/// macOS 把按钮竖排在右下角且接受钮在上，GNOME/Adwaita 与 KDE 把接受钮放在行尾且用
-/// `suggested-action` 填充强调色。
+/// 「拒绝」指取消侧。三档覆盖四大设计语言的现实分歧：Windows 与 KDE 把接受钮排在拒绝钮之前
+/// （Qt 动作按钮序表 `buttonRoleLayouts` 的 `WinLayout` / `KdeLayout` 两支均为 Yes→No、
+/// Accept→Reject）；GNOME/Adwaita 的对话框把接受钮排在行尾（右）并以 `suggested-action`
+/// 填强调色（即 Adwaita 警报对话框里 [取消] 在左、[确定] 在右的实测排布）；
+/// macOS 把按钮竖排在右下角且接受钮在上。
 enum class DialogButtonOrder : std::uint8_t {
     AcceptFirst,  ///< 水平行内接受钮在前（左），拒绝钮在后。
     AcceptLast,  ///< 水平行内接受钮在后（右），拒绝钮在前。

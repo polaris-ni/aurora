@@ -29,6 +29,11 @@ struct TypeScale {
     Font label_large{Font{.size_pt = 14.0F, .weight = 500}};  ///< Label Large。
     Font label_medium{Font{.size_pt = 12.0F, .weight = 500}};  ///< Label Medium。
     Font label_small{Font{.size_pt = 11.0F, .weight = 500}};  ///< Label Small。
+
+    /// @brief 逐字段相等比较（十五档 `Font` 全等）；供主题解析与测试断言。
+    /// @param other 比较对象。
+    /// @return 全部字段相等时为 true。
+    [[nodiscard]] auto operator==(const TypeScale &other) const -> bool = default;
 };
 
 }  // namespace aurora

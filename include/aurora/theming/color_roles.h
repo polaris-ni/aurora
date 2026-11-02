@@ -63,6 +63,11 @@ struct ColorRoles {
     Color hover;  ///< 交互态悬停叠色（含 alpha）。
     Color pressed;  ///< 交互态按压叠色（含 alpha）。
 
+    /// @brief 逐字段相等比较（三十八项全等）；供主题解析与「风格档 ≡ 基线档」的测试断言。
+    /// @param other 比较对象。
+    /// @return 全部字段相等时为 true。
+    [[nodiscard]] auto operator==(const ColorRoles &other) const -> bool = default;
+
     /// @brief 亮色档色角色全集。
     /// @return 与现行 `Theme::light()` 观感一致（已消费角色）、其余取 M3 标准中性 / 占位的角色组。
     [[nodiscard]] static constexpr auto light() noexcept -> ColorRoles {
