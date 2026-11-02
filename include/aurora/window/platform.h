@@ -7,6 +7,7 @@
 #include "aurora/core/platform.h"
 #include "aurora/environment/media_query.h"
 #include "aurora/theming/color_scheme.h"
+#include "aurora/theming/theme_style.h"
 #include "aurora/window/window.h"
 
 namespace aurora {
@@ -263,6 +264,25 @@ struct Platform {
 #endif
     return p;
 }
+
+/// @brief 显式查询桌面外壳证据（Linux/BSD 的风格解算输入；specification/06-app-platform.md §5）。
+///
+/// 与 `platform()` 的关系：`platform().kind` 表 **OS 家族**（Windows / macOS / Linux / 其余），
+/// 分不出同一台 Linux 机器跑的是 GNOME 还是 KDE，而这两者的观感应当不同——风格轴需要第二枚证据，
+/// 它就是本函数的返回值。它**不并进** `Platform` 快照：`Platform` 的口径是「编译期 OS + 自动探测
+/// Surface」，且 `platform()` 被大量既有断言逐字段比较，扩字段会牵动它们。
+///
+/// 证据口径与局限（读进程环境，实现在 `src/aurora/theming/detail/theme_probe.cpp`，全库唯一一份）：
+/// 只有 Linux / BSD 分支读 `XDG_CURRENT_DESKTOP` → `DESKTOP_SESSION`；Windows / macOS / WASM /
+/// Android / 无头恒返回 `Unknown`——它们的外壳证据在 `kind` 那一轴。裸 X11、自建合成器、无会话
+/// 变量的环境同样 `Unknown`，这是**证据缺失**而不是「没有桌面」。
+///
+/// 与 `os_color_scheme()` 并列的一条口径：**创建时读一次，不随运行期环境变化**。本函数自身每次
+/// 调用都直读环境变量（供诊断与测试如实取数）；风格解算侧的缓存发生在
+/// `Theme::default_style()`，故换桌面外壳要重启应用。
+/// @return 外壳证据；`Unknown`（无证据）与 `Other`（有证据但不认识）分列。
+/// @note Side-effects: reads the process environment（仅 Linux / BSD 分支）。
+[[nodiscard]] inline auto desktop_environment() -> DesktopEnvironment { return detail::probe_desktop_environment(); }
 
 #ifdef AURORA_PLATFORM_WINDOWS
 namespace detail {

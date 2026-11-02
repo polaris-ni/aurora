@@ -92,6 +92,32 @@ struct Theme {
     ///         `from_style(Material, Unspecified)` 逐位等于 `with_defaults()`。
     [[nodiscard]] static auto from_style(ThemeStyle style, ColorScheme scheme = ColorScheme::Unspecified) -> Theme;
 
+    /// @brief 探测「这台机器的设计语言」属于哪套风格（风格轴的唯一运行期入口）。
+    ///
+    /// 判据表是纯函数 `detail::style_from(PlatformKind, DesktopEnvironment, has_window_backend)`，
+    /// 本函数只负责取证据 + 转调：证据源是 `platform().kind` 与 `auto_detect_surface()`，
+    /// **不是** `MediaQuery::platform`（后者表渲染后端而非 OS 家族，取错源会让「Linux 桌面 +
+    /// 非原生后端」误落回落档）。
+    ///
+    /// 结果每进程只读一次并缓存（静态局部量），故**风格轴不随运行期环境变化**：换外壳要重启
+    /// 应用。明暗轴相反，它经 `resolve_color_scheme` 三级优先链跟随 OS——两轴在这条上的差异是
+    /// 有意的，见 specification/07-environment-modifier.md §5.2。
+    /// @return 该环境的风格档；无窗口后端 / WASM / 无任何证据时为 `Material`（回落档，非错误态）。
+    /// @note Side-effects: reads the process environment（仅 Linux / BSD 分支，且只读一次）。
+    /// @note Thread: 静态局部量的首次初始化由语言保证线程安全，读取路径无锁。
+    [[nodiscard]] static auto default_style() -> ThemeStyle;
+
+    /// @brief 跟随这台机器的设计语言给出整套标定主题（零参数的默认路径）。
+    ///
+    /// 等价于 `from_style(default_style())`，即**只定风格轴、不定明暗档**：返回主题的 `scheme`
+    /// 是 `Unspecified`（对明暗不表态，取值落明色列），明暗仍交给三级优先链解算。本函数不在
+    /// 构造期直读注册表 / 配置文件拿暗色档——那会同时违反「不在每帧直读、创建时读一次」与
+    /// 「构造期不隐式读 OS 偏好」两条既有纪律。要一份确定的暗色就写
+    /// `from_style(default_style(), os_color_scheme())`，由调用方显式承担那次读取。
+    /// @return 该环境风格档的标定主题（`scheme` 不表态）。
+    /// @note 与 `XxxProps::defaults()` 同名不同主：后者出的是该控件的属性快照。
+    [[nodiscard]] static auto defaults() -> Theme;
+
     /// @brief 返回所有字段取声明默认值的主题：light 基准列 + 无扩展、`scheme` 不表态。
     /// @return 逐字段取默认成员值的主题实例（裸主题即明色基线，非无色空壳）。
     [[nodiscard]] static auto with_defaults() -> Theme { return Theme{}; }

@@ -53,7 +53,10 @@ struct MediaQuery {
     float text_scale_factor = 1.0F;  ///< 系统字体缩放（辅助功能）。
     ScreenOrientation orientation = ScreenOrientation::Portrait;  ///< 由 `screen_size` 派生。
     Size screen_size{};  ///< 物理屏幕的逻辑尺寸（dp）；无 Provider 时为 0。
-    PlatformKind platform = PlatformKind::Unknown;  ///< 编译期常量，非 Windows 为 Unknown。
+    /// @brief 后端类别折算的平台位：只在 Win32 后端填 `Windows`，其余（含 Linux 桌面 + GLFW/X11）
+    /// 恒 `Unknown`。**表的是渲染后端，不是 OS 家族**——要 OS 家族请用 `platform().kind`，
+    /// 按它做平台判断会把 Linux 桌面误判成「未知平台」（风格解算即此判据的来源，见 `Theme::default_style`）。
+    PlatformKind platform = PlatformKind::Unknown;
     DeviceKind device = DeviceKind::Unknown;  ///< 编译期常量，非桌面为 Unknown。
     EdgeInsets padding{};  ///< 安全区（刘海/状态栏）内边距（dp）。
     bool prefer_reduced_motion = false;  ///< 系统「减弱动效」偏好。
