@@ -80,7 +80,12 @@
 #ifdef AURORA_PLATFORM_LINUX
 // clang-format off
 #include <X11/Xlib.h>
+#include <X11/Xatom.h>
 // clang-format on
+// glfwGetX11Display 仅在声明 GLFW_EXPOSE_NATIVE_X11 后由 glfw3native.h 暴露；本探针在 Linux 下用它独立
+// 读回窗口几何 / WM 状态（_NET_WM_STATE），故须显式开启。宏名与 glfw_surface.cpp 同口径，裸宏名豁免命名检查。
+#define GLFW_EXPOSE_NATIVE_X11  // NOLINT(*-identifier-naming)
+#include <GLFW/glfw3native.h>
 #endif
 #ifdef AURORA_PLATFORM_WINDOWS
 #ifndef NOMINMAX
@@ -179,6 +184,7 @@ auto expected_monitor_rects() -> std::vector<Rect> {
     if (monitors == nullptr) {
         return rects;
     }
+    // NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic)
     for (int i = 0; i < count; ++i) {
         int mx = 0;
         int my = 0;
@@ -189,11 +195,13 @@ auto expected_monitor_rects() -> std::vector<Rect> {
         }
         rects.push_back(Rect{.x = mx, .y = my, .w = vm->width, .h = vm->height});
     }
+    // NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic)
     return rects;
 }
 
 /// @brief 实测窗口矩形是否覆盖某块 GLFW 显示器视口（±2px）。
 [[nodiscard]] auto covers_a_monitor(const Rect &actual, const std::vector<Rect> &expected) -> bool {
+    // NOLINTNEXTLINE(readability-use-anyofallof): 提前返回式匹配，改写 any_of 反而掩盖 early-return 语义
     for (const Rect &e : expected) {
         if (std::abs(actual.x - e.x) <= 2 && std::abs(actual.y - e.y) <= 2 && std::abs(actual.w - e.w) <= 2 &&
             std::abs(actual.h - e.h) <= 2) {
@@ -228,12 +236,14 @@ auto has_any_maximized_atom(Display *dpy, ::Window win) -> bool {
     if (ok == Success && actual_type == XA_ATOM && prop != nullptr) {
         // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
         const auto *atoms = reinterpret_cast<const Atom *>(prop);
+        // NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic)
         for (unsigned long i = 0; i < nitems; ++i) {
             if (atoms[i] == mh || atoms[i] == mv) {
                 found = true;
                 break;
             }
         }
+        // NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic)
     }
     if (prop != nullptr) {
         XFree(prop);

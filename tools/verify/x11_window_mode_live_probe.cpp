@@ -161,12 +161,14 @@ auto has_net_wm_state(Display *dpy, ::Window win, Atom target) -> bool {
     if (ok == Success && actual_type == XA_ATOM && prop != nullptr) {
         // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
         const auto *atoms = reinterpret_cast<const Atom *>(prop);
+        // NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic)
         for (unsigned long i = 0; i < nitems; ++i) {
             if (atoms[i] == target) {
                 found = true;
                 break;
             }
         }
+        // NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic)
     }
     if (prop != nullptr) {
         XFree(prop);
