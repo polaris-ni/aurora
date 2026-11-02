@@ -145,10 +145,11 @@ auto WindowHost::on_scale_changed() -> void {
 
 auto WindowHost::on_os_color_scheme(ColorScheme s) -> void {
     if (window_ != nullptr) {
-        // OS 档位快照推入 Window（未显式 set_theme 时参与默认根主题解析）；主题面取色全变，
-        // 整帧标脏重排重绘。应用显式 set_theme 后本推送不参与解析，重绘一次无副作用。
+        // OS 档位快照推入 Window（未显式 set_theme 时参与默认根主题解析）。整帧标脏与整子树缓存
+        // 失效都在 `Window::set_os_color_scheme` 内部成对完成——本层不再补 `force_full_redraw`，
+        // 否则同档重推（attach 时常见）会绕过 setter 的同值短路，白重绘一帧。
+        // 应用显式 set_theme 后本推送不参与解析，setter 的换档动作无副作用。
         window_->set_os_color_scheme(s);
-        window_->force_full_redraw();
     }
     // 框架那一半完成后才转发应用级上报表：顺序保证「应用看到变化时，本窗根主题已同值」。
     // 原样透传 OS 原值（含 Unspecified）——「系统不表态回哪一档」是应用策略，不在本层回落。

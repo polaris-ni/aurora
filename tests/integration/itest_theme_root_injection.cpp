@@ -7,6 +7,11 @@
 /// （生产侧等价于 Win32 WM_SETTINGCHANGE → Application 再推送）经 WindowHost 转发后，
 /// 默认根注入下一帧翻转，且宿主 teardown 后 seam 不再触达 Window（解绑回归）。
 ///
+/// 还覆盖**常驻树**上的换档落地，分两格各钉一半：换档帧连带整子树缓存失效（重排重录读到新档，
+/// 关掉脏追踪才观察得到）、换档同时整窗标脏（增量脏区推不出「整幅配色变了」，开着脏追踪才观察
+/// 得到）；同值重推两半都不做（稳态帧的缓存收益与不重绘，宿主 attach 会原样再推一次当前档）。
+/// 本文件的其余用例每次新建一棵树，观察不到这两段。
+///
 /// 两轴解算面另三格：未显式设主题时注入主题的**风格轴跟随探测档**（`Theme::default_style()`，
 /// 真机读数即真机观感，故本格的判据是「与探测结果自洽」而非某个具体档）、显式 `set_theme`
 /// 整份携带两轴、`set_theme_style` 只钉风格轴而明暗仍随 OS 翻转。做绝对色值断言的用例一律先
@@ -18,6 +23,7 @@
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "aurora/app/application.h"
 #include "aurora/aurora.h"
@@ -85,6 +91,30 @@ auto surface_of(WindowHost *host) -> HeadlessSurface * {
     }
     return aurora::ThemeStyle::Material;  // 五档全同值不可达（枚举只有五档且候选已覆盖四档）。
 }
+
+/// @brief 常驻树探针：逐帧记录**布局期**与**绘制期**读到的根主题底色。
+///
+/// 与 `probe_theme` 的分工：后者每次新建一棵树，`present_root` 必走重挂载，观察不到「同一棵常驻树
+/// 换档」——而那正是根注入缓存失效要负责的场景（脏标记只向上溯达祖先，后代不主动失效即停在旧档）。
+/// 本探针**不禁**布局缓存：缓存短路下一帧就是缺陷现象，换档帧整子树失效生效才是判据。
+class ThemeObserver final : public aurora::Widget {
+  public:
+    std::vector<aurora::Color> layout_surfaces;  ///< 每帧一条：`on_layout` 期读到的 `roles.surface`。
+    std::vector<aurora::Color> paint_surfaces;  ///< 每帧一条：`on_paint` 期读到的 `roles.surface`。
+
+    [[nodiscard]] auto type_name() const -> const char * override { return "ThemeObserver"; }
+
+  protected:
+    auto on_layout(const aurora::Constraints &c, const aurora::BuildContext &ctx) -> aurora::Size override {
+        layout_surfaces.push_back(aurora::inherit_theme(ctx).roles.surface);
+        return c.max;  // 撑满父约束（无子节点，尺寸不参与断言）
+    }
+
+    auto on_paint(aurora::Painter & /*p*/, const aurora::Rect & /*bounds*/, const aurora::BuildContext &ctx)
+        -> void override {
+        paint_surfaces.push_back(aurora::inherit_theme(ctx).roles.surface);
+    }
+};
 
 }  // namespace
 
@@ -184,6 +214,82 @@ AURORA_TEST_CASE(os_scheme_flips_default_injection) {
     AURORA_TEST_CHECK(light.roles.surface == aurora::Color::white());
 }
 
+AURORA_TEST_CASE(theme_axis_change_reaches_a_persistent_tree) {
+    // 常驻树换肤：三枚主题 setter 的「下一帧生效」必须连带一次整子树缓存失效，否则后代沿用旧档的
+    // 布局 / Display List 解算结果。真机复现于 examples/demos/demo_theme_styles.cpp：切风格档后
+    // 按钮与滑杆仍按旧 primary 绘制——根注入值与脏标记都对，只有后代缓存是旧的。
+    auto win = make_window(headless_opts("theme_live_switch"));
+    win->enable_dirty_tracking(false);  // 无脏的下一帧会被整帧跳过，注入复评无从发生
+    win->set_theme_style(aurora::ThemeStyle::Material);
+
+    auto probe = std::make_shared<ThemeObserver>();
+    aurora::Node node{probe};
+    (void)win->present_root(node);
+    AURORA_TEST_REQUIRE_EQ(probe->layout_surfaces.size(), 1U);
+    AURORA_TEST_REQUIRE_EQ(probe->paint_surfaces.size(), 1U);
+    const aurora::Theme material_light = aurora::Theme::from_style(aurora::ThemeStyle::Material, ColorScheme::Light);
+    AURORA_TEST_CHECK(probe->layout_surfaces[0] == material_light.roles.surface);
+    AURORA_TEST_CHECK(probe->paint_surfaces[0] == material_light.roles.surface);
+
+    // 明暗轴换档：同一棵树、探针自身没有任何脏标记，只靠换档帧的向下失效读到新档。
+    win->set_os_color_scheme(ColorScheme::Dark);
+    (void)win->present_root(node);
+    AURORA_TEST_REQUIRE_EQ(probe->layout_surfaces.size(), 2U);
+    const aurora::Theme material_dark = aurora::Theme::from_style(aurora::ThemeStyle::Material, ColorScheme::Dark);
+    AURORA_TEST_CHECK(probe->layout_surfaces[1] == material_dark.roles.surface);
+    AURORA_TEST_REQUIRE_EQ(probe->paint_surfaces.size(), 2U);
+    AURORA_TEST_CHECK(probe->paint_surfaces[1] == material_dark.roles.surface);
+
+    // 风格轴换档：钉一枚与当前档不同的（同档则判据空转，与 style_distinct_from_probed 同一口径）。
+    const aurora::ThemeStyle other = aurora::ThemeStyle::Windows;
+    win->set_theme_style(other);
+    (void)win->present_root(node);
+    AURORA_TEST_REQUIRE_EQ(probe->layout_surfaces.size(), 3U);
+    const aurora::Theme other_dark = aurora::Theme::from_style(other, ColorScheme::Dark);
+    AURORA_TEST_CHECK(probe->layout_surfaces[2] == other_dark.roles.surface);
+    AURORA_TEST_CHECK(!(other_dark.roles.surface == material_dark.roles.surface));
+
+    // 同值重推不置挂起位：宿主 attach 会原样再推一次当前 OS 档，稳态帧的布局缓存必须仍然有效
+    // （否则每次 attach / 每次重复推送都白重排整子树）。
+    const std::size_t settled = probe->layout_surfaces.size();
+    win->set_os_color_scheme(ColorScheme::Dark);
+    win->set_theme_style(other);
+    (void)win->present_root(node);
+    AURORA_TEST_CHECK_EQ(probe->layout_surfaces.size(), settled);
+}
+
+AURORA_TEST_CASE(theme_axis_change_marks_the_whole_window_dirty) {
+    // 换肤的第二半：像素面。上一格证「后代缓存失效 ⇒ 重排读到新档」，本格证「这一帧真的被重绘」——
+    // 只失效不标脏时逻辑全对、屏幕不动（增量脏区不会自己推断出「整窗配色变了」）。
+    // 本格刻意**不关**脏追踪：关了就没有增量脏区可言，判据当场空转。
+    auto win = make_window(headless_opts("theme_dirty_full_redraw"));
+    win->set_theme_style(aurora::ThemeStyle::Material);
+    auto probe = std::make_shared<ThemeObserver>();
+    aurora::Node node{probe};
+    (void)win->present_root(node);  // 消费首帧脏区，回到无脏稳态
+    AURORA_TEST_REQUIRE_FALSE(win->has_pending_dirty());
+
+    // 换风格档 ⇒ 整窗标脏（变异自证：删 setter 里的 force_full_redraw 本格必红）。
+    win->set_theme_style(aurora::ThemeStyle::Gnome);
+    AURORA_TEST_CHECK_TRUE(win->has_pending_dirty());
+    (void)win->present_root(node);
+    AURORA_TEST_CHECK_FALSE(win->has_pending_dirty());  // 生效帧消费掉脏区，不留残脏
+
+    // 明暗轴同理：Unspecified → Light 是一次真换档。
+    win->set_os_color_scheme(ColorScheme::Light);
+    AURORA_TEST_CHECK_TRUE(win->has_pending_dirty());
+    (void)win->present_root(node);
+    const std::size_t settled = probe->paint_surfaces.size();
+    AURORA_TEST_CHECK_FALSE(win->has_pending_dirty());
+
+    // 同值重推既不标脏也不重绘：宿主 attach 会原样再推一次当前档，稳态帧不该被整帧重绘。
+    win->set_os_color_scheme(ColorScheme::Light);
+    win->set_theme_style(aurora::ThemeStyle::Gnome);
+    AURORA_TEST_CHECK_FALSE(win->has_pending_dirty());
+    (void)win->present_root(node);
+    AURORA_TEST_CHECK_EQ(probe->paint_surfaces.size(), settled);
+}
+
 AURORA_TEST_CASE(explicit_theme_overrides_os_scheme) {
     // 三级链：显式 set_theme 高于 OS 档——即便 OS 推 Dark，显式 Light 主题原样注入。
     auto win = make_window(headless_opts("theme_explicit_vs_os"));
@@ -197,7 +303,7 @@ AURORA_TEST_CASE(explicit_theme_overrides_os_scheme) {
 AURORA_TEST_CASE(os_scheme_change_via_surface_seam_flips_injection) {
     // OS 档位变化的生产链路（不含 Win32 WndProc 本体，那一段只能在真机验证）：
     // Surface seam（生产侧 = WM_SETTINGCHANGE 到达后 Application 的再推送）→ WindowHost
-    // 转发 → Window::set_os_color_scheme + force_full_redraw → 下一帧根注入翻转。
+    // 转发 → Window::set_os_color_scheme（换档两半：整窗标脏 + 生效帧向下失效）→ 下一帧根注入翻转。
     WindowOptions opts;
     opts.title = "theme_os_change";
     opts.size = Size{.width = 320.0F, .height = 240.0F};
@@ -211,14 +317,14 @@ AURORA_TEST_CASE(os_scheme_change_via_surface_seam_flips_injection) {
     host->window()->set_theme_style(aurora::ThemeStyle::Material);
     host->window()->set_os_color_scheme(ColorScheme::Light);
     AURORA_TEST_CHECK(probe_theme(*host->window()).scheme == ColorScheme::Light);
-    // 基线自证：探针与 render_frame 后须无残脏，否则「emit 后置脏」无法区分「 seam 置脏」
-    // 与「本就未清的残脏」，判据会空转（变异自证：删 on_os_color_scheme 的 force_full_redraw 必红）。
+    // 基线自证：探针与 render_frame 后须无残脏，否则「emit 后置脏」无法区分「seam 置脏」
+    // 与「本就未清的残脏」，判据会空转（变异自证：删 set_os_color_scheme 的 force_full_redraw 必红）。
     AURORA_TEST_CHECK_FALSE(host->window()->has_pending_dirty());
     (void)host->render_frame(0.016);
     AURORA_TEST_CHECK_FALSE(host->window()->has_pending_dirty());
 
     surface->emit_os_color_scheme_change(ColorScheme::Dark);
-    // seam 置脏（on_os_color_scheme 里 force_full_redraw 的可观测面）：翻转必须伴随整帧重排重绘，
+    // seam 置脏（换档 setter 内 force_full_redraw 的可观测面）：翻转必须伴随整帧重排重绘，
     // 否则脏区优化会让旧明色像素留在帧缓冲里，探针读到新主题但屏幕是旧观感。
     // 须先于 probe_theme 断言——probe 的 present_root 会消费脏区。
     AURORA_TEST_CHECK_TRUE(host->window()->has_pending_dirty());

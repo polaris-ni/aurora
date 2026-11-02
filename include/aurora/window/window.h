@@ -595,8 +595,16 @@ class Window {
     ///
     /// 未调用时窗口按三级优先链 `os_color_scheme`（由 `Application` 经 `set_os_color_scheme` 推入）
     /// → 明色 解析默认主题；本 setter 一旦设定即覆盖该默认，`prepare_context` 每帧注入之。
+    /// 换档自带两件事，缺一即「逻辑对了、屏幕没变」：① 生效那一帧做一次整子树缓存失效——主题在
+    /// 布局期与 Display List 里都被后代消费，脏标记只向上溯达，后代不失效就停在旧档解算结果；
+    /// ② 整窗标脏（`force_full_redraw`）——换肤改变的是每一像素的配色，增量脏区无从推断。
+    /// （与 `set_locale` 同口径，低频调用时代价可接受。）
     /// @param t 生效主题（其 `scheme` 即最终档）。
-    auto set_theme(Theme t) -> void { theme_ = std::move(t); }
+    auto set_theme(Theme t) -> void {
+        theme_ = std::move(t);
+        theme_pending_ = true;
+        force_full_redraw();
+    }
     /// @brief 当前显式设定的根主题（未设定为空）。
     /// @return 最近一次 `set_theme` 的值；从未显式设定时为 `std::nullopt`。
     [[nodiscard]] auto theme() const -> const std::optional<Theme> & { return theme_; }
@@ -609,17 +617,34 @@ class Window {
     ///
     /// 未调用时风格档由 `Theme::default_style()` 探测（每进程读一次，换桌面外壳需重启应用；
     /// 与明暗轴「运行期跟随 OS」的差异口径见 specification/07-environment-modifier.md §5.2）。
-    /// 与 `set_theme` / `set_locale` 同构：本 setter 只存值，`prepare_context` 于**下一帧**起生效。
+    /// 与 `set_theme` / `set_locale` 同构：本 setter 只存值，`prepare_context` 于**下一帧**起生效，
+    /// 生效那一帧连带整子树缓存失效 + 整窗标脏（同值重推两者都不做，避免无谓重排重绘）。
     /// @param s 生效风格档（`Material` 可用来锁回与本窗探测结果无关的基线观感）。
-    auto set_theme_style(ThemeStyle s) -> void { style_ = s; }
+    auto set_theme_style(ThemeStyle s) -> void {
+        if (style_.has_value() && *style_ == s) {
+            return;  // 同值重推：解算结果不变，不值得清一次子树缓存、更不值得整帧重绘
+        }
+        style_ = s;
+        theme_pending_ = true;
+        force_full_redraw();
+    }
     /// @brief 当前显式设定的风格档（未设定为空）。
     /// @return 最近一次 `set_theme_style` 的值；为空表示风格轴交由 `Theme::default_style()` 探测。
     [[nodiscard]] auto theme_style() const -> const std::optional<ThemeStyle> & { return style_; }
     /// @brief 推入 OS 明暗偏好快照（由 `Application` 在窗口创建、以及收到系统外观变更
     ///        通知——如 Win32 `WM_SETTINGCHANGE`——时调用；`Window` 自身不直读系统以免
     ///        公共头反向依赖平台层）。仅当应用未 `set_theme` 时参与默认主题解析。
+    ///        换档连带整子树缓存失效 + 整窗标脏（与 `set_theme` 同口径），故宿主侧不必再
+    ///        额外 `force_full_redraw`；同档重推（宿主 attach 时常见）两者都不做。
     /// @param s OS 档位（`Unspecified` 表示未表态，按明色回落）。
-    auto set_os_color_scheme(ColorScheme s) -> void { os_scheme_ = s; }
+    auto set_os_color_scheme(ColorScheme s) -> void {
+        if (os_scheme_ == s) {
+            return;  // 同档重推（宿主 attach 时常见）：解算结果不变，不置挂起位、不整帧重绘
+        }
+        os_scheme_ = s;
+        theme_pending_ = true;
+        force_full_redraw();
+    }
 
     /// @brief 显式设定本窗的窗口级 locale（帧级根注入）。
     ///
@@ -933,6 +958,14 @@ class Window {
     ///        （消费时顺带做一次整子树缓存失效，见 `Widget::invalidate_subtree_caches`）。
     bool locale_pending_ = false;
     ColorScheme os_scheme_ = ColorScheme::Unspecified;  ///< OS 明暗偏好快照（由 Application 推入）。
+    /// @brief 主题换档挂起标志：`set_theme` / `set_theme_style` / `set_os_color_scheme` 在**解算输入
+    ///        实际变化**时置位，`prepare_context` 注入新档的那一帧消费并清零（同 `locale_pending_` 口径）。
+    ///
+    /// 主题与 locale 同属「后代不自身变脏、却按环境取值」的输入：控件在布局期与 Display List 里
+    /// 消费 `inherit_theme(ctx)`，只靠脏标记不会向下传播，后代即停在旧观感（真机复现：切换风格档后
+    /// 常驻树里的按钮/滑杆仍按旧 primary 绘制）。本标志负责**向下失效**那一半；像素那一半由 setter
+    /// 同批的 `force_full_redraw` 负责（两者缺一：只失效则增量脏区不重绘，只标脏则重排仍读旧缓存）。
+    bool theme_pending_ = false;
     /// @brief 根主题解算缓存的键值对：两枚输入档位 + 该组合的解算结果。
     ///
     /// 键取**解算后的档位**而非 setter 的可选值：`style_` 为空时结果取决于进程级探测档，
@@ -1231,6 +1264,14 @@ class Window {
         // 显式调用（低频），多清一次只等于一次重排，不影响稳态帧。
         if (locale_pending_) {
             locale_pending_ = false;
+            root.widget().invalidate_subtree_caches();
+        }
+        // 主题换档同理：上面 `root_env_.set<Theme>` 已注入新档，但后代的布局 / Display List 缓存
+        // 仍是旧档解算结果——脏标记只向上溯达祖先，后代不主动失效就停在旧观感（常驻树上换肤必现）。
+        // 判据同样取挂起标志而非比对新旧主题：`Theme` 无等价性要求，且本组 setter 由应用显式调用
+        // （低频），多清一次只等于一次重排，不影响稳态帧的缓存收益。
+        if (theme_pending_) {
+            theme_pending_ = false;
             root.widget().invalidate_subtree_caches();
         }
         BuildContext ctx;
