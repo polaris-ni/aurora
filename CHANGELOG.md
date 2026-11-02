@@ -187,6 +187,10 @@ freeze: minor-versions-are-additive
 | 在循环已结束、打烊窗口之外调用 `async()` / `then()` | 视为编程错误：经 `on_contract_violation` 硬失败（FATAL + 默认 `std::terminate`，与线程局部 strict 开关无关）；测试经既有 `set_strict_failure_handler` 注入捕获 |
 | Inspector 调试端点 / `win32_ua` 跨线程读取 | 无在岗循环时如实降级：inspector 回 HTTP 503（不跨线程直读树）、`win32_ua` 回 `UIA_E_ELEMENTNOTAVAILABLE`；须先让 `Application` 或自领租约的宿主在跑 |
 
+### Notes
+
+- **主题两轴的帧路径与尺寸实测读数**：`sizeof(Theme)` 由 816 增至 936 字节（+120，MinGW x86_64、`-DNDEBUG` 口径实测；四组令牌 24 + 28 + 48 + 12 与风格身份位，含对齐填充）。值拷贝链变长，故根主题解算加了档位对缓存：`Window::resolved_root_theme()` 每帧被 `prepare_context` 调用，缓存前每帧走一次 `Theme::from_style`（其内部先整套构造 `light()` / `dark()` 再逐字段覆写，等于每帧两次整套 `Theme` 构造），缓存后同档位组合不再调用，`from_style` 退出帧路径。缓存键取**解算后**的 `(风格档, 明暗档)` 两枚输入，任一 setter 换档后下一帧自然重建，setter 侧无需失效代码；显式 `set_theme` 走短路分支，不读写缓存。判据覆盖在 `itest_theme_root_injection`：把键里的明暗比对删掉，三格（OS 档翻转、seam 生产链路翻转、双轴钉档）当场转红，故缓存不是只写在注释里的承诺。滚动条粗细与焦点环几何两枚令牌本轮仍无消费点，原因是如实排除而非遗漏，见本节 Added 的控件接线条目末段。
+
 ## [1.0.0-alpha.10] - 2026-10-25
 
 

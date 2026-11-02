@@ -230,6 +230,8 @@ margin 在 Maximized / FullScreen / tiled 态塌缩为 0（贴边无可拖缝隙
 
 **两轴解算**：`resolved_root_theme()` 在显式 `theme_` 缺席时返回 `Theme::from_style(风格档, 明暗档)`——风格轴取 `set_theme_style` 钉住的档位，未钉时取 `Theme::default_style()` 的探测档；明暗轴取宿主推入的 `os_scheme_`，其中 `Unspecified` ≡ 明色，故注入主题的 `scheme` 恒为 `Light` / `Dark` 具体档、不为 `Unspecified`（这一条与下面三级链的口径同源）。`set_theme` 与 `set_theme_style` 同时给出时前者生效（它携带完整两轴取值，短路排在风格解算之前）。零回归边界：`from_style(Material, Light)` ≡ `Theme::light()`、`from_style(Material, Dark)` ≡ `Theme::dark()`，故风格档落回 `Material` 的那几类环境（无窗口后端的构建——含测试宿主与无头 CI；`PlatformKind::Web`；以及未映射进平台家族且读不到外壳证据的目标）解算结果与两轴模型引入前逐值相同。注意 Linux 一行的 `Unknown` / `Other` **不**回落 `Material` 而是取 `Gnome`（理由见 `theming/theme_style.h` 判据表注释：本库既有的 `os_color_scheme()` Linux 支读 GTK `settings.ini`，已经默认这台机器在跑 GTK 系桌面，Adwaita 是与该启发式同源的基线，而非另造一档「无主风格」）。
 
+**解算结果的缓存**：`Theme` 是含 15 枚字体族名串的 936 字节聚合（`sizeof` 实测，见 `CHANGELOG.md` 的 [Unreleased] Notes），而本函数每帧被 `prepare_context` 调用，故按**解算后的 `(风格档, 明暗档)` 档位对**缓存、同组合内不再调 `Theme::from_style`——帧路径因此不含主题构造。缓存不靠 setter 失效：任一 setter 换档即改变键、下一帧自然重建，显式 `theme_` 走短路分支根本不读写缓存。断言在 `itest_theme_root_injection`（删去键中的明暗比对后，OS 档翻转、seam 生产链路与双轴钉档三格同时转红）。
+
 **行为变更（主题解算口径的破坏性变化；控件属性类型侧的破坏另见 `CHANGELOG.md` 的 [Unreleased]）**：应用什么都不设时，默认观感从「Material 基线」变为「本机风格档」——Windows 构建得 Windows 档、macOS 得 MacOs 档、Linux 按外壳证据得 Gnome 或 Kde 档。两条迁移路径：`set_theme(Theme::light())` 取回与本窗探测无关的逐值相同旧观感；`set_theme_style(ThemeStyle::Material)` 保留明暗跟随但锁死风格档。
 
 **三级优先链**（应用未显式设置时）：显式 `set_theme` > OS 档（经 `set_os_color_scheme` 推入）> 明色。OS 未表态（`Unspecified`，headless/CI 常见）回落明色，故「`Unspecified` ≡ 明色列」是全系统单一口径：根注入链底、CSD 桥基座（见 5.3）与 `inherit_theme` 的无注入兜底（`Theme::light()`，`theming/theme_scope.h`）同解。注入的主题 `scheme` 携带解析后的最终档（`Light` / `Dark`，不为 `Unspecified`）。
