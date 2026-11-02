@@ -56,7 +56,14 @@ auto SingleInstance::instance() -> SingleInstance & {
     return guard;
 }
 
-SingleInstance::~SingleInstance() { release(); }
+SingleInstance::~SingleInstance() noexcept {
+    try {
+        release();
+    } catch (...) {
+        // 析构函数不得向外抛异常：平台桥释放失败在此不可恢复，吞掉以免 std::terminate。
+        (void)0;
+    }
+}
 
 auto SingleInstance::acquire(const AppIdentity &identity) -> Result<SingleInstanceOutcome> {
     if (acquired_) {
