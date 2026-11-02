@@ -600,6 +600,21 @@ class Window {
     /// @brief 当前显式设定的根主题（未设定为空）。
     /// @return 最近一次 `set_theme` 的值；从未显式设定时为 `std::nullopt`。
     [[nodiscard]] auto theme() const -> const std::optional<Theme> & { return theme_; }
+
+    /// @brief 只定**风格轴**，明暗继续跟随 OS（两轴正交模型在应用侧的表达）。
+    ///
+    /// `set_theme` 只能整份覆盖，表达不了「就要 Windows 那套观感，深浅随系统」这种诉求；本 setter
+    /// 只钉风格档，明暗仍走 `set_os_color_scheme` 推入的 OS 档。两者同时给出时 `set_theme` 优先
+    /// （它携带完整的两轴取值，见 `resolved_root_theme()` 的短路）。
+    ///
+    /// 未调用时风格档由 `Theme::default_style()` 探测（每进程读一次，换桌面外壳需重启应用；
+    /// 与明暗轴「运行期跟随 OS」的差异口径见 specification/07-environment-modifier.md §5.2）。
+    /// 与 `set_theme` / `set_locale` 同构：本 setter 只存值，`prepare_context` 于**下一帧**起生效。
+    /// @param s 生效风格档（`Material` 可用来锁回与本窗探测结果无关的基线观感）。
+    auto set_theme_style(ThemeStyle s) -> void { style_ = s; }
+    /// @brief 当前显式设定的风格档（未设定为空）。
+    /// @return 最近一次 `set_theme_style` 的值；为空表示风格轴交由 `Theme::default_style()` 探测。
+    [[nodiscard]] auto theme_style() const -> const std::optional<ThemeStyle> & { return style_; }
     /// @brief 推入 OS 明暗偏好快照（由 `Application` 在窗口创建、以及收到系统外观变更
     ///        通知——如 Win32 `WM_SETTINGCHANGE`——时调用；`Window` 自身不直读系统以免
     ///        公共头反向依赖平台层）。仅当应用未 `set_theme` 时参与默认主题解析。
@@ -912,6 +927,7 @@ class Window {
     WindowState window_state_ = WindowState::Visible;  ///< 当前窗口可见性快照（由 Application 设置）。
     WindowMode window_mode_ = WindowMode::Normal;  ///< 当前窗口几何态快照（由 Application 设置）。
     std::optional<Theme> theme_;  ///< 应用显式设定的根主题；空表示交由默认解析链。
+    std::optional<ThemeStyle> style_;  ///< 应用显式设定的风格档；空表示按 `Theme::default_style()` 探测。
     std::optional<Locale> locale_;  ///< 应用显式设定的窗口级 locale；空表示不注入（控件回落缺省档）。
     /// @brief 换档挂起标志：`set_locale` 置位，`prepare_context` 注入该档的那一帧消费并清零
     ///        （消费时顺带做一次整子树缓存失效，见 `Widget::invalidate_subtree_caches`）。
@@ -1132,14 +1148,23 @@ class Window {
         return Result<bool>{true};
     }
 
-    /// @brief 解析本窗当前应注入根 BuildContext 的主题（三级优先链）。
-    /// @return 显式 `theme_`（若有，原样，其 `scheme` 即最终档）；否则按 OS 档取 `Theme::dark()` /
-    ///         `Theme::light()`（OS 未表态 `Unspecified` ≡ 明色，与 `token_in`/CSD 桥同口径）。
+    /// @brief 解析本窗当前应注入根 BuildContext 的主题（三级优先链，两轴解算）。
+    /// @return 显式 `theme_`（若有，原样，其 `scheme` 即最终档，风格与明暗一并由它携带）；
+    ///         否则 `Theme::from_style(风格档, 明暗档)`——风格轴取 `style_`，未钉时取
+    ///         `Theme::default_style()` 的探测档；明暗轴取 `os_scheme_`，其中 `Unspecified` ≡ 明色
+    ///         （与 CSD 桥、`inherit_theme` 兜底同口径），故注入主题的 `scheme` 恒为 `Light` / `Dark`
+    ///         具体档、不为 `Unspecified`。
+    /// @note 零回归：Material 档下 `from_style(Material, Light)` ≡ `Theme::light()`、
+    ///       `from_style(Material, Dark)` ≡ `Theme::dark()`（除扩展注册表外的九个值面逐字段全等，
+    ///       断言在 `utest_theme_presets`），故「探测不到原生风格」的环境（无头构建、WASM）
+    ///       解算结果与改动前逐值相同。
     [[nodiscard]] auto resolved_root_theme() const -> Theme {
         if (theme_.has_value()) {
             return *theme_;
         }
-        return (os_scheme_ == ColorScheme::Dark) ? Theme::dark() : Theme::light();
+        const ThemeStyle style = style_.value_or(Theme::default_style());
+        const ColorScheme scheme = (os_scheme_ == ColorScheme::Dark) ? ColorScheme::Dark : ColorScheme::Light;
+        return Theme::from_style(style, scheme);
     }
 
     /// @brief 构建根 BuildContext 并挂载/安装脏汇聚点（如需要）。
@@ -1165,7 +1190,8 @@ class Window {
         root_env_.set<WindowState>(window_state_);
         root_env_.set<WindowMode>(window_mode_);
         // 注入根主题（默认根注入）：子树无 `ThemeScope` 时经 `inherit_theme(ctx)` 读到此值；
-        // 三级优先链 = 显式 set_theme > set_os_color_scheme 推入的 OS 档 > 明色。子树自建
+        // 三级优先链 = 显式 set_theme > set_os_color_scheme 推入的 OS 档 > 明色，其中风格轴由
+        // set_theme_style / `Theme::default_style()` 定档（两轴解算见 resolved_root_theme）。子树自建
         // `ThemeScope` 仍按「最近祖先优先」覆盖此默认。
         root_env_.set<Theme>(resolved_root_theme());
         // 注入窗口 chrome 服务（与状态快照同源，同一 Surface；此处 surface_ 已解引用必非空）：
