@@ -321,20 +321,15 @@
         {
           "name": "corner_radius",
           "type": "float",
-          "default": 6.0,
-          "note": "Corner radius (dp)",
-          "minimum": "0"
+          "note": "Corner radius (dp; follows theme shapes.small when unset)",
+          "minimum": "0",
+          "default_expr": "\"theme.shapes.small\""
         },
         {
           "name": "padding",
           "type": "EdgeInsets",
-          "default": {
-            "left": 12.0,
-            "top": 6.0,
-            "right": 12.0,
-            "bottom": 6.0
-          },
-          "note": "Padding"
+          "note": "Padding (follows theme spacing when unset)",
+          "default_expr": "\"theme.spacing(large/small)\""
         },
         {
           "name": "enabled",
@@ -473,9 +468,9 @@
         {
           "name": "size",
           "type": "float",
-          "default": 20.0,
-          "note": "Box size (dp)",
-          "minimum": "0"
+          "note": "Box size (dp; follows theme controls.indicator_size when unset)",
+          "minimum": "0",
+          "default_expr": "\"theme.controls.indicator_size\""
         },
         {
           "name": "corner_radius",
@@ -925,9 +920,9 @@
         {
           "name": "thickness",
           "type": "float",
-          "default": 1.0,
-          "note": "Line thickness (dp)",
-          "minimum": "0"
+          "note": "Line thickness (dp; follows theme controls.separator_thickness when unset)",
+          "minimum": "0",
+          "default_expr": "\"theme.controls.separator_thickness\""
         },
         {
           "name": "color",
