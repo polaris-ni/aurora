@@ -192,6 +192,7 @@ au::Text("Welcome").font_size(24).bold();
 - 初始化列表形式 `au::Column{ au::Text("A"), au::Text("B") }` 可用——`Column` / `Row` 接受 `std::initializer_list<Node>`。
 - 链式 setter 返回引用；作为子节点放入 `children` 时必须用 `std::move` 包裹（`Widget` 拷贝构造被删除，`Node` 仅移动派生对象）。
 - `Widget::defaults()` 不是虚成员；仅 `Button` 提供静态 `defaults()`（如 `au::Button::defaults() -> ButtonProps`，见 `button.h`），返回该控件的默认 `Props`；其余控件的默认属性来源待补。
+- 别把控件的 `defaults()` 与 `Theme::defaults()` 混用：前者出**该控件的属性快照**（`ButtonProps`），后者出**本机风格档的整套标定主题**（`Theme`，只定风格轴、不定明暗档，见 [`07-environment-modifier.md`](07-environment-modifier.md) §5.1）。两族同名不同主，返回类型也不同。
 
 `Node(W&&)` 是非 explicit 转换构造函数，值类型控件可隐式转为 `Node`。仅在两分支类型不同的 `?:` 三元、或需要连续两次用户转换的场景才显式包 `Node{...}`。
 

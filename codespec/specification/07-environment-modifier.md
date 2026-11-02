@@ -194,7 +194,7 @@ margin 在 Maximized / FullScreen / tiled 态塌缩为 0（贴边无可拖缝隙
 
 ### 5.1 主题值对象与角色集
 
-`Theme`（`theming/theme.h`）是角色化主题值对象，结构为 `Theme{ roles, type_scale, csd, scheme }` 加一张 `ThemeExtension<T>` 注册表；`Theme::light()` / `Theme::dark()` 是两个内置档位，`with_defaults()` 返回 light 基准列（`scheme` 保持 `Unspecified`）。经 `ThemeProvider` / `ThemeScope` 注入，组件用 `inherit_theme(ctx)` 读取。
+`Theme`（`theming/theme.h`）是角色化主题值对象，结构为 `Theme{ style, roles, type_scale, csd, shapes, spacing, controls, conventions, scheme, extensions }`——身份位（`style` / `scheme`）与四组色/字/度量令牌加一张 `ThemeExtension<T>` 注册表。`Theme::light()` / `Theme::dark()` 是两个内置档位，`with_defaults()` 返回 light 基准列（`scheme` 保持 `Unspecified`），二者与 `from_style(Material, ·)` 逐值相同。经 `ThemeProvider` / `ThemeScope` 注入，组件用 `inherit_theme(ctx)` 读取。
 
 **色角色层 `ColorRoles`**（`theming/color_roles.h`，纯值 struct，snake_case 字段名一套、明暗两列取值，命名对标 Material 3 `ColorScheme` 全集）：
 
@@ -214,6 +214,16 @@ margin 在 Maximized / FullScreen / tiled 态塌缩为 0（贴边无可拖缝隙
 
 **窗口装饰角色组 `CsdRoles`**（`theming/csd_roles.h`）：`Theme` 的库自有字段（与 `roles` / `type_scale` 同层，不经 `ThemeExtension<T>`——窗口装饰配色是框架资产且必须在渲染路径零分配），8 个字段与标题栏/窗框配色一一对应（`title_bar_bg_active` / `title_bar_bg_inactive` / `title_bar_fg_active` / `title_bar_fg_inactive` / `title_bar_hover_tint` / `title_bar_pressed_tint` / `title_bar_close_hover` / `shadow_color`）。取值来源见「CSD 派生通道」。
 
+**风格轴 `ThemeStyle`**（`theming/theme_style.h`）：`{Material, Windows, MacOs, Gnome, Kde}` 五档，与明暗轴 `ColorScheme{Unspecified, Light, Dark}` **正交**——一套设计语言的亮/暗是同一档的两种呈现，不是两档风格（枚举名里不带 Light/Dark 字样是这条的命名面）。`Material` 同时是**无证据回落档**（无头构建、WASM、裸 X11 拿到的就是它，故 golden 基线与无头 CI 的观感与此前逐位相同）。第二枚证据 `DesktopEnvironment{Unknown, Gnome, Kde, Other}` 只在 Linux / BSD 上读得到，公共入口 `desktop_environment()` 见 [`06-app-platform.md`](06-app-platform.md) §5。
+
+**两轴解算面**：`Theme::from_style(ThemeStyle, ColorScheme = Unspecified)` 是纯函数，按（风格, 档）出一整套标定令牌，取值出处逐字段带等级注记（官方 / 实测 / 派生 / 未取证）；`Theme::default_style()` 探测本机的风格档；`Theme::defaults()` ≡ `from_style(default_style())`。三条口径：
+
+- `scheme = Unspecified` 时**填明色列但 `scheme` 字段保持 `Unspecified`**——不表态不等于亮，这一条与 §5.2 的三级优先链共用同一口径。
+- `default_style()` 的证据源是 `platform().kind` 与 `auto_detect_surface()`，**不是** `MediaQuery::platform`（后者表渲染后端、非 Windows 恒 `Unknown`，取错源会让 Linux 桌面误落回落档）。判据表本身是纯函数 `detail::style_from(PlatformKind, DesktopEnvironment, has_window_backend)`，无头一票否决、Windows / macOS 单轴定档、Linux 有 KDE 证据取 `Kde` 否则 `Gnome`（Adwaita 基线与既有 GTK 配置启发式同源）、`PlatformKind::Unknown` 按外壳证据取档两者皆无才回落 `Material`、`Web` 恒 `Material`；14 格逐格断言由 `utest_theme_probe` 锚定。
+- `defaults()` **只定风格轴、不定明暗档**：不在构造期直读注册表 / 配置文件，那会同时违反 §5.2「创建时读一次」与应用侧「构造期不隐式读 OS 偏好」。要一份确定的暗色写 `from_style(default_style(), os_color_scheme())`，由调用方显式承担那次读取。
+
+**令牌层四组**（`theming/shape_scale.h` / `spacing_scale.h` / `control_metrics.h` / `layout_conventions.h`，全为逻辑 dp 的纯值 struct，`Theme` 逐字段直挂）：`shapes`（`small` / `medium` / `large` / `extra_large` 圆角）、`spacing`（留白与内边距档位）、`controls`（控件高、命中下限、焦点环粗细与偏移、滚动条粗细与内缩）、`conventions`（`ScrollBarMode{Classic, Overlay}` / `DialogButtonOrder{AcceptFirst, AcceptLast, VerticalRightAligned}` / `MenuBarPlacement{InWindow, NativePreferred}` / `FocusRingStyle{SolidOutline, OuterGlow}` 四枚惯例枚举加 `motion_scale` 动效倍率）。四组的声明默认值即 Material 基线，故 `Theme{}` 与 `from_style(Material, Unspecified)` 逐位等于 `with_defaults()`——**令牌层是聚合面扩展，不改变任何既有观感**；控件读取它们属后续接线，本轮 `shapes` / `spacing` / `controls` 尚无消费方。
+
 ### 5.2 默认根注入与 OS 跟随
 
 `Window`（`window/window.h`）持有主题状态，暴露 `set_theme(const Theme&)`（应用显式设置，最高优先）、`theme()` 与 `set_os_color_scheme(ColorScheme)`（供宿主推入 OS 档位的设定器）。`prepare_context` 每帧向根 `BuildContext` 注入 `Theme`（`root_env_.set<Theme>(resolved_root_theme())`），与 `MediaQuery` / `WindowState` / `WindowMode` / `WindowChrome` 同址注入，机制完全对称——子树无 `ThemeScope` 时经 `inherit_theme(ctx)` 读到此值。
@@ -224,13 +234,15 @@ margin 在 Maximized / FullScreen / tiled 态塌缩为 0（贴边无可拖缝隙
 
 **框架那一半之外另有一条应用级转发**：`WindowHost::on_os_color_scheme` 在完成「推 `Window` + 整帧置脏」之后，再向 `WindowHost::set_os_scheme_sink`（`Application` 在 `register_host` 对**每个**宿主安装）报一次原值，由 `Application::os_color_scheme_state()`（`ReadOnlyState<ColorScheme>`）与命令式回调 `set_on_os_color_scheme()` 消费——三级优先链、`force_full_redraw`、Win32 的逐宿主基线去重与 `Surface::set_os_color_scheme_handler` 的独占单槽语义**全部不变**，本层只加「应用级会看到」这一层；应用侧旁听走 sink，不去抢那一枚槽（抢了会顶掉框架的根主题跟随）。四条口径：跨宿主去重（N 扇窗各收一次同值切换在应用级只算一次，比较在转发处做而非指望 `State::set`——它对相等值照样发信号）、回调恒在主线程（消息泵线程同步转发，不引入后端或探测线程）、初值 `Unspecified` 不隐式 seed（启动期解算走显式的 `refresh_os_color_scheme()`，宿主登记时框架自己那一读只推 `Window` 快照）、**原值透传不回落**（「系统不表态回哪一档」是应用策略，框架回落会让应用永久失去区分「系统说亮」与「系统没说」的能力）。聚合范围与 `window_state()` / `window_mode()` 的「只投影主窗」相反，完整契约见 [`06-app-platform.md`](06-app-platform.md) §6.2。
 
+**两轴在「读一次」上的差异是有意的**：明暗档运行期跟随 OS（上面那条上报链），风格档则不跟随——`Theme::default_style()` 的读数落进程级静态缓存，用户在会话中途换桌面外壳（GNOME ↔ Plasma）不改当前进程的风格，需重启应用。理由两条：外壳切换在 XDG 侧是会话级事件、库侧既不该订阅也不该轮询；且风格档决定的是整套令牌，运行期翻档会让一棵已排好的树整体换族名与度量，成本远高于换明暗色。口径都在本条，代码侧的注记（`Theme::default_style()` 函数头与 `src/aurora/theming/detail/theme_probe.cpp` 文件头）指向这里。
+
 `os_color_scheme()`（`window/platform.h`）的探测细节：Linux 读 GTK 配置文件启发式（不引 DBus 依赖），Win32 读注册表 `HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize` 的 `AppsUseLightTheme`（REG_DWORD，0 = Dark；键在值缺 = Light；键打不开 = Unspecified，实现位于独立 TU 避免公共头引入 `<windows.h>`），macOS 问 `NSApp.effectiveAppearance` 的 `bestMatchFromAppearancesWithNames:`（`NSAppearanceNameDarkAqua` 命中即 Dark、`Aqua` 即 Light；`NSApp == nil`（CLI / 无头）或 bestMatch 为空回 `Unspecified`；`NSAppearance` 的最小明暗对也能正确归类，实现位于独立 TU 避免公共头引入 `<AppKit/AppKit.h>`，并已在 macOS 构建内编译验证）。`Platform::color_scheme` 字段须由调用方经 `os_color_scheme()` 显式填充（`platform()` 不代做——读偏好有文件 / 注册表访问副作用）。
 
 **测试约定（防 CI 档位漂移）**：经 `Window` 呈现主题消费控件、且做绝对色像素断言的测试，必须显式固定主题档（`set_theme` 或 `set_os_color_scheme`）——否则其观感随 runner 的 OS 档位漂移。「跟随 OS」的正向验证经 seam 打桩完成（`set_os_color_scheme` 推入反转档位断言注入翻转），不依赖真机档位，见 `itest_theme_root_injection`。
 
 ### 5.3 CSD 派生通道（typed）
 
-`title_bar_style_from_theme(theme)` / `window_frame_style_from_theme(theme, base)`（`theming/csd_style_bridge.h`）签名保留，实现为「预设基座 + CSD 角色组派生」：基座按 `theme.scheme` 取 `CsdPreset::AdwaitaLight` / `AdwaitaDark`（几何 / 显隐 / 度量字段不参与派生，属定制面——维持 口径；/ 钉住的原生机度与字形口径不动），配色字段从 `csd` 角色组逐项派生（`bg_active` ← `title_bar_bg_active`、`fg_active` ← `title_bar_fg_active`、`close_hover` ← `title_bar_close_hover`、窗框投影色 ← `shadow_color` 等）。`Unspecified` 按 5.2 单一口径取明色列。
+`title_bar_style_from_theme(theme)` / `window_frame_style_from_theme(theme, base)`（`theming/csd_style_bridge.h`）签名保留，实现为「预设基座 + CSD 角色组派生」：基座按 **`theme.style` × `theme.scheme` 两轴**取八枚 `CsdPreset` 之一，映射由纯函数 `csd_preset_for(ThemeStyle, ColorScheme)` 给出（`Windows` → `WindowsLight` / `WindowsDark`、`MacOs` → `MacLight` / `MacDark`、`Kde` → `BreezeLight` / `BreezeDark`、`Material` 与 `Gnome` → `AdwaitaLight` / `AdwaitaDark`；几何 / 显隐 / 度量字段不参与派生，属定制面——维持 §4.2 钉住的原生机度与字形口径不动），配色字段从 `csd` 角色组逐项派生（`bg_active` ← `title_bar_bg_active`、`fg_active` ← `title_bar_fg_active`、`close_hover` ← `title_bar_close_hover`、窗框投影色 ← `shadow_color` 等）。`Unspecified` 按 5.2 单一口径取明色列。
 
 **逐值不变量**：`title_bar_style_from_theme(Theme::light())` 与 `from_preset(CsdPreset::AdwaitaLight)`、`Theme::dark()` 与 `from_preset(CsdPreset::AdwaitaDark)` 的配色字段逐值相同（`Theme::light()` / `dark()` 用预设 pinned 值播种 `csd` 组），由 `utest_theme_csd_bridge` 钉死。**`from_bare` 口径**：`with_defaults()` 即 light 基准列，故 `title_bar_style_from_theme(Theme::with_defaults())` ≡ `from_preset(CsdPreset::AdwaitaLight)`——裸主题不再解析出暗色标题栏，这是随角色化重构落地的有意行为变化（迁移路径见 `CHANGELOG.md`）。
 

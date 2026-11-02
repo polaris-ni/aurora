@@ -537,6 +537,8 @@ if (p.is_mobile() && p.capabilities().multitouch) { /* 启用多指手势 */ }
 
 本自由函数是**无缓存的现读**（每次一记注册表 / 文件访问），供启动期解算与显式探测；运行期跟随不要以轮询它实现——`Application` 聚合后端上报（Win32 = `WM_SETTINGCHANGE`）成应用级读点 `os_color_scheme_state()` / `set_on_os_color_scheme()`，口径与聚合范围见 §6.2。
 
+**桌面外壳证据查询**：`desktop_environment()`（`window/platform.h`）返回 `DesktopEnvironment{Unknown, Gnome, Kde, Other}`，是主题风格轴的第二枚输入——`platform().kind` 表 OS 家族，分不出同一台 Linux 机器跑的是 GNOME 还是 KDE，而这两者的观感应当不同。它**不并进** `Platform` 快照：`platform()` 的口径是「编译期 OS + 自动探测 Surface」，且大量既有断言逐字段比较它的取值，扩字段会牵动它们。证据链为 `XDG_CURRENT_DESKTOP`（冒号分隔、逐段折小写做子串匹配，KDE 先于 GNOME）→ `DESKTOP_SESSION` → 两段都非空却一个也不认识记 `Other`、两段皆缺记 `Unknown`；**只有 Linux / BSD 分支读进程环境**，Windows / macOS / WASM / Android / 无头恒返回 `Unknown`——它们的外壳证据在 `kind` 那一轴，由环境变量表态反而制造假证据。`Unknown`（证据缺失）与 `Other`（环境说了但不认识）分列，探测**没有失败态**。读取口径与 `os_color_scheme()` 相反：本函数每次现读（供诊断与测试如实取数），风格解算侧的缓存落在 `Theme::default_style()`（进程级静态局部量），故换桌面外壳要重启应用；两轴差异的理由见 [`07-environment-modifier.md`](07-environment-modifier.md) §5.2。实现体全库唯一一份在 `src/aurora/theming/detail/theme_probe.cpp`，本函数只做转发——第二处 `getenv` 读取会让「主题按 KDE 解算、平台探测说没有外壳」这类矛盾各自漂移。判据表是纯函数，14 格逐格断言与环境变量四态域不变量由 `utest_theme_probe` 锚定。
+
 ---
 
 ## 6 生命周期

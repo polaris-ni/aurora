@@ -683,6 +683,7 @@ au::Button(au::ButtonProps{ .label = "OK" });
 - 默认值文档化在**声明处**：代码中可省略（保持简洁），但 LSP hover 时可见（保持透明），AI 工具无需查阅外部文档。
 - 新增 `XxxProps` 的每个字段必须有合理默认值（规则见 §6.2）。
 - 运行时可查询默认值：各控件提供静态 `defaults()`（如 `au::Button::defaults()` 返回默认 `ButtonProps`）。
+- `defaults()` 是**同名不同主**的两族：`Xxx::defaults()` 出该控件的属性快照，`Theme::defaults()` 出「本机风格档的整套标定主题」（只定风格轴、不定明暗档，见 [`specification/07-environment-modifier.md`](specification/07-environment-modifier.md) §5.1）。生成代码或文档时按主语选，不要把主题实例当属性快照。
 
 **验收标准：** 空构造 + 单一必填属性即可得到可用控件；`defaults()` 与头文件声明的默认值一致。
 
