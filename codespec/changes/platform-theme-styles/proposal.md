@@ -4,7 +4,7 @@
 | :--- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 变更编号 | CHG-057                                                                                                                                                                                                                                                                                                                                                                             |
 | 提出日期 | 2026-11-02                                                                                                                                                                                                                                                                                                                                                                          |
-| 当前状态 | 已提议                                                                                                                                                                                                                                                                                                                                                                                |
+| 当前状态 | 实施中                                                                                                                                                                                                                                                                                                                                                                                |
 | 关联需求 | SPEC.API.SENSIBLE-DEFAULTS.001                                                                                                                                                                                                                                                                                                                                                      |
 | 影响面  | `include/aurora/theming/` 新增 `theme_style.h` 与形状/间距/度量/惯例四个令牌头、`theme.h` 聚合面扩字段与四枚静态工厂；`src/aurora/theming/` 新目录（探测 TU + 预设标定表，含桌面环境探测唯一实现体）；`include/aurora/window/platform.h` 新增 `desktop_environment()` 转发与 `os_color_scheme()` 口径注记、`include/aurora/environment/media_query.h` 的 `platform` 字段补「表后端不表 OS 家族」注释（无签名变更）；`include/aurora/window/title_bar_style.h` 的 `CsdPreset` 扩两档（连带 `TitleBarStyle::from_preset` 的穷举 `switch`、派生通道测试与 `examples/demos/demo_csd_gallery.cpp` 的预设循环）；`include/aurora/theming/csd_style_bridge.h` 基座改按风格映射；`include/aurora/window/window.h` 根注入解算链与 `set_theme_style`；首批控件默认值改读令牌；工具链登记面同步（known_enums 登记两枚新枚举并补登既缺位的 ColorScheme、其编译期锚点用例、伞头清单 `[direct]` 新头、`aurora_api.json` 重建）；`tests/unit/` `tests/integration/` 相应批次；`codespec/` 四篇规格（07 / 06 / 04 / 03）+ 四篇顶层文档（ARCHITECTURE / CODING_STANDARDS / SPECIFICATIONS / BUILD_OPTIONS）+ 手工用例；根级 CHANGELOG.md 记行为变更与迁移路径 |
 
@@ -109,6 +109,8 @@ enum class ThemeStyle : std::uint8_t {
 
 每套风格给出六个维度：色角色两列、字阶族名与正文基准、形状档位、间距档位、控件度量、布局惯例。仓库内已有的真机标定值直接复用，未复用的先给候选值并就地标注入册：
 
+> 本表是**提议阶段的候选登记**，落码时逐值取证后有不少改判（候选值被推翻、或根本无出处故不写值）。实际落档取值与其分级见紧随其后的「标定批落地校正」；两处冲突以校正表为准，本表保留原样以示决策轨迹。
+
 | 维度 | Material（现行） | Windows | MacOs | Gnome | Kde |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | 字体族 | `sans-serif` | Segoe UI Variable Text | SF Pro Text | Adwaita Sans（GNOME 47+）/ Cantarell（≤46） | Noto Sans |
@@ -125,6 +127,32 @@ enum class ThemeStyle : std::uint8_t {
 - 每套风格的 `on_*` 角色与配对角色继续满足 WCAG AA ≥ 4.5:1（现有 `utest_theme_roles` 的断言面从 2 档扩到 10 档，见验收判据第六条）。
 - `Kde` 的标题栏按钮布局先复用 `TitleBarButtonLayout::Adwaita` + Breeze 度量钉值；若标定批实测字形差异显著，再单列一枚布局值（单列即新增枚举值，属公共 API，须在该批一并回写）。
 
+#### 标定批落地校正（实际进表的取值与其分级）
+
+取证后本提案的候选值有六处改判、三处「维持不写值」。校正表按维度给出落码实际值，括号内是上表候选；`Material` 列即现行基线，四套风格档都从它出发只覆写有出处的字段。
+
+| 维度 | Windows | MacOs | Gnome | Kde |
+| :--- | :--- | :--- | :--- | :--- |
+| 字体族 | Segoe UI Variable Text | SF Pro Text | Adwaita Sans（现行名；47.x 及以前是 Cantarell，族名是偏好而非保证，缺字体按既有回退语义降级） | Noto Sans |
+| 正文基准 | 14px 折 10.5pt（官方 type ramp Body；候选 12pt 作废） | 13pt（官方） | 11pt（官方 gsettings-desktop-schemas 的 `font-name` 默认值 `'Adwaita Sans 11'`——初稿标「未取到一手出处」的这条本轮取到了） | 10pt（官方 plasma-integration） |
+| 字阶其余档位 | 等比重锚（比值 = 平台正文 / 14pt），分级 `派生` | 同 | 同 | 同 |
+| 控件基准高 | 32dp（`派生`：Body 行高 20 + 垂直 padding 5+6 + 1px 描边） | **不写值**（候选 28dp 无一手出处，维持 Material 基线） | 34dp（`派生`：buttons.scss 的 min-height 24 + 5×2） | 36dp（候选 30dp 作废；`派生`：文字高 + 2×Button_MarginWidth(6) + 2×Frame_FrameWidth(2)） |
+| 主控件圆角 `shapes.small` | 4dp（`官方` ControlCornerRadius） | **不写值**（无出处） | 9dp（候选 12dp 改判：12 是 `shapes.large` 的 `$card_radius`，按钮档是 `$button_radius` = 9） | 5dp（候选 3dp 改判；`官方` `$Metrics::Frame_FrameRadius`，绘制半径 4.5 = 5 − 0.5×描边） |
+| 其余形状档位 | `shapes.medium` 8dp（`官方` OverlayCornerRadius） | 不覆写 | `shapes.large` 12 / `extra_large` 15（`官方` / `派生` `$dialog_radius`） | 不覆写 |
+| 滚动条 | 不覆写（`ScrollbarMode::Classic` 与基线同值；细经典档的自动收窄是行为不是令牌） | Overlay（官方惯例） | Overlay（官方惯例） | Classic + `controls.scrollbar_thickness` 8dp（`官方` `$Metrics::ScrollBar_SliderWidth`，21dp 轨道内的滑块宽） |
+| 焦点环 | 只落外环（`focus_ring` 取外环色的不透明近似）；内层对比环**需要给 `FocusRingStyle` 加一档**，属公共 API 增量，记为计划/待建 | `FocusRingStyle::OuterGlow` | 初稿「描边双环」**未落**：现有枚举只有 Outline / OuterGlow / None 三档，表达不了双环，维持 Outline | 初稿「内嵌虚线」**未落**：同上，维持 Outline；`focus_ring` 色取 `官方` DecorationFocus #3DAEE9 |
+| 对话框按钮序 | AcceptFirst（与基线同值故不覆写） | `VerticalRightAligned` | `AcceptLast` | **AcceptFirst（候选「接受在后」被推翻）**：官方 Qt `buttonRoleLayouts` 的 KdeLayout 把 Accept 组排在 Reject 左；KDE HIG 本身对按钮序无明文（develop-kde-org 的 hig 九篇全 grep 零命中），故本档出处记在 Qt 侧 |
+| 菜单栏位置 | 不覆写（窗口内） | `NativePreferred` | 不覆写 | 不覆写 |
+| CSD 基座 | `CsdPreset::Windows*` | `CsdPreset::Mac*` | `CsdPreset::Adwaita*` | `CsdPreset::Breeze*`（新增两档） |
+| 标题栏度量 | 沿用 `title_bar_style.h` 真机档 | 同 | 同 | **不钉栏高**（初稿「+ Breeze 度量钉值」改判）：KWin 的栏高由字体与 gridUnit 运行时推导（`max(文字高, gridUnit×2) + smallSpacing×4`），没有独立钉值出处，写死常量反而比推导更不像真机；只钉标题字形 10pt / 400 |
+| 强调色 | 上游 `SystemAccentColor` 无字面量 → 取其官方变体阶梯（`SystemAccentColorDark1` / `Light2` / `Dark2` / `Light3`）作明暗两档的强调色对；常传的 #0078D4 基准值仍 `未取证`，不写死 | `controlAccentColor` 0,122,255（实测），HIG Blue 行 0,136,255 与之冲突 → **取实测**，理由是它是用户机器上真正出现的填充色 | **blue_4 #1C71D8**（默认 `accent_bg_color` 是 blue_3 #3584e4，配白 3.77:1 不达本库 AA 不变量；同一官方调色板的 blue_4 配白 4.77:1 达标且仍是 Adwaita 蓝 → 改取值而非记豁免） | #3DAEE9（`官方`，明暗同值） |
+| 错误色 | #C42B1C（`实测`，复用标题栏关闭钮悬停红） | 不覆写 | 亮档 red_3 #E01B24 / 暗档 red_4 #C01C28（`官方` destructive_bg_color） | #DA4453（`官方` ForegroundNegative，明暗同值） |
+
+- **WCAG 判据的实际落点（验收判据第六条的兑现方式）**：断言面从 2 档扩到 10 档（五风格 × 明暗两档）已落，但「每对 ≥4.5:1」不是一条能全绿的硬线——上游官方配对里有不达标的，忠实照抄与达标二者只能选一个。裁决规则统一为：**上游调色板里存在达标的同族档位的（Windows 变体阶梯、Adwaita blue_4）取达标档；不存在的（Aqua 强调色、Breeze 强调色 / ForegroundInactive / ForegroundNegative）照抄上游配对并就地记豁免 + 实测比值**。豁免在 `utest_theme_roles` 里做成显式表格，每条目钉一个 `floor_ratio` 下限——比值只能变好，取更差的改动即红灯，且断言同时要求它仍 < 4.5（豁免失效要显式撤销，不许悄悄留着当遮罩）。共 5 条豁免：MacOs 明暗两档的 on_primary/primary（4.02）、Kde 明暗两档的 on_primary/primary（2.49）、Kde on_error/error（4.26）、Kde on_surface_variant/surface_variant（亮 3.69 / 暗 5.89，明档记 3.2 下限）。
+- **半透明层色的落法**：Fluent 的 `#E4000000` 一类、Adwaita 的 `color-mix` 与 `--border-opacity: 15%` 在静态预设里保留不了「叠加于任意底色」的语义，一律按官方公式合成到该档页面底色落成不透明近似，算式随值写明，分级为 `派生`。
+- **等比重锚而非照抄上游字阶表**：四套语言的字阶名（Fluent 的 Body/Caption、Apple 的 Text Styles、KDE 的 Header1–Small）与本库的 Material 语义名（display / headline / title / body / label）非一一对应，且本轮只取到各平台的**正文基准**一手值。故字阶只换族名 + 按正文基准等比缩放，分级 `派生`，理由随实现注释留档。
+- **KDE HIG 禁止硬编码 px/pt** 这条限制与本库静态令牌档的形态冲突，落法是静态档 + 注释声明该限制，不做运行期读取（运行期读 pt 需要 gsettings 通道，超出本提案范围）。
+
 #### 取值出处台账（标定批输入；上游原文取自 2026-11-02 调研，逐值可复核）
 
 分级口径：**官方** = 上游一手（仓库源文件或厂商规范表）；**实测** = 第三方真机 dump；**派生** = 由官方公式合成，非官方数；**未取到** = 无一手出处，维持候选、不得静默写死进公共头。
@@ -138,6 +166,7 @@ enum class ThemeStyle : std::uint8_t {
 
 - **与 KDE HIG 站点的漂移**：develop.kde.org 的颜色页仍写 Plasma 5 值（如 button 底 #eff0f1），与 master 的 `.colors`（Button 域 252,252,252 / 41,44,48）不一致；取色以 `.colors` 为准，HIG 站点只作布局惯例的参考。
 - **排版基准的出处与一处更正**：Windows 官方 type ramp 的 Body 是 **14 epx（行高 20）**、最小 12px Regular，与本表初稿的「12pt 候选」不符——标定批按 14px 口径重议后再定值；macOS 平台默认 **13pt**、最小 10pt、Body 样式 13/16；KDE 默认 **10pt**，px 阶梯 Header1 18 / H2 13 / H3 12 / H4 11 / Body 10 / Small 8，且其 HIG 同时**禁止硬编码 px/pt**（框架侧只能给静态档，须在注释里声明这条限制）；GNOME 官方只给族名不给尺寸，常传的 11pt **未取到一手出处**。族名一处更正：GNOME 47+ 默认已由 Cantarell 改为 **Adwaita Sans**，本表「Cantarell」须按版本分界改写。
+- **标定批复核后的两处再更正**（终值见上方「标定批落地校正」）：① GNOME 正文 11pt **取到了一手出处**——gsettings-desktop-schemas 的 `font-name` 默认值即 `'Adwaita Sans 11'`（47.x 及以前为 `'Cantarell 11'`），本条初判的「未取到」作废；② Windows 强调色虽然基准字面量 `#0078D4` 仍未取证，但上游 `SystemAccentColorLight1..3` / `Dark1..3` 六档是仓内字面量，够作强调色对取值，故本档不必停在「未取到故不写值」。
 - **传输注记**：gitlab.gnome.org（含其 API）在本机调研环境全程 406，Adwaita 取值经其 GitHub 镜像仓库原文核对；invent.kde.org 与 GitHub 直连被拦，经内容 API 与 jsDelivr `/gh/` 镜像取回，字节与上游一致。落码时若需引用具体行，须以本机可复核的镜像为准并注明。
 
 ### CSD 派生通道按风格映射（`include/aurora/theming/csd_style_bridge.h`）
@@ -177,6 +206,7 @@ enum class ThemeStyle : std::uint8_t {
 9. **零开销承诺**：`defaults()` / `default_style()` 每进程至多一次证据读取（缓存），渲染路径读令牌为直接字段访问，无哈希、无新增堆分配（既有 `Theme` 的两态取值链不变）。
 10. **门禁矩阵全绿**：`check_api_schema_sync`（先 `aurora_api_json`）、`check_naming_conventions`、`check_api_budget`、`check_doc_comments`、`check_platform_macros`（新 TU 只用 `AURORA_*` 宏）、`check_core_layer_boundary`、`check_arch_module_map`（该门禁只校 `codespec/ARCHITECTURE.md` §4 模块映射行内反引号文件是否真实存在，故未落地的新头**不得提前写入 §4**，须在头文件落地的同批登记）、`check_umbrella_header`（新公共头同批登记进 tools/check/umbrella_manifest.txt 的 `[direct]` 清单并进 `aurora/aurora.h`）、`check_no_cjk_literals`（字体族名等字面量全 ASCII）、`check_codespec_xref`、`check_code_doc_sync`、`check_manual_test_format`、`lint`、`format-check` 与 `ctest --preset ninja-test` 全量通过；`toggles` CI 矩阵覆盖「无任何窗口后端」变体以验证无头回落。
 11. **落码批次划分**：令牌批（四组令牌 + `Theme` 扩字段，零观感变化）→ 标定批（五套预设值 + `CsdPreset` 扩档 + CSD 映射）→ 探测批（`DesktopEnvironment` + `default_style()` + 纯函数矩阵）→ 收敛批（根注入 + `set_theme_style` + 未钉主题的绝对色断言用例补齐）→ 接线批（首批控件消费）→ 回写批（文档与 CHANGELOG 收口）。每批独立可验证、独立可回滚，收敛批之前既有观感零变化；提案状态随批次从「已提议」推进到「实施中」，回写批完成后归档。
+    - 批次进展（与状态字段同处维护）：令牌批与标定批已落码——后者交付 `src/aurora/theming/theme_presets.cpp` 的 `Theme::from_style` 预设表、`CsdPreset` 扩到八档、`csd_preset_for` 的风格映射，以及 `utest_theme_presets` / `utest_title_bar_style` / `utest_theme_csd_bridge` / `utest_theme_roles` 四个套件的断言面；判据 1 / 2 / 5 / 6 已在该两批内验证，判据 3 / 4 / 7 / 8 待探测、收敛、接线三批。
 12. **兜底三点同源**：构造三类语境各断言一次——挂 `Window` 且未显式设主题（得 `default_style()` 档）、树内无 `ThemeProvider` 的 `resolve_theme(root, target)`（得 `with_defaults()` 即 Material 基线）、裸 `BuildContext` 的 `inherit_theme(ctx)`（得 `Theme::light()`）。后两者在收敛后**必须保持 Material 不变**，断言即钉住不变量第七条。
 13. **AI 面枚举登记到位**：`ThemeStyle`、`DesktopEnvironment` 与 `ColorScheme` 三枚枚举同批出现在 `aurora_api.json` 的 `enums` 表（登记进 tools/include/known_enums.h 并补 `itest_known_enums` 的编译期锚点），既有的 `known_enums_historical_wrong_values_do_not_return` 用例继续通过；风格轴与明暗轴在 schema 里同时可枚举，正交模型不因半轴缺位而在代码生成面退化。
 14. **字体确定性核对**：同一份声明式树在「装有该风格首选字体」与「未装」的两台机器上分别取文本度量，记录差异并证明该差异只出现在非 Material 档；Material 档（`sans-serif` 内建 face）在两台机器上度量逐位一致，`tests/golden/` 基线不因本提案改判据。此条守 `codespec/ARCHITECTURE.md` §11 第 5 条不变量。
