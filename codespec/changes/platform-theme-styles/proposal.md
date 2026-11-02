@@ -111,12 +111,12 @@ enum class ThemeStyle : std::uint8_t {
 
 | 维度 | Material（现行） | Windows | MacOs | Gnome | Kde |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| 字体族 | `sans-serif` | Segoe UI Variable Text | SF Pro Text | Cantarell | Noto Sans |
-| 正文基准 | 14pt（现值） | 12pt（候选） | 13pt（候选） | 11pt（候选） | 10pt（候选） |
+| 字体族 | `sans-serif` | Segoe UI Variable Text | SF Pro Text | Adwaita Sans（GNOME 47+）/ Cantarell（≤46） | Noto Sans |
+| 正文基准 | 14pt（现值） | 14px（官方 type ramp Body，见下方台账；初稿 12pt 候选作废） | 13pt（官方平台默认） | 11pt（候选，未取到一手出处） | 10pt（官方默认） |
 | 控件基准高 | 现值不动 | 32dp（候选） | 28dp（候选） | 34dp（候选） | 30dp（候选） |
 | 主控件圆角 | 6dp（现值，`shapes.small`） | 4dp（候选） | 7dp（候选） | 12dp（候选） | 3dp（候选） |
 | 焦点环 | 描边、`focus_ring` 极性色 | 描边 + 内层对比环 | 外扩发光 | 描边双环 | 内嵌虚线 |
-| 对话框按钮序 | 接受在后 | 接受在前（水平） | 接受在后（垂直右对齐） | 接受在后（`suggested-action` 填充） | 接受在后（水平） |
+| 对话框按钮序 | 接受在前（水平）——**现状复现**：`dialog.h` 的 `confirm()` 现把 Yes 排在 No 前、左对齐 | 接受在前（水平） | 接受在后（垂直右对齐） | 接受在后（`suggested-action` 填充） | 接受在后（水平） |
 | 滚动条 | 经典占位 | 细经典（自动收窄） | 覆盖式 | 覆盖式 | 经典占位 |
 | CSD 基座 | `CsdPreset::Adwaita*`（现状不变） | `CsdPreset::Windows*`（已有真机标定） | `CsdPreset::Mac*`（已有真机标定） | `CsdPreset::Adwaita*`（已有真机标定） | 新增 `CsdPreset::Breeze*` 两档 |
 | 配色取值 | `ColorRoles::light()/dark()` 现值 | Fluent 中性面 + 系统蓝系强调 | Aqua 表面族 + systemBlue | Adwaita 调色板（`blue3` 系强调） | Breeze 中性面 + `#3daee9` 强调 |
@@ -124,6 +124,21 @@ enum class ThemeStyle : std::uint8_t {
 - **取值口径分级**：凡本表标「已有真机标定」的档位直接复用 `include/aurora/window/title_bar_style.h` 里注释已注明出处的数值；标「候选」的数值**不得在无出处的情况下进公共头**——落码批要求逐值注明来源（官方 HIG / 上游 CSS 变量表 / 真机取色），并在代码注释里随值写死出处，口径与 `title_bar_style.h` 现有注释块一致。
 - 每套风格的 `on_*` 角色与配对角色继续满足 WCAG AA ≥ 4.5:1（现有 `utest_theme_roles` 的断言面从 2 档扩到 10 档，见验收判据第六条）。
 - `Kde` 的标题栏按钮布局先复用 `TitleBarButtonLayout::Adwaita` + Breeze 度量钉值；若标定批实测字形差异显著，再单列一枚布局值（单列即新增枚举值，属公共 API，须在该批一并回写）。
+
+#### 取值出处台账（标定批输入；上游原文取自 2026-11-02 调研，逐值可复核）
+
+分级口径：**官方** = 上游一手（仓库源文件或厂商规范表）；**实测** = 第三方真机 dump；**派生** = 由官方公式合成，非官方数；**未取到** = 无一手出处，维持候选、不得静默写死进公共头。
+
+| 风格 | 色锚点（light / dark） | 等级 | 强调色 | 等级 |
+| :--- | :--- | :--- | :--- | :--- |
+| Windows | 页面底 `SolidBackgroundFillColorBase` #F3F3F3 / #202020；卡片底 `CardBackgroundFillColorDefault` #B3FFFFFF / #0DFFFFFF（半透层色，静态预设须改取其不透明近似 `CardStrokeColorDefaultSolid` #EBEBEB / #1C1C1C）；正文 `TextFillColorPrimary` #E4000000 / #FFFFFFFF；次要 `TextFillColorSecondary` #9E000000 / #C5FFFFFF；描边 `ControlStrokeColorDefault` #0F000000 / #12FFFFFF | 官方（microsoft-ui-xaml 的 Common_themeresources_any.xaml，Light 块与 Default(=Dark) 块） | 上游只做 `SystemAccentColor` 引用，**无字面量**；常传的 #0078D4 未取到一手出处 | 未取到 |
+| MacOs | windowBackground 236,236,236 / 50,50,50；controlBackground 255,255,255 / 30,30,30；label α0.847 双档；separator α0.098 双档 | 实测（Monterey 12.0.1 / Big Sur 11.2.3 dump；Apple HIG 明写「勿硬编码系统色值、数值随版本浮动」）→ 落码前须在目标 macOS 重测 | HIG 表 Blue 行 0,136,255 / 0,145,255；AppKit 实测 controlAccentColor 0,122,255 | 官方与实测**冲突**，标定批须择一并注明理由 |
+| Gnome | window 底 #fafafb / #222226；view #ffffff / #1d1d20；headerbar #ffffff / #2e2e32；正文 `RGB(0 0 6 / 80%)` / white；描边为 `--border-opacity:15%` 公式、**无独立 hex** | 官方（libadwaita 的 _colors.scss + _palette.scss） | 默认 Blue 行 #3584e4（明暗同值，standalone 档 #0461be / #81d0ff） | 官方 |
+| Kde | window 底 239,240,241 / 32,35,38；view 255,255,255 / 20,22,24；正文 35,38,41 / 252,252,252；次要 112,125,138 / 161,169,177；**描边无键**（Breeze 以前景半透明运行时合成）| 官方（Plasma 6.x master 与 @v6.3.0 的 BreezeLight.colors / BreezeDark.colors 同值） | 61,174,233（#3DAEE9，明暗一致） | 官方——同时**推翻**「Plasma 6 已换默认强调色」的传闻 |
+
+- **与 KDE HIG 站点的漂移**：develop.kde.org 的颜色页仍写 Plasma 5 值（如 button 底 #eff0f1），与 master 的 `.colors`（Button 域 252,252,252 / 41,44,48）不一致；取色以 `.colors` 为准，HIG 站点只作布局惯例的参考。
+- **排版基准的出处与一处更正**：Windows 官方 type ramp 的 Body 是 **14 epx（行高 20）**、最小 12px Regular，与本表初稿的「12pt 候选」不符——标定批按 14px 口径重议后再定值；macOS 平台默认 **13pt**、最小 10pt、Body 样式 13/16；KDE 默认 **10pt**，px 阶梯 Header1 18 / H2 13 / H3 12 / H4 11 / Body 10 / Small 8，且其 HIG 同时**禁止硬编码 px/pt**（框架侧只能给静态档，须在注释里声明这条限制）；GNOME 官方只给族名不给尺寸，常传的 11pt **未取到一手出处**。族名一处更正：GNOME 47+ 默认已由 Cantarell 改为 **Adwaita Sans**，本表「Cantarell」须按版本分界改写。
+- **传输注记**：gitlab.gnome.org（含其 API）在本机调研环境全程 406，Adwaita 取值经其 GitHub 镜像仓库原文核对；invent.kde.org 与 GitHub 直连被拦，经内容 API 与 jsDelivr `/gh/` 镜像取回，字节与上游一致。落码时若需引用具体行，须以本机可复核的镜像为准并注明。
 
 ### CSD 派生通道按风格映射（`include/aurora/theming/csd_style_bridge.h`）
 
@@ -142,7 +157,7 @@ enum class ThemeStyle : std::uint8_t {
 
 ### 序列化与 AI 面
 
-- `Theme` 的 `to_json` / `from_json` 增 `style` / `shapes` / `spacing` / `controls` / `conventions` 键（键名即字段名，stringly 仍只存在于序列化边界）。
+- 序列化面（对码校正）：`Theme` 当前**没有** `to_json` / `from_json` 实现体——`theme.h` 的 `@note Rebuildable: yes, via to_json / from_json` 与 `codespec/specification/07-environment-modifier.md` §5.4 的「主题 JSON 重建面」是声明先于实现的状态（仓内唯一相关注册是 `src/aurora/widget/serialization.cpp` 里 `reg_no_props<Provider<Theme>>("ThemeProvider", Theme{}, ...)`，它序列化的不是主题角色集）。故本提案**不新增** `style` / `shapes` / `spacing` / `controls` / `conventions` 的 JSON 键（没有可增的载体），只把五组令牌随主题值对象进出；JSON 键名口径与新键的落地归属另记为「计划/待建」项，待 Theme 的 JSON 实现体落地时按「键名即字段名、stringly 只存在于序列化边界」执行。该声明-实现缺口本提案不填补（超范围），但须在 §5.4 回写时如实标注为「计划」而非「既有能力」。
 - **枚举的 AI 面不是自动的**：`aurora_api.json` 的 `enums` 表由手工维护的 `tools/include/known_enums.h` 单源提供（该头同时被 gen_api / aurora_mcp / aurora_cli / aurora_lsp 共享，取值须与真实枚举成员逐字一致，由 `tests/integration/itest_known_enums.cpp` 的编译期锚点把关）。故新增 `ThemeStyle` 与 `DesktopEnvironment` 必须同批登记进该头并补锚点，否则 AI 侧看不到风格轴的取值面——这是两轴正交模型在代码生成面上唯一的失效点，必须钉住。
 - 口径校正（实测所得）：`aurora_api.json` 里**不含** `Theme` 的令牌面（`ColorRoles` / `TypeScale` / `CsdRoles` 在 schema 中零命中，仅 `ThemeProvider` 一名出现），因此本提案新增四个令牌结构体不改变 schema 规模；API 预算的增长来源只有 known_enums 登记的两枚枚举与 `Window` 新增的两枚成员描述。实测余量：当前 `aurora_api.json` 206103 字节 ≈ 51.5k token（按 `tools/check/check_api_budget.py` 的 4 字符/token 口径），预算上限 75000 token。
 - **同批补登 `ColorScheme`（已定）**：明暗轴当前**不在** known_enums 登记表里，AI 侧只能枚举半根轴，与不变量第一条「两轴对等正交」不符。本批把三枚枚举一并登记（`ThemeStyle` / `DesktopEnvironment` / `ColorScheme`），纯登记、无行为变化，代价是 `itest_known_enums` 需补三组编译期锚点。
@@ -180,7 +195,7 @@ enum class ThemeStyle : std::uint8_t {
 
 ## 回写落点
 
-- `codespec/specification/07-environment-modifier.md`：§5.1 增 `ThemeStyle` / `ShapeScale` / `SpacingScale` / `ControlMetrics` / `LayoutConventions` 字段与五套预设取值口径；§5.2 改写根注入解算链（两轴正交 + 无头回落判据 + 风格轴不随运行期变化 + 兜底三点同源）并补 `desktop_environment()` 转发与探测实现体唯一口径；§5.3 改 CSD 基座映射表；§5.4 补序列化新键；**§4.2 同步改档数**——现文钉「三套视觉语言 × 明暗两档 = 六值」与「度量口径三档分治」表，`CsdPreset` 扩 `Breeze*` 后须改为四套 × 两档 = 八值并为 Breeze 补一行度量取法与出处（该处计数与表行由 `check_code_doc_sync` 对码复核，漏改即文档-代码漂移）。
+- `codespec/specification/07-environment-modifier.md`：§5.1 增 `ThemeStyle` / `ShapeScale` / `SpacingScale` / `ControlMetrics` / `LayoutConventions` 字段与五套预设取值口径；§5.2 改写根注入解算链（两轴正交 + 无头回落判据 + 风格轴不随运行期变化 + 兜底三点同源）并补 `desktop_environment()` 转发与探测实现体唯一口径；§5.3 改 CSD 基座映射表；§5.4 把「主题 JSON 重建面」如实改注为**计划面**（`Theme` 现无 `to_json` / `from_json` 实现体，新令牌组的键名口径随实现落地才生效）；**§4.2 同步改档数**——现文钉「三套视觉语言 × 明暗两档 = 六值」与「度量口径三档分治」表，`CsdPreset` 扩 `Breeze*` 后须改为四套 × 两档 = 八值并为 Breeze 补一行度量取法与出处（该处计数与表行由 `check_code_doc_sync` 对码复核，漏改即文档-代码漂移）。
 - `codespec/specification/06-app-platform.md`：§5 平台探测段增桌面环境证据口径（含 `PlatformKind` 未覆盖 BSD / Android 时的 `Unknown` 判据行）、探测实现体唯一性约束、`platform().kind`（表 OS 家族）与 `MediaQuery::platform`（表渲染后端）的取值分野，以及风格档对原生装饰无效的边界说明。
 - `codespec/specification/04-widget.md`：首批控件默认值由字面量改为主题令牌表达式的落点清单，以及 `Theme::defaults()` 与 `XxxProps::defaults()` 的命名分流。
 - `codespec/specification/03-layout-render.md`：字体族名偏好与回退口径对文本度量的影响（守 §10.1 的确定性渲染需求 SPEC.TEST.RENDER.DETERMINISTIC-SNAPSHOT.001）。
