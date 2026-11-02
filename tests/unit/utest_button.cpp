@@ -2,7 +2,8 @@
 /// 目标单元: include/aurora/widget/button.h
 /// 测试说明: 覆盖 Button——默认属性、label 与 on_click 回调（activate 与 Press/Release 合成点击）、
 /// 禁用态不触发回调、min_size 布局与约束钳制、自描述元数据、属性序列化往返、
-/// 标签 i18n（绘制 / 无障碍 / 自然宽同源，字面档输出不变）
+/// 标签 i18n（绘制 / 无障碍 / 自然宽同源，字面档输出不变）、主题跟随（未设色/度量时取主题角色
+/// 与 `shapes` / `spacing` 档，含风格轴；显式设值优先）
 
 #include <memory>
 #include <string>
@@ -151,7 +152,10 @@ AURORA_TEST_CASE(button_defaults_and_type_name) {
     AURORA_TEST_CHECK_EQ(std::string{b.type_name()}, "Button");
     const ButtonProps d = Button::defaults();
     AURORA_TEST_CHECK_TRUE(d.enabled);
-    AURORA_TEST_CHECK_NEAR(d.corner_radius, 6.0F, 1e-4F);
+    // 圆角与内边距的「默认值」不再是本件字面量，而是「未显式设置」这一态：取值随主题形状 / 间距档
+    // 解算（Material 基线下实测为 6 与 12/6，由 button_radius_and_padding_follow_the_theme 逐档核）。
+    AURORA_TEST_CHECK_FALSE(d.corner_radius.has_value());
+    AURORA_TEST_CHECK_FALSE(d.padding.has_value());
     AURORA_TEST_CHECK_NEAR(d.min_width, 0.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(d.min_height, 0.0F, 1e-4F);
     // 默认背景/文字色未显式设置：跟随主题（roles.primary / roles.on_primary），
@@ -278,7 +282,8 @@ AURORA_TEST_CASE(button_serialize_deserialize_roundtrip) {
     // CJK-LITERAL: cjk-fixture - Han label restored unchanged after deserialization
     AURORA_TEST_CHECK_EQ(dst.label().get().text, "确认");
     AURORA_TEST_CHECK_FALSE(dst.enabled);
-    AURORA_TEST_CHECK_NEAR(dst.corner_radius, 10.0F, 1e-4F);
+    AURORA_TEST_CHECK_TRUE(dst.corner_radius.has_value());  // 显式设过即随键往返，不被主题档吞掉
+    AURORA_TEST_CHECK_NEAR(*dst.corner_radius, 10.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(dst.min_width, 80.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(dst.min_height, 36.0F, 1e-4F);
 }
@@ -359,7 +364,8 @@ AURORA_TEST_CASE(button_natural_width_equals_resolved_label_width_plus_padding) 
 
     // 缺省档（无 Locale 注入）：自然宽 = 显示串量宽 + 左右内边距。
     LayoutEngine::layout(b, bounded(400.0F, 80.0F));
-    const float expected_en = render::FontEngine::measure_width("Short", f) + b.padding.left + b.padding.right;
+    const float expected_en =
+        render::FontEngine::measure_width("Short", f) + (aurora::Theme::light().spacing.large * 2.0F);
     AURORA_TEST_CHECK_NEAR(b.size().width, expected_en, 1e-3F);
 
     // 注入 Locale 后重新布局：必须按新译文重测，而不是复用缺省档的旧宽。
@@ -368,8 +374,8 @@ AURORA_TEST_CASE(button_natural_width_equals_resolved_label_width_plus_padding) 
     ctx.env = &env;
     b.mark_needs_layout();  // 约束与上一轮相同，布局缓存会命中并跳过 on_layout
     LayoutEngine::layout(b, bounded(400.0F, 80.0F), ctx);
-    const float expected_zz =
-        render::FontEngine::measure_width("Considerably longer caption", f) + b.padding.left + b.padding.right;
+    const float expected_zz = render::FontEngine::measure_width("Considerably longer caption", f) +
+                              (aurora::Theme::light().spacing.large * 2.0F);
     AURORA_TEST_CHECK_NEAR(b.size().width, expected_zz, 1e-3F);
     AURORA_TEST_CHECK_GT(expected_zz, expected_en);  // 两条期望值有区分度，判据非空转
 }
@@ -391,9 +397,10 @@ AURORA_TEST_CASE(button_natural_width_covers_non_ascii_translation) {
     }
     table.add(Locale{}, key_name, translated);
     LayoutEngine::layout(b, bounded(400.0F, 80.0F));
-    const float expected = render::FontEngine::measure_width(translated, f) + b.padding.left + b.padding.right;
+    const float expected =
+        render::FontEngine::measure_width(translated, f) + (aurora::Theme::light().spacing.large * 2.0F);
     AURORA_TEST_CHECK_NEAR(b.size().width, expected, 1e-3F);
-    AURORA_TEST_CHECK_GT(expected, b.padding.left + b.padding.right);  // 译文确实量出了宽度
+    AURORA_TEST_CHECK_GT(expected, aurora::Theme::light().spacing.large * 2.0F);  // 译文确实量出了宽度
 }
 
 AURORA_TEST_CASE(button_paint_remeasures_when_display_text_changes_without_relayout) {
@@ -473,6 +480,8 @@ AURORA_TEST_CASE(cursor_shape_hook_defaults_to_pointing_hand) {
 class ThemeProbe final : public Button {
   public:
     using Button::resolve_background;
+    using Button::resolve_corner_radius;
+    using Button::resolve_padding;
     using Button::resolve_text_color;
 };
 
@@ -507,6 +516,72 @@ AURORA_TEST_CASE(button_explicit_colors_override_theme) {
     b.text_color(Color{0x12, 0x34, 0x56});
     AURORA_TEST_CHECK(b.resolve_background(dark) == Color(0xE0, 0x1B, 0x24));
     AURORA_TEST_CHECK(b.resolve_text_color(dark) == Color(0x12, 0x34, 0x56));
+}
+
+// ---- 度量跟随（接线批）：未显式设值 → 读主题形状/间距档；显式设值 → 主题不覆盖 ----
+
+AURORA_TEST_CASE(button_metrics_default_to_material_baseline) {
+    // 无注入 = Material 基线档：接线前后实测同为圆角 6、内边距 12/6，观感零回归的锚点。
+    const BuildContext bare;
+    ThemeProbe b;
+    AURORA_TEST_CHECK_NEAR(b.resolve_corner_radius(bare), 6.0F, 1e-4F);
+    const EdgeInsets pad = b.resolve_padding(bare);
+    AURORA_TEST_CHECK_NEAR(pad.left, 12.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(pad.right, 12.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(pad.top, 6.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(pad.bottom, 6.0F, 1e-4F);
+}
+
+AURORA_TEST_CASE(button_metrics_follow_theme_tokens_when_unset) {
+    // 改过令牌的主题 ⇒ 解析值随令牌走（证明读的是 theme，而不是写死的常量）。
+    Theme t = Theme::light();
+    t.shapes.small = 11.5F;
+    t.spacing.large = 20.0F;
+    t.spacing.small = 7.0F;
+    const auto [env, ctx] = themed_ctx(t);
+    ThemeProbe b;
+    AURORA_TEST_CHECK_NEAR(b.resolve_corner_radius(ctx), 11.5F, 1e-4F);
+    const EdgeInsets pad = b.resolve_padding(ctx);
+    AURORA_TEST_CHECK_NEAR(pad.left, 20.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(pad.right, 20.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(pad.top, 7.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(pad.bottom, 7.0F, 1e-4F);
+}
+
+AURORA_TEST_CASE(button_metrics_follow_style_arm) {
+    // 两轴的风格轴同样驱动度量：Windows/Gnome/Kde 的 `shapes.small` 与基线档实测不同值，
+    // 若解析仍回 6（未接线）本用例即红——四档取值互异，同时钉住「不是巧合相等」。
+    struct Arm {
+        ThemeStyle style;
+        float expected;
+    };
+    static constexpr Arm ARMS[] = {
+        {.style = ThemeStyle::Material, .expected = 6.0F},
+        {.style = ThemeStyle::Windows, .expected = 4.0F},
+        {.style = ThemeStyle::Gnome, .expected = 9.0F},
+        {.style = ThemeStyle::Kde, .expected = 5.0F},
+    };
+    ThemeProbe b;
+    for (const Arm &arm : ARMS) {
+        const auto [env, ctx] = themed_ctx(Theme::from_style(arm.style, ColorScheme::Light));
+        AURORA_TEST_CHECK_NEAR(b.resolve_corner_radius(ctx), arm.expected, 1e-4F);
+    }
+}
+
+AURORA_TEST_CASE(button_explicit_metrics_override_theme) {
+    // 对照组：显式设过圆角/内边距后，换任何主题档都不动（两态语义的另一半）。
+    Theme t = Theme::light();
+    t.shapes.small = 11.5F;
+    t.spacing.large = 20.0F;
+    t.spacing.small = 7.0F;
+    const auto [env, ctx] = themed_ctx(t);
+    ThemeProbe b;
+    b.set_corner_radius(0.0F);
+    b.set_padding(EdgeInsets{.left = 3.0F, .top = 2.0F, .right = 3.0F, .bottom = 2.0F});
+    AURORA_TEST_CHECK_NEAR(b.resolve_corner_radius(ctx), 0.0F, 1e-4F);
+    const EdgeInsets pad = b.resolve_padding(ctx);
+    AURORA_TEST_CHECK_NEAR(pad.left, 3.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(pad.top, 2.0F, 1e-4F);
 }
 
 }  // namespace aurora::test_cases::utest_button

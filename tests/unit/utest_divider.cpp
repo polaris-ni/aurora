@@ -1,7 +1,8 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/widget/divider.h
 /// 测试说明: 覆盖 Divider——默认属性、水平/垂直方向的布局尺寸（填满主轴、厚度作交叉轴）、
-/// 厚度与紧约束钳制、缩进链式 setter、序列化往返与 describe 元数据
+/// 厚度与紧约束钳制、缩进链式 setter、序列化往返与 describe 元数据、主题跟随（未设色/线厚时取
+/// 主题角色与 `controls.separator_thickness`，显式设值优先）
 
 #include <memory>
 #include <string>
@@ -45,8 +46,8 @@ AURORA_TEST_CASE(default_state_and_type_name) {
     Json props = Json::object();
     d.serialize_props(props);
     AURORA_TEST_CHECK_EQ(require_field<std::string>(props, "orientation"), "horizontal");
-    AURORA_TEST_CHECK_NEAR(require_field<float>(props, "thickness"), 1.0F, 1e-4F);
-    // 默认未显式设色：color 键不输出（遵循「跟随主题 outline_variant」语义，与 Button/Text 同口径）。
+    // 默认未显式设值：thickness / color 键都不输出（两态语义：空 = 跟随主题，与 Button/Text 同口径）。
+    AURORA_TEST_CHECK_FALSE(props.contains("thickness"));
     AURORA_TEST_CHECK_FALSE(props.contains("color"));
     AURORA_TEST_CHECK_NEAR(require_field<float>(props, "indent"), 0.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(require_field<float>(props, "end_indent"), 0.0F, 1e-4F);
@@ -160,6 +161,36 @@ AURORA_TEST_CASE(divider_explicit_color_overrides_theme) {
     Divider d;
     d.color = Color{10, 20, 30, 40};  // 刻意区别于两档 outline_variant
     AURORA_TEST_CHECK(d.resolve_color(dark) == Color(10, 20, 30, 40));
+}
+
+// ---- 度量跟随（接线批）：未显式设厚度 → 读主题 `controls.separator_thickness` ----
+
+AURORA_TEST_CASE(divider_thickness_default_to_material_baseline) {
+    // 无注入 = Material 基线档：接线前后实测同为 1dp，观感零回归的锚点。
+    const BuildContext bare;
+    const Divider d;
+    AURORA_TEST_CHECK_NEAR(d.resolve_thickness(bare), 1.0F, 1e-4F);
+}
+
+AURORA_TEST_CASE(divider_thickness_follows_theme_tokens_when_unset) {
+    // 改过令牌的主题 ⇒ 解析值随令牌走（证明读的是 theme，而不是写死的常量）。
+    Theme t = Theme::light();
+    t.controls.separator_thickness = 3.5F;
+    const auto [env, ctx] = themed_ctx(t);
+    Divider d;
+    AURORA_TEST_CHECK_NEAR(d.resolve_thickness(ctx), 3.5F, 1e-4F);
+    LayoutEngine::layout(d, bounded(300.0F, 80.0F), ctx);
+    AURORA_TEST_CHECK_NEAR(d.size().height, 3.5F, 1e-4F);  // 布局与绘制同源（同一条 resolve 通道）
+}
+
+AURORA_TEST_CASE(divider_explicit_thickness_overrides_theme) {
+    // 对照组：显式设过厚度后主题不动（两态语义的另一半）。
+    Theme t = Theme::light();
+    t.controls.separator_thickness = 3.5F;
+    const auto [env, ctx] = themed_ctx(t);
+    Divider d;
+    d.thickness = 6.0F;
+    AURORA_TEST_CHECK_NEAR(d.resolve_thickness(ctx), 6.0F, 1e-4F);
 }
 
 }  // namespace aurora::test_cases::utest_divider

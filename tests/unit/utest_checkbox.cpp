@@ -1,15 +1,20 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/widget/checkbox.h
 /// 测试说明: 覆盖 Checkbox——默认态、set_value 触发 on_changed、Press/Release 合成点击切换、
-/// 禁用态忽略点击、共享来源双向写穿（含用户输入）与信号收集、方框尺寸布局、自描述、序列化往返
+/// 禁用态忽略点击、共享来源双向写穿（含用户输入）与信号收集、方框尺寸布局（含主题度量档跟随
+/// 与显式设值优先）、自描述、序列化往返
 
+#include <memory>
 #include <string>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
+#include "aurora/environment/environment.h"
 #include "aurora/event/event.h"
 #include "aurora/layout/layout_engine.h"
 #include "aurora/state/state.h"
+#include "aurora/theming/theme.h"
 #include "aurora/widget/checkbox.h"
 #include "framework/aurora_test.h"
 #include "framework/json_access.h"
@@ -24,6 +29,22 @@ auto bounded(float w, float h) -> Constraints {
     return Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = w, .height = h}};
 }
 
+/// 造一个注入了指定主题的构建上下文（根级环境，无父指针）。
+/// 返回 holder + ctx：调用方持有 holder 即保证环境存活（BuildContext 本就只供当帧读取）。
+auto themed_ctx(const Theme &t) -> std::pair<std::shared_ptr<Environment>, BuildContext> {
+    auto env = std::make_shared<Environment>();
+    env->set_local(t);
+    BuildContext ctx;
+    ctx.env = env.get();
+    return {std::move(env), ctx};
+}
+
+/// 探针：把 protected 的 `resolve_size` 提到 public（与 `on_layout` 走的是同一条函数）。
+class SizeProbe final : public Checkbox {
+  public:
+    using Checkbox::resolve_size;
+};
+
 }  // namespace
 
 AURORA_TEST_CASE(checkbox_defaults_and_type_name) {
@@ -31,6 +52,11 @@ AURORA_TEST_CASE(checkbox_defaults_and_type_name) {
     AURORA_TEST_CHECK_EQ(std::string{c.type_name()}, "Checkbox");
     AURORA_TEST_CHECK_FALSE(c.value());
     AURORA_TEST_CHECK_TRUE(c.enabled());
+
+    Json props = Json::object();
+    c.serialize_props(props);
+    // 默认未显式设边长：size 键不输出（两态语义：空 = 跟随主题 controls.indicator_size）。
+    AURORA_TEST_CHECK_FALSE(props.contains("size"));
 }
 
 AURORA_TEST_CASE(checkbox_set_value_fires_on_changed) {
@@ -189,6 +215,37 @@ AURORA_TEST_CASE(checkbox_serialize_deserialize_roundtrip) {
     AURORA_TEST_CHECK_FALSE(dst.enabled());
     LayoutEngine::layout(dst, bounded(200.0F, 100.0F));
     AURORA_TEST_CHECK_NEAR(dst.size().width, 28.0F, 1e-4F);
+}
+
+// ---- 度量跟随（接线批）：未显式设边长 → 读主题 `controls.indicator_size` ----
+
+AURORA_TEST_CASE(checkbox_size_default_to_material_baseline) {
+    // 无注入 = Material 基线档：接线前后实测同为 20dp，观感零回归的锚点。
+    const BuildContext bare;
+    SizeProbe c;
+    AURORA_TEST_CHECK_NEAR(c.resolve_size(bare), 20.0F, 1e-4F);
+}
+
+AURORA_TEST_CASE(checkbox_size_follows_theme_tokens_when_unset) {
+    // 改过令牌的主题 ⇒ 解析值随令牌走（证明读的是 theme，而不是写死的常量）。
+    Theme t = Theme::light();
+    t.controls.indicator_size = 26.0F;
+    const auto [env, ctx] = themed_ctx(t);
+    SizeProbe c;
+    AURORA_TEST_CHECK_NEAR(c.resolve_size(ctx), 26.0F, 1e-4F);
+    LayoutEngine::layout(c, bounded(200.0F, 100.0F), ctx);
+    AURORA_TEST_CHECK_NEAR(c.size().width, 26.0F, 1e-4F);  // 布局与绘制同源（同一条 resolve 通道）
+    AURORA_TEST_CHECK_NEAR(c.size().height, 26.0F, 1e-4F);
+}
+
+AURORA_TEST_CASE(checkbox_explicit_size_overrides_theme) {
+    // 对照组：显式设过边长后主题不动（两态语义的另一半）。
+    Theme t = Theme::light();
+    t.controls.indicator_size = 26.0F;
+    const auto [env, ctx] = themed_ctx(t);
+    SizeProbe c;
+    c.set_size(14.0F);
+    AURORA_TEST_CHECK_NEAR(c.resolve_size(ctx), 14.0F, 1e-4F);
 }
 
 }  // namespace aurora::test_cases::utest_checkbox

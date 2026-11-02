@@ -1,7 +1,8 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/theming/shape_scale.h + spacing_scale.h + control_metrics.h + layout_conventions.h
 /// 测试说明: 钉死四组令牌的 Material 基线「逐位复现现行硬编码」这条零回归判据——形状 / 间距 / 度量
-/// 三组的可复现项与控件公共头的现值逐字段相等，惯例组的默认项与落地前的排布行为一致。
+/// 三组的可复现项与控件在无注入主题下的默认解算值（`Button` / `Divider` 的 `resolve_*` 通道）逐字段
+/// 相等，惯例组的默认项与落地前的排布行为一致。
 /// 标「候选」的三项（控件紧凑档之外的命中下限、滚动条粗细）只断言声明值，不对账控件。
 
 #include "aurora/theming/theme.h"
@@ -11,6 +12,17 @@
 
 namespace aurora::test_cases::utest_theme_tokens {
 
+namespace {
+
+/// 探针：把 protected 的 `resolve_*` 钩子与属性字段提到可读位置（对账走的与生产渲染同一条函数）。
+class ButtonProbe final : public Button {
+  public:
+    using Button::resolve_corner_radius;
+    using Button::resolve_padding;
+};
+
+}  // namespace
+
 AURORA_TEST_CASE(shape_scale_reproduces_current_button_corner) {
     const ShapeScale shapes;
     AURORA_TEST_CHECK(shapes.none == 0.0F);
@@ -19,9 +31,12 @@ AURORA_TEST_CASE(shape_scale_reproduces_current_button_corner) {
     AURORA_TEST_CHECK(shapes.medium == 8.0F);
     AURORA_TEST_CHECK(shapes.large == 12.0F);
     AURORA_TEST_CHECK(shapes.extra_large == 16.0F);
-    // 零回归对账：现行 Button 的圆角默认值必须等于 shapes.small，否则接线即改观感。
-    const ButtonProps button;
-    AURORA_TEST_CHECK(button.corner_radius == shapes.small);
+    // 零回归对账：未显式设圆角时 Button 解算到的正是 `shapes.small`——接线批把默认值改成读令牌后，
+    // 这条判据从「props 常量相等」迁到「同一条 resolve 通道在无注入主题下相等」。
+    const BuildContext bare;
+    ButtonProbe b;
+    AURORA_TEST_CHECK_FALSE(b.corner_radius.has_value());  // 未设值才走主题档
+    AURORA_TEST_CHECK(b.resolve_corner_radius(bare) == shapes.small);
 }
 
 AURORA_TEST_CASE(spacing_scale_reproduces_current_button_padding) {
@@ -33,21 +48,28 @@ AURORA_TEST_CASE(spacing_scale_reproduces_current_button_padding) {
     AURORA_TEST_CHECK(spacing.large == 12.0F);
     AURORA_TEST_CHECK(spacing.extra_large == 16.0F);
     AURORA_TEST_CHECK(spacing.huge == 24.0F);
-    // 零回归对账：Button 内边距水平 = large、垂直 = small。
-    const ButtonProps button;
-    AURORA_TEST_CHECK(button.padding.left == spacing.large);
-    AURORA_TEST_CHECK(button.padding.right == spacing.large);
-    AURORA_TEST_CHECK(button.padding.top == spacing.small);
-    AURORA_TEST_CHECK(button.padding.bottom == spacing.small);
+    // 零回归对账：未显式设内边距时 Button 解算到水平 = `large`、垂直 = `small`。
+    const BuildContext bare;
+    ButtonProbe b;
+    AURORA_TEST_CHECK_FALSE(b.padding.has_value());  // 未设值才走主题档
+    const EdgeInsets pad = b.resolve_padding(bare);
+    AURORA_TEST_CHECK(pad.left == spacing.large);
+    AURORA_TEST_CHECK(pad.right == spacing.large);
+    AURORA_TEST_CHECK(pad.top == spacing.small);
+    AURORA_TEST_CHECK(pad.bottom == spacing.small);
 }
 
 AURORA_TEST_CASE(control_metrics_reproduces_current_widget_metrics) {
     const ControlMetrics controls;
     // 可对账项：与控件公共头 / Widget 常量的现值逐位相等。
-    const DividerProps divider;
-    AURORA_TEST_CHECK(divider.thickness == controls.separator_thickness);
-    // 焦点环现值住在 `Widget` 的受保护常量里（绘制与脏区共用），测试侧不可直读，
-    // 故钉声明值 2.0 / 2.0；接线批改读令牌时以「替换前后环宽不变」的像素断言兜底。
+    // Divider 的线厚在控件侧改读 `controls.separator_thickness`（未显式设值时），对账同走 resolve 通道。
+    const Divider divider;
+    AURORA_TEST_CHECK_FALSE(divider.thickness.has_value());
+    AURORA_TEST_CHECK(divider.resolve_thickness(BuildContext{}) == controls.separator_thickness);
+    // 焦点环现值住在 `Widget` 的受保护常量里（绘制与脏区共用），测试侧不可直读，故只钉声明值 2.0 / 2.0。
+    // 本模块未改读这两枚令牌：环宽除绘制侧还决定脏区外扩，而 `dirty_bounds()` 没有 `BuildContext`
+    // 可拿主题，单接绘制侧会让「画的环」与「标脏的盒」取到不同宽度（残影像素）。留待脏区具备
+    // 主题入口时两处一并改读，届时以「替换前后环宽不变」的像素断言兜底。
     AURORA_TEST_CHECK(controls.focus_ring_inset == 2.0F);
     AURORA_TEST_CHECK(controls.focus_ring_width == 2.0F);
     // 声明值对账（出处见头注释：Checkbox 20 / MenuBar 26 / Dropdown 与 SpinBox 框高 30 /

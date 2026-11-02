@@ -1,7 +1,7 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/theming/theme_query.h
 /// 测试说明: 覆盖 resolve_theme 在无注入时回退默认主题、根处 ThemeScope 生效、嵌套 ThemeScope 的最近祖先优先、
-/// 深层子树继承祖先主题，以及目标不在树中时的兜底行为
+/// 深层子树继承祖先主题，以及目标不在树中时的兜底行为；并单独钉住兜底档恒 ≡ Material 基线（不随风格档探测漂移）
 
 #include <memory>
 #include <string>
@@ -23,6 +23,18 @@ AURORA_TEST_CASE(resolve_theme_without_injection_returns_defaults) {
     AURORA_TEST_CHECK_EQ(resolved.roles.surface, Theme::with_defaults().roles.surface);
     AURORA_TEST_CHECK_EQ(resolved.roles.primary, Theme::with_defaults().roles.primary);
     AURORA_TEST_CHECK_EQ(resolved.roles.on_surface, Theme::with_defaults().roles.on_surface);
+}
+
+AURORA_TEST_CASE(resolve_theme_fallback_is_material_baseline_not_platform_style) {
+    // 三处兜底同源的查询侧：无 Provider 时逐组令牌全等于裸主题（Material 基线），身份位也不是探测档。
+    // 若兜底被改成 `Theme::default_style()`，在非 Material 风格档的构建上本用例即红。
+    Node root{Placeholder{}};
+    const Theme resolved = resolve_theme(root);
+    AURORA_TEST_CHECK(resolved.style == ThemeStyle::Material);
+    AURORA_TEST_CHECK(resolved.shapes == ShapeScale{});
+    AURORA_TEST_CHECK(resolved.spacing == SpacingScale{});
+    AURORA_TEST_CHECK(resolved.controls == ControlMetrics{});
+    AURORA_TEST_CHECK(resolved.conventions == LayoutConventions{});
 }
 
 AURORA_TEST_CASE(resolve_theme_at_root_scope) {
