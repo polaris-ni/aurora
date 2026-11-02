@@ -5,8 +5,13 @@
 
 #include "aurora/theming/color_roles.h"
 #include "aurora/theming/color_scheme.h"
+#include "aurora/theming/control_metrics.h"
 #include "aurora/theming/csd_roles.h"
+#include "aurora/theming/layout_conventions.h"
+#include "aurora/theming/shape_scale.h"
+#include "aurora/theming/spacing_scale.h"
 #include "aurora/theming/theme_extension.h"
+#include "aurora/theming/theme_style.h"
 #include "aurora/theming/type_scale.h"
 
 namespace aurora {
@@ -15,14 +20,21 @@ namespace aurora {
 ///
 /// 经 `Provider<Theme>` / `ThemeScope` 注入环境，组件用 `inherit_theme(ctx)` 读取（见
 /// specification/07-environment-modifier.md §5.1）。取代旧的「扁平字段 + stringly 命名令牌表」双入口：
+/// - `style`：本实例所属**风格轴**（身份位，供 CSD 派生与自描述面读取；取值见 `ThemeStyle`）；
 /// - `roles`：Material 3 色角色全集（明暗两列，本实例持一列，由 `scheme` 标注归属档）；
 /// - `type_scale`：排版 15 档（不分明暗，`body_medium` 承接旧 `Theme::font`）；
 /// - `csd`：窗口装饰配色角色组（与通用角色解耦，组件级覆写面）；
+/// - `shapes` / `spacing` / `controls`：形状、间距与控件基准度量三组令牌（单位逻辑 dp，不分明暗）；
+/// - `conventions`：布局与交互惯例组（按钮序 / 标题对齐 / 菜单栏位置 / 滚动条模式 / 焦点环形状 / 动效倍率）；
 /// - `extensions`：应用自定义令牌以类型为键注册（`set_extension<T>` / `extension<T>()`），无字符串回落。
 ///
+/// 两轴正交：`style` 表「用哪套设计语言」，`scheme` 表「这套语言的明暗呈现」，二者互不折平——
+/// 一枚风格内含明暗两列取值，一枚 `Theme` 实例仍只持**一列**（与 `ColorRoles` 的「角色名一套、
+/// 取值两列」同构）。
+///
 /// 三级明暗优先链不变：显式样式 > `scheme` > OS 偏好（`os_color_scheme()`）；`scheme` 为
-/// `Unspecified` 表示本主题不表态，由优先链下层继续解析。渲染路径读角色为直接字段访问，无哈希、
-/// 无堆分配（`extensions` 为空时零分配）。
+/// `Unspecified` 表示本主题不表态，由优先链下层继续解析。渲染路径读角色与令牌为直接字段访问，
+/// 无哈希、无堆分配（`extensions` 为空时零分配）。
 ///
 /// 豁免 bugprone-exception-escape：Theme 随控件回调网被值拷贝（Provider 转发链上的
 /// std::function 深拷贝触发 .clang-tidy 已记录的系统性假告警面——「转入 std::function 的可调用对象
@@ -33,9 +45,14 @@ namespace aurora {
 /// @note Rebuildable: yes, via to_json / from_json（角色集；扩展不参与）
 /// NOLINTNEXTLINE(bugprone-exception-escape)
 struct Theme {
+    ThemeStyle style = ThemeStyle::Material;  ///< 风格轴归属（身份位；供 CSD 派生与自描述面读取）。
     ColorRoles roles = ColorRoles::light();  ///< 色角色全集（本实例持明或暗一列）。
     TypeScale type_scale;  ///< 排版 15 档（不分明暗）。
     CsdRoles csd = CsdRoles::light();  ///< 窗口装饰配色角色组。
+    ShapeScale shapes;  ///< 形状档位令牌（圆角，逻辑 dp）。
+    SpacingScale spacing;  ///< 间距档位令牌（留白与内边距，逻辑 dp）。
+    ControlMetrics controls;  ///< 控件基准度量（控件高、命中下限、焦点环、滚动条等，逻辑 dp）。
+    LayoutConventions conventions;  ///< 布局与交互惯例组（枚举 + 动效倍率）。
     ColorScheme scheme = ColorScheme::Unspecified;  ///< 明暗归属档（三级优先链中间层，语义不变）。
     ThemeExtensions extensions;  ///< 类型安全扩展注册表（空则零分配）。
 

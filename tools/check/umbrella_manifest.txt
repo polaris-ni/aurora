@@ -165,12 +165,17 @@ aurora/state/undo_stack.h
 aurora/storage/storage.h
 aurora/theming/color_roles.h
 aurora/theming/color_scheme.h
+aurora/theming/control_metrics.h
 aurora/theming/csd_roles.h
 aurora/theming/csd_style_bridge.h
+aurora/theming/layout_conventions.h
+aurora/theming/shape_scale.h
+aurora/theming/spacing_scale.h
 aurora/theming/theme.h
 aurora/theming/theme_extension.h
 aurora/theming/theme_query.h
 aurora/theming/theme_scope.h
+aurora/theming/theme_style.h
 aurora/theming/type_scale.h
 aurora/todo.h
 aurora/ui/factories.h
