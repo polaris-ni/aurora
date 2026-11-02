@@ -94,10 +94,10 @@ namespace {
 
 /// @brief 主题预设序号 → 枚举 + 名称（ClientSide 预览窗循环切换用）。
 ///
-/// 六档全覆盖（三套视觉语言 × 明暗两档）：漏掉 Mac 两档会让 `set_title_bar_style` 的
-/// 红绿灯分支在本 demo 里永远走不到，回归时只能靠单测兜底。
+/// 八档全覆盖（四套视觉语言 × 明暗两档）：漏掉 Mac 两档会让 `set_title_bar_style` 的红绿灯分支
+/// 在本 demo 里永远走不到，漏掉 Breeze 两档同理——回归时只能靠单测兜底。
 [[nodiscard]] auto theme_preset(int idx) -> au::CsdPreset {
-    switch (idx % 6) {
+    switch (idx % 8) {
         case 0:
             return au::CsdPreset::AdwaitaDark;
         case 1:
@@ -108,13 +108,17 @@ namespace {
             return au::CsdPreset::WindowsLight;
         case 4:
             return au::CsdPreset::MacDark;
-        default:
+        case 5:
             return au::CsdPreset::MacLight;
+        case 6:
+            return au::CsdPreset::BreezeDark;
+        default:
+            return au::CsdPreset::BreezeLight;
     }
 }
 
 [[nodiscard]] auto theme_name(int idx) -> std::string_view {
-    switch (idx % 6) {
+    switch (idx % 8) {
         case 0:
             return "AdwaitaDark";
         case 1:
@@ -125,8 +129,12 @@ namespace {
             return "WindowsLight";
         case 4:
             return "MacDark";
-        default:
+        case 5:
             return "MacLight";
+        case 6:
+            return "BreezeDark";
+        default:
+            return "BreezeLight";
     }
 }
 
@@ -196,7 +204,7 @@ auto open_preview(au::Application &app, au::DecorationPolicy p, const std::share
 
         au::Button theme_btn{au::ButtonProps{.label = "Cycle title-bar theme (host self-draw)"}};
         theme_btn.on_click = [self_id, &app, theme_idx, note]() -> void {
-            *theme_idx = (*theme_idx + 1) % 6;
+            *theme_idx = (*theme_idx + 1) % 8;
             const std::string label{theme_name(*theme_idx)};
             if (auto *w = resolve_preview(app, self_id)) {
                 w->set_title_bar_style(au::TitleBarStyle::from_preset(theme_preset(*theme_idx)));

@@ -13,17 +13,19 @@ enum class TitleBarButtonLayout : std::uint8_t {
     Mac,  ///< macOS「红绿灯」：圆形按钮左缘外收 8dp 垂直居中，左→右 close→min→max（macOS 惯例顺序）。
 };
 
-/// @brief CSD 标题栏预设（三套视觉语言 × 明暗两档 = 六套）。
+/// @brief CSD 标题栏预设（四套视觉语言 × 明暗两档 = 八套）。
 ///
 /// 经 `TitleBarStyle::from_preset(CsdPreset)` 取值；预设只产 `TitleBarStyle`（颜色 / 布局语言 /
 /// 度量基线），显隐开关全部保持开启——显隐与几何细节属调用方的定制面，不属预设。
 /// `TitleBarStyle{}` 的默认成员值即 `CsdPreset::AdwaitaDark` 一档。
-/// 三套语言的**度量口径**分治：Adwaita 两档沿用栏高推导式（按钮盒 `clamp(h-6,26,34)`=30dp、
+/// 四套语言的**度量口径**分治：Adwaita 两档沿用栏高推导式（按钮盒 `clamp(h-6,26,34)`=30dp、
 /// 间距 3dp、贴边外边距 6dp，取 libadwaita `.default-decoration` 的「22dp 内容 + 4dp 外边距」
 /// 与 `windowcontrols { border-spacing: 3px }` 口径）；Windows 两档按 Win11 真机钉值（栏高 32dp /
 /// 按钮盒 46dp / 图标槽 16dp）；Mac 两档按 macOS 标准窗口钉值（栏高 28dp / 红绿灯直径 12dp /
-/// 首枚圆心距左缘 20dp / 标题 13pt 居中）。字形尺寸与度量无关，一律由绘制层按各语言的固定设计
-/// 网格绘制（见 `title_bar_painter.cpp`）。
+/// 首枚圆心距左缘 20dp / 标题 13pt 居中）；Breeze 两档只钉配色与标题字号，几何沿用 Adwaita
+/// 档的推导式——KWin 的 Breeze 栏高是运行时推导（`max(文字高, gridUnit×2) + smallSpacing×4`，
+/// `smallSpacing = max(2, gridUnit/4)`），上游不给独立常量，钉死反而偏离真机。
+/// 字形尺寸与度量无关，一律由绘制层按各语言的固定设计网格绘制（见 `title_bar_painter.cpp`）。
 enum class CsdPreset : std::uint8_t {
     AdwaitaLight,  ///< GNOME/libadwaita 亮色 header bar（bg=`#FFFFFF`、fg=`#333334`、close_hover=`#E01B24`）
     AdwaitaDark,  ///< GNOME/libadwaita 暗色 header bar（bg=`#2E2E32`、fg=白、close_hover=`#E01B24`）
@@ -31,6 +33,8 @@ enum class CsdPreset : std::uint8_t {
     WindowsDark,  ///< WinUI/Windows 11 暗色标题栏（bg≈`#202020`、fg=白、close_hover=`#C42B1C`；栏高与按钮盒同亮色档）
     MacLight,  ///< macOS 亮色「红绿灯」标题栏（bg≈`#ECECEC`、fg=黑；圆形底色由绘制层按语言固定）
     MacDark,  ///< macOS 暗色「红绿灯」标题栏（bg≈`#323232`、fg=白；度量同亮色档）
+    BreezeLight,  ///< KDE Plasma 6 / Breeze 亮色标题栏（bg=`#EFF0F1`、fg=`#232629`；悬停走强调色，无红色关闭档）
+    BreezeDark,  ///< KDE Plasma 6 / Breeze 暗色标题栏（bg=`#202326`、fg=`#FCFCFC`；度量与按钮语言同亮色档）
 };
 
 /// @brief 标题栏度量覆写值（纯数据聚合；**缺省即沿用各视觉语言的推导规则**，故默认零改动）。
@@ -78,20 +82,22 @@ struct TitleBarStyle {
     Color close_pressed{0xC0, 0x1B, 0x28};  ///< 关闭钮按压底色（Adwaita red3 按下态，比悬停态更深）
 
     /// @brief 按预设取一套标题栏样式。
-    /// @param p 预设枚举值（三套视觉语言 × 明暗两档）。
+    /// @param p 预设枚举值（四套视觉语言 × 明暗两档 = 八套）。
     /// @return 对应预设的 `TitleBarStyle`；`CsdPreset::AdwaitaDark` 与默认构造逐值相同。
     /// @note 预设数值出处（均为业界近似取整）：libadwaita 现行 header bar（暗 `#2E2E32`/`#222226`、
     ///     亮 `#FFFFFF`/`#FAFAFB`、close_hover red3 `#E01B24`、底缘 shade 线 = 12%（亮）/ 36%（暗）
     ///     黑叠加后的实色）；WinUI/Win11（暗 `#202020`/`#191919`、亮 `#F3F3F3`、
-    ///     close_hover `#C42B1C`）；macOS（暗 `#323232`、亮 `#ECECEC`）。按压底色取「悬停罩加深一档」
+    ///     close_hover `#C42B1C`）；macOS（暗 `#323232`、亮 `#ECECEC`）；KDE Breeze（亮
+    ///     `#EFF0F1`/`#E3E5E7`、暗 `#202326`/`#292C30`，四支配色取 KDE/breeze 仓库
+    ///     `colors/Breeze{Light,Dark}.colors` 的 `[Colors:Window]`）。按压底色取「悬停罩加深一档」
     ///     的近似值；Mac 布局的红绿灯填色 / 描边 / 符号色 / 按下色由绘制层按语言固定，预设不覆盖。
     /// @note `separator` 是标题栏底缘那条 1px 分隔线（libadwaita `headerbar` 的
     ///     `box-shadow: inset 0 -1px var(--headerbar-shade-color)`）。只有 Adwaita 两档有：
-    ///     Win11 与 macOS 的标题栏底缘均无此线，故四档预设一律置全透明。alpha=0 即不画该线。
+    ///     Win11、macOS 与 Breeze 的标题栏底缘均无此线，故其余六档预设一律置全透明。alpha=0 即不画该线。
     /// @note `button_tint` 是窗口控制圆底的**常态**底色——libadwaita 的圆底画在 `> image` 上且
     ///     常态就有（`background-color: $button_color` = currentColor 10%），并非只在悬停时出现；
-    ///     悬停 15% / 按压 30% 仍走 `hover_tint` / `pressed_tint`。Windows 与 Mac 两档常态无圆底，
-    ///     故置全透明。
+    ///     悬停 15% / 按压 30% 仍走 `hover_tint` / `pressed_tint`。Windows、Mac 与 Breeze
+    ///     六档常态无圆底，故置全透明。
     /// @note Windows 两档的**度量**按真机 DWM 标题栏实测口径给出（非按栏高推导）：栏高 32dp、
     ///     按钮盒 46dp、图标槽 16dp、标题 9pt / 字重 400；字形本身由绘制层按 10×10dp 设计网格
     ///     绘制（见 `title_bar_painter.cpp`），故按钮盒再宽也不放大字形——这是 Win11 的实际行为。
@@ -102,14 +108,17 @@ struct TitleBarStyle {
     ///     故必须显式钉住而不能沿用。Adwaita 两档**不钉度量**：其推导式 `clamp(h-6,26,34)` 在栏高
     ///     36 时给 30dp，正是 libadwaita `.default-decoration` 的「22dp 内容 + 4dp 外边距」，间距
     ///     3dp 出自 `windowcontrols { border-spacing: 3px }`——钉值反而会破坏「`TitleBarStyle{}`
-    ///     默认成员值即 AdwaitaDark」这条契约。
-    /// @note 三套语言的**字形**一律由绘制层按固定设计网格绘制，与按钮盒尺寸解耦（Windows
-    ///     10×10dp / Adwaita 16×16dp / macOS 6pt），详见 `title_bar_painter.cpp`。
-    /// @note **标题对齐**（两个方向各自成规）：水平方向 Adwaita / Mac 两档居中（libadwaita
-    ///     `AdwHeaderBar` 与 macOS 窗口标题均居中），Windows 两档左对齐（WinUI 即左对齐）——
-    ///     默认成员值 true 就是 Adwaita 档的口径，故只有 Windows 两档显式置 false。垂直方向
-    ///     三档一律居中：绘制层按 `FontEngine::measure_height` 把行盒摆到栏高的中点
-    ///     （`draw_text` 的 y 是**行盒顶**，把标题带原样传下去会让文字贴栏的上缘）。
+    ///     默认成员值即 AdwaitaDark」这条契约。Breeze 两档同样**不钉度量**（只钉标题字号 / 字重）：
+    ///     KWin 侧的栏高是运行时推导（`max(文字高, gridUnit×2) + smallSpacing×4`），上游不给独立
+    ///     常量，钉死反而偏离真机；按钮语言沿用 Adwaita 档的右缘内收方形盒。
+    /// @note 四套语言的**字形**一律由绘制层按固定设计网格绘制，与按钮盒尺寸解耦（Windows
+    ///     10×10dp / Adwaita 16×16dp / macOS 6pt）；Breeze 两档与 Adwaita 共用右缘方形语言，
+    ///     故字形也走 Adwaita 的 16×16dp 网格，详见 `title_bar_painter.cpp`。
+    /// @note **标题对齐**（两个方向各自成规）：水平方向 Adwaita / Mac / Breeze 档居中（libadwaita
+    ///     `AdwHeaderBar`、macOS 窗口标题与 KWin Breeze 的默认标题对齐均为居中），Windows 两档
+    ///     左对齐（WinUI 即左对齐）——默认成员值 true 就是 Adwaita 档的口径，故只有 Windows 两档
+    ///     显式置 false。垂直方向八档一律居中：绘制层按 `FontEngine::measure_height` 把行盒摆到栏高
+    ///     的中点（`draw_text` 的 y 是**行盒顶**，把标题带原样传下去会让文字贴栏的上缘）。
     [[nodiscard]] static constexpr auto from_preset(CsdPreset p) noexcept -> TitleBarStyle {
         TitleBarStyle s;  // 基准 = AdwaitaDark（默认成员值）
         switch (p) {
@@ -206,6 +215,43 @@ struct TitleBarStyle {
                 s.metrics.button_margin = 14.0F;
                 s.metrics.icon_size = 16.0F;
                 s.metrics.title_font_size_pt = 13.0F;
+                s.metrics.title_font_weight = 400;
+                break;
+            case CsdPreset::BreezeLight:
+                // KDE Plasma 6 / Breeze 标题栏：四支配色取 KDE/breeze 的 colors/
+                // BreezeLight.colors（`[Colors:Window]` 的 BackgroundNormal / BackgroundAlternate
+                // 与 ForegroundNormal / ForegroundInactive），悬停与按压取该文件的
+                // `DecorationHover` / `DecorationFocus`（两支同值 `#3DAEE9`）。alpha 沿用 Adwaita
+                // 档的 15% / 30%——上游对装饰层的悬停透明度不给数值，这是本档唯一的猜测位。
+                s.bg_active = Color{0xEF, 0xF0, 0xF1};
+                s.bg_inactive = Color{0xE3, 0xE5, 0xE7};
+                s.fg_active = Color{0x23, 0x26, 0x29};
+                s.fg_inactive = Color{0x70, 0x7D, 0x8A};
+                s.hover_tint = Color{0x3D, 0xAE, 0xE9, 38};
+                s.pressed_tint = Color{0x3D, 0xAE, 0xE9, 77};
+                s.button_tint = Color::transparent();  // Breeze 标题栏按钮常态无底衬
+                s.separator = Color::transparent();  // 底缘无 Adwaita 那条 inset shade 线
+                s.close_hover = Color::transparent();  // 关闭钮不转红，悬停同样走强调色圆底
+                s.close_pressed = Color::transparent();
+                s.metrics.title_font_size_pt = 10.0F;  // 官方 plasma-integration 的 WM 字体 10pt
+                s.metrics.title_font_weight = 400;  // Noto Sans Regular，非 libadwaita 的 bold
+                break;
+            case CsdPreset::BreezeDark:
+                // 同亮色档，取 BreezeDark.colors：Window BackgroundNormal 32,35,38、
+                // BackgroundAlternate 41,44,48、ForegroundNormal 252,252,252、
+                // ForegroundInactive 161,169,177。注意版本口径：暗档中性面自 Plasma 6.4 起
+                // 整体改暗，v6.3.0 是 42,46,50 / 49,54,59，勿按旧 tag 复核。
+                s.bg_active = Color{0x20, 0x23, 0x26};
+                s.bg_inactive = Color{0x29, 0x2C, 0x30};
+                s.fg_active = Color{0xFC, 0xFC, 0xFC};
+                s.fg_inactive = Color{0xA1, 0xA9, 0xB1};
+                s.hover_tint = Color{0x3D, 0xAE, 0xE9, 38};
+                s.pressed_tint = Color{0x3D, 0xAE, 0xE9, 77};
+                s.button_tint = Color::transparent();
+                s.separator = Color::transparent();
+                s.close_hover = Color::transparent();
+                s.close_pressed = Color::transparent();
+                s.metrics.title_font_size_pt = 10.0F;
                 s.metrics.title_font_weight = 400;
                 break;
         }
