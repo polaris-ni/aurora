@@ -226,7 +226,11 @@ margin 在 Maximized / FullScreen / tiled 态塌缩为 0（贴边无可拖缝隙
 
 ### 5.2 默认根注入与 OS 跟随
 
-`Window`（`window/window.h`）持有主题状态，暴露 `set_theme(const Theme&)`（应用显式设置，最高优先）、`theme()` 与 `set_os_color_scheme(ColorScheme)`（供宿主推入 OS 档位的设定器）。`prepare_context` 每帧向根 `BuildContext` 注入 `Theme`（`root_env_.set<Theme>(resolved_root_theme())`），与 `MediaQuery` / `WindowState` / `WindowMode` / `WindowChrome` 同址注入，机制完全对称——子树无 `ThemeScope` 时经 `inherit_theme(ctx)` 读到此值。
+`Window`（`window/window.h`）持有主题状态，暴露 `set_theme(const Theme&)`（应用显式设置，最高优先）、`theme()`、`set_theme_style(ThemeStyle)` / `theme_style()`（只钉风格轴，明暗仍跟随 OS）与 `set_os_color_scheme(ColorScheme)`（供宿主推入 OS 档位的设定器）。`prepare_context` 每帧向根 `BuildContext` 注入 `Theme`（`root_env_.set<Theme>(resolved_root_theme())`），与 `MediaQuery` / `WindowState` / `WindowMode` / `WindowChrome` 同址注入，机制完全对称——子树无 `ThemeScope` 时经 `inherit_theme(ctx)` 读到此值。
+
+**两轴解算**：`resolved_root_theme()` 在显式 `theme_` 缺席时返回 `Theme::from_style(风格档, 明暗档)`——风格轴取 `set_theme_style` 钉住的档位，未钉时取 `Theme::default_style()` 的探测档；明暗轴取宿主推入的 `os_scheme_`，其中 `Unspecified` ≡ 明色，故注入主题的 `scheme` 恒为 `Light` / `Dark` 具体档、不为 `Unspecified`（这一条与下面三级链的口径同源）。`set_theme` 与 `set_theme_style` 同时给出时前者生效（它携带完整两轴取值，短路排在风格解算之前）。零回归边界：`from_style(Material, Light)` ≡ `Theme::light()`、`from_style(Material, Dark)` ≡ `Theme::dark()`，故探测回落 `Material` 的环境（无头构建、WASM、裸 X11 无外壳证据）解算结果与两轴模型引入前逐值相同。
+
+**行为变更（本库唯一一条主题面的破坏性变化）**：应用什么都不设时，默认观感从「Material 基线」变为「本机风格档」——Windows 构建得 Windows 档、macOS 得 MacOs 档、Linux 按外壳证据得 Gnome 或 Kde 档。两条迁移路径：`set_theme(Theme::light())` 取回与本窗探测无关的逐位相同旧观感；`set_theme_style(ThemeStyle::Material)` 保留明暗跟随但锁死风格档。
 
 **三级优先链**（应用未显式设置时）：显式 `set_theme` > OS 档（经 `set_os_color_scheme` 推入）> 明色。OS 未表态（`Unspecified`，headless/CI 常见）回落明色，故「`Unspecified` ≡ 明色列」是全系统单一口径：根注入链底、CSD 桥基座（见 5.3）与 `inherit_theme` 的无注入兜底（`Theme::light()`，`theming/theme_scope.h`）同解。注入的主题 `scheme` 携带解析后的最终档（`Light` / `Dark`，不为 `Unspecified`）。
 
@@ -238,7 +242,7 @@ margin 在 Maximized / FullScreen / tiled 态塌缩为 0（贴边无可拖缝隙
 
 `os_color_scheme()`（`window/platform.h`）的探测细节：Linux 读 GTK 配置文件启发式（不引 DBus 依赖），Win32 读注册表 `HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize` 的 `AppsUseLightTheme`（REG_DWORD，0 = Dark；键在值缺 = Light；键打不开 = Unspecified，实现位于独立 TU 避免公共头引入 `<windows.h>`），macOS 问 `NSApp.effectiveAppearance` 的 `bestMatchFromAppearancesWithNames:`（`NSAppearanceNameDarkAqua` 命中即 Dark、`Aqua` 即 Light；`NSApp == nil`（CLI / 无头）或 bestMatch 为空回 `Unspecified`；`NSAppearance` 的最小明暗对也能正确归类，实现位于独立 TU 避免公共头引入 `<AppKit/AppKit.h>`，并已在 macOS 构建内编译验证）。`Platform::color_scheme` 字段须由调用方经 `os_color_scheme()` 显式填充（`platform()` 不代做——读偏好有文件 / 注册表访问副作用）。
 
-**测试约定（防 CI 档位漂移）**：经 `Window` 呈现主题消费控件、且做绝对色像素断言的测试，必须显式固定主题档（`set_theme` 或 `set_os_color_scheme`）——否则其观感随 runner 的 OS 档位漂移。「跟随 OS」的正向验证经 seam 打桩完成（`set_os_color_scheme` 推入反转档位断言注入翻转），不依赖真机档位，见 `itest_theme_root_injection`。
+**测试约定（防 CI 档位漂移）**：经 `Window` 呈现主题消费控件、且做绝对色像素断言的测试，必须显式钉住主题（`set_theme`，或至少 `set_theme_style(ThemeStyle::Material)` 锁风格档 + `set_os_color_scheme` 锁明暗档）——否则其观感随 runner 的 OS 家族与 OS 档位双向漂移（两轴模型后，风格轴也会漂）。做「与探测结果自洽」类断言的用例反过来**不设**风格档，判据取「注入档位 == `Theme::default_style()`」而非某个具体档名，避免同一份用例在 Windows 与无头 runner 上一红一绿。「跟随 OS」的正向验证经 seam 打桩完成（`set_os_color_scheme` 推入反转档位断言注入翻转），不依赖真机档位，见 `itest_theme_root_injection`。
 
 ### 5.3 CSD 派生通道（typed）
 
