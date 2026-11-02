@@ -453,6 +453,10 @@ EM_JS(void, probe_defer_js, (std::intptr_t fn_ptr), {
 });
 // clang-format on
 
+// 前向声明：定义见本文件末尾 `extern "C"` 块。`aurora_probe_deferred_run` 的地址 0 哨兵路径在调用点
+// （下方）之前需可见声明；定义位于其后，二者均为 C 链接同名符号，故此处声明即可被调用处解析。
+extern "C" void aurora_probe_drain_duty();
+
 // @brief 推迟续体的回收口：调用并释放（EM_JS 只传地址，所有权归本函数）。
 //        地址 0 是哨兵「只排水、不回收」——值班租约的 wake 用它把一次排空推迟到本宏任务。
 extern "C" EMSCRIPTEN_KEEPALIVE void aurora_probe_deferred_run(std::intptr_t fn_ptr) {

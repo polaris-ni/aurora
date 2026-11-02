@@ -143,7 +143,8 @@ auto read_geometry(Display *dpy, ::Window win) -> std::optional<Rect> {
     int rx = 0;
     int ry = 0;
     const bool translated = XTranslateCoordinates(dpy, win, DefaultRootWindow(dpy), 0, 0, &rx, &ry, &child) != False;
-    return Rect{.x = translated ? rx : xr, .y = translated ? ry : yr, .w = static_cast<int>(cw), .h = static_cast<int>(ch)};
+    return Rect{
+        .x = translated ? rx : xr, .y = translated ? ry : yr, .w = static_cast<int>(cw), .h = static_cast<int>(ch)};
 }
 
 /// @brief 读窗口 `_NET_WM_STATE` 属性，判断目标原子是否在列（独立取证 WM 实际状态）。
@@ -225,7 +226,8 @@ auto main(int argc, char **argv) -> int {
     aurora::Node root = aurora::Node{aurora::Row{}};
     session.mount(root);
     const auto settled = session.pump_until_settled(10);
-    check(settled.ok(), "(0) baseline frames settled" + (settled.ok() ? std::string{} : ": " + settled.error().message));
+    check(settled.ok(),
+          "(0) baseline frames settled" + (settled.ok() ? std::string{} : ": " + settled.error().message));
 
     const Atom fullscreen_atom = XInternAtom(dpy, "_NET_WM_STATE_FULLSCREEN", False);
     const int screen = DefaultScreen(dpy);
@@ -266,7 +268,8 @@ auto main(int argc, char **argv) -> int {
                 // `_NET_WM_STATE_FULLSCREEN` 原子（2a）才是绑定的全屏证据。
                 emit("[NOTE] (2d) window geometry " + aurora_verify::format_int(after->x) + "," +
                      aurora_verify::format_int(after->y) + " " + aurora_verify::format_int(after->w) + "x" +
-                     aurora_verify::format_int(after->h) + " — multi-monitor layout cannot be asserted without XRandr; " +
+                     aurora_verify::format_int(after->h) +
+                     " — multi-monitor layout cannot be asserted without XRandr; " +
                      "the _NET_WM_STATE_FULLSCREEN atom (2a) is the binding proof");
             }
         }

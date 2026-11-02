@@ -209,17 +209,17 @@ struct Platform {
         // `XIconifyWindow` / `glfwIconifyWindow`，toggle_maximize 经 `_NET_WM_STATE_MAXIMIZED_*` /
         // `glfwMaximizeWindow`）亦全接——六家桌面后端均 true。Wasm 无窗口概念；Headless 的
         // `set_window_mode` 是测试 seam（不代表 OS 能力），恒 false。
-        c.runtime_window_mode = (surface == SurfaceKind::Win32 || surface == SurfaceKind::D3D11 ||
-                                 surface == SurfaceKind::Wayland || surface == SurfaceKind::MacOS ||
-                                 surface == SurfaceKind::X11 || surface == SurfaceKind::Glfw);
+        c.runtime_window_mode =
+            (surface == SurfaceKind::Win32 || surface == SurfaceKind::D3D11 || surface == SurfaceKind::Wayland ||
+             surface == SurfaceKind::MacOS || surface == SurfaceKind::X11 || surface == SurfaceKind::Glfw);
         // 全屏切换：Win32 / D3D11（同一 Win32Host 的 borderless 全屏：monitor 枚举 + 还原几何 +
         // WM_SIZE 定档上报）/ Wayland / MacOS 四家已接到 OS；X11 经 `set_window_mode(FullScreen)` 发
         // `_NET_WM_STATE_FULLSCREEN` 原子（WM 接管几何还原），`set_fullscreen` 覆写转发同源；Glfw 经
         // borderless 铺满所在显示器（存/还原几何 + 装饰态，不改视频模式）落地——四家桌面后端 + Glfw 全
         // true；Wasm / Headless 非 OS 能力，恒 false，应用先查询再决定是否提供全屏入口。
-        c.runtime_fullscreen = (surface == SurfaceKind::Win32 || surface == SurfaceKind::D3D11 ||
-                                 surface == SurfaceKind::Wayland || surface == SurfaceKind::MacOS ||
-                                 surface == SurfaceKind::X11 || surface == SurfaceKind::Glfw);
+        c.runtime_fullscreen =
+            (surface == SurfaceKind::Win32 || surface == SurfaceKind::D3D11 || surface == SurfaceKind::Wayland ||
+             surface == SurfaceKind::MacOS || surface == SurfaceKind::X11 || surface == SurfaceKind::Glfw);
         // 桌面外壳集成四枚位：入口是进程级自由函数（`include/aurora/app/` 的五个新头），与
         // `SurfaceKind` 无关——平台桥按编译期 OS 宏接线（见 `src/aurora/app/detail/` 的三套
         // `*_shell_integration.cpp`），故这里按平台整体置位，不随 Surface 变化；Headless 在

@@ -155,7 +155,8 @@ auto read_geometry_linux(Display *dpy, ::Window win) -> std::optional<Rect> {
     int rx = 0;
     int ry = 0;
     const bool translated = XTranslateCoordinates(dpy, win, DefaultRootWindow(dpy), 0, 0, &rx, &ry, &child) != False;
-    return Rect{.x = translated ? rx : xr, .y = translated ? ry : yr, .w = static_cast<int>(cw), .h = static_cast<int>(ch)};
+    return Rect{
+        .x = translated ? rx : xr, .y = translated ? ry : yr, .w = static_cast<int>(cw), .h = static_cast<int>(ch)};
 }
 #endif
 
@@ -275,7 +276,8 @@ auto main(int argc, char **argv) -> int {
     aurora::Node root = aurora::Node{aurora::Row{}};
     session.mount(root);
     const auto settled = session.pump_until_settled(10);
-    check(settled.ok(), "(0) baseline frames settled" + (settled.ok() ? std::string{} : ": " + settled.error().message));
+    check(settled.ok(),
+          "(0) baseline frames settled" + (settled.ok() ? std::string{} : ": " + settled.error().message));
 
     const std::vector<Rect> monitors = expected_monitor_rects();
     emit("  GLFW monitors reported: " + aurora_verify::format_int(static_cast<long long>(monitors.size())));
@@ -407,8 +409,9 @@ auto main(int argc, char **argv) -> int {
         if (obs_max) {
             check(true, "(4c) OS-side maximized state confirmed (independent observation)");
         } else {
-            emit("[NOTE] (4c) OS-side maximized state not independently observable on this platform; "
-                 "snapshot (4a) is the binding proof");
+            emit(
+                "[NOTE] (4c) OS-side maximized state not independently observable on this platform; "
+                "snapshot (4a) is the binding proof");
         }
         // 幂等二次切换：快照回 Normal。
         win.toggle_maximize();
@@ -448,8 +451,9 @@ auto main(int argc, char **argv) -> int {
         if (obs_min) {
             check(true, "(5b) OS-side minimized state confirmed (independent observation)");
         } else {
-            emit("[NOTE] (5b) OS-side minimized state not independently observable on this platform; "
-                 "snapshot (5a) is the binding proof");
+            emit(
+                "[NOTE] (5b) OS-side minimized state not independently observable on this platform; "
+                "snapshot (5a) is the binding proof");
         }
         check(log.count("WRN") == 0, "(5c) minimize() produced no WARN");
         // 末步不再复位：本库未单独暴露「去 iconic」还原腿（还原依赖 OS / 任务栏）；残留态不影响判据。
