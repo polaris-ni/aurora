@@ -253,14 +253,15 @@ AURORA_TEST_CASE(click_window_default_follows_system) {
     AURORA_TEST_CHECK_EQ(ed.click_window_ms, 60000U);
 }
 
-#if defined(AURORA_PLATFORM_LINUX) && !defined(AURORA_PLATFORM_ANDROID)
 AURORA_TEST_CASE(click_window_linux_reads_gsettings_or_fallback) {
+#if !defined(AURORA_PLATFORM_LINUX) || defined(AURORA_PLATFORM_ANDROID)
+    AURORA_TEST_SKIP("GSettings double-click read is Linux-only");
+#endif
     // Linux 分支：要么经 GLib GSettings 读到真实系统值，要么回退库级兜底常量；
     // 两者均须为正且落在合理区间（避免极端负值或 0 穿透到派发器初值）。
     const std::uint32_t ms = os_double_click_ms();
     AURORA_TEST_CHECK_TRUE(ms >= 1U);
     AURORA_TEST_CHECK_TRUE(ms <= 10000U);
 }
-#endif
 
 }  // namespace aurora::test_cases::utest_event
