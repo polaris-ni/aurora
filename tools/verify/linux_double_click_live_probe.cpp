@@ -134,8 +134,12 @@ using FnGObjectUnref = void (*)(void *);
         gobj = ::dlopen("libgobject-2.0.so", RTLD_LAZY | RTLD_LOCAL);
     }
     if (gio == nullptr || gobj == nullptr) {
-        if (gio != nullptr) ::dlclose(gio);
-        if (gobj != nullptr) ::dlclose(gobj);
+        if (gio != nullptr) {
+            ::dlclose(gio);
+        }
+        if (gobj != nullptr) {
+            ::dlclose(gobj);
+        }
         return std::nullopt;  // 缺 GLib：库必回退常量
     }
 
@@ -186,8 +190,7 @@ using FnGObjectUnref = void (*)(void *);
         return std::nullopt;
     }
     // 命令串是常量拼接，只做 PATH 查询与只读取值，不含外部输入。
-    const std::string command =
-        "gsettings get org.gnome.desktop.peripherals.mouse double-click 2>/dev/null";
+    const std::string command = "gsettings get org.gnome.desktop.peripherals.mouse double-click 2>/dev/null";
     // NOLINTNEXTLINE(cert-env33, bugprone-command-processor)
     std::string raw;
     {
@@ -269,11 +272,12 @@ auto main(int argc, char **argv) -> int {
     if (witness.has_value()) {
         emit("[WITNESS] GSettings double-click read independently = " + std::to_string(*witness) + " ms");
         check(value == static_cast<std::uint32_t>(*witness),
-              "os_double_click_ms() follows the system value read from GLib GSettings (" +
-                  std::to_string(value) + " == " + std::to_string(*witness) + ")");
+              "os_double_click_ms() follows the system value read from GLib GSettings (" + std::to_string(value) +
+                  " == " + std::to_string(*witness) + ")");
     } else {
-        emit("[WITNESS] GLib GSettings not readable on this machine (missing libgio / schema / session) -> "
-             "expecting clean fallback to the library constant");
+        emit(
+            "[WITNESS] GLib GSettings not readable on this machine (missing libgio / schema / session) -> "
+            "expecting clean fallback to the library constant");
         check(value == aurora::AURORA_DEFAULT_CLICK_WINDOW_MS,
               "os_double_click_ms() falls back to AURORA_DEFAULT_CLICK_WINDOW_MS when GSettings is unreadable (" +
                   std::to_string(value) + " == " + std::to_string(aurora::AURORA_DEFAULT_CLICK_WINDOW_MS) + ")");
@@ -284,11 +288,10 @@ auto main(int argc, char **argv) -> int {
     if (cli_witness.has_value()) {
         emit("[CLI] gsettings CLI reports double-click = " + std::to_string(*cli_witness) + " ms");
         if (witness.has_value() && *cli_witness != *witness) {
-            warn("gsettings CLI (" + std::to_string(*cli_witness) +
-                 ") disagrees with the GLib GSettings read (" + std::to_string(*witness) +
+            warn("gsettings CLI (" + std::to_string(*cli_witness) + ") disagrees with the GLib GSettings read (" +
+                 std::to_string(*witness) +
                  "); both are independent of the library, investigate the desktop environment");
-        } else if (!witness.has_value() &&
-                   *cli_witness != static_cast<int>(aurora::AURORA_DEFAULT_CLICK_WINDOW_MS)) {
+        } else if (!witness.has_value() && *cli_witness != static_cast<int>(aurora::AURORA_DEFAULT_CLICK_WINDOW_MS)) {
             warn("gsettings CLI sees " + std::to_string(*cli_witness) +
                  " ms but the library could not read GSettings (fell back to the constant) — possible "
                  "dlopen/session gap worth checking on this machine");

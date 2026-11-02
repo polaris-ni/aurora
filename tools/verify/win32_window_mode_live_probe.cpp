@@ -248,8 +248,7 @@ auto run_one_decoration(aurora::DecorationPolicy decoration, const std::string &
               "(" + label + ") set_fullscreen(false) restored the pre-fullscreen window rect (+-1px)");
         check(app.window_mode().get() == aurora::WindowMode::Normal,
               "(" + label + ") set_fullscreen(false) reported Normal to the application snapshot");
-        check(log.count("WRN") == 0,
-              "(" + label + ") set_fullscreen(false) produced no WARN");
+        check(log.count("WRN") == 0, "(" + label + ") set_fullscreen(false) produced no WARN");
     }
     return true;  // Application 析构销毁窗口
 }

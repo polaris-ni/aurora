@@ -1438,18 +1438,16 @@ auto Win32Host::set_fullscreen(bool on) -> void {
             target = mi.rcMonitor;
         }
         // Borderless 全屏：去标题/可调边框/系统菜单可见性，转 WS_POPUP 覆盖整屏。
-        const DWORD new_style =
-            (d.saved_style | WS_POPUP) & ~(WS_CAPTION | WS_THICKFRAME | WS_BORDER | WS_DLGFRAME);
+        const DWORD new_style = (d.saved_style | WS_POPUP) & ~(WS_CAPTION | WS_THICKFRAME | WS_BORDER | WS_DLGFRAME);
         SetWindowLongPtrA(d.hwnd, GWL_STYLE, static_cast<LONG_PTR>(new_style));
-        SetWindowPos(d.hwnd, HWND_TOP, target.left, target.top, target.right - target.left,
-                     target.bottom - target.top, SWP_FRAMECHANGED | SWP_NOACTIVATE);
+        SetWindowPos(d.hwnd, HWND_TOP, target.left, target.top, target.right - target.left, target.bottom - target.top,
+                     SWP_FRAMECHANGED | SWP_NOACTIVATE);
         d.fullscreen = true;
     } else {
         // 还原样式与几何（不抢前台：HWND_TOPMOST 不用于还原）。
         SetWindowLongPtrA(d.hwnd, GWL_STYLE, static_cast<LONG_PTR>(d.saved_style));
-        SetWindowPos(d.hwnd, nullptr, d.saved_rect.left, d.saved_rect.top,
-                     d.saved_rect.right - d.saved_rect.left, d.saved_rect.bottom - d.saved_rect.top,
-                     SWP_FRAMECHANGED | SWP_NOZORDER | SWP_NOACTIVATE);
+        SetWindowPos(d.hwnd, nullptr, d.saved_rect.left, d.saved_rect.top, d.saved_rect.right - d.saved_rect.left,
+                     d.saved_rect.bottom - d.saved_rect.top, SWP_FRAMECHANGED | SWP_NOZORDER | SWP_NOACTIVATE);
         d.fullscreen = false;
     }
     // 定档上报：handle_size 因 fullscreen 标志会收敛到同值，此处显式收口（size 已随 WM_SIZE 更新）。

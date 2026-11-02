@@ -118,8 +118,9 @@ auto main(int argc, char **argv) -> int {
     emit("");
     emit("[ENV] GetDoubleClickTime() availability (the library reads the system value through this at runtime):");
     const std::optional<std::uint32_t> witness = witness_double_click_ms();
-    emit(std::string("       GetDoubleClickTime()    : ") +
-         (witness.has_value() ? (std::to_string(*witness) + " ms") : "returned 0 (call failed, unexpected on Windows)"));
+    emit(std::string("       GetDoubleClickTime()    : ") + (witness.has_value()
+                                                                 ? (std::to_string(*witness) + " ms")
+                                                                 : "returned 0 (call failed, unexpected on Windows)"));
 
     // ---- ② 范围合理性 ----
     emit("");
@@ -132,14 +133,15 @@ auto main(int argc, char **argv) -> int {
     emit("");
     if (witness.has_value()) {
         emit("[WITNESS] GetDoubleClickTime() read independently = " + std::to_string(*witness) + " ms");
-        check(value == *witness,
-              "os_double_click_ms() follows the system value read from GetDoubleClickTime (" +
-                  std::to_string(value) + " == " + std::to_string(*witness) + ")");
+        check(value == *witness, "os_double_click_ms() follows the system value read from GetDoubleClickTime (" +
+                                     std::to_string(value) + " == " + std::to_string(*witness) + ")");
     } else {
-        emit("[WITNESS] GetDoubleClickTime() returned 0 on this machine (unexpected) -> "
-             "expecting clean fallback to the library constant");
-        warn("GetDoubleClickTime() could not be read; cannot witness against the system value "
-             "on this machine (investigate the Windows session)");
+        emit(
+            "[WITNESS] GetDoubleClickTime() returned 0 on this machine (unexpected) -> "
+            "expecting clean fallback to the library constant");
+        warn(
+            "GetDoubleClickTime() could not be read; cannot witness against the system value "
+            "on this machine (investigate the Windows session)");
     }
 
     emit("");

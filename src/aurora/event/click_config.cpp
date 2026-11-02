@@ -1,8 +1,7 @@
-#include "aurora/event/event.h"
+#include <cstring>
 
 #include "aurora/core/platform.h"
-
-#include <cstring>
+#include "aurora/event/event.h"
 
 #if defined(AURORA_PLATFORM_WINDOWS)
 #ifndef NOMINMAX
@@ -35,9 +34,9 @@ using FnGSettingsGetInt = int (*)(void *, const char *);
 using FnGObjectUnref = void (*)(void *);
 
 struct GlibSettingsApi {
-    FnGSettingsNew settings_new = nullptr;        ///< `g_settings_new`
+    FnGSettingsNew settings_new = nullptr;  ///< `g_settings_new`
     FnGSettingsGetInt settings_get_int = nullptr;  ///< `g_settings_get_int`
-    FnGObjectUnref object_unref = nullptr;         ///< `g_object_unref`
+    FnGObjectUnref object_unref = nullptr;  ///< `g_object_unref`
     bool ok = false;  ///< 三个核心符号是否齐全
 };
 
@@ -53,8 +52,12 @@ struct GlibSettingsApi {
             gobj = ::dlopen("libgobject-2.0.so", RTLD_LAZY | RTLD_LOCAL);
         }
         if (gio == nullptr || gobj == nullptr) {
-            if (gio != nullptr) ::dlclose(gio);
-            if (gobj != nullptr) ::dlclose(gobj);
+            if (gio != nullptr) {
+                ::dlclose(gio);
+            }
+            if (gobj != nullptr) {
+                ::dlclose(gobj);
+            }
             return a;  // 缺 GLib：ok=false，调用方回退常量
         }
         bool ok = true;

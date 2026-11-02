@@ -8,8 +8,8 @@
 #include <optional>
 #include <vector>
 
-#include "aurora/event/event.h"
 #include "aurora/event/dispatcher.h"
+#include "aurora/event/event.h"
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_event {
