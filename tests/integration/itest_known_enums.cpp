@@ -57,7 +57,10 @@ namespace {
            static_cast<int>(aurora::net::ExportSurface::InspectorJson) +
            static_cast<int>(aurora::net::FieldClass::Secret) +
            static_cast<int>(aurora::net::http::HttpStage::BodyDone) + static_cast<int>(aurora::ResourcePhase::Failed) +
-           static_cast<int>(aurora::StreamPolicy::Replace) + static_cast<int>(au::webview::WebViewMode::Snapshot);
+           static_cast<int>(aurora::StreamPolicy::Replace) + static_cast<int>(au::webview::WebViewMode::Snapshot) +
+           static_cast<int>(au::ThemeStyle::Kde) + static_cast<int>(au::ThemeStyle::MacOs) +
+           static_cast<int>(au::DesktopEnvironment::Other) + static_cast<int>(au::DesktopEnvironment::Gnome) +
+           static_cast<int>(au::ColorScheme::Unspecified) + static_cast<int>(au::ColorScheme::Dark);
 }
 
 /// @brief 属性类型是否属于「不需要枚举登记」的基础 / 容器类型。
@@ -129,6 +132,26 @@ AURORA_TEST_CASE(known_enums_historical_wrong_values_do_not_return) {
     // textBaseline 分档（alphabetic / ideographic 在 Aurora 未区分）。
     AURORA_TEST_CHECK(static_cast<int>(reg.at("CrossAxisAlignment").size()) == 5);
     AURORA_TEST_CHECK(has_value(reg.at("CrossAxisAlignment"), "Baseline"));
+}
+
+AURORA_TEST_CASE(theme_axes_are_both_enumerable) {
+    // 两轴正交模型在代码生成面上的钉子：风格轴与明暗轴必须同时可枚举，且风格轴里不含明暗位。
+    const auto reg = aurora::tools::known_enums();
+    AURORA_TEST_REQUIRE(reg.count("ThemeStyle") == 1);
+    AURORA_TEST_REQUIRE(reg.count("DesktopEnvironment") == 1);
+    AURORA_TEST_REQUIRE(reg.count("ColorScheme") == 1);
+
+    AURORA_TEST_CHECK(static_cast<int>(reg.at("ThemeStyle").size()) == 5);
+    AURORA_TEST_CHECK(has_value(reg.at("ThemeStyle"), "MacOs"));  // 拼写随 PlatformKind::MacOs
+    AURORA_TEST_CHECK(!has_value(reg.at("ThemeStyle"), "MacOS"));
+    AURORA_TEST_CHECK(!has_value(reg.at("ThemeStyle"), "Unknown"));  // 无证据回落 Material，不设不可用档
+    for (const auto &v : reg.at("ThemeStyle")) {
+        AURORA_TEST_CHECK_MSG(v.find("Dark") == std::string::npos, "style axis must not carry a brightness bit");
+        AURORA_TEST_CHECK_MSG(v.find("Light") == std::string::npos, "style axis must not carry a brightness bit");
+    }
+    // 明暗三态不塌：Unspecified 必须在登记值里，否则 AI 侧无法表达「本层不表态」。
+    AURORA_TEST_CHECK(static_cast<int>(reg.at("ColorScheme").size()) == 3);
+    AURORA_TEST_CHECK(has_value(reg.at("ColorScheme"), "Unspecified"));
 }
 
 AURORA_TEST_CASE(known_enums_cover_all_enum_typed_props) {

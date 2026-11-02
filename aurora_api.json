@@ -5011,6 +5011,14 @@
       ]
     },
     {
+      "name": "ColorScheme",
+      "values": [
+        "Unspecified",
+        "Light",
+        "Dark"
+      ]
+    },
+    {
       "name": "ConnectivityChangeCause",
       "values": [
         "SubscriptionStart",
@@ -5074,6 +5082,15 @@
         "EaseInOutCubic",
         "BounceOut",
         "Custom"
+      ]
+    },
+    {
+      "name": "DesktopEnvironment",
+      "values": [
+        "Unknown",
+        "Gnome",
+        "Kde",
+        "Other"
       ]
     },
     {
@@ -5429,6 +5446,16 @@
         "Clip",
         "Ellipsis",
         "Fade"
+      ]
+    },
+    {
+      "name": "ThemeStyle",
+      "values": [
+        "Material",
+        "Windows",
+        "MacOs",
+        "Gnome",
+        "Kde"
       ]
     },
     {

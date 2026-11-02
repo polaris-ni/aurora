@@ -161,6 +161,16 @@ namespace aurora::tools {
     // ---- gesture ----
     enums["DragAxis"] = {"None", "Horizontal", "Vertical"};
 
+    // ---- theming (both axes of the theme model must be enumerable for AI codegen) ----
+    // Style axis (aurora/theming/theme_style.h): the design language a Theme instance belongs to.
+    // `Material` doubles as the fallback for environments with no style evidence.
+    enums["ThemeStyle"] = {"Material", "Windows", "MacOs", "Gnome", "Kde"};
+    // Desktop shell evidence feeding the style resolution on Linux/BSD (same header).
+    enums["DesktopEnvironment"] = {"Unknown", "Gnome", "Kde", "Other"};
+    // Light/dark axis (aurora/theming/color_scheme.h): previously absent from this registry, which
+    // left the second axis un-enumerable while the first one was registered.
+    enums["ColorScheme"] = {"Unspecified", "Light", "Dark"};
+
     // ---- webview ----
     // 取值逐字来自 `web_view.cpp` 的 `mode_to_string`（序列化落盘的字符串即这两枚），
     // 不是枚举成员的 C++ 限定名——属性值校验与补全都按字符串比对。
