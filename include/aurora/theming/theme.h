@@ -42,7 +42,8 @@ namespace aurora {
 ///
 /// @note Thread: thread-safe (pure value type)
 /// @note Side-effects: none
-/// @note Rebuildable: yes, via to_json / from_json（角色集；扩展不参与）
+/// @note Rebuildable: no（无 to_json / from_json 实现体；经 from_style 两轴解算或 light/dark 预设重建，
+///       JSON 载入口属计划面，见 specification/07-environment-modifier.md §5.4）
 /// NOLINTNEXTLINE(bugprone-exception-escape)
 struct Theme {
     ThemeStyle style = ThemeStyle::Material;  ///< 风格轴归属（身份位；供 CSD 派生与自描述面读取）。
