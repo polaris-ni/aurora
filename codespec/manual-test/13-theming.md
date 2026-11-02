@@ -8,14 +8,19 @@
 
 ### 1.1 被测模块
 
-`theming/` —— 主题层（9 个公共头），在实测依赖分层中位于 L5。
+`theming/` —— 主题层（14 个公共头），在实测依赖分层中位于 L5。
 
 | 头 | 职责 |
 |:---|:---|
-| `theme.h` | 主题值对象：色角色集、排版字阶、CSD 角色组与明暗档位，浅色/深色生成器 |
+| `theme.h` | 主题值对象：色角色集、排版字阶、CSD 角色组、四组度量令牌、布局惯例组与明暗档位，浅色/深色生成器与两轴解算入口 `from_style` / `default_style` / `defaults` |
+| `theme_style.h` | 风格轴枚举 `ThemeStyle{Material, Windows, MacOs, Gnome, Kde}`（与明暗轴正交） |
 | `color_roles.h` | 色角色全集（Material 3 命名 + Aurora 扩展角色） |
 | `type_scale.h` | 排版 15 档 |
 | `csd_roles.h` | 窗口装饰（CSD）组件级配色角色组 |
+| `shape_scale.h` | 形状档位令牌（六档圆角，逻辑 dp） |
+| `spacing_scale.h` | 间距档位令牌（留白与内边距，逻辑 dp） |
+| `control_metrics.h` | 控件基准度量（控件高、命中下限、焦点环、滚动条等，逻辑 dp） |
+| `layout_conventions.h` | 布局与交互惯例组（对话框按钮序 / 标题对齐 / 菜单栏位置 / 滚动条模式 / 焦点环形态 / 动效倍率） |
 | `csd_style_bridge.h` | Theme → CSD 派生通道（typed） |
 | `theme_scope.h` | 主题作用域（`ThemeScope`，继承自通用 `Provider`） |
 | `theme_query.h` | 按条件查询主题值 |
@@ -33,6 +38,8 @@
 | `examples/demos/demo_theme.cpp` | `demo_theme` | 浅色与深色两个主题作用域并排呈现，及其对子树的影响边界 |
 
 `demo_theme` 在同屏并列放置两个 `ThemeProvider`，分别注入 `Theme::light()` 与 `Theme::dark()`，两者内部包裹的是**同一个控件类** `ThemedBox`。该控件在绘制时经 `ctx.environment<Theme>()` 读取主题；`Window` 的默认根注入保证主题恒存在，控件内未注入主题的回退路径不再可达。因此该载体可同时验证「注入生效」「作用域隔离」两项，且同一控件类在两个作用域下呈现不同颜色，恰好排除了「颜色来自控件自身」的解释。
+
+**该载体不覆盖风格轴**：它注入的两枚主题都是 Material 档的明暗两列，且 demo 侧的页面底色与文字色写死在调色板常量里，根注入解算出的平台风格档对它是不可观察的。风格档并排对照需要新载体，状态见 §1.8 末「待建载体」。
 
 ### 1.3 执行环境
 
@@ -128,6 +135,7 @@
 | 文字对比度 | 可读性是感知属性，程序只能算对比度比值而无从判断实际观感 |
 | 作用域隔离 | 「主题只影响作用域内的子树」需同屏并列对照才能排除全局污染的伪像 |
 | 同一控件的跨主题差异 | 用同一个控件类在两个作用域下呈现不同，是排除「颜色写死在控件里」的唯一直观证据 |
+| 跨风格档的观感分野 | 「Windows 档看起来像 Windows、KDE 档看起来像 KDE」是纯感知判断；程序能断言 `from_style(Kde, Dark).roles` 逐值等于标定表，却断言不了那套值并排摆出来后像不像 Breeze。**该子域当前无可用载体**，见本节末「待建载体」 |
 
 **不纳入人工测试的头及其理由**：
 
@@ -135,9 +143,16 @@
 |:---|:---|:---|
 | `theme.h` 的角色集与生成器 | 浅色/深色主题的角色取值为确定性常量；其**感知正确性**由 TC-THEMING-002 与 TC-THEMING-004 覆盖 | `utest_theme` |
 | `theme.h` 的 `ThemeExtension<T>` 注册表 | 类型键的注册与查询为确定性逻辑，且本载体未展示扩展 | `utest_theme_extension` |
+| `theme.h` 的 `from_style` / `default_style` / `defaults` | 两轴解算是纯查表：给定（风格档, 明暗档）得到逐字段确定的主题，人眼在这件事上没有程序给不出的信息——程序直接比整棵 `ColorRoles` 树。观感面（「这档像不像那个平台」）才是人工的活儿，归上一表 | `utest_theme_presets` |
+| `theme_style.h` | 只有一个枚举与其字符串化，无视觉表现；「哪台机器解算出哪一档」的判据在环境证据侧 | `utest_theme_probe` |
+| `shape_scale.h` / `spacing_scale.h` / `control_metrics.h` / `layout_conventions.h` | 四组令牌的登记与逐风格覆写为确定性常量表；令牌的**消费面**（控件默认值真的读到它）由像素与几何断言更准，人眼分不清 4dp 与 6dp 圆角 | `utest_theme_tokens` / `utest_button` / `utest_dialog` |
+| `color_scheme.h` | 枚举与 OS 偏好读取口径为确定性逻辑；真机明暗切换的观感在窗口装饰模块（`manual-test/10-window.md`）覆盖 | `utest_theme_csd_bridge` |
 | `color_roles.h` / `type_scale.h` / `csd_roles.h` | 角色取值、字阶与 CSD 配色的登记为确定性逻辑，其感知正确性由 TC-THEMING-002 / 004 覆盖 | `utest_theme_roles` / `utest_theme_csd_roles` |
 | `theme_scope.h` | 作用域压栈/弹栈与继承为确定性逻辑；其**隔离效果**由 TC-THEMING-003 覆盖。经共享 `State<Theme>` 的运行时换肤需专门的换肤入口，本载体不含，故不立用例 | `utest_theme_scope` |
-| `theme_query.h` | 条件查询为确定性求值，无视觉表现 | `utest_theme_query` |
+| `theme_query.h` | 条件查询为确定性求值，无视觉表现；三处兜底恒等于 Material 基线这条不变量由断言守 | `utest_theme_query` |
+| `csd_style_bridge.h` | 「预设基座 + CSD 角色组派生」是逐字段映射，且派生结果的机度与字形口径由窗口装饰侧的用例覆盖，本模块不重复 | `utest_theme_csd_bridge` |
+
+**待建载体（计划/待建，非现状）**：上表「跨风格档的观感分野」子域需要的载体是一份**五套风格 × 明暗两档并排**的对照页（同一控件集在十份主题下重复呈现，外加对话框按钮序与焦点环形态的分档演示），现无此目标。理由与阻塞点记在此处，避免读者把上面那条「纳入」行当成已有覆盖：本模块 §2 的 001–004 全部只涉及 `Theme::light()` / `dark()` 两枚显式注入档，风格轴在 `demo_theme` 上不可观察——该载体的页面底色与文字色都写死在 demo 侧调色板（`examples/demos/demo_common.h` 的 `Card` / `pal::AURORA_SURFACE`），根注入解算出的平台档对它没有任何影响。
 
 ## 2 用例清单
 

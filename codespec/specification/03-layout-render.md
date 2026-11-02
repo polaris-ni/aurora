@@ -508,6 +508,12 @@ au::Column{}
 
 **默认字体**是内置 Noto Sans（OFL），引擎首次使用时自动注册为 `""` / `"sans-serif"` / `"Noto Sans"` / `"default"`，含 Headless，保证跨机文本渲染逐位确定。缺字按候选 `FT_Face` 链回退（含系统 CJK 字体）避免豆腐块；无任何可用字体文件时回退内置 `BitmapFont` 保底。
 
+**主题风格档带来的族名偏好**（口径详见 [`07-environment-modifier.md`](07-environment-modifier.md) §5.1）：四套平台风格在标定字阶时整组替换 `Font::family`——Windows 档 `Segoe UI Variable Text`、macOS 档 `SF Pro Text`、GNOME 档 `Adwaita Sans`、KDE 档 `Noto Sans`；Material 档不动族名，十五档保持默认键 `sans-serif`。**族名是偏好而非保证**：`resolve_faces` 先在注册表命中（内置 Noto Sans 的四个键即在此层），未命中才按系统字体目录懒加载该族，仍解析不到则落默认链，**全程不报错**。
+
+对 §10.1 的确定性渲染需求（SPEC.TEST.RENDER.DETERMINISTIC-SNAPSHOT.001）的影响分两面。**无头 / CI / 未装该系统字体的机器**上四档的族名一律解析到同一份内置 Noto Sans，字面与度量逐位不变——风格档换的是取值表，不是字形来源，golden 基线因此与风格轴正交（字号仍随档变，但那是同一字面下的确定缩放）。**真机装了该系统字体**时，文本度量随平台所装字体而异，这是「观感跟随平台」的预期结果而非漂移；两机的字体确定性差值属仍在测项，不作为本节的既成承诺。
+
+由这两面得出一条测试纪律：**做绝对宽度或像素断言的用例，须先钉 Material 档**（`Theme::from_style(ThemeStyle::Material, …)` / `set_theme_style(Material)`），或经 `register_font` 注入同一份 TTF 把字面锁死——与 [`07-environment-modifier.md`](07-environment-modifier.md) §5.2 的既有测试约定同源，否则同一份用例在 Windows 构建与 Linux 构建上判据漂移。KDE 档恰好把族名写成 `Noto Sans`，而注册表命中优先于目录懒加载，故它恒取内置面，**不**随系统所装 Noto Sans 的版本变化——这不是巧合，是「内置键先命中」这条解析顺序的直接推论。
+
 **抗锯齿**：`enum class TextAAMode { Supersample, ClearType }` 加进程级 `set_text_aa_mode(mode)` / `text_aa_mode()`，默认 `Supersample`。`Supersample` 用 `FT_RENDER_MODE_NORMAL` 输出 A8 灰度覆盖度，与背景无关；`ClearType` 用 `FT_RENDER_MODE_LCD` 输出 3× 水平 RGB 子像素覆盖度，经 `Painter::blend_subpixel` 逐通道合成，**仅当文本不透明时启用**，半透明或字体不可用时自动回退 `Supersample`。
 
 **光栅状态世代**：`FontEngine::raster_generation()` 返回全局计数。三个字体注入接口（`set_default_font` / `register_font` / `register_font_from_memory`，换用不同字面同样改变字形光栅结果）**无条件**自增它；`set_text_aa_mode` 仅在写入值真正变化时自增（同值写入短路返回）。控件的 Display List 与离屏层缓存在录制/生成那一刻固化了 AA 模式与字面，而 `Widget::mark_needs_paint()` 只沿父链向上传播失效、不触及后代缓存——故控件必须把本世代纳入缓存命中条件（`Widget::paint` 已内置），否则切换后后代仍回放旧光栅，表现为「切换瞬间无变化、过一会儿才随无关失效零星生效」。字形图集键已含 AA 模式与 `px`，世代失效只触发重录、不产生脏条目。

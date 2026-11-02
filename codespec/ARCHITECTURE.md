@@ -124,7 +124,7 @@ Aurora 是一个 C++20 跨平台 GUI 库，以**声明式 + 响应式**为核心
 |:---|:---|:---|
 | 导航 | `navigation/` | `navigator.h` `route.h`（`Route` / `RouteTransition`） `router.h` `transition_layer.h` `navigator_host.h` `hero.h` |
 | 动画 | `animation/` | `timeline.h`（`Tween` / `Keyframes` / `TimelineSpec`） `animator.h`（`AnimationController` / `Animator` / `AnimatedValue` / `TimelinePlayer`） `easing.h`（`Curve`） `spring.h`（`SpringSimulation` / `SpringAnimation`） |
-| 主题 | `theming/` | `theme.h`（聚合） `color_roles.h` `type_scale.h` `csd_roles.h` `csd_style_bridge.h` `theme_scope.h` `theme_query.h` `theme_extension.h` `color_scheme.h` |
+| 主题 | `theming/` | `theme.h`（聚合 + `from_style` / `default_style` / `defaults`，四套风格的标定表实现体在 `theming/theme_presets.cpp`） `theme_style.h` `color_scheme.h` `color_roles.h` `type_scale.h` `csd_roles.h` `shape_scale.h` `spacing_scale.h` `control_metrics.h` `layout_conventions.h` `csd_style_bridge.h` `theme_scope.h` `theme_query.h` `theme_extension.h`；桌面外壳探测的实现体 `theming/detail/theme_probe.cpp`（全库唯一的环境变量读取点） |
 | 环境注入 | `environment/` | `environment.h` `media_query.h` `build_context.h` |
 | 国际化 | `i18n/` | `message_id.h`（`MessageId`） `locale.h` `localized_string.h`（`LocalizedString` / `MessageArg`） `message_catalog.h`（`MessageCatalog` / `default_catalog`） `plural.h`（CLDR 表驱动判定） `format.h`（数字 / 货币 / 日期 + `CivilDate`） `builtin_messages.h`（内置词表薄封装，生成件 `builtin_messages.gen.h`） |
 | 事件 | `event/` | `event.h` `dispatcher.h` `gesture.h` `focus.h` `keycode.h` `drag_drop.h` |
@@ -460,6 +460,10 @@ Aurora 内置轻量级运行时性能检测体系，提供帧级指标采集、�
 14. **动画时间轴的 dt 只有单一漏斗入口**：帧步长到动画步长的折算只经 `scaled_frame_dt`（或 `Animator::scale_frame_dt`）**一次**——`Animator::tick` 折算后推进控制器并把折算值交给 `add_frame_binding`，各控件自驱路径在自己的 `tick` / `tick_gestures` 入口折算一次，下游求解器（`ScrollGlide::tick`、`SpringSimulation::value`、`AnimationController::tick`）保持纯时序、不感知倍率。两层都乘 ⇒ 倍率变平方。`Animator::current()` 为空时漏斗恒等返回（无头 / golden 的确定性基线据此不破），漏斗**只做乘法、不夹取**。缩放为 `0.0`（冻结）不得产生常驻帧：控制器不置脏、绑定不写回、`has_active()` 转假、控件侧不标脏不请求帧。
 15. **循环模式不改写既有一次性语义**：`PlaybackMode::Repeat` 只改变「到达端点之后怎么办」，不改单次播放的进度方程、曲线、终值，也不新增 `completed` 触发——`on_completed` 仍只在控制器被置为 `Completed` / `Dismissed` 终态那一帧触发一次，无限循环全程不触发；`reset()` / `stop()` 把模式清回 `Once`。`reduce_motion` 优先于循环：无障碍档单帧落本次目标端点即止，不进入往复。
 16. **`set_progress` 不改状态语义**：外部定位只写进度（越界夹入 `[0,1]`），**不改 `status_`、不清 `PlaybackMode`**；它与 `reset(v)`（按值改写 `status_`）是两条不同语义，不得互相代偿。外部脏位与推进脏分离：`tick()` 入口只清推进脏，外部脏活到 `Animator` 帧末 `clear_dirty()` 一并清——否则「手势在帧边界前写入、同一帧绑定阶段写回」与「空闲帧不写回」两条既有语义会同时失真。
+17. **风格轴与明暗轴正交，明暗三态不可折平**：`ThemeStyle{Material, Windows, MacOs, Gnome, Kde}` 表「用哪套设计语言」，`ColorScheme{Unspecified, Light, Dark}` 表「这套语言的明暗呈现」，二者不得折成一枚枚举（否则要么丢档、要么给每档造 `*Light` / `*Dark` 两枚风格名，命名面即违规）。`Unspecified` 是**三态**而非 Dark 的别名：它只在根注入解算处取一次「明色基准列」，主题实例内仍只持一列取值。任何新增的中间解算层都不得把 `Unspecified` 提前折成具体档——折平会让三级优先链（显式样式 > `scheme` > OS 偏好）失去「本层不表态」的表达力。锚点：`itest_theme_root_injection` 的两轴三格。
+18. **主题兜底三点同源 ≡ Material 基线**：`inherit_theme(ctx)` 无注入时、`resolve_theme` 找不到目标时、DFS 种子处，兜底**恒等于** `Theme::with_defaults()`（Material 明色列），**不读**风格档探测结果。平台风格只能经 `Window` 根注入或树内 `ThemeScope` 进入——兜底读探测值会让「无主题」与「探测到 KDE」两种状态给出同一观感，把「探测失效」这个事实变得不可观测。三处各有断言（`itest_theme_root_injection` 钉根注入、`utest_theme_query` 钉查询、控件侧以裸 `BuildContext` 调 `resolve_*` 的基线用例钉构建上下文），改任一兜底取值须三处同批改。
+19. **确定性渲染优先于观感跟随**：风格档改的是取值表（配色 / 度量 / 字阶族名），不改字形来源——四档的族名在未装该系统字体的机器上仍解析到内置 Noto Sans，golden 与无头 CI 逐位不变（见 [`specification/03-layout-render.md`](specification/03-layout-render.md) §8.2）。因此**绝对像素或绝对宽度判据必须先钉 Material 档**（或注入同一份 TTF），不得依赖真机所装字体；同理，探测到的风格档在进程内只解算一次（`Theme::default_style()` 的静态局部量），换外壳须重启，不得为了「实时跟随外壳」把每次读取都变成 `getenv`。
+20. **根主题解算不在帧路径重建 `Theme`**：`Window::resolved_root_theme()` 按**解析后的（风格档 × 明暗档）对**缓存整份 `Theme`（尺寸读数见 `CHANGELOG.md` 的 Notes 节），命中即返回引用。`prepare_context` 每帧调用它，直接 `Theme::from_style` 等于每帧两次整份构造。缓存键取**解析后**的取值而非三枚输入，故 setter 侧不需要失效钩子；显式 `set_theme` 在缓存之前短路。判据：删掉缓存键里的 `scheme` 比较必须让三格注入用例变红——否则缓存退化成只认风格档，判据空转。
 
 ---
 

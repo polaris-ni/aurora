@@ -16,6 +16,8 @@
 | `AURORA_ENABLE_*` | 插桩 / 分析 / 能力开关 | 是否注入编译 / 链接期分析工具（覆盖率 / 内存检测 / 调试 / 性能插桩）或开启构建加速 / 内部能力（lld / ccache / SIMD / DEBUG / 测试注入点 / 内置音频设备后端 / 内置 WebView 引擎后端 / 内置 TLS 后端引擎） | 多数否；`PROFILING` / `TRACING` 与架构级优化三开关及 `DEBUG` / `TEST_HOOKS` / `AUDIO` / `AUDIO_WASAPI` / `AUDIO_ALSA` / `AUDIO_COREAUDIO` / `AUDIO_WEBAUDIO` 注入 PUBLIC 宏，`SIMD` / `IMAGE_*` / `WEBVIEW` 组与 `NET_TLS_*` 组注入内部（PRIVATE）宏，`LLD` / `CCACHE` 不注入宏 |
 
 > `Win32/GDI` 后端仅在 `_WIN32` 下编译，无需额外开关，已由 `AURORA_BACKEND_WIN32` 的内置默认值覆盖。
+>
+> 主题风格轴（`ThemeStyle` 五档 + 四套标定表 + 桌面外壳探测）**不设任何 `AURORA_*` 开关，也不新增缓存变量或 feature 宏**：全量编译进静态库，任何配置下都可用，消费者侧无需额外的 `find_package` 参数。探测不被门控的理由见 [`specification/07-environment-modifier.md`](specification/07-environment-modifier.md) §5.2——关掉探测只会让无头 CI 与真机取到不同的默认风格档，而默认档正是所有观感判据的分母。被探测读取的两个环境变量（`XDG_CURRENT_DESKTOP` / `DESKTOP_SESSION`）在 §7 登记；它们**不是**本库的开关面，取值由桌面会话自身决定，本库只读不写。
 
 ### 1.1 CMake 脚本布局
 
@@ -745,7 +747,7 @@ GLFW 同口径自 `third_party/glfw` 源码构建，但仅在 `AURORA_BACKEND_GL
 
 ## 7 运行时 / 测试环境变量
 
-以下变量不进入编译，仅在运行测试 / demo 时被 `std::getenv` 读取：
+以下变量不进入编译，在运行测试 / demo 时被 `std::getenv` 读取；标「库内」的行是**产品运行期**读取的桌面会话证据（不是测试开关），由桌面环境自身写入，本库只读不写。
 
 | 变量 | 取值 | 作用 |
 |:---|:---|:---|
@@ -761,6 +763,8 @@ GLFW 同口径自 `third_party/glfw` 源码构建，但仅在 `AURORA_BACKEND_GL
 | `AURORA_E2E_OS_INPUT` | `1`/`on`/`yes`/`true`（大小写不敏感） | OS 级输入注入通道（真机增强层 `tests/e2e/etest_os_input.cpp`）的选择加入开关：未置时该用例组为 skip 桩；置了才执行真实注入（Windows SendInput / PostMessage、Linux XTest）。SendInput 是全局注入无法定向，置位后须以**独立 ctest 调用**独占执行（`ctest -L e2e -R etest_os_input`），不与默认并行混跑；锁定 / 非交互桌面下以 `no_interactive_desktop` 明确原因 skip。见 `specification/08-tooling.md` §8.2 |
 | `NO_AT_BRIDGE` | 非 `0` 即生效 | GNOME 惯例的显式免提开关：置位后 Linux AT-SPI2 桥 `create()` 恒返回 `nullptr`，不碰 libdbus / 总线，无障碍路径整体退出 |
 | `AT_SPI_BUS_ADDRESS` | D-Bus 地址串 | 无障碍总线地址显式直给（跳过 `org.a11y.Bus.GetAddress` 查询），用于非常规桌面 / 测试注入；置了但地址无效仍按降级处理 |
+| `XDG_CURRENT_DESKTOP`（库内） | 桌面会话标识，惯例为冒号分隔（如 `GNOME`、`KDE`、`ubuntu:GNOME`） | **主题风格轴的第二枚证据**：`desktop_environment()`（`window/platform.h`，实现体在 `src/aurora/theming/detail/theme_probe.cpp`）逐段折小写做子串匹配，**KDE 先于 GNOME** 判定。仅 Linux / BSD 分支读取；Windows / macOS / WASM / Android / 无头恒不读（它们的外壳证据在 `platform().kind` 那一轴）。口径与判据表见 [`specification/06-app-platform.md`](specification/06-app-platform.md) §5 |
+| `DESKTOP_SESSION`（库内） | 会话名（如 `plasma`、`gnome`、`gnome-classic`） | `XDG_CURRENT_DESKTOP` 未置或不含可识别段时的**次级证据**，同一套匹配规则。两段都非空却一个也不认识 → `Other`；两段皆缺 → `Unknown`（探测**没有失败态**，`Unknown` 与 `Other` 分列）。风格解算侧只在进程内读一次（`Theme::default_style()` 的静态局部量），改环境变量须重启应用；本库的 `os_color_scheme()` 相反，每次现读 |
 | `AURORA_INSPECTOR_PORT` | 1–65535 | `aurora_mcp` 的 `live_*` 工具与 E2E 客户端 `aurora_e2e_client` 连接运行中应用的默认端口；缺省 `6280`（与 `InspectorServer::start()` 默认值一致）。`aurora_mcp` 单个工具调用可用 `session` 入参（`"6280"` 或 `"127.0.0.1:6280"`）覆盖；`aurora_e2e_client` 可用 `--port` 覆盖。**同为 demo 侧的启动开关**：`demo_common.h` 的 `run_demo` 检测到该变量（值非空）即随 demo 启动 `InspectorServer`，未设置不启动；值非法按未声明回落默认（脏值不截断）。两侧各自独立解析同一变量，天然对齐。主机恒为回环，见 `specification/08-tooling.md` §5.4–5.5 |
 
 > CTest 默认 CWD = `build/`，故依赖相对路径的 golden / fixture 测试以仓库根为基准：测试框架启动时统一把 cwd 切换到仓库根（`tests/framework/test_main.cpp` 的 `isolation::setup()`），故 `ctest` 下直接可跑，无需为各用例单独设置 `WORKING_DIRECTORY`（原 14 条 `WORKING_DIRECTORY` 白名单已移除）。

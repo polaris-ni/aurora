@@ -682,6 +682,7 @@ au::Button(au::ButtonProps{ .label = "OK" });
 
 - 默认值文档化在**声明处**：代码中可省略（保持简洁），但 LSP hover 时可见（保持透明），AI 工具无需查阅外部文档。
 - 新增 `XxxProps` 的每个字段必须有合理默认值（规则见 §6.2）。
+- **度量 / 形状 / 配色类默认值以「平台风格解算出的主题令牌」表达，不写字面量**：属性侧用 `std::optional<T>`（空 = 跟随主题），绘制期经 `resolve_xxx(const BuildContext&)` 读 `inherit_theme(ctx)` 的令牌（`shapes.*` / `spacing.*` / `controls.*` / `roles.*` / `conventions.*`），落点清单见 [`specification/04-widget.md`](specification/04-widget.md) §4.1。理由：字面量默认值把「Material 档的取值」误当成「跨风格通用的取值」，同一枚按钮在 KDE 与 macOS 上本该不同的高度和圆角；声明处可见性不受影响——描述符的 `default_value` 元数据写成令牌名（`"theme.shapes.small"`），序列化的 `default_expr` 给出可求值的表达式，未显式设置时**不序列化**该键。
 - 运行时可查询默认值：各控件提供静态 `defaults()`（如 `au::Button::defaults()` 返回默认 `ButtonProps`）。
 - `defaults()` 是**同名不同主**的两族：`Xxx::defaults()` 出该控件的属性快照，`Theme::defaults()` 出「本机风格档的整套标定主题」（只定风格轴、不定明暗档，见 [`specification/07-environment-modifier.md`](specification/07-environment-modifier.md) §5.1）。生成代码或文档时按主语选，不要把主题实例当属性快照。
 
@@ -876,6 +877,7 @@ au::Button(au::ButtonProps{ .label = "OK" });
 
 - **LIT-1（阻断）**：**注释之外不得出现中日韩字符**。`include/` `src/` `examples/` `tests/` `tools/` 内 C++/Python 的字符串字面量、字符字面量与 raw string，以及 `cmake/` 与根 `CMakeLists.txt` 的引号参数 / bracket 参数，一律用英文书写；`//`、`///`、`/* */`、Python/CMake `#`、`#[[ ]]` 与 docstring 属文档散文，保持中文不受此限。判定对象是「会离开源码的东西」——字面量经 `Logger`/`AURORA_LOG_RAW`/`Diagnostics`/`AURORA_CHECK`/Inspector/CLI/LSP/CTest 输出抵达控制台，而控制台代码页不受本库控制：GBK（cp936）等窄代码页下 UTF-8 中文串会呈现为问号与方块，同一份文案在不同代码页上结果不同（本仓整改的直接起因是跑门禁脚本时 `UnicodeEncodeError: 'gbk' codec can't encode character`）。注释不会离开源码，故不受限。
 - **LIT-2（阻断）**：脚本内 `EXEMPT_FILES` 的文件级白名单条目一旦不再命中任何诊断即判红灯。白名单机制常设、列表默认留空，防止清单腐烂。
+- **字体族名照 LIT-1 取 ASCII 原文**：主题标定表里的 `Font::family` 字面量一律写系统字体的英文/拉丁族名（`"Segoe UI Variable Text"`、`"SF Pro Text"`、`"Adwaita Sans"`、`"Noto Sans"`），**不得**为「中文正文该用什么字体」写汉字族名。理由与 LIT-1 同一条链路：族名既进 `FT_Face` 名匹配，也进 `aurora_api.json` 的 `default_expr` 与 LSP hover 文本，代码页一换就匹配不到、读不出来。需要说明「该档在中文环境下的实际观感」时写注释，不写字面量。
 - 规则编号 `LIT-1`/`LIT-2` 与 `tools/check/check_no_cjk_literals.py` 的输出编号一一对应；引用本节写 `§14.x` 或 `LIT-n`，不得写行号（`AGENTS.md` 硬规则 11）。
 
 ### 14.2 例外：功能必需的中文数据

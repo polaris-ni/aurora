@@ -461,6 +461,20 @@ au::Text("Welcome").font_size(24).bold();
 
 强调色（`active_color` / `accent_color` / `focused_border_color` 等）一律为 `std::optional<Color>`。未显式设置时，绘制期经 `inherit_theme(ctx)` 解析对应角色（`ThemeScope` 换肤即生效），且**未设置不序列化**——保留「跟随主题」语义，`to_json` / `from_json` 往返不丢失意图。`Button` 遵同一契约（迁移批起）：`ButtonProps::color` 为只读来源 `ReadOnlyState<std::optional<Color>>`（保留响应式能力，空 = 跟随 `roles.primary`）、`on_color` 为 `std::optional<Color>`（空 = 跟随 `roles.on_primary`），解析点是接收 `BuildContext` 的 `resolve_background(ctx)` / `resolve_text_color(ctx)`；`describe_static` 的 `default_value` 元数据为 `"theme.primary"` / `"theme.on_primary"`（AI/codegen 面文档值，不参与运行时）。
 
+**度量、形状与惯例同契约**——首批把颜色侧的两态语义推广到令牌层，逐控件落点清单如下：
+
+| 控件 / 面 | 属性（未显式设值时解算） | 令牌 | 解算点 |
+| :--- | :--- | :--- | :--- |
+| `Button` | `corner_radius` | `theme.shapes.small` | `resolve_corner_radius(ctx)`（每帧由 `on_paint` 解算一次，再传给 `paint_background` / `paint_border`，避免背景与描边取到两个半径） |
+| `Button` | `padding` | `theme.spacing.large`（水平）与 `theme.spacing.small`（垂直） | `resolve_padding(ctx)`（布局与绘制同源） |
+| `Divider` | `thickness` | `theme.controls.separator_thickness` | `resolve_thickness(ctx)` |
+| `Checkbox` | `size` | `theme.controls.indicator_size` | `resolve_size(ctx)` |
+| `Dialog` 工厂 | 动作按钮排布、标题对齐、行距 | `theme.conventions.dialog_button_order` / `dialog_title_alignment`、`theme.spacing.medium` / `large` | `detail::dialog_actions` / `dialog_title_text` / `dialog_stretches_children`；两个工厂的末位形参是 `const Theme & = Theme::defaults()` |
+
+三行控件项与颜色面逐条同构：属性为 `std::optional`、未设置不序列化、`describe_static` 的 `default_value` 登记令牌路径串（`"theme.shapes.small"` / `"theme.spacing(large/small)"` / `"theme.controls.separator_thickness"` / `"theme.controls.indicator_size"`，均为 AI/codegen 面文档值，不参与运行时）。显式设值一律优先，两态语义见 §2.5。`Dialog` 那行的主题来自 `Theme::defaults()`（风格轴探测档），因此它是「惯例真实生效」的落点：`AcceptFirst` + `Leading` 档（Material / Windows / KDE）产出的节点树与接线前逐位同构，其余档位才多包一层右靠容器——右靠需要自由空间，故非默认档的动作行会被拉到 `Dialog` 给的内容盒宽（`Dialog::on_layout` 的 0.8× 上限），这是排布观感的取舍而非尺寸变化。
+
+尚未接线的两枚如实登记在此：`controls.min_touch_target` **不**绑 `Button::min_width` / `min_height`（改绑会把既有全部像素 golden 一起移动，属未经请求的视觉变更）；`controls.scrollbar_thickness` 与焦点环两枚（`focus_ring_width` / `focus_ring_inset`）当前无消费点，理由见 [`07-environment-modifier.md`](07-environment-modifier.md) §5.1 的消费面段。
+
 ### 4.2 状态反馈与禁用态
 
 hover / 按下统一用 `Color::shaded(k)` 乘性调暗（hover ≈ ×0.90 / ×0.92，pressed ≈ ×0.78 / ×0.80），淡色底与选区用 `Color::with_alpha(a)`。按钮 / 输入 / 选择类控件（`Button` / `Checkbox` / `Switch` / `Slider` / `TextInput` / `Dropdown` / `RadioSpin` / `SegmentedControl`）提供 `set_enabled(bool)`：禁用态统一灰化绘制、**吞掉指针事件**（置 `e.handled = true` 不冒泡）且不改值。例外：`Chip` / `TabBar` / `ProgressIndicator` 无 `set_enabled` 方法，也无禁用态分支。

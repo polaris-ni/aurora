@@ -222,7 +222,9 @@ margin 在 Maximized / FullScreen / tiled 态塌缩为 0（贴边无可拖缝隙
 - `default_style()` 的证据源是 `platform().kind` 与 `auto_detect_surface()`，**不是** `MediaQuery::platform`（后者表渲染后端、非 Windows 恒 `Unknown`，取错源会让 Linux 桌面误落回落档）。判据表本身是纯函数 `detail::style_from(PlatformKind, DesktopEnvironment, has_window_backend)`，无头一票否决、Windows / macOS 单轴定档、Linux 有 KDE 证据取 `Kde` 否则 `Gnome`（Adwaita 基线与既有 GTK 配置启发式同源）、`PlatformKind::Unknown` 按外壳证据取档两者皆无才回落 `Material`、`Web` 恒 `Material`；14 格逐格断言由 `utest_theme_probe` 锚定。
 - `defaults()` **只定风格轴、不定明暗档**：不在构造期直读注册表 / 配置文件，那会同时违反 §5.2「创建时读一次」与应用侧「构造期不隐式读 OS 偏好」。要一份确定的暗色写 `from_style(default_style(), os_color_scheme())`，由调用方显式承担那次读取。
 
-**令牌层四组**（`theming/shape_scale.h` / `spacing_scale.h` / `control_metrics.h` / `layout_conventions.h`，全为逻辑 dp 的纯值 struct，`Theme` 逐字段直挂）：`shapes`（`small` / `medium` / `large` / `extra_large` 圆角）、`spacing`（留白与内边距档位）、`controls`（控件高、命中下限、焦点环粗细与偏移、滚动条粗细与内缩）、`conventions`（`ScrollBarMode{Classic, Overlay}` / `DialogButtonOrder{AcceptFirst, AcceptLast, VerticalRightAligned}` / `MenuBarPlacement{InWindow, NativePreferred}` / `FocusRingStyle{SolidOutline, OuterGlow}` 四枚惯例枚举加 `motion_scale` 动效倍率）。四组的声明默认值即 Material 基线，故 `Theme{}` 与 `from_style(Material, Unspecified)` 逐位等于 `with_defaults()`——**令牌层是聚合面扩展，不改变任何既有观感**；控件读取它们属后续接线，本轮 `shapes` / `spacing` / `controls` 尚无消费方。
+**令牌层四组**（`theming/shape_scale.h` / `spacing_scale.h` / `control_metrics.h` / `layout_conventions.h`，全为逻辑 dp 的纯值 struct，`Theme` 逐字段直挂）：`shapes`（`small` / `medium` / `large` / `extra_large` 圆角）、`spacing`（留白与内边距档位）、`controls`（控件高、命中下限、焦点环粗细与偏移、滚动条粗细与内缩）、`conventions`（`DialogButtonOrder{AcceptFirst, AcceptLast, VerticalRightAligned}` / `DialogTitleAlignment{Leading, Centered}` / `MenuBarPlacement{InWindow, NativePreferred}` / `ScrollbarMode{Classic, Overlay}` / `FocusRingStyle{Outline, OuterGlow, None}` 五枚惯例枚举加 `motion_scale` 动效倍率）。四组的声明默认值即 Material 基线，故 `Theme{}` 与 `from_style(Material, Unspecified)` 逐位等于 `with_defaults()`。
+
+**消费面**（默认值即「未显式设值时跟随主题档」，逐控件的落点清单见 [`04-widget.md`](04-widget.md) §4.1）：`Button` 圆角读 `shapes.small`、内边距读 `spacing.large`（水平）与 `spacing.small`（垂直）；`Divider` 线厚读 `controls.separator_thickness`；`Checkbox` 方框边长读 `controls.indicator_size`；`Dialog` 的两个工厂读 `conventions.dialog_button_order` / `dialog_title_alignment` 与 `spacing.medium` / `spacing.large`。`controls` 的其余字段（`control_height` / `control_height_small` / `menu_item_height` / `icon_default_size` / `content_padding` / `min_touch_target` / `scrollbar_thickness` / `focus_ring_*`）与 `conventions` 的 `menu_bar_placement` / `scrollbar_mode` / `focus_ring_style` / `motion_scale` **当前无控件消费点**：预设表照标定值写入它们，是为了让风格档可比较、也让后续接线有唯一落点，但「已登记」不等于「已生效」——`scrollbar_thickness` 无消费是因为本库不画滚动条，`focus_ring_*` 无消费是因为环宽同时决定脏区外扩而 `dirty_bounds()` 拿不到 `BuildContext`（只接绘制侧会让环与脏区取到不同宽度、留残影像素）。`utest_theme_tokens` 逐字段钉住 Material 基线，控件侧的三条判据（基线实测 / 改令牌即随动 / 显式设值压过主题）见 `utest_button`、`utest_divider`、`utest_checkbox` 与 `utest_dialog`。
 
 ### 5.2 默认根注入与 OS 跟随
 
@@ -258,9 +260,13 @@ margin 在 Maximized / FullScreen / tiled 态塌缩为 0（贴边无可拖缝隙
 
 **保留面**：`ThemeScope`（`theming/theme_scope.h`，`Provider<Theme>` 子类，支持经共享 `State<Theme>` 运行时换肤，值变化即子树重渲染）、`inherit_theme(ctx)`、`resolve_theme(root, target)` 查询（`theming/theme_query.h`）、`resolve_color_scheme(explicit, theme, os)` 纯函数（`theming/csd_style_bridge.h`，三级链各层以 `Unspecified` 表示不表态逐层下探）。
 
+`inherit_theme(ctx)` 返回的是**最近祖先注入主题的引用**而非拷贝：控件每帧解算默认度量与配色的路径因此零分配（调用方要长期持有须自行拷贝）。无注入时它指向一份进程内静态的 Material 基线档，`resolve_theme` 的兜底同理为 `Theme::with_defaults()`——这两处兜底**恒 ≡ Material 基线**，加上 `Window` 根注入未显式设主题时走的两轴解算（§5.2），构成「三处兜底同源」：平台风格档只能经 `Window` 根注入或树内 `ThemeScope` 进入，任何兜底读探测值都会让「无主题」与「探测到某平台」两种状态给出同一观感。三处各有断言，见 `itest_theme_root_injection`（根注入）、`utest_theme_query`（查询），以及控件侧以裸 `BuildContext` 调 `resolve_*` 的「基线实测」用例（`utest_button` / `utest_divider` / `utest_checkbox`，证的是构建上下文这条兜底）。
+
 **废除面**（随角色化重构退场，迁移路径见 `CHANGELOG.md`）：`Theme` 扁平字段 `background` / `primary` / `on_primary` / `text` / `font`；`TokenValue`；`tokens` / `dark_tokens` 命名令牌表及全部 `token*` / `set_token` 成员（含 `token_for` / `token_in` 解析入口与 `csd.*` / `focus.ring` / `chart.palette.*` 字符串令牌层）；`StyleProps` / `TokenOr<T>` / `ResolvedStyle`（theming 目录下 style_props.h 头无生产消费方，文件本体与测试 `utest_style_props` 已随 收束批删除）。控件取色统一为两态：显式属性值 > 主题角色（未显式设置时角色必有值，无第三态回落），映射表见 [`04-widget.md`](04-widget.md)。
 
-**主题 JSON 重建面**：角色集（roles + type_scale + csd + scheme）经 `to_json` / `from_json` 进出，JSON 键名即角色名——stringly 只允许存在于这个序列化边界，不进渲染路径；`ThemeExtension<T>` 不参与自动序列化。
+**主题 JSON 重建面（计划面，未落地）**：`Theme` **没有** `to_json` / `from_json` 实现体——主题的现建重建通道是两轴纯函数 `Theme::from_style(style, scheme)`（§5.1）与预设工厂 `light()` / `dark()`，不走字符串。计划中的 JSON 面是「角色集（roles + type_scale + csd + scheme + 三组度量 + 惯例组）进出，键名即角色/令牌名——stringly 只允许存在于这个序列化边界，不进渲染路径」，其键名口径（含本批新增的 `shapes` / `spacing` / `controls` / `conventions` 四组）随该实现落地才生效，本节此刻不对其作现状承诺。`ThemeExtension<T>` 即便实现也不参与自动序列化（§5.1）。
+
+树内的注入壳另有一层：`Provider<Theme>` 在 `src/aurora/widget/serialization.cpp` 以 `reg_no_props` 注册为 `"ThemeProvider"`，即**结构可重建、注入值不携带**（重建后取默认 `Theme{}` ≡ Material 基线明色列）。要持久化主题取值，等上一条 JSON 面落地，或由应用在自己侧存值、重建后再注入。
 
 ---
 

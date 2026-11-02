@@ -91,7 +91,7 @@ Aurora 本质上是一个**把 UI 开发变成「结构化数据描述」问题*
 | SPEC.API.NAMING-CONSISTENCY.001 | 极致命名一致性 + 扁平命名空间 | AI 易补全 | [`CODING_STANDARDS.md`](CODING_STANDARDS.md) §11.2 |
 | SPEC.API.MINIMAL-COMPOSITION.001 | 正交可组合的最小核心 API | AI 少幻觉 | [`CODING_STANDARDS.md`](CODING_STANDARDS.md) §11.3 |
 | SPEC.API.STRONG-TYPES.001 | 强类型 + 单位标注 + 编译期校验 | 编译即验证 | [`CODING_STANDARDS.md`](CODING_STANDARDS.md) §11.4 |
-| SPEC.API.SENSIBLE-DEFAULTS.001 | 合理默认值（声明处可见） | AI 少写少错 | [`CODING_STANDARDS.md`](CODING_STANDARDS.md) §11.5 |
+| SPEC.API.SENSIBLE-DEFAULTS.001 | 合理默认值（声明处可见；度量与配色默认值 = 平台风格解算出的整套主题令牌） | AI 少写少错 | [`CODING_STANDARDS.md`](CODING_STANDARDS.md) §11.5 |
 | SPEC.FEAT.STATE.SIGNAL-STATE.001 | 单向数据流 + 细粒度信号状态模型 | AI 易理解状态 | [`02-state.md`](specification/02-state.md) §7.1 |
 | SPEC.FEAT.WIDGET.FLAT-COMPONENTS.001 | 扁平组合模型 + 共享所有权组件 | AI 易追踪逻辑 | [`04-widget.md`](specification/04-widget.md) §6.1 |
 | SPEC.API.EXPLICIT-FIRST.001 | 显式优于隐式（含样式继承） | AI 无理解盲区 | [`05-event-navigation.md`](specification/05-event-navigation.md) §8.1 |
