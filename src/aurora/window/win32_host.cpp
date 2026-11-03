@@ -12,6 +12,13 @@
 #include "aurora/window/detail/win32_menu_bar.h"  // Win32 原生菜单栏桥（宿主唯一持有）
 #include "aurora/window/detail/win32_modifiers.h"
 #include "aurora/window/detail/win32_recent_documents.h"  // OS 最近文档投影桥（宿主引用守卫）
+
+// Windows SDK 的 rpcndr.h 会把 small 定义为 char，经上面 detail 头引入的 windows.h 带进来；
+// 下面 ua.h 链上的主题头有同名成员字段，会被该宏改写。此处撤掉这个 SDK 遗留宏。
+#ifdef small
+#undef small
+#endif
+
 #include "aurora/window/detail/win32_ua.h"
 
 #ifdef AURORA_BACKEND_WIN32

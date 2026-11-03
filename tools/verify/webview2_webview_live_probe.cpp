@@ -151,7 +151,10 @@ constexpr int AURORA_PROBE_BOOT_MS = 30000;  ///< 挂载 + 能力落定 + 导航
 constexpr int AURORA_PROBE_NAV_MS = 40000;  ///< 导航 + 标题（WebView2 IPC）
 constexpr int AURORA_PROBE_SCRIPT_MS = 20000;  ///< 两次 evaluate 往返
 constexpr int AURORA_PROBE_MESSAGE_MS = 20000;  ///< 两侧消息通道
-constexpr int AURORA_PROBE_RESIZE_MS = 300;  ///< 改档后重排 + 再同步（纯本地布局，短墙钟即可）
+/// 改档后「重排 + 几何再下发」的墙钟轮询上限。重排本身是本地布局，但帧循环受 WebView2 IPC
+/// 影响，帧间隔可达数百毫秒；以固定短墙钟到点取样会在「还没重排」时误判（真机实测偶发）。
+/// 故改为轮询到几何落定为止，此值只作兜底上限。
+constexpr int AURORA_PROBE_RESIZE_MS = 10000;
 constexpr int AURORA_PROBE_SNAPSHOT_MS = 30000;  ///< 快照异步捕获
 /// 页侧反射求值的重试间隔（ms）：postMessage → 页 onmessage → 反射是异步的，须轮询。
 constexpr int AURORA_PROBE_REFLECT_INTERVAL_MS = 120;
@@ -710,37 +713,42 @@ auto main(int argc, char **argv) -> int {
                     // 改交互视图的尺寸意图 → 标脏布局 → 下一帧重排 → 几何再下发。
                     probe.interactive->width(aurora::px(AURORA_PROBE_VIEW_W1)).height(aurora::px(AURORA_PROBE_VIEW_H1));
                 }
-                if (probe.stage_waited_ms() < AURORA_PROBE_RESIZE_MS) {
-                    return;  // 等墙钟让重排与几何同步落定（帧忙转，帧数不代表墙钟）
-                }
                 aurora::Surface &surface = probe.window->surface();
                 const float scale = surface.scale_factor();
                 const aurora::EdgeInsets inset = surface.content_inset();
                 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast, performance-no-int-to-ptr)
-                HWND host = static_cast<HWND>(probe.window->surface().native_handle());
-                const std::vector<ChildInfo> after = query_children(host);
+                HWND host = static_cast<HWND>(surface.native_handle());
                 const std::optional<aurora::Rect> ib = probe.interactive->window_bounds();
-                if (!ib.has_value()) {
+                std::optional<aurora::webview::NativeViewRect> expected_after;
+                std::optional<ChildInfo> match;
+                if (ib.has_value()) {
+                    expected_after = aurora::webview::to_native_rect(*ib, scale, inset);
+                    for (const ChildInfo &c : query_children(host)) {
+                        if (rect_close(*expected_after, c, AURORA_PROBE_GEOM_TOL)) {
+                            match = c;
+                            break;
+                        }
+                    }
+                }
+                const bool moved = match.has_value() && probe.have_expected_before &&
+                                   std::abs(match->width - probe.expected_before.width) > 4;
+                // 轮询：重排与子窗再同步可能晚于首次帧回调（帧循环受 WebView2 IPC 影响），
+                // 到墙钟上限前不判失败，避免在「还没重排」时取样。
+                if (!(ib.has_value() && match.has_value() && moved) &&
+                    probe.stage_waited_ms() < AURORA_PROBE_RESIZE_MS) {
+                    return;
+                }
+                if (!ib.has_value() || !expected_after.has_value()) {
                     probe.results.add(false, "win32-geometry-follows-resize", "window_bounds unavailable after resize");
                     enter_stage(Stage::Done);
                     return;
                 }
-                const aurora::webview::NativeViewRect expected_after =
-                    aurora::webview::to_native_rect(*ib, scale, inset);
-                probe.results.info("expected-interactive-after", expected_text(expected_after));
-                const ChildInfo *match = nullptr;
-                for (const ChildInfo &c : after) {
-                    if (rect_close(expected_after, c, AURORA_PROBE_GEOM_TOL)) {
-                        match = &c;
-                        break;
-                    }
-                }
-                const bool moved = match != nullptr && probe.have_expected_before &&
-                                   std::abs(match->width - probe.expected_before.width) > 4;
-                probe.results.add(match != nullptr && moved, "win32-geometry-follows-resize",
-                                  match == nullptr
-                                      ? "no child matches resized expected rect " + expected_text(expected_after)
-                                      : child_text(*match) + " (was " + expected_text(probe.expected_before) + ")");
+                probe.results.info("expected-interactive-after", expected_text(*expected_after));
+                probe.results.add(match.has_value() && moved, "win32-geometry-follows-resize",
+                                  match.has_value()
+                                      ? child_text(*match) + " (was " + expected_text(probe.expected_before) + ")"
+                                      : "no child matches resized expected rect " + expected_text(*expected_after) +
+                                            " within " + std::to_string(AURORA_PROBE_RESIZE_MS) + "ms");
                 enter_stage(Stage::Snapshot);
                 return;
             }
@@ -759,9 +767,10 @@ auto main(int argc, char **argv) -> int {
                                                                 static_cast<std::size_t>(img.height) * 4U;
                     if (!sized) {
                         // 空图是引擎按契约兑现的「捕获未产出像素」（`NativeViewSink::capture`
-                        // 要求失败也必须回调空图）。最常见成因是合成器不产帧：GPU 进程不可用
-                        // 的会话里 `CapturePreview` 返回 S_OK 却永不回调。给出复核手段，免得
-                        // 把环境限制误读成引擎缺陷。
+                        // 要求失败也必须回调空图）。隐藏视图的产帧前置已在引擎侧兜住（捕获期
+                        // 临时授予可见性），故此项仍失败时优先怀疑会话环境：GPU 进程不可用时
+                        // `CapturePreview` 会返回 S_OK 却永不回调。给出复核手段，免得把环境
+                        // 限制误读成引擎缺陷。
                         probe.results.add(false, "snapshot-bitmap",
                                           std::string("no pixels captured (") + aurora_verify::format_int(img.width) +
                                               "x" + aurora_verify::format_int(img.height) +
