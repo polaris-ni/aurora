@@ -1,6 +1,6 @@
 # 环境注入、主题与修饰符（environment / theming / i18n / modifier）
 
-> 覆盖 `include/aurora/environment/`（3 个头）、`theming/`（4 个头）、`i18n/`（8 个头）、`modifier/`（6 个头）。
+> 覆盖 `include/aurora/environment/`（3 个头）、`theming/`（15 个头）、`i18n/`（8 个头）、`modifier/`（6 个头）。
 > 本文件是环境依赖注入、媒体查询、主题与国际化、以及 `Modifier` 修饰系统的**唯一权威**。
 > 响应式属性见 [`02-state.md`](02-state.md) §2；控件的二层属性划分见 [`03-layout-render.md`](03-layout-render.md) §7.4。
 
@@ -199,7 +199,7 @@ margin 在 Maximized / FullScreen / tiled 态塌缩为 0（贴边无可拖缝隙
 
 ### 5.1 主题值对象与角色集
 
-`Theme`（`theming/theme.h`）是角色化主题值对象，结构为 `Theme{ style, roles, type_scale, csd, shapes, spacing, controls, conventions, scheme, extensions }`——身份位（`style` / `scheme`）与四组色/字/度量令牌加一张 `ThemeExtension<T>` 注册表。`Theme::light()` / `Theme::dark()` 是两个内置档位，`with_defaults()` 返回 light 基准列（`scheme` 保持 `Unspecified`），二者与 `from_style(Material, ·)` 逐值相同。经 `ThemeProvider` / `ThemeScope` 注入，组件用 `inherit_theme(ctx)` 读取。
+`Theme`（`theming/theme.h`）是角色化主题值对象，结构为 `Theme{ style, roles, type_scale, csd, shapes, spacing, controls, motion, conventions, scheme, extensions }`——身份位（`style` / `scheme`）与四组色/字/度量令牌、一组动效时长档加一张 `ThemeExtension<T>` 注册表。度量令牌各组不分明暗，故 `light()` / `dark()` 在 `shapes` / `spacing` / `controls` / `motion` 上逐字段同值。`Theme` 及各角色组逐字段可判等（`operator==`，`ThemeExtensions` 一侧按类型键逐条判等，见下）。`Theme::light()` / `Theme::dark()` 是两个内置档位，`with_defaults()` 返回 light 基准列（`scheme` 保持 `Unspecified`），二者与 `from_style(Material, ·)` 逐值相同。经 `ThemeProvider` / `ThemeScope` 注入，组件用 `inherit_theme(ctx)` 读取。
 
 **色角色层 `ColorRoles`**（`theming/color_roles.h`，纯值 struct，snake_case 字段名一套、明暗两列取值，命名对标 Material 3 `ColorScheme` 全集）：
 
@@ -215,9 +215,13 @@ margin 在 Maximized / FullScreen / tiled 态塌缩为 0（贴边无可拖缝隙
 
 **排版角色层 `TypeScale`**（`theming/type_scale.h`）：Material 3 排版 15 档（`display` / `headline` / `title` / `body` / `label` 各 large/medium/small）的 `Font` 字段；图表族经 `compute_geometry` 读取的字阶语义由 `type_scale.body_medium` 承接。
 
-**类型安全扩展 `ThemeExtension<T>`**（`theming/theme_extension.h`）：应用自定义令牌面以类型为键注册——概念基类 + 模板模型（值语义深拷贝，与 `Theme` 随控件回调网被值拷贝的现状一致）；`Theme::extension<T>()` 返回 `const T*`，未注册返回 `nullptr`（调用方显式判空，无字符串拼写静默回落）。典型用途是图表色板（`ChartPalette` 扩展）。扩展**不参与** JSON 自动序列化，由应用自行负责。
+**度量令牌组 `ShapeScale` / `SpacingScale` / `ControlMetrics` / `MotionScale`**（`theming/shape_scale.h` / `spacing_scale.h` / `control_metrics.h` / `motion_scale.h`）与惯例组 `LayoutConventions`（`theming/layout_conventions.h`）：形状 6 档、间距 7 档、控件基准度量 12 项、时长 6 档，加一组枚举惯例；单位一律逻辑 dp（时长为 ms），强类型字段 + 逐字段声明处默认值。度量与配色解耦，与 `TypeScale` 同理**不分明暗**，故各持一列。前三组与惯例组的逐字段取值口径见 [`specification/04-widget.md`](04-widget.md) §4.1 的落点清单（`shapes.small` = 6 dp 即 `Button` 现行圆角、`spacing.large` / `small` = 12 / 6 即 `Button` 现行水平 / 垂直内边距、`controls.indicator_size` = 20 即 `Checkbox` 方框边长、`controls.separator_thickness` = 1 即 `Divider` 现行线厚），初值逐位复现令牌层落地前的硬编码，切风格前观感零变化。`MotionScale` 是本批新增的时长档（`motion.medium` = 150 ms 即滚动视口滑行默认时长、`motion.none` = 0 是「减弱动态效果」开关置位时的短路档），与惯例组的 `motion_scale` 倍率是两轴——倍率只缩放既有曲线，二者相乘消费。
 
-**窗口装饰角色组 `CsdRoles`**（`theming/csd_roles.h`）：`Theme` 的库自有字段（与 `roles` / `type_scale` 同层，不经 `ThemeExtension<T>`——窗口装饰配色是框架资产且必须在渲染路径零分配），8 个字段与标题栏/窗框配色一一对应（`title_bar_bg_active` / `title_bar_bg_inactive` / `title_bar_fg_active` / `title_bar_fg_inactive` / `title_bar_hover_tint` / `title_bar_pressed_tint` / `title_bar_close_hover` / `shadow_color`）。取值来源见「CSD 派生通道」。
+每组结构体在自身头文件就近登记一张「成员指针 → 短名」编译期对照表（`AURORA_TOKENS` 数组 + `token_name(member)` 反查），属性行据此以**成员指针**作活令牌回落点（`.fallback<&ShapeScale::small>()`）：回落点在编译期烧成一次成员指针解引用，**令牌改名即编译失败**，渲染路径不出现字符串查名。表内短名即 `aurora_api.json` 里 `default_expr` / `default_value` 的用名，前缀规则为 `theme.<Theme 字段名>.<档名>`——度量档真路径 `shapes.small` → 短名 `theme.shapes.small`、`controls.indicator_size` → `theme.controls.indicator_size`，色角色沿用既有拼法（真路径 `roles.primary` → 短名 `theme.primary`，即表在 `ColorRoles` 一侧、前缀不带 `roles.`）。`LayoutConventions` 不登记表：它的字段是枚举而非标量，消费方是排布与绘制分支选择，不作属性回落点。表与实际字段的一致性由令牌登记表门禁校验。消费状态如实记：`shapes` / `spacing` / `controls` 的接档已随四枚控件属性落码（见 [`specification/04-widget.md`](04-widget.md) §4.1），`motion` 当前无属性行消费端（库内唯一时长型属性 `Skeleton::duration` 是 shimmer **周期**、默认 1.5 s，不属该梯度），未接线前不得描述为已生效能力。
+
+**类型安全扩展 `ThemeExtension<T>`**（`theming/theme_extension.h`）：应用自定义令牌面以类型为键注册——概念基类 + 模板模型（值语义深拷贝，与 `Theme` 随控件回调网被值拷贝的现状一致）；`Theme::extension<T>()` 返回 `const T*`，未注册返回 `nullptr`（调用方显式判空，无字符串拼写静默回落）。典型用途是图表色板（`ChartPalette` 扩展）。扩展**不参与** JSON 自动序列化，由应用自行负责；`operator==` 按类型键逐条判等，扩展类型自身无 `operator==` 时该项恒判不等（保守方向：宁可多标一次脏，不放过真实变更）。扩展位**不参与属性回落**——它是 `void*` + 类型键的线性扫描面，既取不到成员指针（回落点须「改名即编译红」）、也不可枚举与序列化，故库内度量与配色令牌的落点只在 `Theme` 的一等字段上。
+
+**窗口装饰角色组 `CsdRoles`**（`theming/csd_roles.h`）：`Theme` 的库自有字段（与 `roles` / `type_scale` / 度量令牌组同层，不经 `ThemeExtension<T>`——窗口装饰配色是框架资产且必须在渲染路径零分配），8 个字段与标题栏/窗框配色一一对应（`title_bar_bg_active` / `title_bar_bg_inactive` / `title_bar_fg_active` / `title_bar_fg_inactive` / `title_bar_hover_tint` / `title_bar_pressed_tint` / `title_bar_close_hover` / `shadow_color`）。取值来源见「CSD 派生通道」。
 
 **风格轴 `ThemeStyle`**（`theming/theme_style.h`）：`{Material, Windows, MacOs, Gnome, Kde}` 五档，与明暗轴 `ColorScheme{Unspecified, Light, Dark}` **正交**——一套设计语言的亮/暗是同一档的两种呈现，不是两档风格（枚举名里不带 Light/Dark 字样是这条的命名面）。`Material` 同时是**无证据回落档**（无头构建、WASM、裸 X11 拿到的就是它，故 golden 基线与无头 CI 的观感与此前逐位相同）。第二枚证据 `DesktopEnvironment{Unknown, Gnome, Kde, Other}` 只在 Linux / BSD 上读得到，公共入口 `desktop_environment()` 见 [`06-app-platform.md`](06-app-platform.md) §5。
 

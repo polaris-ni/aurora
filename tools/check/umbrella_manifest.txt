@@ -169,6 +169,7 @@ aurora/theming/control_metrics.h
 aurora/theming/csd_roles.h
 aurora/theming/csd_style_bridge.h
 aurora/theming/layout_conventions.h
+aurora/theming/motion_scale.h
 aurora/theming/shape_scale.h
 aurora/theming/spacing_scale.h
 aurora/theming/theme.h

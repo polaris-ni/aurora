@@ -124,7 +124,7 @@ Aurora 是一个 C++20 跨平台 GUI 库，以**声明式 + 响应式**为核心
 |:---|:---|:---|
 | 导航 | `navigation/` | `navigator.h` `route.h`（`Route` / `RouteTransition`） `router.h` `transition_layer.h` `navigator_host.h` `hero.h` |
 | 动画 | `animation/` | `timeline.h`（`Tween` / `Keyframes` / `TimelineSpec`） `animator.h`（`AnimationController` / `Animator` / `AnimatedValue` / `TimelinePlayer`） `easing.h`（`Curve`） `spring.h`（`SpringSimulation` / `SpringAnimation`） |
-| 主题 | `theming/` | `theme.h`（聚合 + `from_style` / `default_style` / `defaults`，四套风格的标定表实现体在 `theming/theme_presets.cpp`） `theme_style.h` `color_scheme.h` `color_roles.h` `type_scale.h` `csd_roles.h` `shape_scale.h` `spacing_scale.h` `control_metrics.h` `layout_conventions.h` `csd_style_bridge.h` `theme_scope.h` `theme_query.h` `theme_extension.h`；桌面外壳探测的实现体 `theming/detail/theme_probe.cpp`（全库唯一的环境变量读取点） |
+| 主题 | `theming/` | `theme.h`（聚合 + `from_style` / `default_style` / `defaults`，四套风格的标定表实现体在 `theming/theme_presets.cpp`） `theme_style.h` `color_scheme.h` `color_roles.h` `type_scale.h` `csd_roles.h` `shape_scale.h` `spacing_scale.h` `motion_scale.h` `control_metrics.h` `layout_conventions.h`（度量令牌各组各带「成员指针 → 短名」编译期对照表，供属性行作活令牌回落点） `csd_style_bridge.h` `theme_scope.h` `theme_query.h` `theme_extension.h`；桌面外壳探测的实现体 `theming/detail/theme_probe.cpp`（全库唯一的环境变量读取点） |
 | 环境注入 | `environment/` | `environment.h` `media_query.h` `build_context.h` |
 | 国际化 | `i18n/` | `message_id.h`（`MessageId`） `locale.h` `localized_string.h`（`LocalizedString` / `MessageArg`） `message_catalog.h`（`MessageCatalog` / `default_catalog`） `plural.h`（CLDR 表驱动判定） `format.h`（数字 / 货币 / 日期 + `CivilDate`） `builtin_messages.h`（内置词表薄封装，生成件 `builtin_messages.gen.h`） |
 | 事件 | `event/` | `event.h` `dispatcher.h` `gesture.h` `focus.h` `keycode.h` `drag_drop.h` |

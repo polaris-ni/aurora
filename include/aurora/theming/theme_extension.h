@@ -1,5 +1,7 @@
 #pragma once
 
+#include <algorithm>
+#include <concepts>
 #include <type_traits>
 #include <typeindex>
 #include <utility>
@@ -77,6 +79,26 @@ class ThemeExtensions {
     /// @param other 对端表。
     auto swap(ThemeExtensions &other) noexcept -> void { entries_.swap(other.entries_); }
 
+    /// @brief 逐条判等：按类型键配对后比较扩展取值（条目序无关）。
+    ///
+    /// 判等子按插入类型登记；扩展类型自身没有 `operator==` 时该项恒判不等——方向是保守的：
+    /// 宁可让宿主主题被认定为「变了」而多标一次脏，也不放过真实变更。
+    ///
+    /// @param other 比较对象。
+    /// @return 条目类型集合相同、且逐条取值相等时为 true。
+    [[nodiscard]] auto operator==(const ThemeExtensions &other) const -> bool {
+        if (entries_.size() != other.entries_.size()) {
+            return false;
+        }
+        for (const auto &e : entries_) {
+            const auto match = std::ranges::find_if(other.entries_, [&e](const Entry &o) { return o.key == e.key; });
+            if (match == other.entries_.end() || e.equal == nullptr || !e.equal(e.obj, match->obj)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     /// @brief 注册/覆盖类型 T 的扩展（同类型整体替换）。
     /// @tparam T 扩展类型（须满足 `ThemeExtension`）。
     /// @param value 扩展值（移入，由本表持有其拷贝）。
@@ -89,6 +111,15 @@ class ThemeExtensions {
         e.obj = new D(std::move(value));  // NOLINT(cppcoreguidelines-owning-memory)
         e.clone = [](const void *src) -> void * { return new D(*static_cast<const D *>(src)); };  // NOLINT
         e.drop = [](void *p) { delete static_cast<D *>(p); };  // NOLINT
+        e.equal = [](const void *lhs, const void *rhs) -> bool {
+            if constexpr (std::equality_comparable<D>) {
+                return *static_cast<const D *>(lhs) == *static_cast<const D *>(rhs);
+            } else {
+                (void)lhs;
+                (void)rhs;
+                return false;  // 类型无判等实现：保守报不等
+            }
+        };
         entries_.push_back(e);
     }
 
@@ -125,17 +156,23 @@ class ThemeExtensions {
     }
 
   private:
-    /// @brief 类型擦除持有项：typeid 键、对象指针、克隆子与释放子（按插入类型特化）。
+    /// @brief 类型擦除持有项：typeid 键、对象指针、克隆子、释放子与判等子（按插入类型特化）。
     struct Entry {
         std::type_index key = std::type_index(typeid(void));  ///< 扩展类型的 typeid 键。
         void *obj = nullptr;  ///< 持有的扩展对象（本表所有）。
         void *(*clone)(const void *) = nullptr;  ///< 深拷贝 obj，产出新 obj 指针。
         void (*drop)(void *) = nullptr;  ///< 释放 obj。
+        bool (*equal)(const void *,
+                      const void *) = nullptr;  ///< 同型判等 obj；类型无 `operator==` 时恒返回 false（见 `set`）。
 
-        /// @brief 产出一个持有 obj 深拷贝的新项（复用同型 clone/drop）。
+        /// @brief 产出一个持有 obj 深拷贝的新项（复用同型 clone/drop/equal）。
         /// @return 深拷贝后的 Entry。
         [[nodiscard]] auto copy() const -> Entry {
-            return Entry{.key = key, .obj = clone != nullptr ? clone(obj) : nullptr, .clone = clone, .drop = drop};
+            return Entry{.key = key,
+                         .obj = clone != nullptr ? clone(obj) : nullptr,
+                         .clone = clone,
+                         .drop = drop,
+                         .equal = equal};
         }
     };
 

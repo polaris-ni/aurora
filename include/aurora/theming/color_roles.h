@@ -1,5 +1,9 @@
 #pragma once
 
+#include <array>
+#include <string_view>
+#include <utility>
+
 #include "aurora/core/color.h"
 
 namespace aurora {
@@ -63,10 +67,68 @@ struct ColorRoles {
     Color hover;  ///< 交互态悬停叠色（含 alpha）。
     Color pressed;  ///< 交互态按压叠色（含 alpha）。
 
-    /// @brief 逐字段相等比较（三十八项全等）；供主题解析与「风格档 ≡ 基线档」的测试断言。
+    /// @brief 逐字段相等比较（三十八项全等）；供主题解析、「风格档 ≡ 基线档」断言与快照的同值守卫。
     /// @param other 比较对象。
     /// @return 全部字段相等时为 true。
     [[nodiscard]] auto operator==(const ColorRoles &other) const -> bool = default;
+
+    /// @brief 「成员指针 → 令牌短名」对照表（`AURORA_TOKENS.size()` 由列表推出，不手写枚数）。
+    ///
+    /// 短名即 `aurora_api.json` 的 `default_expr` 用名（沿用既有的 `theme.<角色>` 拼法，与 C++ 真路径
+    /// `roles.<角色>` 的前缀映射由本表登记，规则见 `codespec/specification/07-environment-modifier.md`
+    /// §5.1）；表与实际角色的一致性由令牌登记表门禁校验。
+    static constexpr auto AURORA_TOKENS = std::to_array<std::pair<Color ColorRoles::*, std::string_view>>({
+        {&ColorRoles::primary, "theme.primary"},
+        {&ColorRoles::on_primary, "theme.on_primary"},
+        {&ColorRoles::primary_container, "theme.primary_container"},
+        {&ColorRoles::on_primary_container, "theme.on_primary_container"},
+        {&ColorRoles::secondary, "theme.secondary"},
+        {&ColorRoles::on_secondary, "theme.on_secondary"},
+        {&ColorRoles::secondary_container, "theme.secondary_container"},
+        {&ColorRoles::on_secondary_container, "theme.on_secondary_container"},
+        {&ColorRoles::tertiary, "theme.tertiary"},
+        {&ColorRoles::on_tertiary, "theme.on_tertiary"},
+        {&ColorRoles::tertiary_container, "theme.tertiary_container"},
+        {&ColorRoles::on_tertiary_container, "theme.on_tertiary_container"},
+        {&ColorRoles::error, "theme.error"},
+        {&ColorRoles::on_error, "theme.on_error"},
+        {&ColorRoles::error_container, "theme.error_container"},
+        {&ColorRoles::on_error_container, "theme.on_error_container"},
+        {&ColorRoles::surface, "theme.surface"},
+        {&ColorRoles::surface_dim, "theme.surface_dim"},
+        {&ColorRoles::surface_bright, "theme.surface_bright"},
+        {&ColorRoles::surface_container_lowest, "theme.surface_container_lowest"},
+        {&ColorRoles::surface_container_low, "theme.surface_container_low"},
+        {&ColorRoles::surface_container, "theme.surface_container"},
+        {&ColorRoles::surface_container_high, "theme.surface_container_high"},
+        {&ColorRoles::surface_container_highest, "theme.surface_container_highest"},
+        {&ColorRoles::on_surface, "theme.on_surface"},
+        {&ColorRoles::on_surface_variant, "theme.on_surface_variant"},
+        {&ColorRoles::surface_variant, "theme.surface_variant"},
+        {&ColorRoles::outline, "theme.outline"},
+        {&ColorRoles::outline_variant, "theme.outline_variant"},
+        {&ColorRoles::inverse_surface, "theme.inverse_surface"},
+        {&ColorRoles::inverse_on_surface, "theme.inverse_on_surface"},
+        {&ColorRoles::inverse_primary, "theme.inverse_primary"},
+        {&ColorRoles::scrim, "theme.scrim"},
+        {&ColorRoles::shadow, "theme.shadow"},
+        {&ColorRoles::surface_tint, "theme.surface_tint"},
+        {&ColorRoles::focus_ring, "theme.focus_ring"},
+        {&ColorRoles::hover, "theme.hover"},
+        {&ColorRoles::pressed, "theme.pressed"},
+    });
+
+    /// @brief 反查一枚色角色的令牌短名（编译期与运行期同形，零分配）。
+    /// @param member 本结构体的成员指针；传空指针不命中。
+    /// @return 命中时为形如 `theme.primary` 的短名；未登记时为空串（调用方须判空）。
+    [[nodiscard]] static constexpr auto token_name(Color ColorRoles::*member) noexcept -> std::string_view {
+        for (const auto &[ptr, name] : AURORA_TOKENS) {
+            if (ptr == member) {
+                return name;
+            }
+        }
+        return {};
+    }
 
     /// @brief 亮色档色角色全集。
     /// @return 与现行 `Theme::light()` 观感一致（已消费角色）、其余取 M3 标准中性 / 占位的角色组。

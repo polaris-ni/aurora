@@ -1,5 +1,9 @@
 #pragma once
 
+#include <array>
+#include <string_view>
+#include <utility>
+
 namespace aurora {
 
 /// @brief 控件基准度量：一套设计语言里「控件该有多高、线该有多粗」的那组数值，单位一律逻辑 dp。
@@ -33,10 +37,41 @@ struct ControlMetrics {
     float icon_default_size = 24.0F;  ///< 图标默认边长（复现现值：`Icon` / `IconButton` 盒边长）。
     float content_padding = 8.0F;  ///< 通用内容留白（复现现值：`IconButton` 内边距与四张图表留白同为 8）。
 
-    /// @brief 逐字段相等比较（十二项全等）；供主题解析与测试断言。
+    /// @brief 逐字段相等比较（十二项全等）；供主题解析、测试断言与快照的同值守卫。
     /// @param other 比较对象。
     /// @return 全部字段相等时为 true。
     [[nodiscard]] auto operator==(const ControlMetrics &other) const -> bool = default;
+
+    /// @brief 「成员指针 → 令牌短名」对照表（`AURORA_TOKENS.size()` 由列表推出，不手写枚数）。
+    ///
+    /// 短名即 `aurora_api.json` 的 `default_expr` 用名，前缀映射规则见
+    /// `codespec/specification/07-environment-modifier.md` §5.1；表与实际字段的一致性由令牌登记表门禁校验。
+    static constexpr auto AURORA_TOKENS = std::to_array<std::pair<float ControlMetrics::*, std::string_view>>({
+        {&ControlMetrics::control_height, "theme.controls.control_height"},
+        {&ControlMetrics::control_height_small, "theme.controls.control_height_small"},
+        {&ControlMetrics::min_touch_target, "theme.controls.min_touch_target"},
+        {&ControlMetrics::menu_item_height, "theme.controls.menu_item_height"},
+        {&ControlMetrics::focus_ring_width, "theme.controls.focus_ring_width"},
+        {&ControlMetrics::focus_ring_inset, "theme.controls.focus_ring_inset"},
+        {&ControlMetrics::indicator_size, "theme.controls.indicator_size"},
+        {&ControlMetrics::scrollbar_thickness, "theme.controls.scrollbar_thickness"},
+        {&ControlMetrics::separator_thickness, "theme.controls.separator_thickness"},
+        {&ControlMetrics::border_thickness, "theme.controls.border_thickness"},
+        {&ControlMetrics::icon_default_size, "theme.controls.icon_default_size"},
+        {&ControlMetrics::content_padding, "theme.controls.content_padding"},
+    });
+
+    /// @brief 反查一枚控件度量的令牌短名（编译期与运行期同形，零分配）。
+    /// @param member 本结构体的成员指针；传空指针不命中。
+    /// @return 命中时为形如 `theme.controls.indicator_size` 的短名；未登记时为空串（调用方须判空）。
+    [[nodiscard]] static constexpr auto token_name(float ControlMetrics::*member) noexcept -> std::string_view {
+        for (const auto &[ptr, name] : AURORA_TOKENS) {
+            if (ptr == member) {
+                return name;
+            }
+        }
+        return {};
+    }
 };
 
 }  // namespace aurora

@@ -8,6 +8,7 @@
 #include "aurora/theming/control_metrics.h"
 #include "aurora/theming/csd_roles.h"
 #include "aurora/theming/layout_conventions.h"
+#include "aurora/theming/motion_scale.h"
 #include "aurora/theming/shape_scale.h"
 #include "aurora/theming/spacing_scale.h"
 #include "aurora/theming/theme_extension.h"
@@ -16,17 +17,25 @@
 
 namespace aurora {
 
-/// @brief 主题：强类型色角色集 + 排版字阶 + CSD 组件角色 + 类型安全扩展的值语义聚合。
+/// @brief 主题：强类型色角色集 + 排版字阶 + 度量令牌四组 + 动效时长档 + CSD 组件角色 + 布局惯例 + 类型安全
+///        扩展的值语义聚合。
 ///
 /// 经 `Provider<Theme>` / `ThemeScope` 注入环境，组件用 `inherit_theme(ctx)` 读取（见
 /// specification/07-environment-modifier.md §5.1）。取代旧的「扁平字段 + stringly 命名令牌表」双入口：
 /// - `style`：本实例所属**风格轴**（身份位，供 CSD 派生与自描述面读取；取值见 `ThemeStyle`）；
 /// - `roles`：Material 3 色角色全集（明暗两列，本实例持一列，由 `scheme` 标注归属档）；
 /// - `type_scale`：排版 15 档（不分明暗，`body_medium` 承接旧 `Theme::font`）；
-/// - `csd`：窗口装饰配色角色组（与通用角色解耦，组件级覆写面）；
 /// - `shapes` / `spacing` / `controls`：形状、间距与控件基准度量三组令牌（单位逻辑 dp，不分明暗）；
+/// - `motion`：动效时长六档（不分明暗，单位毫秒；`conventions.motion_scale` 是它的倍率轴，二者相乘消费）；
 /// - `conventions`：布局与交互惯例组（按钮序 / 标题对齐 / 菜单栏位置 / 滚动条模式 / 焦点环形状 / 动效倍率）；
-/// - `extensions`：应用自定义令牌以类型为键注册（`set_extension<T>` / `extension<T>()`），无字符串回落。
+/// - `csd`：窗口装饰配色角色组（与通用角色解耦，组件级覆写面）；
+/// - `extensions`：应用自定义令牌以类型为键注册（`set_extension<T>` / `extension<T>()`），无字符串回落，
+///   且**不参与属性回落**（类型擦除位不可枚举、不可求值成员指针，故只作应用级自定义令牌）。
+///
+/// 度量令牌各组在自身头文件里登记「成员指针 → 短名」对照表（`AURORA_TOKENS` / `token_name`），供属性行
+/// 以成员指针作**活令牌回落点**：短名即 `aurora_api.json` 的 `default_expr` 用名，前缀为
+/// `theme.<字段名>.<档名>`（色角色沿用既有的 `theme.<角色>` 拼法）。`conventions` 组是枚举而非标量，
+/// 消费方是排布与绘制分支选择，不作回落点，故该组不登记表。
 ///
 /// 两轴正交：`style` 表「用哪套设计语言」，`scheme` 表「这套语言的明暗呈现」，二者互不折平——
 /// 一枚风格内含明暗两列取值，一枚 `Theme` 实例仍只持**一列**（与 `ColorRoles` 的「角色名一套、
@@ -53,9 +62,20 @@ struct Theme {
     ShapeScale shapes;  ///< 形状档位令牌（圆角，逻辑 dp）。
     SpacingScale spacing;  ///< 间距档位令牌（留白与内边距，逻辑 dp）。
     ControlMetrics controls;  ///< 控件基准度量（控件高、命中下限、焦点环、滚动条等，逻辑 dp）。
+    MotionScale motion;  ///< 动效时长六档（不分明暗；减动效开关置位时快照取零档，属性行的活令牌回落点）。
     LayoutConventions conventions;  ///< 布局与交互惯例组（枚举 + 动效倍率）。
     ColorScheme scheme = ColorScheme::Unspecified;  ///< 明暗归属档（三级优先链中间层，语义不变）。
     ThemeExtensions extensions;  ///< 类型安全扩展注册表（空则零分配）。
+
+    /// @brief 逐字段相等比较（含扩展注册表的逐条判等）；换肤与覆写物化用它判「到底变了没」。
+    ///
+    /// 度量令牌各组与 `scheme` / `style` 同参与比较，故「只改配色不动度量」也判为变；未注册扩展时该项恒真。
+    /// 同值守卫（同值覆写不触发重排重绘）与相关单测按 `codespec/specification/07-environment-modifier.md`
+    /// §5.1 的口径断言本比较。
+    ///
+    /// @param other 比较对象。
+    /// @return 全部字段（含扩展）相等时为 true。
+    [[nodiscard]] auto operator==(const Theme &other) const -> bool = default;
 
     /// @brief 生成浅色主题（亦是未挂 `ThemeScope` 的树经 `inherit_theme` 拿到的兜底主题）。
     /// @return `roles`/`csd` 取亮色列、`scheme` = `Light` 的主题。

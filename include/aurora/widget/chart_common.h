@@ -309,6 +309,11 @@ struct ChartPalette {
         Color{124, 179, 66, 255},  // light green
     };
 
+    /// @brief 逐字段相等比较（八色全等）；注册进 `ThemeExtensions` 后让携带本扩展的主题可判等。
+    /// @param other 比较对象。
+    /// @return 色板逐位相等时为 true。
+    [[nodiscard]] auto operator==(const ChartPalette &other) const -> bool = default;
+
     /// @brief 浅色档色板（与内置 `chart_palette` 同值）。
     /// @return 浅色档 `ChartPalette` 值。
     [[nodiscard]] static auto light() -> ChartPalette { return ChartPalette{}; }

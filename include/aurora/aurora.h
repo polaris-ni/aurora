@@ -177,6 +177,7 @@
 #include "aurora/theming/csd_roles.h"
 #include "aurora/theming/csd_style_bridge.h"
 #include "aurora/theming/layout_conventions.h"
+#include "aurora/theming/motion_scale.h"
 #include "aurora/theming/shape_scale.h"
 #include "aurora/theming/spacing_scale.h"
 #include "aurora/theming/theme.h"
