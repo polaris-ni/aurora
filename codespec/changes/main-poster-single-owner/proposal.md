@@ -77,3 +77,11 @@
 - `codespec/specification/06-app-platform.md`：帧循环与值班——`loop_begin/loop_end` 领取/归还/重领时序、并发 run 拒绝、`Window` 不再自跑帧循环、模态共享全局队列
 - `codespec/SPECIFICATIONS.md`：需求表 `SPEC.FEAT.CORE.ASYNC-CONCURRENCY.001` 行与 §「单线程 UI vs 异步」处置表述改值班口径
 - 本提案状态流转：已提议 → 实施中 → 已归档
+
+## 实施环境与踩坑记录（附录）
+
+> 归档时从实施期交接记录中保留的可复用环境事实；一次性读数（测试计数、构建树路径）不录，测试运行器 CLI 全集见 `codespec/BUILD_OPTIONS.md` §7.1。
+
+- **PowerShell 源文件不得过管道**：源文件内容经管道（如 `Set-Content` 管道替换）会破坏 UTF-8，中文注释当场碎裂；批量文本改动一律用编辑器工具逐处改。
+- **MinGW Release 无可符号化栈**：每个 TU 的 `-O3` 覆盖 `-g`，gdb 栈全为 `??`；崩溃定位用 stderr 埋点，并先 `setvbuf(stderr, ..., _IOLBF, 0)` 置行缓冲。stdout 重定向到文件是全缓冲，崩溃时日志会全部丢失，故探针一律走 stderr。
+- **回退文件后须刷新时间戳**：`Copy-Item` 保留源 `LastWriteTime`，回退后 ninja 判定「无变化」不重编，运行器二进制会残留旧插桩；回退后刷新时间戳，并用 `findstr /M /C:"<探针串>"` 对运行器二进制确认无探针残留（exit 1 表示干净）。
