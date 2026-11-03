@@ -4,7 +4,7 @@
 | :--- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 变更编号 | CHG-057                                                                                                                                                                                                                                                                                                                                                                             |
 | 提出日期 | 2026-11-02                                                                                                                                                                                                                                                                                                                                                                          |
-| 当前状态 | 实施中                                                                                                                                                                                                                                                                                                                                                                                |
+| 当前状态 | 已归档                                                                                                                                                                                                                                                                                                                                                                                |
 | 关联需求 | SPEC.API.SENSIBLE-DEFAULTS.001                                                                                                                                                                                                                                                                                                                                                      |
 | 影响面  | `include/aurora/theming/` 新增 `theme_style.h` 与形状/间距/度量/惯例四个令牌头、`theme.h` 聚合面扩字段与四枚静态工厂；`src/aurora/theming/` 新目录（探测 TU + 预设标定表，含桌面环境探测唯一实现体）；`include/aurora/window/platform.h` 新增 `desktop_environment()` 转发与 `os_color_scheme()` 口径注记、`include/aurora/environment/media_query.h` 的 `platform` 字段补「表后端不表 OS 家族」注释（无签名变更）；`include/aurora/window/title_bar_style.h` 的 `CsdPreset` 扩两档（连带 `TitleBarStyle::from_preset` 的穷举 `switch`、派生通道测试与 `examples/demos/demo_csd_gallery.cpp` 的预设循环）；`include/aurora/theming/csd_style_bridge.h` 基座改按风格映射；`include/aurora/window/window.h` 根注入解算链与 `set_theme_style`；首批控件默认值改读令牌；工具链登记面同步（known_enums 登记两枚新枚举并补登既缺位的 ColorScheme、其编译期锚点用例、伞头清单 `[direct]` 新头、`aurora_api.json` 重建）；`tests/unit/` `tests/integration/` 相应批次；`codespec/` 四篇规格（07 / 06 / 04 / 03）+ 四篇顶层文档（ARCHITECTURE / CODING_STANDARDS / SPECIFICATIONS / BUILD_OPTIONS）+ 手工用例；根级 CHANGELOG.md 记行为变更与迁移路径 |
 
@@ -222,6 +222,33 @@ enum class ThemeStyle : std::uint8_t {
 6. **与 CHG-056 的交界**。形状/间距令牌归属被本提案前移，CHG-056 落码时须复用而非重定义（其提案文档需同步一处依赖说明）；属性表与写拦截部分不受影响。两提案若同批落码，令牌结构的定义权归本提案、消费面归 CHG-056。
 7. **风格跟随与用户手选的优先级由应用裁定**。框架提供两条通道（`defaults()` 探测、`set_theme_style` 显式）但不替应用做「用户偏好 vs 系统探测」的裁决；这条留白须写进规格里，避免后来者误加隐式偏好读取。
 8. **对码事实校正项已定案**：`aurora_api.json` 的枚举面来自手工登记表而非自动反射（见「序列化与 AI 面」第二条），`ColorScheme` 的缺位随本批一并补齐；需求侧沿用 SPEC.API.SENSIBLE-DEFAULTS.001，不另立特性条目。
+
+## 验收证据
+
+执行面：Windows（Ninja + MinGW g++ 16.1.0，Release 构建，16 逻辑核，`ctest --preset ninja-test` 并发度 16）；Emscripten（WASM 预设）本轮未重跑。核对日期 2026-11-03。
+
+| 判据 | 实测证据 |
+|:---|:---|
+| 1 提案 / 格式 / 静态检查 | `check_change_proposals` 绿（57 篇提案元数据 / 章节 / 回写落点一致）；`format-check` 与 `lint` 在回写批已全绿，本轮未重跑 lint（按 `AGENTS.md` §3.1 只跑改动文件的口径）。 |
+| 2–6 令牌 / 标定 / 探测 / 三态 / 对比度 | 全量 ctest 内 `utest_theme_presets`、`utest_theme_probe`、`utest_theme_csd_bridge`、`utest_theme_roles` 均通过。 |
+| 7 惯例真实生效 | `utest_dialog` 的四套风格档顺序 / 对齐 / 命中盒用例通过；`MenuBar` 的 `menu_bar_placement` 消费点在菜单栏控件侧，与本提案无涉。 |
+| 8 令牌消费接线 | `Button` / `Checkbox` / `Divider` / `Dialog` 四件已接通；`Scroll`（无滚动条绘制实现）、焦点环几何（`dirty_bounds()` 无 `BuildContext`）、`Button::min_width` / `min_height`（改绑会移动既有全部像素 golden）三项按 `CHANGELOG.md` 的 [Unreleased] 控件接线条目如实排除。 |
+| 9 零开销承诺 | 静态局部量同值断言 + `inherit_theme` 按引用返回；`sizeof(Theme)` 由 816 增至 936（+120 B，MinGW x86_64 `-DNDEBUG`，记于 `CHANGELOG.md` 的 Notes）。 |
+| 10 门禁矩阵 | `ctest --preset ninja-test` 实测 **460 / 461 通过**，唯一红为 `check_codespec_xref`（3 条，全部来自 CHG-056 提案引用的未落地面：控件属性访问器头 ×2、属性访问器门禁脚本 ×1），**非本提案引入**；实施期记录的 `utest_net_http_client` 满载并行超时本轮未复现（该套件 84 例全绿）；`toggles` CI 矩阵未在本机执行。 |
+| 11 落码批次划分 | 令牌 / 标定 / 探测 / 收敛 / 接线 / 回写六批均已落码，无剩余批次。 |
+| 12 兜底三点同源 | `itest_theme_root_injection`、`utest_theme_query`、`utest_theme_tokens` 三处锚点通过。 |
+| 13 AI 面枚举登记 | `ThemeStyle` / `DesktopEnvironment` / `ColorScheme` 已进 `aurora_api.json` 与 `known_enums.h`，`itest_known_enums` 通过。 |
+| 14 字体确定性 | **未完成（外部环境挂账）**：两台字体环境实测未做；`codespec/specification/03-layout-render.md` §8.2 因此只写机制、未写差值数字。 |
+| 15 风格档不参与热路径分配 | 帧路径无 `from_style` / `defaults` 调用，按档位缓存兑现（`itest_theme_root_injection` 删键内明暗比对即三格转红）。 |
+
+**手工用例**：`codespec/manual-test/13-theming.md` 的 `TC-THEMING-005`～`TC-THEMING-010` 已在 Windows 真机执行并留逐像素读数；`TC-THEMING-011`（Linux 双外壳切换）与 `TC-THEMING-012`（无桌面证据回落 Material）**未执行**，记录行按「未执行即留空」的格式契约保持空白，待 Linux 真机或容器。
+
+**未完成项汇总（外部环境依赖，不计入代码完成度）**：
+
+1. 判据 14：两台字体环境实测。
+2. `TC-THEMING-011` / `TC-THEMING-012`：Linux 真机执行。
+
+两条均未写成已通过，保留为归档后的公开挂账。
 
 ## 回写落点
 
