@@ -156,8 +156,8 @@ AURORA_TEST_CASE(set_theme_style_pins_the_style_axis_and_leaves_the_scheme_to_os
     auto win = make_window(headless_opts("theme_style_only"));
     const aurora::ThemeStyle pinned = style_distinct_from_probed();
     win->set_theme_style(pinned);
-    AURORA_TEST_CHECK_TRUE(win->theme_style().has_value());
-    AURORA_TEST_CHECK_EQ(*win->theme_style(), pinned);
+    // optional 与值直接比较：同时钉「已钉档」与「钉的就是这一枚」，且不触发可选值的无检查解引用。
+    AURORA_TEST_CHECK_TRUE(win->theme_style() == pinned);
     AURORA_TEST_CHECK_TRUE(pinned != aurora::Theme::default_style());
 
     win->set_os_color_scheme(ColorScheme::Dark);
