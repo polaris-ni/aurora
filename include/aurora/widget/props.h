@@ -194,9 +194,10 @@ concept prop_codec_registered = requires {
 
 /// @brief 活令牌回落点的取值体：按当前作用域主题读出该令牌字段的值。
 ///
-/// 令牌必须以**模板实参**给出（`.fallback<&ShapeScale::medium>()`）：短名反查与取值体都要在编译期
+/// 令牌必须以**模板实参**给出（`.fallback<&ShapeScale::small>()`）：短名反查与取值体都要在编译期
 /// 认出这根成员指针的身份，而普通实参位置的成员指针不是常量表达式，也不是合法的非类类型模板参数。
-/// @tparam Scale 令牌组类型（`ColorRoles` / `ShapeScale` / `SpacingScale` / `MotionScale` / `CsdRoles`）。
+/// @tparam Scale 令牌组类型（`ColorRoles` / `ShapeScale` / `SpacingScale` / `ControlMetrics` /
+///         `MotionScale` / `CsdRoles`）。
 /// @tparam Value 令牌字段类型（必须等于本行裸值类型）。
 /// @tparam Member 令牌成员指针。
 /// @param ctx 构建上下文。
