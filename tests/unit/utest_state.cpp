@@ -1,7 +1,8 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/state/state.h / include/aurora/state/read_only_state.h
 /// 测试说明: 句柄构造与取值、set 去重 / always_publish / 自定义等价、update 与 notify、拷贝共享与赋值重绑、
-/// 值赋值提交、订阅首值与固定来源、写队列按轮排空、StateSink 采集去重与 watch、只读句柄无写入面
+/// 值赋值提交、订阅首值与固定来源、写队列按轮排空、StateSink 采集去重与 watch、只读句柄无写入面、
+/// 库内写通道 write_through（写当前源不换源、派生来源拒写、等值去重）
 
 #include <concepts>
 #include <string>
@@ -9,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include "aurora/state/computed.h"
 #include "aurora/state/effect.h"
 #include "aurora/state/read_only_state.h"
 #include "aurora/state/state.h"
@@ -26,6 +28,10 @@ template <typename T>
 concept HasNotify = requires(T handle) { handle.notify(); };
 template <typename T>
 concept HasUpdate = requires(T handle) { handle.update([](const int &v) { return v + 1; }); };
+template <typename T>
+concept HasAssign = requires(T handle, int v) { handle.assign(v); };
+template <typename T>
+concept HasWriteThrough = requires(T handle, int v) { handle.write_through(v); };
 
 }  // namespace
 
@@ -34,6 +40,9 @@ static_assert(!std::is_convertible_v<ReadOnlyState<int>, State<int>>);
 static_assert(!HasSet<ReadOnlyState<int>>);
 static_assert(!HasNotify<ReadOnlyState<int>>);
 static_assert(!HasUpdate<ReadOnlyState<int>>);
+// 库内写通道挂在 `detail::HandleAccess` 上、不挂在句柄上：公共面不因它多出一个名字。
+static_assert(!HasAssign<ReadOnlyState<int>>);
+static_assert(!HasWriteThrough<ReadOnlyState<int>>);
 static_assert(HasSet<State<int>>);
 static_assert(HasNotify<State<int>>);
 static_assert(HasUpdate<State<int>>);
@@ -168,6 +177,72 @@ AURORA_TEST_CASE(read_only_state_assign_rebinds_without_touching_shared_source) 
     a = 2;  // 只是本句柄换到新的常量来源
     AURORA_TEST_CHECK_EQ(a.get(), 2);
     AURORA_TEST_CHECK_EQ(b.get(), 1);
+}
+
+AURORA_TEST_CASE(handle_write_through_updates_current_source_without_rebinding) {
+    // 库内写通道：改的是当前来源的现值，句柄不换源，可写侧与既有订阅照常看见。
+    State<int> owner{1};
+    ReadOnlyState<int> view = owner;  // 与 owner 同一来源
+    StateSink sink;
+    sink.push(view);
+    const auto source_before = sink.sources().front()->id();
+
+    int runs = 0;
+    int last = -1;
+    auto sub = view.subscribe([&](const int &v) {
+        ++runs;
+        last = v;
+    });
+    AURORA_TEST_CHECK_EQ(runs, 1);  // 首值一次
+
+    AURORA_TEST_CHECK(detail::HandleAccess::write_through(view, 5));
+    AURORA_TEST_CHECK_EQ(view.get(), 5);
+    AURORA_TEST_CHECK_EQ(owner.get(), 5);  // 写落在同一来源：可写侧即时可见，未被换成常量源
+    AURORA_TEST_CHECK_EQ(runs, 2);
+    AURORA_TEST_CHECK_EQ(last, 5);
+
+    StateSink after;
+    after.push(view);
+    AURORA_TEST_CHECK_EQ(after.sources().front()->id(), source_before);  // 来源身份未变＝没有断绑
+
+    owner.set(6);  // 原订阅仍固定该来源，照常触发
+    AURORA_TEST_CHECK_EQ(runs, 3);
+    AURORA_TEST_CHECK_EQ(last, 6);
+}
+
+AURORA_TEST_CASE(handle_write_through_owns_constant_source_and_dedupes_equal_values) {
+    // 未绑定外部状态的句柄持有自有常量来源：写通道落在这份来源上；提交口径与 set 一致，等值不去通知。
+    ReadOnlyState<int> view{7};
+    AURORA_TEST_CHECK(detail::HandleAccess::write_through(view, 8));
+    AURORA_TEST_CHECK_EQ(view.get(), 8);
+
+    int runs = 0;
+    auto sub = view.subscribe([&](const int &) { ++runs; });
+    AURORA_TEST_CHECK_EQ(runs, 1);
+    AURORA_TEST_CHECK(detail::HandleAccess::write_through(view, 8));  // 与现值可观察等价
+    AURORA_TEST_CHECK_EQ(runs, 1);
+    AURORA_TEST_CHECK(detail::HandleAccess::write_through(view, 9));
+    AURORA_TEST_CHECK_EQ(runs, 2);
+    AURORA_TEST_CHECK_EQ(view.get(), 9);
+}
+
+AURORA_TEST_CASE(handle_write_through_refuses_derived_sources_and_leaves_them_untouched) {
+    // 派生来源（`computed` 的结果）无独立存储：写通道返回 false 且不改动任何东西，重算照常。
+    State<int> input{2};
+    auto doubled = computed([input] { return input.get() * 2; });
+    AURORA_TEST_CHECK_EQ(doubled.get(), 4);
+
+    int runs = 0;
+    auto sub = doubled.subscribe([&](const int &) { ++runs; });
+    AURORA_TEST_CHECK_EQ(runs, 1);
+
+    AURORA_TEST_CHECK(!detail::HandleAccess::write_through(doubled, 100));
+    AURORA_TEST_CHECK_EQ(doubled.get(), 4);  // 未被写入覆盖
+    AURORA_TEST_CHECK_EQ(runs, 1);  // 也没有发出任何一轮
+
+    input.set(3);  // 依赖变更后仍按计算体重算
+    AURORA_TEST_CHECK_EQ(doubled.get(), 6);
+    AURORA_TEST_CHECK_EQ(runs, 2);
 }
 
 AURORA_TEST_CASE(state_subscribe_delivers_first_value_and_supports_cancel) {

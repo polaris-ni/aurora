@@ -24,9 +24,10 @@ class StateSink;  // 前向声明：只读句柄的采集入口
 
 namespace detail {
 
-/// @brief 仅库内工厂使用的句柄构造通道：把来源节点包成公共句柄。
+/// @brief 仅库内使用的句柄通道：把来源节点包成公共句柄，以及写入只读句柄当前来源的现值。
 ///
-/// 句柄的私有构造不向用户开放，`computed` 与 `State` 的降级转换经本通道完成。
+/// 句柄的私有构造不向用户开放，`computed` 与 `State` 的降级转换经本通道完成；
+/// 框架侧的回写（反序列化热更新）同样只经本通道落值，公共句柄不因此多出写成员。
 struct HandleAccess {
     /// @brief 以来源节点构造只读句柄。
     /// @tparam T 值类型。
@@ -41,6 +42,19 @@ struct HandleAccess {
     /// @return 该句柄共享的来源节点。
     template <typename T>
     static auto source_of(const State<T> &state) -> std::shared_ptr<SourceOf<T>>;
+
+    /// @brief 写入只读句柄**当前来源**的现值：不换源、不重绑、既有订阅照常收到这一轮。
+    ///
+    /// 给库内的反序列化回写路径用：属性已绑定到调用方自己的 `State<T>` 时，热回写改的必须是
+    /// 那个来源的现值；把句柄换成常量源会静默断掉调用方的绑定（订阅从此不再驱动该属性）。
+    /// 本通道只在 `detail::` 内可达，`ReadOnlyState` 的公共面仍无任何写入成员。
+    /// @tparam T 值类型。
+    /// @param handle 只读句柄；写入落到它此刻持有的来源。
+    /// @param next 候选值；提交口径与 `State<T>::set` 一致（可观察等价时不替换、不通知）。
+    /// @return 是否写入：来源是派生节点（`computed` 的结果，值由依赖重算而来、无独立存储）时
+    ///         返回 false，且来源与句柄都不作任何变更。
+    template <typename T>
+    static auto write_through(const ReadOnlyState<T> &handle, T next) -> bool;
 };
 
 }  // namespace detail
@@ -119,6 +133,18 @@ namespace detail {
 template <typename T>
 auto HandleAccess::read_only(std::shared_ptr<SourceOf<T>> source) -> ReadOnlyState<T> {
     return ReadOnlyState<T>(std::move(source));
+}
+
+template <typename T>
+auto HandleAccess::write_through(const ReadOnlyState<T> &handle, T next) -> bool {
+    SourceOf<T> &node = *handle.source_;
+    // `SourceOf<T>` 的实现只有 `Source<T>`（值来源，可写）与 `Derived<T>`（派生，无独立存储）两型，
+    // 且皆 `final`；`role()` 因此是完整判据，按角色下行转换即可，不依赖动态转换与 RTTI。
+    if (node.role() != SourceNode::NodeRole::Source) {
+        return false;
+    }
+    static_cast<Source<T> &>(node).assign(std::move(next));
+    return true;
 }
 
 }  // namespace detail

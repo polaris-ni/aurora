@@ -81,6 +81,8 @@ State → ReadOnlyState 单向；写权限靠类型，不靠 const
 
 `ReadOnlyState` 不声称值不变或句柄非拥有——这两点分别与响应式语义和共享所有权冲突。本库不引入 `Property`、`ImmutableState`、`StateView` 或另一种状态容器；`State`、`ReadOnlyState`、两种 Resource 采用**组合与单向转换**，互不公有继承。反向构造、恢复可写句柄和 `is_writable()` 均不提供。擦除协议收进库内节点，不作为公共基类暴露；控件侧只写 `StateSink::push`（§3.4）。
 
+「句柄没有写入口」与「值不可写」是两件事：库内确有一条**写入当前来源现值**的通道——`detail::HandleAccess::write_through(const ReadOnlyState<T> &, T)`，提交口径与该来源的 `set` 一致（可观察等价时不替换、不通知），来源是派生节点（`computed` 的结果，无独立存储）时拒写并返回 false，句柄本身不换源。它只服务框架侧的回写路径：属性已绑定到调用方的 `State<T>` 时，热回写改的必须是那个来源的现值，把句柄换成常量源会静默断掉调用方的绑定。公共面不因它多出一个名字（负向 `requires` 断言见 `tests/unit/utest_state.cpp`）。
+
 ### 2.6 旧章节迁移
 
 §2 的旧小节曾以 `SignalView<T>` / `Reactive<T>` / `Computed<T>` / `Effect` 为原语清单；对应能力现由 §2.1 的四个词承载，旧类型名不再存在：
