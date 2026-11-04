@@ -281,7 +281,7 @@ AURORA_TEST_CASE(button_serialize_deserialize_roundtrip) {
     AURORA_TEST_CHECK_EQ(dst.label().get().text, "确认");
     AURORA_TEST_CHECK_FALSE(dst.enabled);
     AURORA_TEST_CHECK_TRUE(dst.corner_radius.has_value());  // 显式设过即随键往返，不被主题档吞掉
-    AURORA_TEST_CHECK_NEAR(*dst.corner_radius, 10.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(dst.corner_radius.value_or(0.0F), 10.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(dst.min_width, 80.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(dst.min_height, 36.0F, 1e-4F);
 }
