@@ -20,17 +20,23 @@
 //   likewise invisible. Deltas between the three read forms isolate the read-side allocations from
 //   everything else the frame does.
 // - The copy is measured on two family-name axes, because `Font::family` is a `std::string`: the
-//   default family fits libstdc++'s small-string buffer, so a whole-value copy allocates *nothing*
-//   there; a family longer than that capacity makes each of the 15 fonts allocate. Reporting only
-//   the default axis would read as "a by-value face is free", which is true only by accident.
-//   `injected_800_long_family` is the second axis; allocation counts are bit-identical across reruns
-//   while the millisecond columns jitter with machine load, so ratios are the conclusion.
+//   Material baseline family ("sans-serif", 10 bytes) fits libstdc++'s small-string buffer, so a
+//   whole-value copy of an explicitly injected `Theme::light()` allocates *nothing*; a family longer
+//   than that capacity makes each of the 15 fonts allocate. Reporting only the baseline axis would
+//   read as "a by-value face is free", which is true only by accident -- and since the style-axis
+//   batch it is not even the default: `Window::prepare_context` injects the *platform* theme every
+//   frame, and on Windows that family is "Segoe UI Variable Text" (22 bytes, past SSO), so an app
+//   that never mentions themes is the allocating case. The scene without a `ThemeProvider` is
+//   therefore labelled `win_root_platform_family`; `injected_800_long_family` is the explicit second
+//   axis. Allocation counts are bit-identical across reruns while the millisecond columns jitter
+//   with machine load, so ratios are the conclusion.
 // - Requires a Headless build (`AURORA_BACKEND_HEADLESS`); usage: ./bench_theme
 //
 // Scenes: a `ThemeProvider`-rooted grid of probe widgets (rows x cols, one probe per cell), in
 // three read forms -- `none` (probe reads nothing: the frame baseline), `by_value` (before shape),
-// `by_reference` (landed shape) -- plus the same grid with no provider at all, which takes the
-// in-library fallback snapshot instead of injected storage.
+// `by_reference` (landed shape) -- plus the same grid presented without a provider, where each read
+// picks up the theme the window injects at the root (the platform style on this machine), not the
+// in-library Material fallback.
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -70,8 +76,9 @@ constexpr int AURORA_BENCH_BATCHES = 7;
 constexpr int AURORA_BENCH_FRAME_ITERS = 25;
 constexpr int AURORA_BENCH_SWAP_ITERS = 6;
 constexpr int AURORA_BENCH_COUNTED_FRAMES = 9;
-// SSO 溢出场景用的长字体族名：`Font::family` 是 `std::string`，默认族名 "sans-serif"（10 字节）落在
-// 小串优化里、拷贝零分配；越过 SSO 容量后每枚 Font 各一次分配，整值拷贝的分配成本才显形。
+// SSO 溢出场景用的长字体族名：`Font::family` 是 `std::string`，Material 基线档的 "sans-serif"（10 字节）
+// 落在小串优化里、拷贝零分配；越过 SSO 容量后每枚 Font 各一次分配，整值拷贝的分配成本才显形。
+// 注意缺省配置已是越界档：`Window` 每帧注入本机风格档，Windows 上族名 "Segoe UI Variable Text"（22 字节）。
 constexpr const char *AURORA_BENCH_LONG_FAMILY = "Aurora Benchmark Family Name For Sso Overflow";
 
 // ---------------------------------------------------------------------------
@@ -171,8 +178,8 @@ class ThemeProbe final : public aurora::Widget {
             case ReadForm::None:
                 break;
             case ReadForm::ByValue:
-                // 改动前读面形态：原签名按值返回，一次读取即一份 912 字节整值拷贝（含 15 枚 Font 的 family
-                // 串：默认族名落在小串容量内零分配，越界档每枚各一次 —— 两档都由本基准分列跑出）。
+                // 改动前读面形态：原签名按值返回，一次读取即一份 984 字节整值拷贝（含 15 枚 Font 的 family
+                // 串：Material 基线档落在小串容量内零分配，越界档每枚各一次 —— 两档都由本基准分列跑出）。
                 consume(aurora::Theme{inherit_theme(ctx)});
                 break;
             case ReadForm::ByReference:
@@ -258,7 +265,7 @@ auto with_long_family(aurora::Theme t) -> aurora::Theme {
 auto theme_with_long_family() -> aurora::Theme { return with_long_family(aurora::Theme::light()); }
 
 // 注入场景：ThemeProvider(State<Theme>) 包住探针方阵 —— 换肤即写这枚 State。
-// long_family 决定注入主题的族名档位：false 用默认短族名（落在 SSO 内，拷贝零分配），true 用越界长族名。
+// long_family 决定注入主题的族名档位：false 用 Material 基线档短族名（落在 SSO 内，拷贝零分配），true 用越界长族名。
 auto build_scene(ReadForm form, int count, bool long_family) -> Scene {
     auto col = std::make_shared<aurora::Column>(aurora::ColumnProps{.children = build_probes(form, count)});
     auto theme_state =
@@ -272,7 +279,8 @@ auto build_scene(ReadForm form, int count, bool long_family) -> Scene {
     };
 }
 
-// 无注入场景：探针方阵直接作根，读到的经函数内静态兜底交付（不查映射、无 Provider 重建）。
+// 应用根无 `ThemeProvider` 的场景：探针方阵直接作根，不经 `Provider` 重建子环境。注意它**不是**「无注入」
+// ——`Window::prepare_context` 每帧仍把本机风格档注入根环境，故这里读到的是平台档（Windows 上族名越 SSO）。
 auto build_fallback_scene(ReadForm form, int count) -> Scene {
     auto col = std::make_shared<aurora::Column>(aurora::ColumnProps{.children = build_probes(form, count)});
     return Scene{
@@ -508,7 +516,7 @@ auto main() -> int {
         if (form == ReadForm::None) {
             fb_baseline = run;
         }
-        report_read_row("no_provider_sso", form, scene.probes, run.ms, run.counters, fb_baseline.counters,
+        report_read_row("win_root_platform_family", form, scene.probes, run.ms, run.counters, fb_baseline.counters,
                         fb_baseline.ms);
     }
 
