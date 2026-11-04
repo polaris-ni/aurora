@@ -132,7 +132,7 @@ auto make_dropdown(ChangeLog &log) -> std::shared_ptr<Dropdown> {
 /// @param viewport 绘制盒（同时充当视口原点：控件的全局位置由它决定）。
 /// @param ctx 构建上下文（须带 `MediaQuery`，否则视口高读数为 0、翻转退化为恒向下）。
 [[maybe_unused]] void paint_once(Widget &w, const Rect &viewport, const BuildContext &ctx) {
-    // **必须** begin()：`AURORA_ENABLE_OCCLUSION_CULLING` 下 `Container::on_paint` 用
+    // **必须** begin()：`Container::on_paint` 用
     // `p.clip_bounds()` 裁剪子树，未 begin 的 Painter 其裁剪区为空 ⇒ 整棵子树被剔除、
     // 子控件的 `focus_bounds_` 永不写入（本轮实测：直接 paint 某控件能读到绘制盒，
     // 经未 begin 的 root 遍历则读到零盒）。

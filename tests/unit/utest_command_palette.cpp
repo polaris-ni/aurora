@@ -64,7 +64,6 @@ class ScopedCatalogGuard {
     MessageCatalog saved_;
 };
 
-#ifdef AURORA_ENABLE_DISPLAY_LIST
 /// 录制-回放探针：把 Painter 录下的 DisplayList 回放到本后端，取出每条 DrawText 的文本。
 /// 走的是生产侧同一条 `DisplayList::replay` 通路（唯一实现），不新增任何观测专用 API。
 class TextCapture final : public rhi::RhiBackend {
@@ -86,7 +85,6 @@ class TextCapture final : public rhi::RhiBackend {
     // NOLINTNEXTLINE(*-non-private-member-variables-in-classes)
     std::vector<Entry> entries;  ///< 按提交顺序记录的文本绘制
 };
-#endif
 
 /// @brief 以给定 locale 构造 `BuildContext`（`ctx.env` 指向栈上 `Environment`，生命周期归调用方）。
 /// @param env 已注入值的环境对象（须比返回的 ctx 长寿）。
@@ -527,7 +525,6 @@ AURORA_TEST_CASE(empty_state_text_is_drawn_from_lookup) {
     palette.open();
     (void)palette.layout(bounded(640.0F, 480.0F), ctx);
 
-#ifdef AURORA_ENABLE_DISPLAY_LIST
     // 证明查表结果真的进了绘制，而不是只躺在 getter 里。
     Painter p;
     p.begin(648, 488);
@@ -545,9 +542,6 @@ AURORA_TEST_CASE(empty_state_text_is_drawn_from_lookup) {
         }
     }
     AURORA_TEST_CHECK_TRUE(found);
-#else
-    AURORA_TEST_SKIP("AURORA_ENABLE_DISPLAY_LIST is off; draw-record probe unavailable");
-#endif
     palette.close();
 }
 

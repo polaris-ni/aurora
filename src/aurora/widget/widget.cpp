@@ -302,7 +302,6 @@ auto Widget::layout(const Constraints &c, const BuildContext &ctx) -> Size {
         return size_;
     }
 
-#ifdef AURORA_ENABLE_LAYOUT_CACHE
     // 缓存命中：约束未变、缓存有效、且本控件允许布局缓存（上层已保证“缓存有效 ⇒ 无脏后代”）。
     // 直接复用缓存尺寸，完全跳过修饰链构建 + on_layout + 子树递归。
     // `can_cache_layout()` 为 false 的控件（on_layout 含时间/状态依赖副作用，如骨架→内容切换）
@@ -311,7 +310,6 @@ auto Widget::layout(const Constraints &c, const BuildContext &ctx) -> Size {
         size_ = cached_size_;
         return size_;  // 缓存命中即「已测量过」：缓存的存在本身以测量过一次为前提
     }
-#endif
     // 缓存未命中：本节点将真正重新测量（含修饰链构建 + on_layout + 子树递归）。
     // 计数只统计「真实布局工作量」，缓存命中不计——复杂度门槛即基于此语义。
     AURORA_PROFILE_COUNT(layout_nodes, 1);
@@ -376,7 +374,6 @@ auto Widget::layout(const Constraints &c, const BuildContext &ctx) -> Size {
     }
     // 几何权威完全收敛到 Node::bounds_：布局只确定自身尺寸，位置由父节点经
     // Node::set_bounds 写入（含真实 origin）。Widget 不再持有任何几何缓存。
-#ifdef AURORA_ENABLE_LAYOUT_CACHE
     cached_constraints_ = c;
     cached_size_ = size_;
     // 布局缓存决策：仅基于本控件自身的 can_cache_layout()。
@@ -389,7 +386,6 @@ auto Widget::layout(const Constraints &c, const BuildContext &ctx) -> Size {
     // 对于「父控件缓存会跳过调用子控件 layout()」的场景（如 Scroll），由该父控件自行在
     // 其 can_cache_layout() 覆写中检查直接子控件（见 Scroll::can_cache_layout）。
     layout_cache_valid_ = can_cache_layout();
-#endif
     return size_;
 }
 
@@ -722,7 +718,6 @@ auto Widget::paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> v
         return;
     }
 
-#ifdef AURORA_ENABLE_DISPLAY_LIST
     // Display List 快路径：仅恒等变换（无非离屏合成）参与录制/回放；
     // 旋转/缩放（非恒等 Transform）走 render_into 的离屏合成，保持原样不录制。
     // 含绘制副作用 / 每帧变动内容的控件（Hero / 转场层 / 导航宿主）不可缓存。
@@ -765,7 +760,6 @@ auto Widget::paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> v
     if (p.is_recording()) {
         p.mark_recording_dynamic();
     }
-#endif
 
     render_into(p, bounds, ctx);
 }

@@ -497,7 +497,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// @return 是否允许在输入约束未变时复用上次布局得到的尺寸。
     ///        默认 true；与 `can_cache_display_list()` 对称：绘制每帧变动 → 禁 DL 缓存，
     ///        布局非纯函数 → 禁布局缓存。若 `on_layout` 含时间 / 状态依赖的副作用（首屏骨架→真实内容切换、入场动画、
-    ///        随外部状态重建子节点等“延期布局”），须覆盖为 false。否则布局缓存（AURORA_ENABLE_LAYOUT_CACHE）
+    ///        随外部状态重建子节点等“延期布局”），须覆盖为 false。否则布局缓存
     ///        在约束不变时直接复用缓存尺寸、完全跳过 `on_layout`，使延期逻辑永不触发——
     ///        表现为白屏 / 内容冻结（即 Path B 类 bug）。`mark_needs_layout()` 只能沿“显式标脏”
     ///        路径失效缓存；凡是靠时钟或帧驱动在 `on_paint`/`tick` 中触发重建的控件，必须以此开关
@@ -522,7 +522,6 @@ class Widget : public std::enable_shared_from_this<Widget> {
     ///        实现体委托 `mark_needs_paint_impl(false)`（propagated=false = 业务/状态直接触发）。
     auto mark_needs_paint() -> void { mark_needs_paint_impl(false); }
 
-#ifdef AURORA_ENABLE_DISPLAY_LIST
     /// @brief 使本控件 Display List 失效并沿布局父链向上传播：子树绘制命令被并入祖先 DL，
     ///        故任一后代内容变化时祖先须重录。已在失效链上则短路避免重复递归。
     auto invalidate_display_list_up() -> void {
@@ -541,7 +540,6 @@ class Widget : public std::enable_shared_from_this<Widget> {
             layout_parent_->invalidate_display_list_up();
         }
     }
-#endif
     /// @brief 子树级缓存失效：清本控件**及其全部后代**的布局缓存与 Display List 缓存。
     ///
     /// 脏标记只有向上通道（`mark_needs_layout` / `invalidate_display_list_up` 沿布局父链上溯祖先），
@@ -554,12 +552,8 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// @note 遍历经 `for_each_child`（const 签名）后安全去 const：该遍历的既有非 const 用法见
     ///       `form.h` 的 FormField 验证（同一约定，虚拟化容器只枚举已实体化子节点，未建者本无缓存可清）。
     auto invalidate_subtree_caches() -> void {
-#ifdef AURORA_ENABLE_LAYOUT_CACHE
         layout_cache_valid_ = false;
-#endif
-#ifdef AURORA_ENABLE_DISPLAY_LIST
         dl_valid_ = false;
-#endif
         for_each_child([this](const Widget &child) -> void {
             // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast): 见上文说明，遍历接口只给 const 视图
             const_cast<Widget &>(child).invalidate_subtree_caches();
@@ -1620,15 +1614,11 @@ class Widget : public std::enable_shared_from_this<Widget> {
     ///        与「引擎沿父链自动冒泡的传播」；直接调用为 false。
     auto mark_needs_layout_impl([[maybe_unused]] bool propagated) -> void {
         needs_layout_ = true;
-#ifdef AURORA_ENABLE_LAYOUT_CACHE
         layout_cache_valid_ = false;
         if ((layout_parent_ != nullptr) && !is_relayout_boundary()) {
             layout_parent_->mark_needs_layout_impl(true);
         }
-#endif
-#ifdef AURORA_ENABLE_DISPLAY_LIST
         invalidate_display_list_up();
-#endif
         request_frame(true);
 #ifdef AURORA_ENABLE_DEBUG
         debug::detail::record_dirty(debug::DirtyKind::Layout, type_name(), debug::current_debug_frame(), propagated);
@@ -1640,16 +1630,14 @@ class Widget : public std::enable_shared_from_this<Widget> {
     ///        `mark_needs_layout_impl`。
     auto mark_needs_paint_impl([[maybe_unused]] bool propagated) -> void {
         needs_paint_ = true;
-#ifdef AURORA_ENABLE_DISPLAY_LIST
         invalidate_display_list_up();
-#endif
         request_frame(false);
 #ifdef AURORA_ENABLE_DEBUG
         debug::detail::record_dirty(debug::DirtyKind::Paint, type_name(), debug::current_debug_frame(), propagated);
 #endif
     }
 
-    // ---- 布局缓存（AURORA_ENABLE_LAYOUT_CACHE）----
+    // ---- 布局缓存 ----
     // NOLINTBEGIN(*-non-private-member-variables-in-classes)
     /// @brief 布局缓存有效位：true 表示 `cached_size_` 对应 `cached_constraints_`，约束未变时可复用。
     bool layout_cache_valid_ = false;
@@ -1910,15 +1898,13 @@ class Widget : public std::enable_shared_from_this<Widget> {
     mutable std::uint64_t gpu_layer_raster_gen_ = 0;  ///< 层录制时的光栅状态世代
     mutable std::uint64_t gpu_layer_epoch_ = 0;  ///< 层录制时的层代际（消费端整体失效信号）
 
-#ifdef AURORA_ENABLE_DISPLAY_LIST
-    // ---- Display List 缓存（AURORA_ENABLE_DISPLAY_LIST）----
+    // ---- Display List 缓存 ----
     DisplayList display_list_;  ///< 本控件子树（含后代）的录制命令缓冲
     bool dl_valid_ = false;  ///< 缓存是否有效（内容未变且 bounds 未变）
     Rect last_paint_bounds_{};  ///< 上次录制时的绘制全局矩形（bounds 变化须重录）
     /// @brief 录制时的光栅状态世代（同 `paint_cache_raster_gen_`）：DL 的 DrawText 命令
     ///        固化了录制时的 AA 模式，世代不匹配即须重录，否则回放旧光栅。
     std::uint64_t dl_raster_gen_ = 0;
-#endif
 
   protected:
     /// @brief 请求下一帧重绘（不失效自身/祖先 Display List 缓存）。
@@ -1998,13 +1984,10 @@ class Container : public Widget {
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
         // child.bounds() 存的是“相对本容器内容区”的局部坐标；
         // 绘制前需叠加本容器内容区全局原点（bounds.origin），转为全局坐标。
-#ifdef AURORA_ENABLE_OCCLUSION_CULLING
         const Rect clip = p.clip_bounds();  // 当前有效裁剪（视口/圆角容器等）逻辑 dp 全局坐标
-#endif
         for (Node &child : children_) {
             const Rect cb = child.bounds();
             const auto global{Rect{.origin = bounds.origin + cb.origin, .size = cb.size}};
-#ifdef AURORA_ENABLE_OCCLUSION_CULLING
             // 遮挡剔除：子控件全局盒与裁剪区无交集则整棵子树跳过（保守外接矩形判定）。
             // ⚠️ 「坐标系重映射宿主」（如 `Popup` 按 `anchor_` 在**全局**坐标绘制内容，而自身在常规流中
             // 占零尺寸盒）必须放行：零尺寸盒与 clip 的 `intersects` 恒假，不放行则它整棵画不出来。
@@ -2012,7 +1995,6 @@ class Container : public Widget {
             if (!global.intersects(clip) && !child.widget().paints_outside_layout_box()) {
                 continue;
             }
-#endif
             child.widget().paint(p, global, ctx);
         }
     }
@@ -2207,7 +2189,7 @@ class Container : public Widget {
     /// @return `children_` 中直接子节点的个数。
     [[nodiscard]] auto child_count() const -> size_t { return children_.size(); }
 
-    /// @brief 布局入口（AURORA_ENABLE_LAYOUT_CACHE）：先为所有子节点登记布局父节点，
+    /// @brief 布局入口（布局缓存）：先为所有子节点登记布局父节点，
     ///        再走基类布局（命中缓存时整体跳过子树，依赖父链保证安全）。
     /// @param c 父级下发的尺寸约束（透传给 `Widget::layout`）。
     /// @param ctx 构建上下文（透传给 `Widget::layout`）。
@@ -2386,7 +2368,7 @@ class SingleChild : public Widget {
         return child_view_;
     }
 
-    /// @brief 布局入口（AURORA_ENABLE_LAYOUT_CACHE）：为子节点登记布局父节点，再走基类布局。
+    /// @brief 布局入口（布局缓存）：为子节点登记布局父节点，再走基类布局。
     /// 空子节点（默认构造的 SingleChild）为合法状态：跳过登记，基类 on_layout 由派生类自守。
     /// @param c 父级下发的尺寸约束（透传给 `Widget::layout`）。
     /// @param ctx 构建上下文（透传给 `Widget::layout`）。

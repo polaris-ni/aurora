@@ -17,8 +17,9 @@
 namespace aurora::debug {
 
 /// @brief 当前 aurora 静态库编译时启用的 feature 宏集合（字段名 = 宏名去前缀小写）。
-/// 字段按 BUILD_OPTIONS.md 三层命名分组：AURORA_BACKEND_*（§3）、架构级优化（§3.3）、
+/// 字段按 BUILD_OPTIONS.md 两层命名分组：AURORA_BACKEND_*（§3）、
 /// AURORA_ENABLE_* 内部能力（§4，含 AURORA_ENABLE_IMAGE_* 编解码能力，§4.6）。
+/// 注：布局约束缓存 / 遮挡剔除 / Display List 录制回放为恒开的架构级优化，无开关，故不在本结构内。
 /// 注：`AURORA_BUILD_INSPECTOR_SERVER` 定义在独立目标 aurora_inspector_server 上，
 /// 主库不可见，故不在本结构内。
 struct FeatureFlags {
@@ -30,9 +31,6 @@ struct FeatureFlags {
     bool backend_wayland = false;  ///< AURORA_BACKEND_WAYLAND：原生 Wayland 表面后端（wl_shm + xdg-shell）。
     bool backend_macos = false;  ///< AURORA_BACKEND_MACOS：AppKit/CoreGraphics 表面后端。
     bool backend_wasm = false;  ///< AURORA_BACKEND_WASM：Emscripten/Canvas 2D 浏览器表面后端。
-    bool layout_cache = false;  ///< AURORA_ENABLE_LAYOUT_CACHE：布局约束缓存，约束不变且非脏时跳过子树递归。
-    bool occlusion_culling = false;  ///< AURORA_ENABLE_OCCLUSION_CULLING：遮挡剔除，跳过不与裁剪区相交的子控件绘制。
-    bool display_list = false;  ///< AURORA_ENABLE_DISPLAY_LIST：Display List 录制/回放，子树未脏时跳过 paint 遍历。
     bool simd = false;  ///< AURORA_ENABLE_SIMD：光栅内核 SIMD 双实现（SSE2 基线 + AVX2 运行时分发）。
     bool profiling = false;  ///< AURORA_ENABLE_PROFILING：渲染性能插桩（作用域计时 + 渲染计数器）。
     bool tracing = false;  ///< AURORA_ENABLE_TRACING：Chrome Trace Event 时间线落盘（隐含 profiling）。

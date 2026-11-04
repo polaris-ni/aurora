@@ -38,17 +38,6 @@ auto feature_flags() -> FeatureFlags {
     f.backend_wasm = true;
 #endif
 
-    // ---- 架构级优化 ----
-#ifdef AURORA_ENABLE_LAYOUT_CACHE
-    f.layout_cache = true;
-#endif
-#ifdef AURORA_ENABLE_OCCLUSION_CULLING
-    f.occlusion_culling = true;
-#endif
-#ifdef AURORA_ENABLE_DISPLAY_LIST
-    f.display_list = true;
-#endif
-
     // ---- AURORA_ENABLE_*（内部能力）----
 #ifdef AURORA_ENABLE_SIMD
     f.simd = true;
@@ -113,9 +102,6 @@ auto FeatureFlags::to_json() const -> Json {
     j.set("AURORA_BACKEND_WAYLAND", Json{backend_wayland});
     j.set("AURORA_BACKEND_MACOS", Json{backend_macos});
     j.set("AURORA_BACKEND_WASM", Json{backend_wasm});
-    j.set("AURORA_ENABLE_LAYOUT_CACHE", Json{layout_cache});
-    j.set("AURORA_ENABLE_OCCLUSION_CULLING", Json{occlusion_culling});
-    j.set("AURORA_ENABLE_DISPLAY_LIST", Json{display_list});
     j.set("AURORA_ENABLE_SIMD", Json{simd});
     j.set("AURORA_ENABLE_PROFILING", Json{profiling});
     j.set("AURORA_ENABLE_TRACING", Json{tracing});

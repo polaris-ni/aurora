@@ -283,7 +283,7 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 | 视口逻辑高 | 查 `env_` 环境链上最近祖先注入的 `MediaQuery`（存的是 `root_env_` 地址，窗口期恒定、每帧原地更新） | 事件回调（`on_pointer_event` / `on_scroll`）签名**不带 `BuildContext`**，只有布局 / 绘制两条路拿得到环境 |
 | 本控件全局顶边 y | 命中链下降时由祖先累加传入（`ancestor_offset`）；事件路径另有一路——`MouseEvent::position`（全局）减 `local_position`（本地） | 绘制期写回的 `focus_bounds_` **有缓存缺口**：`Widget::paint` 在显示列表缓存命中时提前 `return`，跳过 `focus_bounds_` 写入（`src/aurora/widget/widget.cpp`），故它不是可靠的真值源 |
 
-⚠️ **写 `env_` 不可只写在 `on_layout`**：`Widget::layout` 在**布局缓存命中时直接 `return`、完全跳过 `on_layout`**（`AURORA_ENABLE_LAYOUT_CACHE` 下），故靠 `on_layout` 单点写入不可靠。本仓既有 `TitleBar` 正是把 `env_` 只写在 `on_layout`（`title_bar.h`）——同款隐患，仅因 `WindowChrome` 缺失时有 null 兜底而未暴露。正确做法：**`on_paint` 为主写入点**（每帧必过）+ `on_layout` / `on_mount` 为兜底。
+⚠️ **写 `env_` 不可只写在 `on_layout`**：`Widget::layout` 在**布局缓存命中时直接 `return`、完全跳过 `on_layout`**（布局缓存恒开），故靠 `on_layout` 单点写入不可靠。本仓既有 `TitleBar` 正是把 `env_` 只写在 `on_layout`（`title_bar.h`）——同款隐患，仅因 `WindowChrome` 缺失时有 null 兜底而未暴露。正确做法：**`on_paint` 为主写入点**（每帧必过）+ `on_layout` / `on_mount` 为兜底。
 
 **「视口」的两种语义（注入那份为准）**：① **第一真值源** = `Window::prepare_context` 注入 `root_env_` 的那份（`MediaQuery::from_surface`，等价于 `Window::size()` ← `Surface::size()`），多窗口下各窗口互不串；② **可选覆写** = 应用经 `Provider<MediaQuery>` 显式注入的子树视口，适用于把子树布局在嵌入区、面板应贴合该区而非整窗的场景。`PanelGeometry` 读的是「最近祖先 Provider 值」，无 Provider 时即落到 ①。`Provider<T>` 是本仓既有的按子树覆盖机制（`widget/provider.h`），`MediaQuery` 是其已支持的类型。
 

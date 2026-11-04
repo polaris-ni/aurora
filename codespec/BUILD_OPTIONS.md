@@ -28,7 +28,7 @@
 | `cmake/AuroraFeatures.cmake` | **feature 宏单一入口** `aurora_define_feature(<宏> [SCOPE] [TARGET] [RAW] [EXPORT])`：定义注入 + `AURORA_FEATURE_DEFINES` 导出登记二合一；全部 feature 宏调用点（后端 / 优化 / SIMD / PROFILING / TRACING / DEBUG / 编解码）经它声明。运行时查询入口 `aurora::debug::feature_flags()`（`include/aurora/debug/feature_flags.h`） |
 | `cmake/AuroraThirdParty.cmake` | FreeType / HarfBuzz 源码构建 |
 | `cmake/AuroraUtils.cmake` | 消费者目标统一配置辅助（`aurora_setup_consumer_target`，demo / 测试 / 工具复用链接 / PCH / C++20 / 告警 / MinGW `-Wa,-mbig-obj`） |
-| `cmake/AuroraBackends.cmake` | 全部 `AURORA_BACKEND_*` Surface 图形后端剪裁开关（唯一例外：`AURORA_BACKEND_MACOS` 的默认值声明在顶层，理由见 §1.1）+ 音频设备后端开关（`AURORA_ENABLE_AUDIO` / `AURORA_ENABLE_AUDIO_WASAPI` / `AURORA_ENABLE_AUDIO_ALSA` / `AURORA_ENABLE_AUDIO_COREAUDIO` / `AURORA_ENABLE_AUDIO_WEBAUDIO`，ENABLE 组）+ 存储 SQLite 后端开关（`AURORA_ENABLE_STORAGE_SQLITE`，ENABLE 组）+ 架构级优化宏（`AURORA_ENABLE_LAYOUT_CACHE` 等） |
+| `cmake/AuroraBackends.cmake` | 全部 `AURORA_BACKEND_*` Surface 图形后端剪裁开关（唯一例外：`AURORA_BACKEND_MACOS` 的默认值声明在顶层，理由见 §1.1）+ 音频设备后端开关（`AURORA_ENABLE_AUDIO` / `AURORA_ENABLE_AUDIO_WASAPI` / `AURORA_ENABLE_AUDIO_ALSA` / `AURORA_ENABLE_AUDIO_COREAUDIO` / `AURORA_ENABLE_AUDIO_WEBAUDIO`，ENABLE 组）+ 存储 SQLite 后端开关（`AURORA_ENABLE_STORAGE_SQLITE`，ENABLE 组） |
 | `cmake/AuroraCompression.cmake` | core 级压缩能力开关（`AURORA_ENABLE_COMPRESSION`，默认 ON，**门控内置 wuffs 解码器的注册**）+ wuffs OBJECT 库 `aurora_wuffs`（图片 PNG 编解码与压缩能力共用，并集条件创建） |
 | `cmake/AuroraImageCodecs.cmake` | `AURORA_ENABLE_IMAGE_JPEG` / `AURORA_ENABLE_IMAGE_WEBP` / `AURORA_ENABLE_IMAGE_PNG`（编译期能力开关） |
 | `cmake/AuroraSimd.cmake` | `AURORA_ENABLE_SIMD`（光栅内核 SIMD 双实现，内部宏，不 PUBLIC 传播） |
@@ -224,21 +224,15 @@ cmake --build build -j $(nproc)
 - 非 Linux（含 Apple）平台开启任一后端将触发 `FATAL_ERROR`。
 - 静态分析口径：CI 的 lint 作业显式打开 X11 / Wayland / GLFW 及其余能力开关（§4.5），**只按上面「最小后端」示例 configure 的本地构建不构成 lint 覆盖面**——未开的宏其 `#ifdef` 收口代码不参与分析，`unique_findings = 0` 会被误读成「查过了」。
 
-### 3.3 架构级渲染 / 布局优化开关
+### 3.3 架构级渲染 / 布局优化（恒开）
 
-三项互不依赖的架构级优化。三者归入 `AURORA_ENABLE_*` 命名组（组内特例：PUBLIC 注入**并随安装导出**，因消费者须与库同宏取值编译 `aurora.h`——ODR / 剪裁一致性）；开关名 = 宏名，库代码用 `#ifdef` 剪裁。关闭任一开关即回退到原始实现路径（等价无优化），可独立退化。
+三项互不依赖的架构级优化恒编入库中，**没有 CMake 选项、没有 feature 宏、没有退化路径**：
 
-| 选项 | 默认值 | 含义 | 传播宏 | 退化行为 |
-|:---|:---|:---|:---|:---|
-| `AURORA_ENABLE_LAYOUT_CACHE` | `ON` | 布局约束缓存：约束不变且非 layout dirty 时跳过子树 layout 递归 | `AURORA_ENABLE_LAYOUT_CACHE` | 每次 `layout()` 都重新计算整棵子树 |
-| `AURORA_ENABLE_OCCLUSION_CULLING` | `ON` | 遮挡剔除：跳过不与 Painter 裁剪区相交的子控件绘制 | `AURORA_ENABLE_OCCLUSION_CULLING` | 始终遍历并绘制全部子控件 |
-| `AURORA_ENABLE_DISPLAY_LIST` | `ON` | Display List 录制 / 回放：子树未脏时直接 replay 命令，跳过 paint 遍历 | `AURORA_ENABLE_DISPLAY_LIST` | 每次 `paint()` 都重新遍历整棵子树 |
+- **布局约束缓存**：约束不变且非 layout dirty 时跳过子树 layout 递归；
+- **遮挡剔除**：跳过不与 Painter 裁剪区相交的子控件绘制；
+- **Display List 录制 / 回放**：子树未脏时直接 replay 命令，跳过 paint 遍历。
 
-三者默认全开；排查回归时可单独关闭定位：
-
-```powershell
-cmake -S . -B build -DAURORA_ENABLE_LAYOUT_CACHE=OFF -DAURORA_ENABLE_DISPLAY_LIST=OFF
-```
+历史上的 `AURORA_ENABLE_LAYOUT_CACHE` / `AURORA_ENABLE_OCCLUSION_CULLING` / `AURORA_ENABLE_DISPLAY_LIST` 三枚开关已删除（见 `CHANGELOG.md` 破坏性变更条目）；再传 `-D...=OFF` 不会关闭任何能力，只会留下未使用的缓存变量。`aurora::debug::feature_flags()` 也不再报告这三项。
 
 ### 3.4 Display List 集成约束（正确性不变量）
 
@@ -531,9 +525,9 @@ python tools/check/run_clang_tidy.py --build-dir build --tu-list build/lint-sele
 python tools/check/run_clang_tidy.py --build-dir build-wasm --emscripten   # 浏览器 TU + #ifdef AURORA_BACKEND_WASM 分支
 ```
 
-两条口径各自的把关面：native 遍覆盖 host 后端与 `#else` 分支，wasm 遍覆盖 `AURORA_PLATFORM_*` 的另一侧（POSIX 派发分支、Web Audio 后端、`wasm_*` 探针）与 libc++ 差异面。CI 两条都跑，且各自是一道独立的必过位：`lint` 作业（8）做 native 三 Pass（DEBUG ON / OFF 各一份编译库，加一份把 `AURORA_ENABLE_{LAYOUT_CACHE,OCCLUSION_CULLING,DISPLAY_LIST,SIMD,TEST_HOOKS}` 全关的反极性编译库），`lint-wasm` 作业（8w）对同一套 configure 产物跑 `--emscripten` 口径；二者互不替代——任一绿灯都不构成另一条通过的证据。浏览器口径原本挂在 `wasm` 作业的末步，拆出：单遍实测 69.7 分钟，占该作业 79.4 分钟的 88%，整条 workflow 的墙钟被一个静态检查步骤卡住；拆成 8w 的分片矩阵后 `wasm` 作业回到 ~10 分钟（configure + 构建 + ctest），两条 lint 门禁并行同量级。
+两条口径各自的把关面：native 遍覆盖 host 后端与 `#else` 分支，wasm 遍覆盖 `AURORA_PLATFORM_*` 的另一侧（POSIX 派发分支、Web Audio 后端、`wasm_*` 探针）与 libc++ 差异面。CI 两条都跑，且各自是一道独立的必过位：`lint` 作业（8）做 native 三 Pass（DEBUG ON / OFF 各一份编译库，加一份把 `AURORA_ENABLE_SIMD` 与 `AURORA_ENABLE_TEST_HOOKS` 关掉的反极性编译库），`lint-wasm` 作业（8w）对同一套 configure 产物跑 `--emscripten` 口径；二者互不替代——任一绿灯都不构成另一条通过的证据。浏览器口径原本挂在 `wasm` 作业的末步，拆出：单遍实测 69.7 分钟，占该作业 79.4 分钟的 88%，整条 workflow 的墙钟被一个静态检查步骤卡住；拆成 8w 的分片矩阵后 `wasm` 作业回到 ~10 分钟（configure + 构建 + ctest），两条 lint 门禁并行同量级。
 
-**反极性覆盖（`optimizations-off` pass）**：架构级优化开关（layout 缓存 / 遮挡剔除 / Display List / SIMD）与 `AURORA_ENABLE_TEST_HOOKS` 默认 ON，其 `#ifdef` 收口的分支在默认两极下不参与分析——把它们关到另一极的第三份编译库补上这些分支。它沿用同一套 `shard: [0,1,2,3]`，故矩阵从 2×4=8 变 3×4=12 个 native 作业，每片墙钟约 25 分钟、`timeout-minutes: 40` 余量不变。反极性补扫很贵（`select_lint_tus.py --changed` 实测：三个架构开关 OFF 牵动 326 TU、TEST_HOOKS/PROFILING/TRACING OFF 牵动 469 TU，并集 490 / 分母 569，单 job 折算 1 小时量级），故落成矩阵的一行而非塞进无分片的 `toggles` 作业。
+**反极性覆盖（`simd-testhooks-off` pass）**：`AURORA_ENABLE_SIMD` 与 `AURORA_ENABLE_TEST_HOOKS` 默认 ON，其 `#ifdef` 收口的分支在默认两极下不参与分析——把它们关到另一极的第三份编译库补上这些分支。它沿用同一套 `shard: [0,1,2,3]`，故矩阵从 2×4=8 变 3×4=12 个 native 作业，每片墙钟约 25 分钟、`timeout-minutes: 40` 余量不变。反极性补扫很贵（单 job 折算 1 小时量级），故落成矩阵的一行而非塞进无分片的 `toggles` 作业。
 
 **平台子作业（`lint-windows` / `lint-macos`）**：Windows / macOS 特有的编译选项只在各自平台存在，主 Linux 遍开不了，故各设一个子作业用**本平台编译库**跑 `run_clang_tidy.py`。二者**只扫平台相关 TU、不扫全仓**：用 `git grep -lE <平台 token 集>` 从第一方源码现场生成文件清单（不落硬编码文件表；同一量法在 macOS 侧实测命中 79 个文件、其中「本身即 TU」进入选集的 48 个，Windows 侧命中 150 个；编译库分母随能力开关与测试文件增删浮动，量级约 770），再交给 `select_lint_tus.py --changed-only` 保留其中「本身即 TU」的那些。选集为空即 `exit 1` 拒跑，绝不退化成「0 告警 = 干净」。clang-tidy 钉同一大版本 22（Windows / macOS 各取 LLVM 官方 tarball，见作业的安装步骤），使检查集与主遍可比。Windows 作业另在**每周定时**多跑一遍全量编译库，兜住「未命中 token 的共享代码经伞头间接看到 `windows.h`」这类间接面。**macOS 作业另跑第二遍 DEBUG=ON 编译库**（`build-lint` / `build-lint-dbg` 两个目录，选集复用第一遍生成的平台标记清单，findings 以同一 artifact 的两条路径上传）：真实后端的调试能力（截图 / 控件树 / 性能快照 / 可视化叠层）全在 `AURORA_ENABLE_DEBUG` 宏后，单遍只分析 OFF 极时 macOS 的读回与调试叠层实现从未进过 clang-tidy。两遍的 configure 能力串对齐顶层 env 的 `LINT_CAPABILITY_FLAGS`，另补 GLFW 与其 GPU 特性、wgpu 宿主、Profiling + Tracing 与内置 mbedTLS（Apple 上系统栈 SecureTransport 默认 ON，mbedTLS 是与之并存的第二引擎）；这些门下的 TU 过去在 macOS 分析面上根本不存在。两遍使墙钟翻倍，`timeout-minutes` 由 60 提到 90。
 
@@ -859,7 +853,7 @@ target_link_libraries(my_app PRIVATE Aurora::aurora)
 
 ### 9.3 feature 宏导出约定
 
-安装期将编译期生效的 `AURORA_BACKEND_*` / `AURORA_ENABLE_LAYOUT_CACHE` / `AURORA_ENABLE_OCCLUSION_CULLING` / `AURORA_ENABLE_DISPLAY_LIST` 与全局 `NOMINMAX` 收集进 `AURORA_EXPORTED_DEFINES`，由 `Aurora::aurora` 的 `INTERFACE` 编译定义导出，使消费者以与库**完全一致**的宏集编译 `aurora.h`（避免 ODR / 剪裁不一致）。新增 feature 宏时须同步本段与 `CMakeLists.txt` 的收集列表。
+安装期将编译期生效的 `AURORA_BACKEND_*` 与全局 `NOMINMAX` 收集进 `AURORA_EXPORTED_DEFINES`，由 `Aurora::aurora` 的 `INTERFACE` 编译定义导出，使消费者以与库**完全一致**的宏集编译 `aurora.h`（避免 ODR / 剪裁不一致）。新增 feature 宏时须同步本段与 `CMakeLists.txt` 的收集列表。
 
 `AURORA_ENABLE_PROFILING` / `AURORA_ENABLE_TRACING` 亦为 PUBLIC feature 宏，但导出策略特殊：
 
@@ -972,11 +966,6 @@ aurora_setup_consumer_target(my_app)      # 可选再追加若干 PRIVATE includ
 -D AURORA_ENABLE_IMAGE_JPEG=ON|OFF  # JPEG 解码 libjpeg-turbo（默认 OFF，内部宏）
 -D AURORA_ENABLE_IMAGE_WEBP=ON|OFF  # WebP 解码 libwebp（默认 OFF，内部宏）
 -D AURORA_ENABLE_IMAGE_PNG=ON|OFF   # PNG/GIF 解码 wuffs（默认 OFF，内部宏）
-
-# 架构级优化（= feature 宏，PUBLIC 传播，默认均 ON）
--D AURORA_ENABLE_LAYOUT_CACHE=ON|OFF
--D AURORA_ENABLE_OCCLUSION_CULLING=ON|OFF
--D AURORA_ENABLE_DISPLAY_LIST=ON|OFF
 
 # 插桩（COVERAGE 与 ASAN 互斥）
 -D AURORA_ENABLE_COVERAGE=ON|OFF         # gcov / llvm-cov（默认 OFF）

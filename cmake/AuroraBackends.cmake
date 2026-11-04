@@ -673,15 +673,3 @@ if (AURORA_ENABLE_STORAGE_SQLITE)
     aurora_define_feature(AURORA_ENABLE_STORAGE_SQLITE EXPORT)
     aurora_log("SQLite storage backend enabled (third_party/sqlite amalgamation source build)")
 endif ()
-
-# ---- 架构级优化开关（性能，独立退化，默认开启） ----
-# 三项互不依赖的渲染/布局优化；宏由 aurora 目标以 PUBLIC 编译定义传播给所有消费者。
-# 关闭任一开关即回退到原始实现路径（等价无优化）。
-option(AURORA_ENABLE_LAYOUT_CACHE "Enable layout constraint cache (skip redundant subtree layout)" ON)
-option(AURORA_ENABLE_OCCLUSION_CULLING "Enable occlusion culling (skip children outside clip region)" ON)
-option(AURORA_ENABLE_DISPLAY_LIST "Enable display list record/replay (skip unchanged subtree paint)" ON)
-foreach (_opt AURORA_ENABLE_LAYOUT_CACHE AURORA_ENABLE_OCCLUSION_CULLING AURORA_ENABLE_DISPLAY_LIST)
-    if (${_opt})
-        aurora_define_feature(${_opt} EXPORT)
-    endif ()
-endforeach ()

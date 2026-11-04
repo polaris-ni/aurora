@@ -24,6 +24,8 @@ freeze: minor-versions-are-additive
 
 ### Breaking
 
+- **三枚架构级优化恒开，删除编译期开关与 `FeatureFlags` 对应字段**（口径见 [`codespec/BUILD_OPTIONS.md`](codespec/BUILD_OPTIONS.md) §3.3）。`AURORA_ENABLE_LAYOUT_CACHE` / `AURORA_ENABLE_OCCLUSION_CULLING` / `AURORA_ENABLE_DISPLAY_LIST` 三枚选项默认 ON 且 `#ifdef` 内为唯一实现，关闭只意味着整段能力不参与编译、没有可用的退化路径。现删除三枚 `option` 与导出宏，布局约束缓存、遮挡剔除、Display List 录制 / 回放恒编入；`FeatureFlags` 删除 `layout_cache` / `occlusion_culling` / `display_list` 三字段，`to_json()` 同步少三个键（26 → 23）。CI 的 `optimizations-off` 矩阵项与 lint 反极性遍中的三枚宏同批删除。迁移路径见 §Migration。
+
 - **响应式状态模型收口为「可写状态 + 只读状态」两词**（契约见 [`codespec/specification/02-state.md`](codespec/specification/02-state.md)，内核不变量见该文附录）。公共面只剩两枚能力类型：`State<T>` 可写（`get` / `set` / `update` / `notify` / `subscribe`，按值持有、复制与右值交接共享同一来源、可隐式降级为只读），`ReadOnlyState<T>` 只读（`get` / `subscribe`，可由值隐式构造，`computed` 返回它）。写权限由类型表达而非 `const`；widget 属性按角色分配——展示属性持只读句柄，可编辑模型持 `State`。删除 `Reactive<T>` / `SignalView<T>` / `SignalViewBase` / `Computed<T>` / `Binding<T>` / `Immutable<T>` / `Mutable<T>` 与其公共头 `reactive.h` / `signal_view.h` / `binding.h` / `immutable.h`；`state_registry.h` 的实现移入库内 `state/detail/registry.h` 且不再作为公共头；新增 `read_only_state.h`（`ReadOnlyState<T>` 与 `StateSink`）。**不留兼容别名、转发头或双轨开关。**
   - 派生：`computed(fn[, eq | always_publish])` 返回 `ReadOnlyState<T>`，`ComputedResult` 由 lambda 返回类型推导（显式结果类型写在 lambda 返回类型上）；菱形依赖只在上游稳定后求值一次。
   - 副作用：公共 `Effect` 类连同 `run()` / `dispose()` 删除；自由工厂 `effect(fn)` 调用即首跑、自动追踪读取，返回与订阅同形的 move-only `Subscription`（`reset()` 取消）。需要延后的调用方把创建移到启动点，不再有「造好但未运行」的对象。
@@ -129,6 +131,15 @@ freeze: minor-versions-are-additive
 - **余下 6 条 Doxygen warning 全部清零，`docs` 目标回到「退出 0 且告警日志为空」的登记基线（只改注释与文档措辞，实现未动）**：上一条修掉的只是让构建提前终止的那 4 条，同树还剩三类 6 条，逐类以最小 fixture 实测定位根因后再改写法，不凭直觉换标记。三类各自的机制：**其一**，文档注释里用 Markdown 链接指向兄弟规格文件（反引号标题加相对路径链接）被 Doxygen 当显式 `\ref` 请求处理，目标按**被抽取头所在的目录**起算，`include/aurora/state/` 出发的两级相对路径永不可达，报 `unable to resolve reference to '../../specification/02-state.md' for \ref command` 两条；本仓 100+ 处同类引用一律写仓库相对路径纯文本（如 `specification/05-event-navigation.md §6.1`），两处改回该形态即与 §13.6「宁可不写链接、只留仓库相对路径文字」同色，引用的文件与章节锚点逐字可达。**其二**，详述命令写成缺尾字母的同名拼写（三处：`Application::active_window()`、`Application::record_dispatch()`、`ThreadPool::interruptible_wait_for()`），Doxygen 报 `Found unknown command '@detail'` 并**把该行起的详述整段丢弃**——比报错更糟的是文档内容静默失踪，消费者只看到一句 brief；§13.2 登记的允许子集里只有带尾字母那一枚，三处改回即段落回到详述位。**其三**，IPv4 内嵌 IPv6 地址那一枚内联码（两枚前导冒号紧跟 `ffff:`）让 Markdown 转换产出不成对的 `<tt>`，报 `found </tt> tag without matching <tt>`；实测只写回环本机地址那一枚内联码不复现，故把两枚前导冒号留在跨度之外即消警、注释文本逐字不变，并在该处写明「勿为统一风格把冒号合回去」。同批把两类触发形态回写 §13.6：既有那条「跨度以点开头发作」的外延补上实测复现的 `::` 形态（并记明触发点不止首字符是点，须按最小 fixture 定位），新增一条「内联码含注释收尾序列要改用 HTML `code` 标签」（承接上一条的实测，含两种被排除的直觉修法）。公共 API、类布局与运行行为零变化，`aurora_api.json` 零差异；验证面：全树 Doxygen 扫描（刻意关 `WARN_AS_ERROR`，防第一条掩盖后续头文件）告警 **0 条**、`docs` 目标退出 0 且告警日志为空、`check_doc_comments` 0 条、改动头文件 `clang-format` 全合格、重建后全量 `ctest --preset ninja-test` 450/450 绿。
 
 ### Migration
+
+- **三枚架构级优化开关迁移**（上条 Breaking 的具体改法）：
+
+| 旧写法 | 新写法 |
+| :--- | :--- |
+| `#ifdef AURORA_ENABLE_LAYOUT_CACHE` / `AURORA_ENABLE_OCCLUSION_CULLING` / `AURORA_ENABLE_DISPLAY_LIST` 条件块 | 删除条件编译，按恒真保留块内代码（三枚能力恒开） |
+| `-DAURORA_ENABLE_LAYOUT_CACHE=OFF` 等三枚 `-D` 开关 | 不再传入；传入不生效，只是留下未使用的 CMake 缓存变量 |
+| 读取 `FeatureFlags::layout_cache` / `occlusion_culling` / `display_list` | 删除该读取与分支（恒为真），或改读对应能力自身的观测面 |
+| 解析 `feature_flags()` JSON 中的三枚宏名键 | 删除对该键的读取；其余 23 个键与归一口径不变 |
 
 - **剪贴板监听迁移到 `on_event`**（上条 Breaking 的具体改法）：
 

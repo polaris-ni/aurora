@@ -59,7 +59,6 @@ auto effective_font(const Button &b) -> Font {
     return f;
 }
 
-#ifdef AURORA_ENABLE_DISPLAY_LIST
 /// 录制-回放探针：把 Painter 录下的 DisplayList 回放到本后端，取出每条 DrawText 的文本与包围盒。
 /// 走的是生产侧同一条 `DisplayList::replay` 通路（唯一实现），不新增任何观测专用 API。
 class TextCapture final : public rhi::RhiBackend {
@@ -94,7 +93,6 @@ auto capture_draw_text(Widget &w, const Rect &box, const BuildContext &ctx) -> s
     dl.replay(cap);
     return cap.entries;
 }
-#endif
 
 /// 直绘一遍（非录制）并把整块画布读回，供逐像素比对。
 [[maybe_unused]] auto render_to_pixels(Widget &w, const Rect &box, const BuildContext &ctx, int cw, int ch)
@@ -306,14 +304,10 @@ AURORA_TEST_CASE(button_tr_label_draws_catalog_text) {
     LayoutEngine::layout(b, bounded(300.0F, 80.0F));
     const BuildContext ctx;  // 无 Provider<Locale> 注入 → 回落 default_catalog() 的缺省档
 
-#ifdef AURORA_ENABLE_DISPLAY_LIST
     const Rect box{.origin = Point{}, .size = b.size()};
     const auto entries = capture_draw_text(b, box, ctx);
     AURORA_TEST_REQUIRE_FALSE(entries.empty());
     AURORA_TEST_CHECK_EQ(entries[0].text, translated);
-#else
-    AURORA_TEST_SKIP("AURORA_ENABLE_DISPLAY_LIST is off; draw-record probe unavailable");
-#endif
 
     // 有墨：圆角置 0 后盒内除文字外全是背景色，非背景像素数 > 0 即文字真的落了笔。
     Button inked;
@@ -337,16 +331,12 @@ AURORA_TEST_CASE(button_accessibility_label_equals_drawn_text) {
     LayoutEngine::layout(b, bounded(300.0F, 80.0F));
     const BuildContext ctx;
 
-#ifdef AURORA_ENABLE_DISPLAY_LIST
     const Rect box{.origin = Point{}, .size = b.size()};
     const auto entries = capture_draw_text(b, box, ctx);
     AURORA_TEST_REQUIRE_FALSE(entries.empty());
     // 预期取绘制侧同一条 resolved_label() 的产物，不在用例里另算一遍。
     AURORA_TEST_CHECK_EQ(b.accessibility_label(), entries[0].text);
     AURORA_TEST_CHECK_EQ(b.accessibility_label(), "Apply changes");
-#else
-    AURORA_TEST_SKIP("AURORA_ENABLE_DISPLAY_LIST is off; draw-record probe unavailable");
-#endif
 }
 
 AURORA_TEST_CASE(button_natural_width_equals_resolved_label_width_plus_padding) {
@@ -416,7 +406,6 @@ AURORA_TEST_CASE(button_paint_remeasures_when_display_text_changes_without_relay
 
     table.add(Locale{}, key_name, "Substantially longer");  // 显示串变了，但刻意不重排
     const BuildContext ctx;
-#ifdef AURORA_ENABLE_DISPLAY_LIST
     const Rect box{.origin = Point{}, .size = b.size()};
     const auto entries = capture_draw_text(b, box, ctx);
     AURORA_TEST_REQUIRE_FALSE(entries.empty());
@@ -427,9 +416,6 @@ AURORA_TEST_CASE(button_paint_remeasures_when_display_text_changes_without_relay
     AURORA_TEST_CHECK_GT(fresh_w, old_w);
     // 缓存失效路径：显示串与上次测量用串不同 → 重测，不能复用 "Old" 的旧宽。
     AURORA_TEST_CHECK_NEAR(entries[0].bounds.size.width, fresh_w, 1e-3F);
-#else
-    AURORA_TEST_SKIP("AURORA_ENABLE_DISPLAY_LIST is off; draw-record probe unavailable");
-#endif
 }
 
 AURORA_TEST_CASE(button_literal_label_output_is_unchanged) {
@@ -450,7 +436,6 @@ AURORA_TEST_CASE(button_literal_label_output_is_unchanged) {
 
     const BuildContext ctx;
 
-#ifdef AURORA_ENABLE_DISPLAY_LIST
     const Rect box{.origin = Point{}, .size = literal.size()};
     // 字面档落笔的串仍是原文本，包围盒宽度也仍是它的量宽。
     const auto entries = capture_draw_text(literal, box, ctx);
@@ -463,9 +448,6 @@ AURORA_TEST_CASE(button_literal_label_output_is_unchanged) {
     const auto px_via_table = render_to_pixels(via_table, box, ctx, 200, 60);
     AURORA_TEST_REQUIRE_EQ(px_literal.size(), px_via_table.size());
     AURORA_TEST_CHECK_TRUE(px_literal == px_via_table);
-#else
-    AURORA_TEST_SKIP("AURORA_ENABLE_DISPLAY_LIST is off; draw-record probe unavailable");
-#endif
 }
 
 AURORA_TEST_CASE(cursor_shape_hook_defaults_to_pointing_hand) {

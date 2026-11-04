@@ -149,7 +149,7 @@ env:
   # ${{ env.* }} 展开进 shell，把该行剩余部分连同行尾续行 `\` 一起注释掉——轻则丢失参数，
   # 重则把下一行变成独立命令（`-D...: command not found`，exit 127）。注释一律写在键外。
   # TLS 覆盖面说明：mbedTLS 由仓库内置源码构建（`AURORA_ENABLE_NET_TLS_MBEDTLS=ON`，源码随 checkout
-  # 就位，无需 /opt provider 根）；optimizations-off pass 追加一条 OpenSSL provider（`shared:/usr`），
+  # 就位，无需 /opt provider 根）；simd-testhooks-off pass 追加一条 OpenSSL provider（`shared:/usr`），
   # 两枚引擎 TU 各拿到一次 lint 分析面。
   LINT_CAPABILITY_FLAGS: >-
     -DAURORA_BACKEND_X11=ON -DAURORA_BACKEND_WAYLAND=ON -DAURORA_BACKEND_GLFW=ON
@@ -172,7 +172,7 @@ env:
   #   Linux 串开内置 mbedTLS（`AURORA_ENABLE_NET_TLS_MBEDTLS=ON`）：源码在 `third_party/mbedtls`、随
   #   checkout 就位、断网可构建，不再需要外部安装根或 `/opt` 引导（旧 `static:/opt/aurora-tls-mbedtls`
   #   provider 路径已废弃）。需要 OpenSSL 的一侧直接在 `AURORA_NET_TLS_PROVIDERS` 里追加一条 `shared:/usr`
-  #   ——那里 openssl 头齐备（作业 3b 的双引擎腿、作业 8 的 optimizations-off 遍、toggles 反极性腿如此）。
+  #   ——那里 openssl 头齐备（作业 3b 的双引擎腿、作业 8 的 simd-testhooks-off 遍、toggles 反极性腿如此）。
   #   Windows / macOS 靠系统栈缺省装配（Schannel / SecureTransport），两串因此只带 Inspector——provider
   #   形态的同平台覆盖面由作业 3b 的对应腿平行补上。
   #   wasm 串同样只取 Inspector：Emscripten 侧不编 mbedTLS/OpenSSL，TLS 走浏览器 fetch。
@@ -674,10 +674,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # 架构级优化三开关全关：layout 缓存 / 遮挡剔除 / Display List 退化路径
-          - name: optimizations-off
-            cmake-flags: -DAURORA_ENABLE_LAYOUT_CACHE=OFF -DAURORA_ENABLE_OCCLUSION_CULLING=OFF -DAURORA_ENABLE_DISPLAY_LIST=OFF
-            run-tests: true
           # SIMD 关：仅编译标量黄金路径（utest_simd_parity 比对基准）
           - name: simd-off
             cmake-flags: -DAURORA_ENABLE_SIMD=OFF
@@ -1219,14 +1215,13 @@ jobs:
           - label: debug-on
             debug: "ON"
             flags: ""
-          # 反极性遍：架构级优化开关全部关闭（layout 缓存 / 遮挡剔除 / Display List / SIMD）
-          # 与测试注入点关闭——这些 `#ifdef` 收口的分支在默认三开关全开时根本不参与分析。
+          # 反极性遍：SIMD 与测试注入点关闭——这些 `#ifdef` 收口的分支在默认开启时根本不参与分析。
           # 与上方两遍共用同一份扩面后端/能力开关（见 Configure 步骤）。
           # 本 pass 另在 env 串的内置 mbedTLS 之外追加一条 OpenSSL provider（shared:/usr）：两枚引擎 TU
           # （tls_mbedtls.cpp / tls_openssl.cpp）各自进一个 pass 的分析面，不新增 job。
-          - label: optimizations-off
+          - label: simd-testhooks-off
             debug: "OFF"
-            flags: -DAURORA_ENABLE_LAYOUT_CACHE=OFF -DAURORA_ENABLE_OCCLUSION_CULLING=OFF -DAURORA_ENABLE_DISPLAY_LIST=OFF -DAURORA_ENABLE_SIMD=OFF -DAURORA_ENABLE_TEST_HOOKS=OFF -DAURORA_NET_TLS_PROVIDERS=shared:/usr
+            flags: -DAURORA_ENABLE_SIMD=OFF -DAURORA_ENABLE_TEST_HOOKS=OFF -DAURORA_NET_TLS_PROVIDERS=shared:/usr
         shard: [0, 1, 2, 3]
         # 单值维度：只为给 `--shard=i/n` 的 n 一个 yaml 内的引用点（见上方注释）。
         total: [4]
@@ -1246,7 +1241,7 @@ jobs:
           # libclang1-22：wgpu-native 的 bindgen 由 configure 期探测 libclang 共享库，clang-tidy-22
           # 只拉 libclang-cpp22（C++ 接口）不含 C 接口的 libclang-22.so.1，故显式补装。
           # mbedTLS 现由仓库内置源码构建（AURORA_ENABLE_NET_TLS_MBEDTLS，源码随 checkout 就位），无需
-          # libmbedtls-dev、也不再搭 /opt provider 根；libssl-dev 供 optimizations-off pass 的 OpenSSL 腿。
+          # libmbedtls-dev、也不再搭 /opt provider 根；libssl-dev 供 simd-testhooks-off pass 的 OpenSSL 腿。
           sudo apt-get install -y clang-tidy-22 clang-format-22 libclang1-22 \
             libx11-dev libxfixes-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxext-dev \
             libgl1-mesa-dev libwayland-dev wayland-protocols libxkbcommon-dev \

@@ -3,7 +3,7 @@
 /// 测试说明: 验证文本拖选只触发「重绘」而非「重排」：最大化/大窗场景下拖选不再每帧全树重排。
 ///           HeadlessSurface + 间谍控件统计 layout/paint 调用：拖选 Move 仅 mark_needs_paint，
 ///           第二帧跳过整树重排（layout_calls 不变）；未变子控件经 Display List 缓存回放，
-///           on_paint 不再调用（该断言受 AURORA_ENABLE_DISPLAY_LIST 门控，关闭时仅提示跳过）。
+///           on_paint 不再调用。
 
 #include <memory>
 
@@ -107,13 +107,9 @@ AURORA_TEST_CASE(drag_selection_paint_only_skips_relayout) {
     AURORA_TEST_CHECK_EQ(raw->frame_count(), 2);
     AURORA_TEST_CHECK_EQ(spy->layout_calls, 1);  // 关键：重排被跳过
 
-#ifdef AURORA_ENABLE_DISPLAY_LIST
     // 选区内无关子控件（spy）内容未变：Display List 命中直接回放，不再调用 on_paint。
     // （frame_count==2 已确认本帧重新上屏；layout_calls==1 确认未重排。）
     AURORA_TEST_CHECK_EQ(spy->paint_calls, 1);
-#else
-    AURORA_TEST_TRACE("AURORA_ENABLE_DISPLAY_LIST not enabled: no DL replay, skipping the paint count assertion");
-#endif
 #else
     AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS not enabled, HeadlessSurface is not compiled");
 #endif

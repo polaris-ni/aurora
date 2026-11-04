@@ -59,7 +59,7 @@ AURORA_TEST_CASE(explicit_size_used_when_positive) {
     AURORA_TEST_CHECK_NEAR(s.size().width, 120.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(s.size().height, 20.0F, 1e-4F);
 
-    // set_size 只更新占位尺寸本身、不标布局脏；AURORA_ENABLE_LAYOUT_CACHE 下约束不变时
+    // set_size 只更新占位尺寸本身、不标布局脏；布局缓存下约束不变时
     // Widget::layout 直接命中缓存返回旧尺寸，须经公开脏标记 mark_needs_layout() 才会真正重排。
     s.set_size(Size{.width = 50.0F, .height = 24.0F});
     s.mark_needs_layout();
