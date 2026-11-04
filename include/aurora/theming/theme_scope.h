@@ -50,8 +50,11 @@ class ThemeScope : public Provider<Theme> {
 /// 取令牌是直接字段访问；需要跨越 `ctx` 生命周期使用主题值（存进成员、闭包捕获）的调用方显式
 /// 拷贝（`const Theme t = inherit_theme(ctx);` 不变）。
 ///
-/// 越界档的实测稳态帧成本为按引用档的 2.25–2.36 倍（`tools/bench/bench_theme.cpp`，Headless 探针方阵；
-/// 四次复跑，分配计数逐位相同）；默认族名落在小串优化容量内，故整值拷贝在缺省配置下零分配。
+/// 越界档的实测稳态帧成本为按引用档的 2.20–2.37 倍、每读 15 次堆分配（`tools/bench/bench_theme.cpp`，
+/// Headless 探针方阵，`sizeof(Theme)` = 984 档，七次复跑，分配计数逐位相同）。别把「默认族名落在小串
+/// 优化容量内」读成「缺省配置零分配」：Material 基线档的 `"sans-serif"` 是 10 字节、确在容量内，但风格轴
+/// 落地后 `Window` 每帧把**本机风格档**注入根环境，Windows 档的族名是 22 字节、已在容量外——不改任何
+/// 主题的 Windows 应用实测就是越界档（基准里那一行 scene 因此叫 `win_root_platform_family`）。
 ///
 /// @param ctx 当前构建上下文（由 layout/paint 传入）。
 /// @return 最近祖先注入的 Theme 的引用；未注入则指向 Material 基线档（与 `Theme::light()` 逐值相同，
