@@ -541,7 +541,7 @@ stdio JSON-RPC 2.0 语言服务，对 `au::<Type>Props{ .prop = ... }` 等声明
 | `bench_scroll` | `tools/bench/bench_scroll.cpp` | 滚动基准（确定性滚动序列；`app` 场景为自包含应用形态负载，`synthetic` 为对照组，`lazy` / `grid` 为隔离场景） |
 | `bench_win32_present` | `tools/bench/bench_win32_present.cpp` | Win32 上屏诊断基准（无 Win32 后端时跳过） |
 | `bench_idle_cpu` | `tools/bench/bench_idle_cpu.cpp` | 空闲 CPU 基准（无 Win32 后端时跳过） |
-| `bench_theme` | `tools/bench/bench_theme.cpp` | 主题读面基准（Headless 下才可运行；同一棵树跑「整值拷贝 / 按引用 / 不读」三形态 × 字体族名「小串内 / 越界」两档，输出一帧内主题解析次数、每次解析的堆分配与纳秒、换肤一帧耗时；非 CTest 断言） |
+| `bench_theme` | `tools/bench/bench_theme.cpp` | 主题读面基准（Headless 下才可运行；同一棵树跑「整值拷贝 / 按引用 / 不读」三形态 × 字体族名三档——小串内的 Material 基线档、注入的越界长族名档、以及缺省配置下窗口每帧注入的本机平台族名档，输出一帧内主题解析次数、每次解析的堆分配与纳秒、换肤一帧耗时；非 CTest 断言） |
 
 **自定义目标**
 
