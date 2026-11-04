@@ -185,12 +185,12 @@ namespace detail {
 
 /// @brief 取主题实例里某一枚令牌组的字段：属性行的活令牌回落点解析的唯一通道。
 ///
-/// 回落点写作 `.fallback<&ShapeScale::medium>()`，模板实参只带「组类型 + 成员指针」两项信息，
+/// 回落点写作 `.fallback<&ShapeScale::small>()`，模板实参只带「组类型 + 成员指针」两项信息，
 /// 故需要一条「组类型 → `Theme` 字段」的映射才能落到具体实例上。本函数按组类型直读字段，
 /// 与 `inherit_theme(ctx)` 的引用化口径相配（返回引用、零拷贝）；`ThemeExtensions` 因此
 /// **不构成**回落来源：它按类型查表、返回可空指针，成员指针无法在其上成立。
 /// @tparam Section 令牌组类型（`ColorRoles` / `TypeScale` / `ShapeScale` / `SpacingScale` /
-///         `MotionScale` / `CsdRoles` 之一；其余类型编译期即红）。
+///         `ControlMetrics` / `MotionScale` / `CsdRoles` 之一；其余类型编译期即红）。
 /// @param theme 主题实例。
 /// @return 该组在主题内的只读引用。
 template <typename Section>
@@ -200,9 +200,11 @@ template <typename Section>
     } else if constexpr (std::is_same_v<Section, TypeScale>) {
         return theme.type_scale;
     } else if constexpr (std::is_same_v<Section, ShapeScale>) {
-        return theme.shape;
+        return theme.shapes;
     } else if constexpr (std::is_same_v<Section, SpacingScale>) {
         return theme.spacing;
+    } else if constexpr (std::is_same_v<Section, ControlMetrics>) {
+        return theme.controls;
     } else if constexpr (std::is_same_v<Section, MotionScale>) {
         return theme.motion;
     } else if constexpr (std::is_same_v<Section, CsdRoles>) {
