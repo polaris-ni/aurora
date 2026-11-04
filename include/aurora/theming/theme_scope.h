@@ -57,6 +57,9 @@ class ThemeScope : public Provider<Theme> {
 ///       不经本兜底进入（判据同源：无宿主 / 无窗口的语境与「无窗口后端即回落 Material」同解）。
 /// @note Thread: 兜底那一份由函数内静态量承担，首次初始化由语言保证线程安全，读取路径无锁。
 [[nodiscard]] inline auto inherit_theme(const BuildContext &ctx) -> const Theme & {
+    // 兜底档本就该懒初始化：进程内单份、首次调用时线程安全地构造；提到命名空间作用域反而引入
+    // 跨 TU 初始化顺序依赖。
+    // NOLINTNEXTLINE(bugprone-dynamic-static-initializers)
     static const Theme LIGHT_FALLBACK = Theme::light();  // 无注入时的 Material 基线档（一份，进程内复用）
     const auto *t = ctx.environment<Theme>();
     return t != nullptr ? *t : LIGHT_FALLBACK;

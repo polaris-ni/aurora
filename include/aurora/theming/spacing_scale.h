@@ -1,5 +1,11 @@
 #pragma once
 
+// Windows SDK 的 rpcndr.h 把 small 定义为 char（经 ole2/oleauto 等头随 windows.h 带入）；
+// 本头的档位字段以 small 命名，宏在生效时会把字段声明改写成 `float char = 6.0F`。此处撤掉该 SDK 遗留宏。
+#ifdef small
+#undef small
+#endif
+
 namespace aurora {
 
 /// @brief 间距档位令牌：一套风格七档，单位逻辑 dp。

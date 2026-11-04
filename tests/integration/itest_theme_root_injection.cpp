@@ -251,11 +251,17 @@ AURORA_TEST_CASE(theme_axis_change_reaches_a_persistent_tree) {
 
     // 同值重推不置挂起位：宿主 attach 会原样再推一次当前 OS 档，稳态帧的布局缓存必须仍然有效
     // （否则每次 attach / 每次重复推送都白重排整子树）。
+#ifdef AURORA_ENABLE_LAYOUT_CACHE
     const std::size_t settled = probe->layout_surfaces.size();
     win->set_os_color_scheme(ColorScheme::Dark);
     win->set_theme_style(other);
     (void)win->present_root(node);
     AURORA_TEST_CHECK_EQ(probe->layout_surfaces.size(), settled);
+#else
+    // 布局缓存关闭时每帧都重排，「同值重推不白重排」的判据无从观察（本格前半的失效断言仍然成立）。
+    AURORA_TEST_TRACE(
+        "AURORA_ENABLE_LAYOUT_CACHE not enabled: every frame relayouts, skipping the cache-reuse assertion");
+#endif
 }
 
 AURORA_TEST_CASE(theme_axis_change_marks_the_whole_window_dirty) {
