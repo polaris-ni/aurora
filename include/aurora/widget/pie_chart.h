@@ -517,7 +517,7 @@ inline auto PieChart::deserialize_props(const Json &props) -> void {
 
 // 绘制顺序：扇区与扇内百分比标签 → 图例色块与名称 → 悬停值框（居中偏上并夹进控件边界）。
 inline auto PieChart::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void {
-    const Theme theme = inherit_theme(ctx);
+    const Theme &theme = inherit_theme(ctx);
     const Font &font = theme.type_scale.body_medium;
     const Point origin = bounds.origin;
     const Geometry &g = geom_;

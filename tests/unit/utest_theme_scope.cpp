@@ -1,15 +1,20 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/theming/theme_scope.h
 /// 测试说明: 覆盖 ThemeScope 的类型名与 Provider<Theme> 身份、静态值与共享 State 两种注入方式的取值、
-/// 经 State 换肤后取值的跟随性，以及 inherit_theme 在无注入环境下的兜底契约
+/// 经 State 换肤后取值的跟随性，以及 inherit_theme 的兜底契约（无注入回落明色基线、返回注入存储本身
+/// 而非副本、兜底快照进程内地址恒定）与 resolve_theme 兜底和它合一的口径
 
 #include <memory>
 #include <string>
+#include <type_traits>
 
 #include "aurora/core/color.h"
 #include "aurora/environment/build_context.h"
+#include "aurora/environment/environment.h"
 #include "aurora/state/state.h"
+#include "aurora/theming/color_scheme.h"
 #include "aurora/theming/theme.h"
+#include "aurora/theming/theme_query.h"
 #include "aurora/theming/theme_scope.h"
 #include "aurora/widget/placeholder.h"
 #include "framework/aurora_test.h"
@@ -49,11 +54,48 @@ AURORA_TEST_CASE(theme_scope_from_shared_state_tracks_updates) {
 }
 
 AURORA_TEST_CASE(inherit_theme_falls_back_to_light_without_injection) {
-    // 未注入主题时返回浅色主题，保证绘制路径永不因缺主题而崩溃。
+    // 未注入主题时返回明色基线，保证绘制路径永不因缺主题而崩溃。
     constexpr BuildContext ctx;
-    const Theme inherited = inherit_theme(ctx);
+    const Theme &inherited = inherit_theme(ctx);
     AURORA_TEST_CHECK_EQ(inherited.roles.surface, Theme::light().roles.surface);
     AURORA_TEST_CHECK_EQ(inherited.roles.on_surface, Theme::light().roles.on_surface);
+    // 兜底档位与 resolve_theme 合一：scheme 明说 Light，不再是不表态的 Unspecified。
+    AURORA_TEST_CHECK_EQ(inherited.scheme, ColorScheme::Light);
+}
+
+AURORA_TEST_CASE(inherit_theme_returns_the_injected_storage_not_a_copy) {
+    // 引用化契约：返回值就是环境里那枚注入值本身（地址同一），故读取零拷贝。
+    const Theme injected = Theme::dark();
+    Environment env;
+    env.set_local(injected);
+    const BuildContext ctx{.env = &env};
+
+    AURORA_TEST_CHECK_NOT_NULL(ctx.environment<Theme>());
+    // 类型面判据（不等地址比较）：读面交付的必须是 `const Theme &`——返回类型改回按值即本条红。
+    AURORA_TEST_CHECK((std::is_same_v<decltype(inherit_theme(ctx)), const Theme &>));
+    AURORA_TEST_CHECK(&inherit_theme(ctx) == ctx.environment<Theme>());
+    AURORA_TEST_CHECK_EQ(inherit_theme(ctx).roles.surface, Theme::dark().roles.surface);
+
+    // 换注入值后重新读取即吃到新值；旧引用不保证仍有效（std::any 替换会销毁旧对象），故不跨替换持有。
+    env.set(Theme::light());
+    AURORA_TEST_CHECK_EQ(inherit_theme(ctx).roles.surface, Theme::light().roles.surface);
+}
+
+AURORA_TEST_CASE(inherit_theme_fallback_is_one_stable_object_per_process) {
+    // 兜底快照地址恒定：不同 ctx、不同调用点拿到的都是同一枚函数内 static，不是每次新造。
+    constexpr BuildContext first;
+    const BuildContext second{.env = nullptr, .scale_factor = 2.0F};
+    AURORA_TEST_CHECK(&inherit_theme(first) == &inherit_theme(second));
+    AURORA_TEST_CHECK(inherit_theme(first) == Theme::light());
+}
+
+AURORA_TEST_CASE(resolve_theme_fallback_matches_inherit_theme_fallback) {
+    // 两条「无注入时给出哪份主题」的通路必须同值：旧偏差是 inherit_theme 兜 light()、
+    // resolve_theme 兜 with_defaults()，差在 scheme 位。
+    const Node root{Placeholder{}};
+    constexpr BuildContext ctx;
+    AURORA_TEST_CHECK(resolve_theme(root) == inherit_theme(ctx));
+    AURORA_TEST_CHECK_EQ(resolve_theme(root).scheme, ColorScheme::Light);
 }
 
 }  // namespace aurora::test_cases::utest_theme_scope

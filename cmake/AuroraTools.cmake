@@ -315,6 +315,10 @@ aurora_add_tool(bench_render tools/bench/bench_render.cpp)
 # 不依赖 examples/ 下任何 fixture 头；synthetic 为无应用形态的对照组。
 aurora_add_tool(bench_scroll tools/bench/bench_scroll.cpp)
 
+# 主题读面基准：同一棵树跑「整值拷贝 / 按引用 / 不读」三形态，产出一帧内主题解析次数、
+# 每次解析的堆分配与纳秒、换肤一帧耗时（非 CTest；Headless 后端下才可运行）。
+aurora_add_tool(bench_theme tools/bench/bench_theme.cpp)
+
 # Win32 上屏诊断基准：拆分拖选帧的 paint / GDI blit 成本（非 CTest；无 Win32 后端时直接跳过）。
 aurora_add_tool(bench_win32_present tools/bench/bench_win32_present.cpp)
 

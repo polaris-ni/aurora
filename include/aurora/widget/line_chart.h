@@ -660,7 +660,7 @@ inline auto LineChart::deserialize_props(const Json &props) -> void {
 /// @param bounds 控件全局矩形（局部几何经原点偏移换算为全局坐标）。
 /// @param ctx 构建上下文（继承主题字体 / 配色）。
 inline auto LineChart::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void {
-    const Theme theme = inherit_theme(ctx);
+    const Theme &theme = inherit_theme(ctx);
     const Font &font = theme.type_scale.body_medium;
     const Point origin = bounds.origin;
     const Geometry &g = geom_;

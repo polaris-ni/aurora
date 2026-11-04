@@ -177,7 +177,7 @@ auto themed = au::ThemeProvider{ theme, au::Button(au::ButtonProps{ .label = "�
 
 ### 10.1 色角色与类型安全扩展
 
-控件经 `inherit_theme(ctx)` 读主题：角色为直接字段访问，无哈希查找、无堆分配；控件未显式设色时回落对应角色（各控件契约见 [`specification/04-widget.md`](specification/04-widget.md)）。应用可整体覆写角色基准值，或以类型为键挂自定义令牌面：
+控件经 `inherit_theme(ctx)` 读主题：返回 `const Theme &`（注入存储本身，本次布局 / 绘制遍历内有效），快照按引用取用、字段直读，唯一一次间接在注入层的映射查表——无哈希查找、无堆分配；控件未显式设色时回落对应角色（各控件契约见 [`specification/04-widget.md`](specification/04-widget.md)）。应用可整体覆写角色基准值，或以类型为键挂自定义令牌面：
 
 ```cpp
 au::Theme theme = au::Theme::dark();

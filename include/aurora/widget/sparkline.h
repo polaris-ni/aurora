@@ -163,7 +163,9 @@ class Sparkline : public LeafWidget, public SparklineProps {
         if (!have || !(hi > lo)) {
             hi = lo + 1.0;
         }
-        const Theme theme = inherit_theme(ctx);
+        // 主题在本控件无消费点（sparkline 取内置 `chart_palette`，不读注册的 `ChartPalette` 扩展）：
+        // 此行只作 `ctx` 的显式消费位保留，按引用读取故零拷贝。
+        const Theme &theme = inherit_theme(ctx);
         const Color c = color.value_or(chart_palette(0));
         std::vector<Point> pts;
         pts.reserve(values.size());

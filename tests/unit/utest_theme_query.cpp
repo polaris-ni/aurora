@@ -1,12 +1,14 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/theming/theme_query.h
-/// 测试说明: 覆盖 resolve_theme 在无注入时回退默认主题、根处 ThemeScope 生效、嵌套 ThemeScope 的最近祖先优先、
-/// 深层子树继承祖先主题，以及目标不在树中时的兜底行为；并单独钉住兜底档恒 ≡ Material 基线（不随风格档探测漂移）
+/// 测试说明: 覆盖 resolve_theme 在无注入时回退明色基线（与 inherit_theme 的兜底合一）、根处 ThemeScope 生效、
+/// 嵌套 ThemeScope 的最近祖先优先、深层子树继承祖先主题，以及目标不在树中时的兜底行为；并单独钉住兜底档
+/// 恒 ≡ Material 基线（不随风格档探测漂移）
 
 #include <memory>
 #include <string>
 
 #include "aurora/core/color.h"
+#include "aurora/theming/color_scheme.h"
 #include "aurora/theming/theme.h"
 #include "aurora/theming/theme_query.h"
 #include "aurora/theming/theme_scope.h"
@@ -17,12 +19,14 @@
 namespace aurora::test_cases::utest_theme_query {
 
 AURORA_TEST_CASE(resolve_theme_without_injection_returns_defaults) {
-    // 树中无 ThemeProvider → 兜底根主题 Theme::with_defaults()。
+    // 树中无 ThemeProvider → 兜底明色基线 Theme::light()，与 inherit_theme 的无注入兜底合一
+    // （旧偏差：本函数曾兜 Theme::with_defaults()，两枚兜底差在 scheme 位）。
     Node root{Placeholder{}};
     const Theme resolved = resolve_theme(root);
-    AURORA_TEST_CHECK_EQ(resolved.roles.surface, Theme::with_defaults().roles.surface);
-    AURORA_TEST_CHECK_EQ(resolved.roles.primary, Theme::with_defaults().roles.primary);
-    AURORA_TEST_CHECK_EQ(resolved.roles.on_surface, Theme::with_defaults().roles.on_surface);
+    AURORA_TEST_CHECK_EQ(resolved.roles.surface, Theme::light().roles.surface);
+    AURORA_TEST_CHECK_EQ(resolved.roles.primary, Theme::light().roles.primary);
+    AURORA_TEST_CHECK_EQ(resolved.roles.on_surface, Theme::light().roles.on_surface);
+    AURORA_TEST_CHECK_EQ(resolved.scheme, ColorScheme::Light);
 }
 
 AURORA_TEST_CASE(resolve_theme_fallback_is_material_baseline_not_platform_style) {
@@ -67,11 +71,12 @@ AURORA_TEST_CASE(resolve_theme_descendant_inherits_ancestor) {
 }
 
 AURORA_TEST_CASE(resolve_theme_target_outside_tree_falls_back) {
-    // 目标不在树中：DFS 走完全树仍未命中，结果保持兜底默认主题（不崩溃、不返回脏值）。
+    // 目标不在树中：DFS 走完全树仍未命中，结果保持兜底明色基线（不崩溃、不返回脏值）。
     Node root{ThemeScope{Theme::dark(), Placeholder{}}};
     const Placeholder outsider;
     const Theme resolved = resolve_theme(root, outsider);
-    AURORA_TEST_CHECK_EQ(resolved.roles.surface, Theme::with_defaults().roles.surface);
+    AURORA_TEST_CHECK_EQ(resolved.roles.surface, Theme::light().roles.surface);
+    AURORA_TEST_CHECK(resolved == Theme::light());
 }
 
 }  // namespace aurora::test_cases::utest_theme_query

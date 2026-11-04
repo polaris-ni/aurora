@@ -538,7 +538,7 @@ inline auto ScatterChart::deserialize_props(const Json &props) -> void {
 
 // 绘制顺序：y 轴与网格 → x 轴数值刻度 → 数据点 → 图例 → 悬停准线/圆环/值框。
 inline auto ScatterChart::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void {
-    const Theme theme = inherit_theme(ctx);
+    const Theme &theme = inherit_theme(ctx);
     const Font &font = theme.type_scale.body_medium;
     const Point origin = bounds.origin;
     const Geometry &g = geom_;

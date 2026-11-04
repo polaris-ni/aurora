@@ -607,7 +607,7 @@ auto Widget::paint_content(Painter &p, const Rect &visual_box, const Rect &conte
 
         if (ring.size.width > 0.0F && ring.size.height > 0.0F) {
             // 焦点环取极性色角色（旧 "focus.ring" 令牌的类型化承接）。
-            const Theme theme = inherit_theme(ctx);
+            const Theme &theme = inherit_theme(ctx);
             p.draw_rounded_border(ring, ring_radius, ring_thickness, theme.roles.focus_ring);
             painted_focus_ring_ = true;  // 环像素落在自身盒外：标脏须按外扩盒，见 Widget::dirty_bounds()
         }

@@ -10,7 +10,8 @@ namespace aurora {
 /// @brief 解析 `target` 在 `root` 树中所处位置的生效主题（specification/07-environment-modifier.md §5.1）。
 ///
 /// 沿构建好的控件树自顶向下 DFS，遇到 `ThemeProvider` 即更新"当前生效主题"，返回指定 widget
-/// 在树中所处位置的**最近生效主题**。默认兜底为 `Theme::with_defaults()`。
+/// 在树中所处位置的**最近生效主题**。默认兜底与 `inherit_theme(ctx)` 的无注入兜底合一为明色基线
+/// `Theme::light()`（旧偏差：本函数曾兜 `Theme::with_defaults()`，与前者差在 `scheme` 位）。
 ///
 /// 兜底档恒 ≡ Material 基线：本通道不读风格档探测结果，平台风格只经 `Window` 根注入或树内
 /// `ThemeScope` 进入（与 `theme_scope.h` 的 `inherit_theme` 同口径，三处兜底同源）。
@@ -18,12 +19,12 @@ namespace aurora {
 /// @param root 遍历起点节点，DFS 从其控件（`root.widget()`）开始向下逐层展开。
 /// @param target 待查询的控件，按地址与树中控件比对，首次命中即取其当前生效主题并停止遍历。
 /// @return `target` 位置最近的生效主题；树中无 `ThemeProvider` 或 `target` 不在树内时为
-///         `Theme::with_defaults()`。
+///         `Theme::light()`。
 /// @note Thread: main-thread only
 /// @note Side-effects: none
 /// @note Rebuildable: no
 [[nodiscard]] inline auto resolve_theme(const Node &root, const Widget &target) -> Theme {
-    Theme result = Theme::with_defaults();
+    Theme result = Theme::light();
     bool found = false;
     std::function<void(const Widget &, Theme)> walk = [&](const Widget &w, Theme cur) -> void {
         Theme here = std::move(cur);
@@ -42,14 +43,14 @@ namespace aurora {
             }
         });
     };
-    walk(root.widget(), Theme::with_defaults());
+    walk(root.widget(), Theme::light());
     return result;
 }
 
 /// @brief 解析整树根所处位置的生效主题（便捷重载）。
 /// @param root 树根节点；以其自身控件为查询目标。
 /// @return 根节点位置的生效主题，即树中最外层 `ThemeProvider` 的值；无 Provider 时为
-///         `Theme::with_defaults()`。
+///         `Theme::light()`。
 [[nodiscard]] inline auto resolve_theme(const Node &root) -> Theme { return resolve_theme(root, root.widget()); }
 
 }  // namespace aurora

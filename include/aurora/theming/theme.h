@@ -77,7 +77,8 @@ struct Theme {
     /// @return 全部字段（含扩展）相等时为 true。
     [[nodiscard]] auto operator==(const Theme &other) const -> bool = default;
 
-    /// @brief 生成浅色主题（亦是未挂 `ThemeScope` 的树经 `inherit_theme` 拿到的兜底主题）。
+    /// @brief 生成浅色主题（亦是「无任何注入」时两条读取通路共用的兜底快照：`inherit_theme(ctx)` 与
+    ///        `resolve_theme(root, target)`）。
     /// @return `roles`/`csd` 取亮色列、`scheme` = `Light` 的主题。
     [[nodiscard]] static auto light() -> Theme {
         Theme t;

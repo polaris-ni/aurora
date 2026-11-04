@@ -50,11 +50,19 @@ class ThemeScope : public Provider<Theme> {
 /// 取令牌是直接字段访问；需要跨越 `ctx` 生命周期使用主题值（存进成员、闭包捕获）的调用方显式
 /// 拷贝（`const Theme t = inherit_theme(ctx);` 不变）。
 ///
+/// 越界档的实测稳态帧成本为按引用档的 2.25–2.36 倍（`tools/bench/bench_theme.cpp`，Headless 探针方阵；
+/// 四次复跑，分配计数逐位相同）；默认族名落在小串优化容量内，故整值拷贝在缺省配置下零分配。
+///
 /// @param ctx 当前构建上下文（由 layout/paint 传入）。
 /// @return 最近祖先注入的 Theme 的引用；未注入则指向 Material 基线档（与 `Theme::light()` 逐值相同，
 ///         进程内一份，无兜底失败态）。
 /// @note 兜底档恒 ≡ Material 基线：风格探测得到的平台档只经 `Window` 根注入或显式 `set_theme` 进入，
 ///       不经本兜底进入（判据同源：无宿主 / 无窗口的语境与「无窗口后端即回落 Material」同解）。
+/// @note 有效期：命中注入时返回值指向环境存储本身，**只在本次布局 / 绘制遍历内有效**——`Provider` 每次
+///       进入本层都按当前值重建子环境（旧存储随之析构），故不得跨帧或跨遍历持有本引用；需要留存就显式拷贝。
+/// @note 兜底合一：`theming/theme_query.h` 的 `resolve_theme` 无注入兜底与此处同一枚 `Theme::light()`
+///       （旧偏差：前者曾兜 `Theme::with_defaults()`，两枚只差 `scheme` 位；本主题的 `roles` / `csd` 已
+///       确定为明色列，再标 `Unspecified`（＝不表态、交给优先链下层）是自我矛盾的）。
 /// @note Thread: 兜底那一份由函数内静态量承担，首次初始化由语言保证线程安全，读取路径无锁。
 [[nodiscard]] inline auto inherit_theme(const BuildContext &ctx) -> const Theme & {
     // 兜底档本就该懒初始化：进程内单份、首次调用时线程安全地构造；提到命名空间作用域反而引入
