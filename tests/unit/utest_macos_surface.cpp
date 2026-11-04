@@ -35,6 +35,9 @@ AURORA_TEST_CASE(macos_surface_type_contract) {
     using A11yRootSetter = void (aurora::MacOSSurface::*)(aurora::Widget *);
     static_assert(std::is_same_v<decltype(&aurora::MacOSSurface::accessibility_provider), A11yProviderGetter>);
     static_assert(std::is_same_v<decltype(&aurora::MacOSSurface::set_accessibility_root), A11yRootSetter>);
+    // 截图同理：漏写即落回基类的 unsupported，macOS 的 OnScreenWindow 截图永远拿不到。
+    using CaptureMethod = aurora::Result<bool> (aurora::MacOSSurface::*)(const std::string &);
+    static_assert(std::is_same_v<decltype(&aurora::MacOSSurface::capture_window), CaptureMethod>);
 #else
     AURORA_TEST_SKIP("macOS backend builds only under AURORA_PLATFORM_MACOS && AURORA_BACKEND_MACOS; not enabled");
 #endif

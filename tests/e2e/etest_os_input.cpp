@@ -1,8 +1,9 @@
 // 测试类型: e2e
 // 目标单元: tools/include/e2e/os_input.h
-// 测试说明: 真机增强层——OS 级输入注入（Windows SendInput / PostMessage、X11 XTest）
-//           投递真实输入后断言控件状态与渲染像素，证明「OS 输入 → 窗口过程 → Aurora
-//           事件管线」整段接线（内核目标式注入只覆盖后半段）。
+// 测试说明: 真机增强层——OS 级输入注入（Windows SendInput / PostMessage、X11 XTest、
+//           macOS CGEvent）投递真实输入后断言控件状态与渲染像素，证明「OS 输入 → 窗口过程
+//           → Aurora 事件管线」整段接线（内核目标式注入只覆盖后半段）。macOS 的 CGEvent 腿
+//           须辅助功能授权，未授权如实记 skip 并指向默认证据探针 `aurora_verify_macos_os_input`。
 //
 // 独占执行约束（与「RUN_SERIAL 已移除、并行模型 = 进程隔离 + 资源虚拟化」的关系）：
 // SendInput 是全局注入、无法定向窗口，多窗口并存时必然串台——既有模型隔离的是资源，
@@ -40,7 +41,7 @@ namespace aurora::test_cases::etest_os_input {
 // helper 仅在注入通道编译的目标平台上有定义意义（其余平台全部用例走 skip 桩，
 // 未使用的匿名命名空间符号会触发 unused-function 告警）。X11 侧以 AURORA_BACKEND_X11
 // 收窄：后端关闭的 Linux 配置下 xtest 用例是编译期 skip 桩，不引用任何 helper。
-#if defined(AURORA_PLATFORM_WINDOWS) || \
+#if defined(AURORA_PLATFORM_WINDOWS) || defined(AURORA_PLATFORM_MACOS) || \
     (defined(AURORA_PLATFORM_UNIX) && !defined(AURORA_PLATFORM_MACOS) && defined(AURORA_BACKEND_X11))
 namespace {
 
@@ -48,9 +49,12 @@ constexpr std::string_view AURORA_OS_FRAME_TITLE = "aurora_e2e_os_input";
 
 /// @brief 注入目标 UI：TextInput（键盘目标，上）+ Checkbox（指针目标，下）。
 ///        Checkbox 走共享 `State<bool>` 观察翻转；TextInput 经 `on_changed` 捕获上屏文本。
+///        `input` 是同一 widget 的第二枚句柄：macOS 腿需要先用内核目标式注入把它置焦，
+///        再让 OS 键盘流打在已聚焦的控件上（焦点前提写进用例，不依赖「首个可聚焦件默认得焦」）。
 struct OsInputUi {
     au::State<bool> checked{false};  // 按值句柄：控件共用同一来源，翻转向全部句柄可见
     std::shared_ptr<std::string> typed = std::make_shared<std::string>();
+    au::Node input;  // TextInput 句柄（与树内那份共享同一 widget）
     au::Node root;
 };
 
@@ -60,6 +64,7 @@ struct OsInputUi {
     au::Node input{au::TextInput{au::TextInputProps{.value = ""}}};
     static_cast<au::TextInput &>(input.widget())  // NOLINT(*-pro-type-static-cast-downcast)
         .set_on_changed([captured = ui.typed](const std::string &v) { *captured = v; });
+    ui.input = input;  // Node 拷贝共享同一 widget：置焦与回读都落在树内那个实例上
     ui.root = au::Node{au::Column{std::move(input), au::Checkbox{ui.checked}}};
     return ui;
 }
@@ -98,7 +103,11 @@ auto require_os_input_policy() -> void {
 }
 
 /// @brief 语义盒（dp，窗口本地）中心 → 客户区物理像素点（× scale；与宿主 px/scale 互逆）。
-[[nodiscard]] auto center_px(const au::Rect &bounds_dp, float scale) -> au::Point {
+///
+/// macOS 腿用不上它：本腿要的是**屏幕全局**点，而纯 C++ 侧只有 `Surface::position()`（窗口
+/// **外框**原点，含标题栏），读不到客户区原点，故指针通道由 `.mm` 探针经 AppKit 协议面取矩形
+/// 后驱动（见 `specification/08-tooling.md` §8.2）；本头保留该换算供 Windows / X11 两腿使用。
+[[maybe_unused]] [[nodiscard]] auto center_px(const au::Rect &bounds_dp, float scale) -> au::Point {
     return au::Point{.x = (bounds_dp.origin.x + (bounds_dp.size.width / 2.0F)) * scale,
                      .y = (bounds_dp.origin.y + (bounds_dp.size.height / 2.0F)) * scale};
 }
@@ -136,7 +145,7 @@ auto require_os_input_policy() -> void {
 }  // namespace
 #endif  // helper 平台门控（Windows / UNIX 非 macOS 且 X11 后端）
 
-// ⚠️ 三个 AURORA_TEST_CASE 须无条件可见（AGENTS.md §5 测试纪律：#if 只能写在用例体内），
+// ⚠️ 四个 AURORA_TEST_CASE 须无条件可见（AGENTS.md §5 测试纪律：#if 只能写在用例体内），
 // 平台/后端差异全部收进用例体的 skip 桩分支——整体包裹会让 macOS 等不满足门控的平台
 // 注册表单边失踪（registry_integrity 红灯 + --run 筛空 exit 2）。
 
@@ -183,7 +192,7 @@ AURORA_TEST_CASE(sendinput_click_toggles_checkbox) {
 #else
     AURORA_TEST_SKIP(
         "this platform has no SendInput channel "
-        "(Windows only; Linux uses XTest, macOS is a known gap)");
+        "(Windows only; Linux uses XTest, macOS uses CGEvent, see cgevent_input_reaches_window)");
 #endif
 }
 
@@ -229,7 +238,8 @@ AURORA_TEST_CASE(postmessage_reaches_window_procedure) {
 #else
     AURORA_TEST_SKIP(
         "this platform has no PostMessage channel "
-        "(Windows only; Linux uses XTest, macOS is a known gap)");
+        "(Windows only; Linux uses XTest, macOS drives the same half-pipeline from the AppKit event queue "
+        "in the aurora_verify_macos_os_input probe)");
 #endif
 }
 
@@ -286,7 +296,70 @@ AURORA_TEST_CASE(xtest_server_input_reaches_window) {
 #else
     AURORA_TEST_SKIP(
         "this platform has no XTest channel "
-        "(Linux only; Windows uses SendInput/PostMessage, macOS is a known gap)");
+        "(Linux only; Windows uses SendInput/PostMessage, macOS uses CGEvent, "
+        "see cgevent_input_reaches_window)");
+#endif
+}
+
+// 用例四：macOS CGEvent 注入（真实 OS 输入流）→ 字符打进已聚焦的 TextInput + 像素变化。
+// 本腿须辅助功能授权：实测未授权时 `CGEventPost(kCGSessionEventTap/HID)` 与
+// `CGEventPostToPid(getpid(), …)` 两条路**一个事件都不送达且不报错**——「什么都没发生」
+// 不能当证据，故据 `cg_input_channel_available()` 带原因记 skip，指向 macOS 的默认证据探针
+// `aurora_verify_macos_os_input`（同进程 AppKit 事件队列注入，与 Win32 的 post_click 同侧，
+// 指针与键盘两腿均在其中取证）。焦点前提写成显式动作而非依赖「首个可聚焦件默认得焦」：
+// 内核目标式注入先把焦点给 TextInput，OS 键盘流才打在确定的控件上。
+AURORA_TEST_CASE(cgevent_input_reaches_window) {
+#ifdef AURORA_PLATFORM_MACOS
+    require_os_input_policy();
+    if (!e2e::backend_compiled(e2e::Backend::MacOS)) {
+        AURORA_TEST_SKIP("backend 'macos' not compiled into this build");
+    }
+    if (!e2e::cg_input_channel_available()) {
+        AURORA_TEST_SKIP(
+            "no accessibility grant: CGEvent posting is silently dropped on macOS (measured: neither "
+            "kCGSessionEventTap nor CGEventPostToPid delivers a single event); the default evidence for "
+            "this platform lives in the aurora_verify_macos_os_input probe");
+    }
+    OsInputUi ui = build_os_input_ui();
+    e2e::Session session = assemble_os_session(e2e::Backend::MacOS, ui.root);
+
+    const auto snapshot = session.semantic_snapshot();
+    AURORA_TEST_REQUIRE_TRUE(snapshot.ok());
+    const auto *input = e2e::find_semantic_node(snapshot.value(), AccessibilityRole::TextInput);
+    AURORA_TEST_REQUIRE_TRUE(input != nullptr);
+    const auto *box = e2e::find_semantic_node(snapshot.value(), AccessibilityRole::Checkbox);
+    AURORA_TEST_REQUIRE_TRUE(box != nullptr);
+    AURORA_TEST_CHECK_FALSE(box->node.state.checked);  // 起点已知：指针腿未跑过，状态不该是翻转过的位置
+
+    // 抬升 + 聚焦（本腿无落点守卫：纯 C++ 侧读不到客户区原点，见 os_input.h 本腿注释）。
+    session.surface().raise();
+    session.surface().focus_window();
+    AURORA_TEST_REQUIRE_TRUE(session.pump_until_settled().ok());
+
+    // 焦点前提：内核目标式注入置焦 TextInput，OS 键盘流才落在确定的控件上。
+    const auto focused = session.tap(ui.input);
+    AURORA_TEST_REQUIRE_TRUE(focused.ok());
+    AURORA_TEST_REQUIRE_TRUE(session.pump_until_settled().ok());
+
+    const auto before = session.read_pixels();
+    AURORA_TEST_REQUIRE_TRUE(before.ok());
+    const auto typed_text = e2e::cg_text("a");
+    AURORA_TEST_REQUIRE_TRUE(typed_text.ok());
+    const auto settled = session.pump_until_settled();
+    AURORA_TEST_REQUIRE_TRUE(settled.ok());
+    AURORA_TEST_CHECK_TRUE(*ui.typed == "a");  // 字符通道：OS 键盘流 → keyDown → TextInputEvent → 状态
+    const auto after = session.read_pixels();
+    AURORA_TEST_REQUIRE_TRUE(after.ok());
+    AURORA_TEST_CHECK_TRUE(
+        region_differs(before.value(), after.value(), input->node.bounds, session.surface().scale_factor()));
+    // 指针腿没跑过：CGEvent 键盘注入不该顺手动到 Checkbox（落点误投的形状会在这一条先亮）。
+    const auto *after_box = snapshot_node(session, AccessibilityRole::Checkbox);
+    AURORA_TEST_REQUIRE_TRUE(after_box != nullptr);
+    AURORA_TEST_CHECK_FALSE(after_box->node.state.checked);
+#else
+    AURORA_TEST_SKIP(
+        "this platform has no CGEvent channel "
+        "(macOS only; Windows uses SendInput/PostMessage, Linux uses XTest)");
 #endif
 }
 

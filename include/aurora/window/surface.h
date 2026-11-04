@@ -422,15 +422,16 @@ class Surface {
 
     /// @brief 导出真实屏幕窗口为 PNG（含 OS 装饰，尽力）。
     /// 默认实现：返回 unsupported 错误。Win32 家族（`Win32Surface` GDI 上屏 / `D3D11Surface` GPU 上屏，
-    /// 共用 `Win32Host` 宿主）、X11、GLFW 在 `AURORA_ENABLE_DEBUG` + 对应后端下覆写；
-    /// Headless/Wayland 保持 unsupported（Wayland 客户端无法截图，属安全限制）。本方法**始终声明**。
+    /// 共用 `Win32Host` 宿主）、X11、GLFW 在 `AURORA_ENABLE_DEBUG` + 对应后端下覆写；macOS 原生
+    /// `MacOSSurface` 截内容视图（不含标题栏，不经 WindowServer 抓屏）。Headless/Wayland 保持
+    /// unsupported（Wayland 客户端无法截图，属安全限制）。本方法**始终声明**。
     /// @param path 输出 PNG 文件路径。
     /// @return 截图写盘成功 true；后端未覆写时 false 及 unsupported 错误。
     [[nodiscard]] virtual auto capture_window(const std::string &path) -> Result<bool> {
         (void)path;
-        return Result<bool>{make_error(
-            ErrorCode::GeneralNotSupported,
-            "capture_window: not supported on this backend (only Win32/X11/GLFW provide OS window capture)")};
+        return Result<bool>{
+            make_error(ErrorCode::GeneralNotSupported,
+                       "capture_window: not supported on this backend (Win32/X11/GLFW/MacOS provide window capture)")};
     }
 
     /// @brief 已呈现帧数（诊断/测试用）：真实后端在各自 `present()` 上屏后自增，

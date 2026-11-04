@@ -296,6 +296,29 @@ if (AURORA_BUILD_VERIFY_TOOLS)
         target_compile_options(aurora_verify_macos_surface PRIVATE -fobjc-arc)
         list(APPEND _aurora_verify_targets aurora_verify_macos_surface)
 
+        # ---- macOS 无障碍协议面（语义树 → MacOSAxBridge → AppKit NSAccessibility）----
+        # 建窗经 E2E 内核（与 etest 同一装配），判据取 AppKit 查询路径的投影本体：角色/名称
+        # 逐类命中、屏幕矩形非空且命中测试回指同一元素、press 动作往返后值重投影、桥的惰性激活
+        # 时机。已持有辅助功能授权时另跑 `e2e::ax_collect` 客户端加强腿，未授权如实记 SKIP——
+        # 实测未授权的客户端属性是退化的（跨进程 -25211，同进程返回 success 但逐元素角色塌成
+        # AXApplication），拿它判绿等于假绿。
+        aurora_add_verify_probe(aurora_verify_macos_ax "${_aurora_verify_dir}/macos_ax_live_probe.mm"
+                OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED ON)
+        target_compile_options(aurora_verify_macos_ax PRIVATE -fobjc-arc)
+        list(APPEND _aurora_verify_targets aurora_verify_macos_ax)
+
+        # ---- macOS OS 级输入注入（AppKit 事件队列 + CGEvent 加强腿的自我申报）----
+        # 建窗经 E2E 内核（Normal 档：OS 输入不打到隐藏窗口），判据取同进程 `[NSApp postEvent:]`
+        # 驱动的整段管线：队列 → `sendEvent:` → 内容视图 → Surface 翻译 → 派发/命中 → 控件状态
+        # 翻转并落进新帧像素；指针往返两次、键盘经 `characters:` 上屏后由 `on_changed` 回读。
+        # CGEvent 那一腿（真实 OS 输入流）须辅助功能授权：实测未授权时 `CGEventPost` 与
+        # `CGEventPostToPid` 一个事件都不送达且不报错，故本探针把「通道自我申报不可用」与
+        # 「静默无效」固定成判据，已授权环境改跑真注入。
+        aurora_add_verify_probe(aurora_verify_macos_os_input "${_aurora_verify_dir}/macos_os_input_live_probe.mm"
+                OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED ON)
+        target_compile_options(aurora_verify_macos_os_input PRIVATE -fobjc-arc)
+        list(APPEND _aurora_verify_targets aurora_verify_macos_os_input)
+
         # ---- macOS 最近文档 OS 投影（NSDocumentController + 独立取证）----
         # 探针不建窗口（顺带覆盖无宿主进程的自举通路），用 `recentDocumentURLs` 独立核对
         # 投影条目出现 / 重复投影去重 / 撤销后清空，并核对能力位与应用内 store 不受投影影响。

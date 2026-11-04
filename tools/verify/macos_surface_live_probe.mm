@@ -8,13 +8,18 @@
 //   ✅ `set_position` / `position` 的物理像素往返（左上原点 / y 向下）；
 //   ✅ `display_id` 与 `app::list_displays` / `primary_display` / `display_containing`
 //      的同一 id 空间（CGDirectDisplayID）；
-//   ✅ `os_color_scheme()` 对 NSApp 外观切换的实时跟随（Dark / Aqua 双向）。
+//   ✅ `os_color_scheme()` 对 NSApp 外观切换的实时跟随（Dark / Aqua 双向）；
+//   ✅ `capture_window` 的内容视图缓存截图：PNG 可解码、像素尺寸等于帧缓冲、含已绘像素。
+//   ✅ 装饰档位映射：`Borderless` 保住原生边缘缩放——`isResizable` 为真、内容区铺满窗框（顶边
+//      内缩 0）、三枚标准窗钮隐藏、经 AppKit 队列投递的右下角拖拽真的改了尺寸，且改后尺寸能从
+//      `Surface::size()` 读回；`resizable=false` 与 `Frameless` 两型实测均无缩放能力。
 //
 //   ❌ 本探针不验收鼠标/键盘事件翻译、输入法、系统拖放、光标形状：前两者需真实人机
 //      输入（见 macos_cursor_live_probe / macos_drag_live_probe），后两者各有专用探针。
-//   ❌ 不经像素截图证明「屏幕上真的显示了」：AppKit 的 `displayIfNeeded` 已同步提交到
-//      WindowServer，但背景会话下 `screencapture` 不可用；本探针证明的是提交前的帧缓冲
-//      内容与提交调用成功。
+//      装饰档位段投递的拖拽只驱动**原生窗框**的缩放，不经过控件派发链，故不构成事件翻译证据。
+//   ❌ 不经 WindowServer 抓屏证明「屏幕上真的显示了」：AppKit 的 `displayIfNeeded` 已同步
+//      提交到 WindowServer，但背景会话下 `screencapture` 不可用；`capture_window` 取的是视图
+//      自身的缓存绘制结果，本探针证明的是提交前的帧缓冲内容与提交调用成功。
 //
 // 构建：
 //   cmake -S . -B build-macos -DAURORA_BACKEND_MACOS=ON -DAURORA_BUILD_VERIFY_TOOLS=ON
@@ -46,10 +51,12 @@
 
 #import <AppKit/AppKit.h>
 
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "verify_print.h"
@@ -82,6 +89,78 @@ auto fmt_size(aurora::Size s) -> std::string { return fmt_float(s.width) + "x" +
 auto fmt_point(aurora::Point p) -> std::string { return "(" + fmt_float(p.x) + "," + fmt_float(p.y) + ")"; }
 
 auto nearly(float a, float b) -> bool { return std::fabs(a - b) <= 1.0F; }
+
+auto fmt_nsize(NSSize s) -> std::string {
+    return fmt_float(static_cast<float>(s.width)) + "x" + fmt_float(static_cast<float>(s.height));
+}
+
+/// @brief 抽干本进程 AppKit 事件队列若干轮（与 OS 输入探针同一条队列腿）。
+auto pump_queue(int rounds) -> void {
+    for (int i = 0; i < rounds; ++i) {
+        NSEvent *event = [NSApp nextEventMatchingMask:NSEventMaskAny
+                                            untilDate:[NSDate dateWithTimeIntervalSinceNow:0.005]
+                                               inMode:NSDefaultRunLoopMode
+                                              dequeue:YES];
+        if (event != nil) {
+            [NSApp sendEvent:event];
+        }
+    }
+}
+
+/// @brief 向窗口右下角投递一次原生边缘拖拽（按下 + steps 段拖动 + 抬起），用于驱动窗框缩放。
+///
+/// 全部事件**先入队、后泵送**：可缩放窗框的 live resize 会在 `sendEvent:` 内进入 AppKit 窗框
+/// 视图的嵌套跟踪循环，逐条「投递—泵送」让主线程卡在第一次 `sendEvent:` 里等后续事件（实测挂死）。
+/// @param window 目标窗口。
+/// @param steps 拖拽段数。
+/// @param step_pt 每段位移（AppKit point，作用于窗口自身坐标系）。
+auto post_corner_drag(NSWindow *window, int steps, double step_pt) -> void {
+    // 先把窗口置于序上并泵空队列，再投拖拽。实测前提是这两件事而不是 key 位：不这样做时同一份
+    // 投递一次改尺都不发生，而改尺成功的那一行 `isKeyWindow` 在本机读到过 0 也读到过 1（观测行见下），
+    // 故 key 读数只作观测、不进判据。这与 OS 输入探针的 priming 同族，但实测该语义没有挡住本腿改尺。
+    [window makeKeyAndOrderFront:nil];
+    pump_queue(60);
+    const NSRect frame = [window frame];
+    // 起笔取屏幕坐标的窗框右下角（与本库 `position()` 的左上原点口径无关，这里是 AppKit 的
+    // 左下原点屏幕系），再换算进窗口自身坐标系——直接按约定手算会把拖拽点静默投偏。
+    const NSPoint screen_corner = NSMakePoint(frame.origin.x + frame.size.width - 3.0, frame.origin.y + 2.0);
+    const NSRect local = [window convertRectFromScreen:NSMakeRect(screen_corner.x, screen_corner.y, 1.0, 1.0)];
+    const NSPoint start = NSMakePoint(NSMidX(local), NSMidY(local));
+    AURORA_LOG_RAW("verify", "drag geometry: frame=", fmt_nsize(frame.size), "@", fmt_float(frame.origin.x), ",",
+                   fmt_float(frame.origin.y), " screen_corner=(", fmt_float(screen_corner.x), ",",
+                   fmt_float(screen_corner.y), ") local=(", fmt_float(start.x), ",", fmt_float(start.y),
+                   ") visible=", [window isVisible] != 0 ? "1" : "0", " key=", [window isKeyWindow] != 0 ? "1" : "0",
+                   "\n");
+    // 时间戳基准取系统开机秒（AppKit 事件时间戳的同源时基）而非 `[NSApp currentEvent]`：队列此刻
+    // 可能为空，currentEvent 为 nil 会把整串拖拽压到 0.0 附近，AppKit 的窗框跟踪逻辑按时间戳判序，
+    // 实测那种形态下一个事件都不生效。
+    const NSTimeInterval base = static_cast<NSTimeInterval>([NSProcessInfo processInfo].systemUptime);
+
+    const auto post = [&](NSEventType type, NSPoint at, NSInteger number, NSTimeInterval when, CGFloat pressure) {
+        NSEvent *event = [NSEvent mouseEventWithType:type
+                                            location:at
+                                       modifierFlags:0
+                                           timestamp:when
+                                        windowNumber:[window windowNumber]
+                                             context:nil
+                                         eventNumber:number
+                                          clickCount:1
+                                            pressure:pressure];
+        if (event != nil) {
+            [NSApp postEvent:event atStart:NO];
+        }
+    };
+    post(NSEventTypeLeftMouseDown, start, 1, base + 0.01, 1.0);
+    for (int i = 1; i <= steps; ++i) {
+        const double moved = static_cast<double>(i) * step_pt;
+        post(NSEventTypeLeftMouseDragged, NSMakePoint(start.x + moved, start.y - moved), static_cast<NSInteger>(10 + i),
+             base + 0.02 * static_cast<double>(i), 1.0);
+    }
+    const double total = static_cast<double>(steps) * step_pt;
+    post(NSEventTypeLeftMouseUp, NSMakePoint(start.x + total, start.y - total), 99,
+         base + 0.02 * static_cast<double>(steps + 1), 0.0);
+    pump_queue(400);
+}
 
 /// @brief 取帧缓冲 (x, y) 处的 RGBA 并与 expected 比；坐标越界判不符，绝不越读。
 /// @param frame 整帧字节（`Painter` 缓冲的视图，空视图 = 数据不可用）。
@@ -184,6 +263,68 @@ auto main() -> int {
         check(pixel_is(frame, fbw, fbw - 1, fbh - 1, clear), "clear color at bottom-right",
               "rgba(" + aurora_verify::format_int(clear.r) + "," + aurora_verify::format_int(clear.g) + "," +
                   aurora_verify::format_int(clear.b) + "," + aurora_verify::format_int(clear.a) + ")");
+
+        // ---- 截图：内容视图缓存位图 → PNG（DEBUG 门控，不需录屏授权）----
+#ifdef AURORA_ENABLE_DEBUG
+        NSString *capture_ns =
+            [NSTemporaryDirectory() stringByAppendingPathComponent:@"aurora_macos_surface_capture.png"];
+        const std::string capture_path = [capture_ns UTF8String] != nullptr ? std::string([capture_ns UTF8String]) : "";
+        auto capture = surface.capture_window(capture_path);
+        check(capture.ok() && capture.value(), "capture_window succeeds", capture ? "" : capture.error().message);
+        NSFileManager *fm = [NSFileManager defaultManager];
+        const bool capture_exists = [fm fileExistsAtPath:capture_ns] == YES;
+        check(capture_exists, "captured PNG exists");
+        unsigned long long capture_bytes = 0;
+        if (capture_exists) {
+            NSDictionary<NSFileAttributeKey, id> *attrs = [fm attributesOfItemAtPath:capture_ns error:nil];
+            if (attrs != nil) {
+                capture_bytes = [attrs fileSize];
+            }
+        }
+        check(capture_bytes > 0, "captured PNG non-empty", aurora_verify::format_uint(capture_bytes));
+        NSBitmapImageRep *decoded = nil;
+        if (capture_exists) {
+            NSData *png = [NSData dataWithContentsOfFile:capture_ns];
+            decoded = (png != nil) ? [[NSBitmapImageRep alloc] initWithData:png] : nil;
+        }
+        check(decoded != nil, "captured PNG decodes");
+        if (decoded != nil) {
+            const NSInteger dw = [decoded pixelsWide];
+            const NSInteger dh = [decoded pixelsHigh];
+            const bool size_ok = dw == static_cast<NSInteger>(std::lround(static_cast<double>(fb1.width))) &&
+                                 dh == static_cast<NSInteger>(std::lround(static_cast<double>(fb1.height)));
+            check(size_ok, "captured PNG size == framebuffer",
+                  aurora_verify::format_int(static_cast<long long>(dw)) + "x" +
+                      aurora_verify::format_int(static_cast<long long>(dh)) + " vs " + fmt_size(fb1));
+            // 红色矩形是逻辑 16×16、位于视图左上角；缓存位图的 y 轴朝向由 AppKit 决定，故在
+            // 四角与中心各取一点，任一点命中即证明缓存的是真实绘制结果而非空白。
+            // 判据取「红主导」而非绝对 rgb：缓存位图带显示器的广色域标签，转回 deviceRGB 后纯红
+            // 会落在 (240,74,45) 一类的偏移值上，色域适配不该让真实的绘制结果判负。
+            // 取样点用 std::array 承载而非 C 数组：C 数组的非常量下标即门禁里的 unchecked
+            // container access 命中面，range-for + pair 读起来也更贴「点集」这一语义。
+            const std::array<std::pair<NSInteger, NSInteger>, 5> samples{
+                {{8, 8}, {8, dh - 9}, {dw - 9, 8}, {dw - 9, dh - 9}, {dw / 2, dh / 2}}};
+            bool red_seen = false;
+            for (const auto &[sample_x, sample_y] : samples) {
+                if (sample_x < 0 || sample_y < 0 || sample_x >= dw || sample_y >= dh) {
+                    continue;
+                }
+                NSColor *c = [[decoded colorAtX:sample_x
+                                              y:sample_y] colorUsingColorSpace:[NSColorSpace deviceRGBColorSpace]];
+                if (c != nil && [c redComponent] > 0.7F && [c redComponent] - [c greenComponent] > 0.4F &&
+                    [c redComponent] - [c blueComponent] > 0.4F) {
+                    red_seen = true;
+                    break;
+                }
+            }
+            check(red_seen, "captured PNG contains the drawn red rect");
+        }
+        if (capture_exists) {
+            (void)[fm removeItemAtPath:capture_ns error:nil];
+        }
+#else
+        AURORA_LOG_RAW("verify", "SKIP  capture_window (AURORA_ENABLE_DEBUG off)\n");
+#endif
 
         // ---- 几何：set_size 同步生效，下一帧按新尺寸重建 ----
         surface.set_size(aurora::Size{.width = 420.0F, .height = 300.0F});
@@ -296,6 +437,81 @@ auto main() -> int {
         surface.set_visible(true);  // 幂等
         check(surface.is_visible(), "set_visible(true) idempotent");
         surface.set_window_state_handler({});
+
+        // ---- 装饰档位映射：Borderless 保留原生边缘缩放、Frameless 完全无装饰 ----
+        // 判据分两路：`isResizable` 证「掩码映射对了」，真投递的拖拽证「原生窗框视图确实把这次
+        // 拖拽变成了改尺」，改尺后还要能从 `Surface::size()` 读回（框架的尺寸链跟得上）。
+        aurora::WindowOptions bl_opts;
+        bl_opts.size = aurora::Size{.width = 300.0F, .height = 200.0F};
+        bl_opts.title = "Aurora borderless resize probe";
+        bl_opts.style.decoration = aurora::DecorationPolicy::Borderless;
+        auto bl_result = aurora::create_window(aurora::MacOSOptions{bl_opts});
+        check(bl_result.ok(), "borderless window created", bl_result.ok() ? "" : bl_result.error().message);
+        if (bl_result.ok()) {
+            auto bl_win = std::move(bl_result.value());
+            aurora::Surface &bl = bl_win->surface();
+            auto *bl_window = (__bridge NSWindow *)bl.native_handle();
+            check(bl_window != nil, "borderless window bridges to NSWindow");
+            check([bl_window isResizable] != 0, "borderless keeps the native resize capability");
+            const NSRect bl_frame = [bl_window frame];
+            const NSRect bl_content = [bl_window contentRectForFrameRect:bl_frame];
+            check(nearly(static_cast<float>(bl_content.size.width), static_cast<float>(bl_frame.size.width)) &&
+                      nearly(static_cast<float>(bl_content.size.height), static_cast<float>(bl_frame.size.height)),
+                  "borderless content rect fills the frame",
+                  fmt_nsize(bl_frame.size) + " vs " + fmt_nsize(bl_content.size));
+            for (const auto &slot : {std::pair<NSWindowButton, const char *>{NSWindowCloseButton, "close"},
+                                     std::pair<NSWindowButton, const char *>{NSWindowMiniaturizeButton, "miniaturize"},
+                                     std::pair<NSWindowButton, const char *>{NSWindowZoomButton, "zoom"}}) {
+                NSButton *button = [bl_window standardWindowButton:slot.first];
+                check(button == nil || [button isHidden] != 0,
+                      std::string{"borderless hides the "} + slot.second + " button");
+            }
+
+            const NSSize size_before = [bl_window frame].size;
+            const aurora::Size logical_before = bl.size();
+            post_corner_drag(bl_window, 12, 8.0);
+            bl.poll_platform_events();
+            const NSSize size_after = [bl_window frame].size;
+            check(size_after.width != size_before.width || size_after.height != size_before.height,
+                  "borderless corner drag really resizes the window",
+                  fmt_nsize(size_before) + " -> " + fmt_nsize(size_after));
+            const aurora::Size logical_after = bl.size();
+            check(logical_after.width != logical_before.width || logical_after.height != logical_before.height,
+                  "Surface::size() follows the native resize",
+                  fmt_size(logical_before) + " -> " + fmt_size(logical_after));
+
+            // 固定尺寸的 Borderless 不得因本档获得缩放能力：缩放来源只有 `style.resizable`。
+            aurora::WindowOptions bl_fixed_opts = bl_opts;
+            bl_fixed_opts.style.resizable = false;
+            bl_fixed_opts.title = "Aurora borderless fixed probe";
+            auto bl_fixed = aurora::create_window(aurora::MacOSOptions{bl_fixed_opts});
+            check(bl_fixed.ok(), "borderless fixed-size window created", bl_fixed.ok() ? "" : bl_fixed.error().message);
+            if (bl_fixed.ok()) {
+                auto fixed_win = std::move(bl_fixed.value());
+                auto *fixed_window = (__bridge NSWindow *)fixed_win->surface().native_handle();
+                check(fixed_window != nil && [fixed_window isResizable] == 0,
+                      "borderless with resizable=false stays non-resizable");
+            }
+        }
+
+        aurora::WindowOptions fl_opts;
+        fl_opts.size = aurora::Size{.width = 300.0F, .height = 200.0F};
+        fl_opts.title = "Aurora frameless probe";
+        fl_opts.style.decoration = aurora::DecorationPolicy::Frameless;
+        auto fl_result = aurora::create_window(aurora::MacOSOptions{fl_opts});
+        check(fl_result.ok(), "frameless window created", fl_result.ok() ? "" : fl_result.error().message);
+        if (fl_result.ok()) {
+            auto fl_win = std::move(fl_result.value());
+            auto *fl_window = (__bridge NSWindow *)fl_win->surface().native_handle();
+            check(fl_window != nil, "frameless window bridges to NSWindow");
+            // 契约口径：`Frameless` = 完全无装饰、无缩放边框，故不得因本提案放宽。
+            check([fl_window isResizable] == 0, "frameless keeps no resize capability");
+            const NSSize before = [fl_window frame].size;
+            post_corner_drag(fl_window, 12, 8.0);
+            const NSSize after = [fl_window frame].size;
+            check(after.width == before.width && after.height == before.height, "frameless corner drag changes nothing",
+                  fmt_nsize(before) + " -> " + fmt_nsize(after));
+        }
 
         // ---- Close 语义：close 置位、cancel_close 可撤销 ----
         surface.close();

@@ -3,7 +3,7 @@
 // 测试说明: 真实后端上对代表性控件做语义树断言（角色/名称/几何/状态/可执行动作），
 //           并与像素断言并列独立取证；平台通道用例验证「语义树 → 平台桥 → 平台投影」
 //           整条链路确实到达平台（Windows 走 UIA 客户端，Linux 走 AT-SPI 客户端，
-//           macOS 通道未实现为已知缺口）。像素读回不可用按期望集口径记账。
+//           macOS 走 AX 同进程客户端）。像素读回不可用按期望集口径记账。
 
 #include <memory>
 #include <string>
@@ -21,6 +21,7 @@
 #include "aurora/widget/text_input.h"
 #include "e2e/atspi_client.h"
 #include "e2e/harness.h"
+#include "e2e/macos_ax_client.h"
 #include "e2e/uia_client.h"
 #include "e2e_expect.h"
 #include "framework/aurora_test.h"
@@ -159,8 +160,8 @@ auto verify_semantic_snapshot(const e2e::Session &session) -> void {
 /// @brief 矩阵取值表：全部真实窗口后端（未编译后端留在表内，是「期望集外 → 跳过」
 ///        的常态样本；`Headless` 不在表内——语义断言面向真实窗口上屏链路）。
 [[nodiscard]] auto a11y_backend_values() -> std::vector<e2e::Backend> {
-    return {e2e::Backend::Win32, e2e::Backend::D3D11,   e2e::Backend::Glfw,
-            e2e::Backend::X11,   e2e::Backend::Wayland, e2e::Backend::Wgpu};
+    return {e2e::Backend::Win32,   e2e::Backend::D3D11, e2e::Backend::Glfw, e2e::Backend::X11,
+            e2e::Backend::Wayland, e2e::Backend::Wgpu,  e2e::Backend::MacOS};
 }
 
 /// @brief 取值名生成器：直接用后端短名，使报告里一眼看出失败的是哪个后端。
@@ -184,7 +185,8 @@ AURORA_TEST_P(A11yBackends, semantic_snapshot_matches_widgets) {
 
 // 用例二（按平台选通道）：平台桥投影必须与进程内快照同词汇到达平台。
 // Windows：UIA 客户端（win32 / d3d11 共用 Win32Host 桥）；Linux：AT-SPI 客户端
-// （x11 / wayland 共用 AtspiBridge，无会话总线为合法永久降级）；macOS：通道未实现。
+// （x11 / wayland 共用 AtspiBridge，无会话总线为合法永久降级）；macOS：AX 同进程
+// 客户端（原生 `MacOSSurface` 的 NSAccessibility 桥，查询即激活时机）。
 AURORA_TEST_P(A11yBackends, platform_bridge_projects_semantics) {
     const e2e::Backend backend = param();
     if (!e2e::backend_compiled(backend)) {
@@ -303,11 +305,68 @@ AURORA_TEST_P(A11yBackends, platform_bridge_projects_semantics) {
     AURORA_TEST_REQUIRE_TRUE(input != nullptr);
     AURORA_TEST_CHECK_FALSE(input->name.empty());
     AURORA_TEST_REQUIRE_TRUE(find_atspi(AccessibilityRole::Text, AURORA_A11Y_TEXT_NAME) != nullptr);
+#elif defined(AURORA_PLATFORM_MACOS)
+    if (backend != e2e::Backend::MacOS) {
+        AURORA_TEST_SKIP(
+            "this backend is not wired to the AppKit accessibility bridge "
+            "(AX channel covers the native macOS surface only)");
+    }
+    if (!e2e::ax_channel_available()) {
+        AURORA_TEST_SKIP(
+            "this process is not an authorized AX client (Accessibility grant absent; untrusted "
+            "queries return degraded app-level attributes) -- default macOS evidence is taken on "
+            "the AppKit protocol side by aurora_verify_macos_ax");
+    }
+    au::Node root = build_a11y_column();
+    e2e::Session session = assemble_a11y_session(backend, root);
+
+    std::vector<e2e::AxSemanticNode> nodes;
+    const auto collected = e2e::ax_collect(
+        std::string{AURORA_A11Y_FRAME_TITLE}, nodes, [&session] { session.surface().wait_events(20.0); }, 15000);
+    if (auto *ctx = testing::current_context(); ctx != nullptr) {
+        ctx->add_note("ax_nodes=" + std::to_string(nodes.size()) +
+                      (collected ? std::string{" ok"} : " " + collected.error().message));
+    }
+    AURORA_TEST_REQUIRE_TRUE(collected.ok());
+    AURORA_TEST_REQUIRE_TRUE(!nodes.empty());
+
+    auto find_ax = [&nodes](AccessibilityRole role, std::string_view name) -> const e2e::AxSemanticNode * {
+        for (const auto &node : nodes) {
+            if (node.role == role && (name.empty() || node.name == name)) {
+                return &node;
+            }
+        }
+        return nullptr;
+    };
+
+    const auto *button = find_ax(AccessibilityRole::Button, AURORA_A11Y_BUTTON_NAME);
+    AURORA_TEST_REQUIRE_TRUE(button != nullptr);
+    AURORA_TEST_CHECK_TRUE(button->press);
+    AURORA_TEST_CHECK_TRUE(button->rect_ok);
+
+    const auto *checkbox = find_ax(AccessibilityRole::Checkbox, AURORA_A11Y_CHECKBOX_LABEL);
+    AURORA_TEST_REQUIRE_TRUE(checkbox != nullptr);
+    AURORA_TEST_CHECK_TRUE(checkbox->press);
+    AURORA_TEST_CHECK_TRUE(checkbox->value_present);
+
+    const auto *slider = find_ax(AccessibilityRole::Slider, AURORA_A11Y_SLIDER_LABEL);
+    AURORA_TEST_REQUIRE_TRUE(slider != nullptr);
+    AURORA_TEST_CHECK_TRUE(slider->value_present);
+    AURORA_TEST_CHECK_TRUE(slider->rect_ok);
+
+    const auto *input = find_ax(AccessibilityRole::TextInput, "");
+    AURORA_TEST_REQUIRE_TRUE(input != nullptr);
+    AURORA_TEST_CHECK_TRUE(input->value_present);
+    AURORA_TEST_CHECK_FALSE(input->name.empty());
+
+    const auto *text = find_ax(AccessibilityRole::Text, AURORA_A11Y_TEXT_NAME);
+    AURORA_TEST_REQUIRE_TRUE(text != nullptr);
+    AURORA_TEST_CHECK_TRUE(text->rect_ok);
 #else
     static_cast<void>(backend);
     AURORA_TEST_SKIP(
-        "semantics channel not implemented on this platform (macOS AX is a known gap, "
-        "see specification/08-tooling.md section 8.2)");
+        "semantics channel not implemented on this platform (see specification/08-tooling.md "
+        "section 8.2 for the per-platform channel matrix)");
 #endif
 }
 

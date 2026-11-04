@@ -10,6 +10,9 @@
 //     `PostMessage`（定向投递——不经光标/焦点系统，直达窗口过程）；
 //   - X11：XTest 扩展（经 X 服务器合成真实输入事件；dlopen libX11/libXtst 免构建依赖，
 //     与 `aurora_verify_x11_ime_live` 探针同款）；
+//   - macOS：CGEvent（`CGEventPost(kCGSessionEventTap)` 走真实 OS 输入流，**须辅助功能
+//     授权**；未授权时该路一个事件都不送达，故为「已授权的加强腿」，默认证据由
+//     `aurora_verify_macos_os_input` 探针在 AppKit 事件队列注入上取证）；
 //   - WASM：CDP `Input.dispatch*`（浏览器外部驱动，见 tools/verify/wasm_input_cdp_drive.mjs，
 //     真实浏览器 opt-in，与 a11y CDP 通道同口径）。
 //
@@ -27,11 +30,16 @@
 //      故注入前先 best-effort 抬升目标窗口、再按屏幕落点复核命中的确是目标；桌面被其他
 //      程序占用且前台锁定拒绝夺焦时带原因拒绝，用例侧据此记 skip——环境竞争不是管线故障
 //      （同坐标的 `post_click` 通道仍独立取证）。
+//   5. **用例侧不得调用 `Surface::set_event_handler`**：该槽是宿主的派发接线本身，写入即
+//      **覆盖** `WindowHost` 装上的分发器（实测：装上计数 handler 后窗口存活、事件仍被
+//      出队，但控件状态纹丝不动——派发落空）。要读派发结果请用**外部可读的实值**：控件
+//      语义状态（`Session::semantic_snapshot`）与帧像素（`Session::read_pixels`）。
 //
 // 本头与 harness.h 同纪律：只依赖 aurora 公共头、不含测试框架宏；通道缺失（平台不支持、
-// dlopen 失败）以 `Result` 错误或探测函数如实上报，**不是构建失败**。覆盖面与 a11y 通道
-// 同口径：win32/d3d11（共用 Win32Host 输入管线，以 win32 为代表）与 x11；GLFW 不暴露
-// 原生句柄（`native_handle()` 为基类空实现）、Wayland 无 XTest 等价物，均记为已知缺口。
+// dlopen 失败、系统授权未授予）以 `Result` 错误或探测函数如实上报，**不是构建失败**。
+// 覆盖面与 a11y 通道同口径：win32/d3d11（共用 Win32Host 输入管线，以 win32 为代表）与 x11，
+// macOS 以 macos 后端为代表（CGEvent 加强腿需授权；无授权时由探针在 AppKit 队列侧取证）；
+// GLFW 不暴露原生句柄（`native_handle()` 为基类空实现）、Wayland 无 XTest 等价物，均记为已知缺口。
 // ============================================================
 
 #include <array>
@@ -52,6 +60,12 @@
 #endif
 #include <windows.h>
 // clang-format on
+#endif
+
+#ifdef AURORA_PLATFORM_MACOS
+// CoreGraphics 事件族 + HIServices 的授权探测，全部是 C API（本头在纯 C++ 侧编译，无 ObjC
+// 语法与 ARC 可用——与 `macos_ax_client.h` 同纪律，AppKit 队列注入那一腿因此落在 `.mm` 探针里）。
+#include <ApplicationServices/ApplicationServices.h>
 #endif
 
 namespace aurora::e2e {
@@ -91,7 +105,9 @@ struct DesktopInteraction {
 /// 本机锁屏态下该探测**仍会放行**（输入桌面名仍是 `Default`，而锁屏以全屏
 /// `LockScreenBackstopFrame` 窗口盖住一切），此时 `SendInput` 不报错而是被该窗口静默吞掉
 /// ——这类环境竞争由 `sendinput_landing_check` 的落点复核兜底，两道门互补而非互为替代。
-/// Linux：无 X 显示（`DISPLAY` 未设）即无输入面；macOS：通道未实现（已知缺口）。
+/// Linux：无 X 显示（`DISPLAY` 未设）即无输入面；macOS：无 WindowServer 主显示即无输入面
+/// （SSH 无会话登录 / 无头 CI 里 `CGMainDisplayID()` 为 0，事件无处可投）。授权与否不在本
+/// 探测裁决，由 `cg_input_channel_available()` 单独把关——两件事的原因与解法都不同。
 [[nodiscard]] inline auto interactive_desktop() -> DesktopInteraction {
 #ifdef AURORA_PLATFORM_WINDOWS
     // 需要真实交互桌面：能打开输入桌面才允许全局注入。
@@ -109,6 +125,16 @@ struct DesktopInteraction {
     if (std::getenv("DISPLAY") == nullptr) {
         return DesktopInteraction{.interactive = false,
                                   .reason = "no X display (DISPLAY unset); XTest injection has no target server"};
+    }
+    return DesktopInteraction{.interactive = true, .reason = ""};
+#elif defined(AURORA_PLATFORM_MACOS)
+    const CGDirectDisplayID main_display = CGMainDisplayID();
+    const CGRect bounds = CGDisplayBounds(main_display);
+    if (main_display == 0U || bounds.size.width <= 0.0 || bounds.size.height <= 0.0) {
+        return DesktopInteraction{.interactive = false,
+                                  .reason =
+                                      "no WindowServer main display (headless / ssh session without Aqua login); "
+                                      "CGEvent injection has no screen to post onto"};
     }
     return DesktopInteraction{.interactive = true, .reason = ""};
 #else
@@ -442,5 +468,140 @@ struct X11Api {
 }
 
 #endif  // X11 通道（UNIX 非 macOS）
+
+// ============================================================
+// macOS 通道（CGEvent：真实 OS 输入流，须辅助功能授权）
+// ------------------------------------------------------------
+// 与 Windows `SendInput` 同侧——全局注入、投给光标所在窗口，覆盖「OS 输入流 → 命中本窗口
+// → 窗口过程 → Aurora 事件管线」这整段前半（X11 的 XTest 是同一形状）。
+// 两条实测口径决定了本腿只能是「已授权的加强腿」，而不是默认证据：
+//   - 未授权（`AXIsProcessTrusted()` 为假）时 `CGEventPost(kCGSessionEventTap, …)` 与
+//     `CGEventPostToPid(getpid(), …)` **两条路一个事件都不送达**：AppKit 侧连
+//     `addLocalMonitorForEventsMatchingMask:` 都收不到，控件状态与像素毫无变化；而投递侧
+//     不报任何错（`CGEventPostToPid` 无返回值、`CGEventPost` 恒返回 success）。「什么都没
+//     发生 + 没有错误」正是最容易被读成通过的形状，故未授权一律判通道不可用。
+//   - 先把应用激活、把窗口做成 key（`activateIgnoringOtherApps:` + `makeKeyAndOrderFront:`）
+//     再投，结论不变——不是命中测试打偏，是事件根本没进进程。
+// 因此 macOS 的**默认证据**在 `tools/verify/macos_os_input_live_probe.mm`：同进程 AppKit
+// 事件队列注入（`[NSApp postEvent:]` → `nextEventMatchingMask:` → `sendEvent:` → 内容视图 →
+// `MacOSSurface` 翻译 → 派发）。该腿与 Win32 的 `post_click` 同侧：投递侧绕过 OS 输入流，
+// 但管线后半段（含命中测试与手势状态机）单独取证得到。本头是纯 C++ 编译面，AppKit 消息
+// 发送语法（ObjC++ + ARC）无法落在头里，故那一腿只在 `.mm` 探针取证——与 a11y 通道的
+// 「协议面探针 + 已授权客户端加强腿」两段式完全同构。
+// ============================================================
+#ifdef AURORA_PLATFORM_MACOS
+
+/// @brief CG 事件投递通道是否可用（= 本进程已持有辅助功能授权；未授权时投递静默无效）。
+///
+/// 授权无法在 SIP 环境里脚本授予（实测 `tccutil` 只能重置、不能写入；TCC 库在受保护卷上），
+/// 故本机与 CI 上该函数为假，用例据此带原因记 SKIP。
+[[nodiscard]] inline auto cg_input_channel_available() -> bool { return AXIsProcessTrusted() != 0; }
+
+/// @brief 缺省显示面的高度（像素）。
+///
+/// E2E 侧的全局坐标一律**左上原点**（与 Win32 屏幕坐标、X11 根坐标同口径），CG 全局坐标是
+/// **左下原点**：注入前须按本值翻转 y。返回 0 表示没有可用显示面（无头 / 无 Aqua 会话）。
+[[nodiscard]] inline auto cg_display_height() -> double { return CGDisplayBounds(CGMainDisplayID()).size.height; }
+
+/// @brief CGEvent 全局注入左键点击：把真实光标移到全局点，按下后原样抬起。
+///
+/// 光标真的会移动、点击真的会夺焦，故调用方须先把目标窗口抬升并聚焦（`Surface::raise()` +
+/// `Surface::focus_window()`，对应 Win32 侧的 `BringWindowToTop` / `SetForegroundWindow`）——
+/// 本腿**没有** Win32 那样的落点复核守卫：从纯 C++ 侧读不到 AppKit 的窗口框，
+/// `CGWindowListCopyWindowInfo` 又需要屏幕录制授权（另一枚独立 TCC 权限）。因此该腿只在
+/// 已授权、且调用方确认自己刚抬升过目标时成立；环境竞争（别的窗口压在落点上）会以「状态未
+/// 翻转」的真实失败暴露，不静默跳过。
+/// @param global_px 屏幕全局物理像素点（左上原点；由语义盒中心 × scale 加窗口原点得出）
+[[nodiscard]] inline auto cg_click(Point global_px) -> Result<void> {
+    if (!cg_input_channel_available()) {
+        return Result<void>{make_error(
+            ErrorCode::GeneralNotSupported,
+            std::string{"cg_click: the accessibility grant is absent, so CGEvent posting is silently dropped "} +
+                "(measured: neither kCGSessionEventTap nor CGEventPostToPid delivers a single event; "
+                "default evidence lives in the aurora_verify_macos_os_input probe)")};
+    }
+    const double height = cg_display_height();
+    if (height <= 0.0) {
+        return Result<void>{
+            make_error(ErrorCode::GeneralNotSupported, "cg_click: no display face to convert global coordinates on")};
+    }
+    const CGPoint point = CGPointMake(global_px.x, height - global_px.y);
+    CGEventSourceRef source = CGEventSourceCreate(kCGEventSourceStateHIDSystemState);
+    CGEventRef move = CGEventCreateMouseEvent(source, kCGEventMouseMoved, point, kCGMouseButtonLeft);
+    CGEventRef down = CGEventCreateMouseEvent(source, kCGEventLeftMouseDown, point, kCGMouseButtonLeft);
+    CGEventRef up = CGEventCreateMouseEvent(source, kCGEventLeftMouseUp, point, kCGMouseButtonLeft);
+    if (move == nullptr || down == nullptr || up == nullptr) {
+        if (move != nullptr) {
+            CFRelease(move);
+        }
+        if (down != nullptr) {
+            CFRelease(down);
+        }
+        if (up != nullptr) {
+            CFRelease(up);
+        }
+        if (source != nullptr) {
+            CFRelease(source);
+        }
+        return Result<void>{make_error(ErrorCode::GeneralNotSupported, "cg_click: CGEventCreateMouseEvent failed")};
+    }
+    // clickState 让按下/抬起配成同一次点击（缺省为 0 时 AppKit 会把它当孤立事件丢弃）。
+    CGEventSetIntegerValueField(down, kCGMouseEventClickState, 1);
+    CGEventSetIntegerValueField(up, kCGMouseEventClickState, 1);
+    CGEventPost(kCGHIDEventTap, move);
+    CGEventPost(kCGHIDEventTap, down);
+    CGEventPost(kCGHIDEventTap, up);
+    CFRelease(move);
+    CFRelease(down);
+    CFRelease(up);
+    CFRelease(source);
+    return Result<void>{};
+}
+
+/// @brief CGEvent 注入文本：逐字符建一对按下/抬起并挂上 Unicode 串（免键位表）。
+///
+/// `CGEventKeyboardSetUnicodeString` 让事件带出字符本身，AppKit 侧走 `keyDown:` 的
+/// `characters:` 通道——与 Win32 的逐字符 `WM_CHAR`、X11 的 keysym 假键同侧。键码固定为 0：
+/// 本腿取证的是**字符通道**接线，不是某个物理键的位置（键位映射属真人操作面）。
+/// @param text 待注入文本（逐字节转 UTF-16 单元；非 ASCII 需调用方自行保证编码）
+[[nodiscard]] inline auto cg_text(std::string_view text) -> Result<void> {
+    if (!cg_input_channel_available()) {
+        return Result<void>{make_error(
+            ErrorCode::GeneralNotSupported,
+            std::string{"cg_text: the accessibility grant is absent, so CGEvent posting is silently dropped"} +
+                " (see cg_click for the measured shape)")};
+    }
+    CGEventSourceRef source = CGEventSourceCreate(kCGEventSourceStateHIDSystemState);
+    for (const char c : text) {
+        const auto unit = static_cast<UniChar>(static_cast<unsigned char>(c));
+        CGEventRef down = CGEventCreateKeyboardEvent(source, static_cast<CGKeyCode>(0U), true);
+        CGEventRef up = CGEventCreateKeyboardEvent(source, static_cast<CGKeyCode>(0U), false);
+        if (down == nullptr || up == nullptr) {
+            if (down != nullptr) {
+                CFRelease(down);
+            }
+            if (up != nullptr) {
+                CFRelease(up);
+            }
+            if (source != nullptr) {
+                CFRelease(source);
+            }
+            return Result<void>{
+                make_error(ErrorCode::GeneralNotSupported, "cg_text: CGEventCreateKeyboardEvent failed")};
+        }
+        CGEventKeyboardSetUnicodeString(down, 1, &unit);
+        CGEventKeyboardSetUnicodeString(up, 1, &unit);
+        CGEventPost(kCGHIDEventTap, down);
+        CGEventPost(kCGHIDEventTap, up);
+        CFRelease(down);
+        CFRelease(up);
+    }
+    if (source != nullptr) {
+        CFRelease(source);
+    }
+    return Result<void>{};
+}
+
+#endif  // macOS 通道（CGEvent）
 
 }  // namespace aurora::e2e

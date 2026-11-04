@@ -33,6 +33,7 @@
 #include "aurora/event/keycode.h"
 #include "aurora/window/detail/ime_composition.h"
 #include "aurora/window/detail/macos_ax_bridge.h"
+#include "aurora/window/detail/macos_decoration.h"
 #include "aurora/window/detail/macos_drag.h"
 #include "aurora/window/detail/macos_keymap.h"
 #include "aurora/window/detail/macos_menu_bar.h"
@@ -289,17 +290,24 @@ struct MacOSSurface::Impl {
             app_ready = true;
 
             transparent = style.transparent;
-            const bool frameless = style.frameless || style.decoration == DecorationPolicy::Frameless ||
-                                   style.decoration == DecorationPolicy::Borderless;
+            // 装饰档位映射的真源在 `detail/macos_decoration.h`（纯布尔结论，可在任意 runner 上
+            // 表驱动单测）；这里只做「布尔 → AppKit 掩码 / 属性」的逐字落地。`Borderless` 的边缘
+            // 缩放由原生窗框视图承担，故 macOS 不设 `begin_window_resize` 覆写——理由与该档的实测
+            // 例外记在 `codespec/specification/07-environment-modifier.md` §4.1。
+            const detail::MacOSDecoration deco = detail::map_macos_decoration(style);
             NSWindowStyleMask mask = 0;
-            if (frameless) {
+            if (deco.native_borderless) {
                 mask = NSWindowStyleMaskBorderless;
             } else {
                 mask = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable;
-                if (style.resizable) {
+                if (deco.full_size_content) {
+                    mask |= NSWindowStyleMaskFullSizeContentView;
+                }
+                if (deco.sizable) {
                     mask |= NSWindowStyleMaskResizable;
                 }
             }
+            const bool hide_buttons = deco.hide_window_buttons;
             const int cw = std::max(1, w);
             const int ch = std::max(1, h);
             const NSRect content = NSMakeRect(0.0, 0.0, static_cast<CGFloat>(cw), static_cast<CGFloat>(ch));
@@ -319,6 +327,23 @@ struct MacOSSurface::Impl {
             const char *utf8 = title.c_str();
             NSString *ns_title = [NSString stringWithUTF8String:utf8];
             [window setTitle:ns_title != nil ? ns_title : @""];
+
+            if (deco.hide_title) {
+                // 只藏「栏」：标题带底色透明 + 标题文本隐藏。
+                [window setTitlebarAppearsTransparent:YES];
+                [window setTitleVisibility:NSWindowTitleHidden];
+            }
+            if (hide_buttons) {
+                // 三枚标准窗钮要逐枚隐藏——`titleVisibility` 管不到钮，否则「无标题栏」档会同时
+                // 出现原生红黄绿圆点与应用的自绘装饰。
+                for (const NSWindowButton button :
+                     {NSWindowCloseButton, NSWindowMiniaturizeButton, NSWindowZoomButton}) {
+                    [[window standardWindowButton:button] setHidden:YES];
+                }
+                // 刻意不 `setMovableByWindowBackground:`：那会让控件层的按下拖拽（滑块、选区、
+                // 列表拖动）同时搬动整个窗口。窗口移动统一经 `begin_window_move()` →
+                // `performWindowDragWithEvent:` 在按下派发栈内发起。
+            }
 
             if (transparent) {
                 [window setOpaque:NO];
@@ -1586,6 +1611,46 @@ auto MacOSSurface::framebuffer_size() const -> Size {
     }
     const float s = scale_factor();
     return Size{.width = size_.width * s, .height = size_.height * s};
+}
+
+auto MacOSSurface::capture_window(const std::string &path) -> Result<bool> {
+#ifdef AURORA_ENABLE_DEBUG
+    if (!impl_ || impl_->window == nil || impl_->view == nil) {
+        return Result<bool>{make_error(ErrorCode::SurfaceLost, "macos capture_window: native window unavailable")};
+    }
+    NSString *target = [NSString stringWithUTF8String:path.c_str()];
+    if (target == nil || [target length] == 0) {
+        return Result<bool>{
+            make_error(ErrorCode::GeneralInvalidArgument, "macos capture_window: path is not valid UTF-8")};
+    }
+    @autoreleasepool {
+        NSView *view = impl_->view;
+        const NSRect bounds = [view bounds];
+        if (bounds.size.width <= 0.0 || bounds.size.height <= 0.0) {
+            return Result<bool>{
+                make_error(ErrorCode::GeneralNotSupported, "macos capture_window: zero-size content view")};
+        }
+        NSBitmapImageRep *rep = [view bitmapImageRepForCachingDisplayInRect:bounds];
+        if (rep == nil) {
+            return Result<bool>{
+                make_error(ErrorCode::GeneralNotSupported, "macos capture_window: bitmap rep allocation failed")};
+        }
+        [view cacheDisplayInRect:bounds toBitmapImageRep:rep];
+        NSData *png = [rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
+        if (png == nil) {
+            return Result<bool>{make_error(ErrorCode::GeneralUnknown, "macos capture_window: PNG encoding failed")};
+        }
+        // 先写临时文件再原子替换：写盘中途失败不会留下半截 PNG 覆盖同名旧图。
+        if ([png writeToFile:target atomically:YES] == NO) {
+            return Result<bool>{make_error(ErrorCode::GeneralUnknown, "macos capture_window: write failed")};
+        }
+    }
+    return Result<bool>{true};
+#else
+    (void)path;
+    return Result<bool>{
+        make_error(ErrorCode::GeneralNotSupported, "capture_window: disabled (AURORA_ENABLE_DEBUG not enabled)")};
+#endif
 }
 
 auto MacOSSurface::native_handle() const -> void * {

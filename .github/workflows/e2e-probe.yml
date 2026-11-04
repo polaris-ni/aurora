@@ -128,3 +128,47 @@ jobs:
         run: |
           ./build/aurora_test_runner --run=etest_multi_window --verbose
           ./build/aurora_test_runner --run=etest_os_input --verbose
+
+      # 无障碍协议面探针：语义树 → MacOSAxBridge → AppKit NSAccessibility 的投影判据
+      # （角色/名称逐类命中、屏幕矩形非空 + 命中测试回指、press 动作往返后值重投影、桥的
+      # 惰性激活时机）。它同样需要图形会话——与真实建窗读回同一前置条件，故只在判据失败
+      # （退出码 1）时红灯；退出码 2（无窗口会话）按 runner 能力记账，不冒充库的缺陷。
+      # AX 客户端加强腿（真 IPC 读回）在 runner 上恒不可用：未授权客户端的属性是退化的。
+      - name: Build AX protocol probe
+        run: |
+          cmake -S . -B build -G Ninja -DAURORA_BUILD_VERIFY_TOOLS=ON
+          cmake --build build --target aurora_verify_macos_ax
+
+      - name: Probe AppKit accessibility projection
+        run: |
+          rc=0
+          ./build/aurora_verify_macos_ax || rc=$?
+          if [ "$rc" -eq 1 ]; then
+            echo "AX projection checks failed"
+            exit 1
+          fi
+          if [ "$rc" -ne 0 ]; then
+            echo "AX probe not runnable in this session (exit $rc): runner capability gap, recorded not failed"
+          fi
+
+      # OS 级输入注入探针：同进程 AppKit 事件队列驱动的整段管线（点击 → 派发/命中 → Checkbox
+      # 往返翻转 + 区域内像素变化；keyDown → characters → TextInput 上屏）。CGEvent 那一腿
+      # 须辅助功能授权，GitHub runner 无从授予，因此探针在 untrusted 环境里改跑「通道自我申报
+      # 不可用 + 裸投递确实一个事件都不送达」两条判据——它把最容易读成通过的形状固定下来。
+      # 与 AX 探针同一前置（需图形会话）：退出码 1 红灯，退出码 2 记 runner 能力缺口。
+      - name: Build OS-input probe
+        run: |
+          cmake -S . -B build -G Ninja -DAURORA_BUILD_VERIFY_TOOLS=ON
+          cmake --build build --target aurora_verify_macos_os_input
+
+      - name: Probe AppKit event-queue input injection
+        run: |
+          rc=0
+          ./build/aurora_verify_macos_os_input || rc=$?
+          if [ "$rc" -eq 1 ]; then
+            echo "OS-input checks failed"
+            exit 1
+          fi
+          if [ "$rc" -ne 0 ]; then
+            echo "OS-input probe not runnable in this session (exit $rc): runner capability gap, recorded not failed"
+          fi

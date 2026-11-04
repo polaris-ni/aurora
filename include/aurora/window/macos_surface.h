@@ -18,8 +18,11 @@ namespace aurora {
 /// @brief macOS AppKit Surface：NSWindow + 自定义 NSView，软件 Painter 帧缓冲经 CGImage 上屏。
 ///
 /// 实现面（与 Win32 / X11 后端同口径）：
-/// - 窗口壳：`NSWindowStyleMaskTitled|Closable|Miniaturizable`（可缩放时再加 `Resizable`），
-///   Frameless / 无边框档改 `Borderless`；标题、尺寸、位置、置顶、透明、最小/最大尺寸在构造期
+/// - 窗口壳：`NSWindowStyleMaskTitled|Closable|Miniaturizable`（可缩放时再加 `Resizable`）；
+///   `Frameless`（含 `frameless == true`）改 `Borderless` 掩码＝完全无装饰且不可拖拽缩放；
+///   `Borderless` 保留原生边缘缩放但隐藏标题栏——`Titled|Closable|Miniaturizable|FullSizeContentView`
+///   （可缩放时再加 `Resizable`）配标题带透明、标题文本隐藏与三枚标准窗钮逐枚隐藏，内容区与窗框
+///   重合（顶边内缩 0）；标题、尺寸、位置、置顶、透明、最小/最大尺寸在构造期
 ///   按 `WindowStyleOptions` 映射；
 /// - 上屏：`Painter` 的 RGBA 物理像素缓冲包装为 `CGImage`，在视图 `drawRect:` 内 1:1 绘制
 ///   （Retina 下物理像素与 backing store 对齐，无缩放模糊）；
@@ -182,6 +185,15 @@ class MacOSSurface : public Surface {
     /// @brief 帧缓冲物理像素尺寸。
     /// @return 物理宽高（Retina 下为逻辑尺寸 × scale）。
     [[nodiscard]] auto framebuffer_size() const -> Size override;
+    /// @brief 把真实窗口内容区导出为 PNG（`AURORA_ENABLE_DEBUG` 门控）。
+    ///
+    /// 经内容视图的 `bitmapImageRepForCachingDisplayInRect:` + `cacheDisplayInRect:toBitmapImageRep:`
+    /// 缓存自绘结果，不经 WindowServer 抓屏，故背景图形会话可用且不需要屏幕录制授权。**只含
+    /// 内容区**（不含标题栏与窗口阴影，与 X11 / GLFW 客户区截图同口径）。窗口 / 视图缺失、
+    /// 零尺寸、PNG 编码或写盘失败均返回机器可读错误；DEBUG 关闭时返回 disabled 错误。
+    /// @param path 输出 PNG 文件路径（覆盖同名文件；目录须已存在）。
+    /// @return 写盘成功 true；失败 false 及错误信息。
+    [[nodiscard]] auto capture_window(const std::string &path) -> Result<bool> override;
     /// @brief 原生窗口句柄（`NSWindow *`，以 `void *` 承载）。
     [[nodiscard]] auto native_handle() const -> void * override;
     /// @brief 已成功上屏的帧数。

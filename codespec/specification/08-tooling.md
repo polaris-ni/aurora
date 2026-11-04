@@ -663,11 +663,15 @@ gen_i18n --emit-builtin <out.hpp> <builtin.json>
 | `aurora_verify_linux_double_click` | Linux `os_double_click_ms()` 是否真经 GLib GSettings 跟随系统双击速度：独立经 dlopen 再读 `org.gnome.desktop.peripherals.mouse` → `double-click` 作交叉见证，与库返回值比对；缺 GLib / 无会话 / schema 未装时断言优雅回退 `AURORA_DEFAULT_CLICK_WINDOW_MS`；`gsettings` CLI 作第二见证（仅 WARN） | **独立 GLib GSettings 读回**（`g_settings_new`/`g_settings_get_int` 经 `libgio-2.0`/`libgobject-2.0` dlopen，与库内 `click_config.cpp` 同机制、独立调用栈）+ `gsettings` CLI 取值对照；纯函数探针，不建窗口、不依赖任何后端 |
 | `aurora_verify_windows_double_click` | Windows `os_double_click_ms()` 是否真经 `GetDoubleClickTime()` 跟随系统双击速度：再调一遍 `GetDoubleClickTime()` 作交叉见证，与库返回值比对；极罕见地返回 0 时仅 WARN 提示 | **独立 `GetDoubleClickTime()` 读回**（与库内 `click_config.cpp` Windows 分支同机制、独立调用栈）；纯函数探针，不建窗口、不依赖任何后端 |
 
+| `aurora_verify_macos_ax` | macOS AppKit 无障碍桥（`MacOSAxBridge` / `AuroraAxElement`）与系统协议面的接缝：桥的**惰性激活时机**（首次查询前为空、查询后成树）、语义树逐类投影（角色 + 名称含兄弟标签回退）、屏幕几何非空、`accessibilityHitTest:` 回指被点控件、`accessibilityValue` 有值、`accessibilityPerformPress` 被接受且动作往返后值**重投影**翻转 | **AppKit 协议面直读**（探针经内核 `e2e::open(Backend::MacOS)` 建窗，从 `contentView` 向下转型递归 `accessibilityChildren` 取投影，与 VoiceOver 走同一套 `NSAccessibility` 协议方法）；同一进程内的 `AXUIElement` 客户端加强腿（`e2e::ax_collect`）仅在 TCC「辅助功能」授权后执行，未授权时打印 `SKIP` 行。**实测（macOS 26.7.2 + 真窗口会话）18/18 通过，投影 12 元素** |
+
+| `aurora_verify_macos_os_input` | macOS 的 OS 级输入注入两条腿：**同进程 AppKit 事件队列注入**驱动的整段管线——点击 → `sendEvent:` → 内容视图 → Surface 翻译 → 派发/命中 → Checkbox **往返两次**翻转、且新帧在语义盒区域内确有像素变化；点击 TextInput 获焦 → 合成 `keyDown` 的 `characters:` 上屏并经 `on_changed` 回读实值。**CGEvent 加强腿的自我申报**——未授权时 `e2e::cg_click` 带原因回不可用，且裸 `CGEventPostToPid` 实测一个事件都不送达（状态纹丝不动、API 不报错），把「什么都没发生」这一最易读成通过的形状固定成判据 | **AppKit 队列注入**（经 `e2e::open(Backend::MacOS)` 建 `Normal` 档窗口——OS 输入不打进隐藏窗口是本层硬前提；目标矩形取 AppKit 协议面的 `accessibilityFrame`，经 `convertRectFromScreen:` 折算成 `NSEvent.locationInWindow`）；已持有 TCC「辅助功能」授权时改跑 `e2e::cg_click` 真注入，未授权打印 `SKIP` 行。**实测（macOS 26.7.2 + 真窗口会话）20/20 通过**（连跑十轮同数）；注入前须先落一枚无 widget 角落的 priming 点击——`NSView` 默认 `acceptsFirstMouse:` 为 NO，未激活窗口的首个 `mouseDown:` 被 AppKit 用作「点击获焦」不转发给视图，实测无铺垫时十轮里两三次首点丢失 |
+
 各探针的验收范围、逐项期望与退出码语义写在对应源文件头注释内（`tools/verify/*.cpp|.mm`）；真机验收须在**对应平台**手工执行。
 
 **静态分析可见性**：这些探针（含 `inspector/inspector_server.cpp`）此前只被 CI 的构建作业编译、不进任何静态分析口径。lint 门禁扩面后，`AURORA_BUILD_VERIFY_TOOLS=ON` 进了主 Linux 遍的 configure，平台专属探针（`tools/verify/{win32_*,wasapi_audio}_live_probe.cpp` 等）另由 `lint-windows` / `lint-macos` 在各自平台的编译库里按 token 定向覆盖——覆盖面与边界见 [`BUILD_OPTIONS.md`](../BUILD_OPTIONS.md) §4.5。
 
-**探针与 E2E 驱动内核（§8.2）的分工**：探针手写的「建窗 / 帧推进 / 像素读回」与内核能力**行为重叠**时，建窗升级为经内核 `e2e::open`（统一 RAII 与失败翻译），探针只保留平台专属判据、断言与退出码；手写段本身即判据本体的保持原样。已升级：`win32_wgpu` / `x11_wgpu`（建窗经 `e2e::open(Backend::Wgpu)`，`WindowSpec` 显式 `Normal` 可见性保持探针窗口可见；WgpuRhi 离屏直驱段是探针核心目的——验证 wgpu 光栅化路径本身，且其读回基底是 RHI 离屏 FBO 而非内核的 `Surface::data()`，保留手写）、`glfw_gpu_features`（建窗经 `open(Backend::Glfw, gpu=true)`；`max_fps=0` 不再显式设置——该字段只作用于 `Application::run` 帧预算，不影响直驱 `present_root` 循环）、`win32_cursor`（Win32/D3D11/Wgpu 三路宿主建窗统一经内核，设备不可用判定由 `open` 失败翻译 + 具体类型 `is_available()` 承担）。保持原样（逐项裁定）：`wayland_wgpu`——内核 `WindowSpec` 无法表达「`WaylandOptions` + `RendererPreference::GpuWgpu` 直达」宿主路由组合；`glfw_cursor`——窗口是裸 `GLFWwindow`，建窗方式与映射镜像同为判据本体（验证 GLFW 环境能力而非 aurora 接线）；`win32_ime`——走正规 `Application` 路径（真实消息泵与焦点序是判据前提），内核 `Session` 无 `Application` 语义；`win32_ua`——建窗带 `RendererPreference::GpuD3D11` 路由，内核无法表达；`wasm_*`——内核 `Backend` 枚举无 Wasm 后端；`wasapi_audio` / `alsa_audio` / `wasm_audio` 为纯音频设备探针、`macos_cursor` 无 aurora 建窗段，天然无重叠；`x11_cursor` / `wayland_cursor` / `x11_ime` / `wayland_ime` / `atspi` 的手写建窗仅为具体类型 `Surface` 的 2–3 行构造（探针自带的不可用判定与降级语义与之等价，平台判据——XFIXES 读回 / 提交事实读回 / IME 状态机 / DBus 协议面——才是本体），经内核建窗后仍须向下转型回具体类型，无行为收益。
+**探针与 E2E 驱动内核（§8.2）的分工**：探针手写的「建窗 / 帧推进 / 像素读回」与内核能力**行为重叠**时，建窗升级为经内核 `e2e::open`（统一 RAII 与失败翻译），探针只保留平台专属判据、断言与退出码；手写段本身即判据本体的保持原样。已升级：`win32_wgpu` / `x11_wgpu`（建窗经 `e2e::open(Backend::Wgpu)`，`WindowSpec` 显式 `Normal` 可见性保持探针窗口可见；WgpuRhi 离屏直驱段是探针核心目的——验证 wgpu 光栅化路径本身，且其读回基底是 RHI 离屏 FBO 而非内核的 `Surface::data()`，保留手写）、`glfw_gpu_features`（建窗经 `open(Backend::Glfw, gpu=true)`；`max_fps=0` 不再显式设置——该字段只作用于 `Application::run` 帧预算，不影响直驱 `present_root` 循环）、`win32_cursor`（Win32/D3D11/Wgpu 三路宿主建窗统一经内核，设备不可用判定由 `open` 失败翻译 + 具体类型 `is_available()` 承担）、`macos_ax`（建窗经 `e2e::open(Backend::MacOS)`，`NoActivate` 可见性使探针窗口不夺前台；无窗口会话由 `open` 失败翻译为退出码 2）、`macos_os_input`（建窗经 `e2e::open(Backend::MacOS)`，`Normal` 可见性是本层硬前提——OS 输入不打进隐藏窗口；无窗口会话同样由 `open` 失败翻译为退出码 2）。保持原样（逐项裁定）：`wayland_wgpu`——内核 `WindowSpec` 无法表达「`WaylandOptions` + `RendererPreference::GpuWgpu` 直达」宿主路由组合；`glfw_cursor`——窗口是裸 `GLFWwindow`，建窗方式与映射镜像同为判据本体（验证 GLFW 环境能力而非 aurora 接线）；`win32_ime`——走正规 `Application` 路径（真实消息泵与焦点序是判据前提），内核 `Session` 无 `Application` 语义；`win32_ua`——建窗带 `RendererPreference::GpuD3D11` 路由，内核无法表达；`wasm_*`——内核 `Backend` 枚举无 Wasm 后端；`wasapi_audio` / `alsa_audio` / `wasm_audio` 为纯音频设备探针、`macos_cursor` 无 aurora 建窗段，天然无重叠；`x11_cursor` / `wayland_cursor` / `x11_ime` / `wayland_ime` / `atspi` 的手写建窗仅为具体类型 `Surface` 的 2–3 行构造（探针自带的不可用判定与降级语义与之等价，平台判据——XFIXES 读回 / 提交事实读回 / IME 状态机 / DBus 协议面——才是本体），经内核建窗后仍须向下转型回具体类型，无行为收益。
 
 **由后台进程执行时的物理前提**（不是软件缺陷，探针按退出码如实申报而非假通过）：凡判据落在「屏幕上真实显示的指针/光标」上的探针（`aurora_verify_win32_cursor`，以及各探针的 `--interactive` 人工段），要求**已解锁且处于活动状态的交互桌面**——探针会把被测窗口置顶（`HWND_TOPMOST`）并依次试摆「屏幕中心 → 四角内侧」共 5 个落点（同处置顶带内他人窗口可长期压住中心点，`SetForegroundWindow` 又受前台锁约束），多次不中才以退出码 3 报出「期望落点 / 实际指针位置 / 该点上的窗口类名 / 试过的落点数」现场证据后终止（远程桌面会话隔离、锁屏时的 `LockScreenBackstopFrame` 同理）。纯逻辑/句柄类判据（如 GLFW 探针自动段：`glfwCreateStandardCursor` 句柄互异计数）不受此约束，可在任意会话内跑通。
 
@@ -968,7 +972,8 @@ Emscripten 下强制不纳入）；install-consumer 作业只验证 `find_packag
   静态场景，交互动画推进语义由交互流往返层覆盖。
 
 **无障碍语义通道层**（`tests/e2e/etest_a11y_semantics.cpp`）：像素冒烟证明「画得出」，本层证明
-「说得出」——控件树的无障碍语义经真实窗口上屏链路**到达平台**。六后端矩阵 × 两用例，与矩阵套件
+「说得出」——控件树的无障碍语义经真实窗口上屏链路**到达平台**。七后端矩阵 × 两用例（`Backend::MacOS`
+随内核枚举补入后进入矩阵），与矩阵套件
 通用纪律（fixture 类名唯一、`AURORA_E2E_EXPECT` 记账）一致。要点与实测口径：
 
 - 统一期望表：进程内快照与平台通道投影**共用同一张期望表**（同源语义树，断言同词汇）。五类控件
@@ -982,40 +987,78 @@ Emscripten 下强制不纳入）；install-consumer 作业只验证 `find_packag
   `FrameworkId=="Aurora"` 的库自有投影（排除系统在同一层合成的非客户区元素）；Linux 经 AT-SPI
   子进程客户端（`tools/include/e2e/atspi_client.h`：python3-gi 枚举桌面树找 FRAME==窗口标题，
   输出 `NODE|role|name` 行；客户端可用性以 python3-gi 探测，无会话总线是合法永久降级）；
-  macOS AX 通道未实现（已知缺口，skip 桩）。通道内的角色/名称/pattern/几何断言与快照用例同表。
+  macOS 分两级（`tools/include/e2e/macos_ax_client.h`）：**默认证据在 AppKit 协议面**——探针
+  `aurora_verify_macos_ax` 从 `contentView` 递归 `accessibilityChildren` 读投影、`accessibilityHitTest:`
+  回指、`accessibilityPerformPress` 往返，与 VoiceOver 同径，本 etest 用例在未授权时按策略 skip 并在
+  skip 原因里点名该探针；**加强腿 `e2e::ax_collect`** 用 `AXUIElementCreateApplication(getpid())` 走真
+  AX IPC，只在 `AXIsProcessTrusted()` 为真（系统设置 → 隐私与安全性 → 辅助功能）时执行。分级的前提是
+  本机实测（macOS 26.7.2、SIP 开、TCC 不可脚本化）：未授权时跨进程查询恒返 `-25211`
+  `kAXErrorAPIDisabled`，同进程查询虽返 `kAXErrorSuccess` 但属性**退化**（逐元素 role 均为
+  `AXApplication`、name 为进程名、`kAXDescriptionAttribute` 返 -25205、`kAXIdentifierAttribute` 返
+  -25212）——拿它当默认证据只会得到「查询成功但读不到语义」的假绿。通道内的角色/名称/pattern/几何断言
+  与快照用例同表。
 - 库层修复回写（`WM_GETOBJECT` 激活回归）：`win32_host.cpp` 的根请求比较此前写作
   `std::cmp_not_equal(static_cast<DWORD>(lParam), UiaRootObjectId)`——混合符号安全比较按**数学值**
   判等，`0xFFFFFFE7` 与 `-25` 永不命中，内置桥无法经 `WM_GETOBJECT` 激活（真机探针时代的
   「两侧都截断到 DWORD」惯例被后续类型安全改写静默破坏；当时无 etest 覆盖故未发现）。恢复两侧
   截断比较（UIA 协议本身即 `(DWORD)lParam == (DWORD)id`）后，UIA 返回完整 Aurora 投影。
-- 平台客户端实现口径：`uia_client.h` / `atspi_client.h` 位于 `tools/include/e2e/`，与探针、etest
-  共用；UIA 侧属性读取走 `GetCurrentPropertyValueEx(..., TRUE)`（不因属性缺失抛错）、树遍历按
+- 平台客户端实现口径：`uia_client.h` / `atspi_client.h` / `macos_ax_client.h` 位于 `tools/include/e2e/`，
+  与探针、etest 共用；UIA 侧属性读取走 `GetCurrentPropertyValueEx(..., TRUE)`（不因属性缺失抛错）、树遍历按
   深度/总量封顶逐层 `Release`；MinGW 的 `uiautomation.h` 是 stub（常量为 `#define`、无
-  `UIA_PROPERTY_ID` 类型别名），接口形参按 int 收敛。
+  `UIA_PROPERTY_ID` 类型别名），接口形参按 int 收敛；AX 侧 `CFTypeRef` 由 RAII `CfHolder` 统一释放、
+  整轮采集跑在专用 worker 线程（`AXUIElementCopyAttributeValue` 在目标 App 无响应时会阻塞调用线程，
+  放主线程会卡死事件泵），主线程只按 `wait_events` 推进窗口事件并做有界 join，超时原因带 `AXError` 名
+  与实际观察到的 FRAME 标题返回。
 
 **OS 级输入注入通道层**（`tests/e2e/etest_os_input.cpp`，真机增强层）：交互流往返层证明「框架内
 模拟输入走通命中与派发」，本层证明「**真实 OS 输入** → 窗口过程 → Aurora 事件管线」整段接线
 （前半段是模拟注入覆盖不到的）。内核通道在 `tools/include/e2e/os_input.h`，与 harness 同纪律
 （只依赖公共头、无测试框架宏）。要点与实测口径：
 
-- 平台通道三分：Windows `SendInput`（全局注入——移动真实光标后投递给光标所在窗口，最接近真人
+- 平台通道四分：Windows `SendInput`（全局注入——移动真实光标后投递给光标所在窗口，最接近真人
   操作的全链路）与 `PostMessage`（定向投递——不经光标/焦点系统直达窗口过程，管线接线可单独取证；
   文本走逐字符 `WM_CHAR`，与 `aurora_verify_win32_ime_live` 探针同款）；Linux XTest（经 X 服务器
   合成真实输入事件，`dlopen` libX11/libXtst 免构建依赖，与 `aurora_verify_x11_ime_live` 探针同款；
   键盘焦点铺垫用 `XSetInputFocus`——无窗口管理器时点击不自动夺焦，等价 WM 的 click-to-focus）；
-  WASM 经 CDP `Input.dispatch*` 由浏览器外部驱动（`tools/verify/wasm_input_cdp_drive.mjs`，真实
-  浏览器 opt-in）。覆盖面与 a11y 通道同口径：win32/d3d11 共用 Win32Host 输入管线（以 win32 为
-  代表）、x11；GLFW 不暴露原生句柄（`native_handle()` 为基类空实现）、Wayland 无 XTest 等价物、
-  macOS 通道未实现，均为已知缺口。
+  macOS `CGEvent`（`e2e::cg_click` / `e2e::cg_text`，经 `kCGHIDEventTap` 投真实输入流，字符腿用
+  `CGEventKeyboardSetUnicodeString` 挂 Unicode 载荷、免键位表）；WASM 经 CDP `Input.dispatch*`
+  由浏览器外部驱动（`tools/verify/wasm_input_cdp_drive.mjs`，真实浏览器 opt-in）。覆盖面与 a11y
+  通道同口径：win32/d3d11 共用 Win32Host 输入管线（以 win32 为代表）、x11、macos（以 AppKit
+  后端为代表）；GLFW 不暴露原生句柄（`native_handle()` 为基类空实现）、Wayland 无 XTest 等价物，
+  均为已知缺口。
+- **macOS 分两级，且 CGEvent 只是加强腿**（实测口径，决定了实现形态）：未持有 TCC「辅助功能」
+  授权时 `CGEventPost(kCGSessionEventTap / kCGHIDEventTap)` 与 `CGEventPostToPid(getpid(), …)`
+  **两条路一个事件都不送达**——AppKit 侧连 `addLocalMonitorForEventsMatchingMask:` 都收不到，
+  控件状态与像素毫无变化，而投递侧不报任何错（`CGEventPostToPid` 无返回值、`CGEventPost` 恒
+  success）；把应用激活、把窗口做成 key 后结论不变，即不是命中测试打偏而是事件根本没进进程。
+  「什么都没发生 + 没有错误」是最容易被读成通过的形状，故 `cg_input_channel_available()`（=
+  `AXIsProcessTrusted()`）为假时用例一律带原因记 skip，**绝不拿静默无效判绿**（SIP 环境下授权
+  无法脚本授予：`tccutil` 只能重置不能写入）。默认证据改由 `aurora_verify_macos_os_input` 探针
+  在**同进程 AppKit 事件队列**上取证：`[NSApp postEvent:]` → `nextEventMatchingMask:` →
+  `sendEvent:` → 内容视图 `mouseDown:` / `keyDown:` → Surface 翻译 → 派发 / 命中 / 手势状态机 →
+  控件翻转并落进新帧像素。该腿与 Win32 的 `post_click` 同侧（投递侧绕过 OS 输入流，管线后半段
+  单独取证）；`os_input.h` 是纯 C++ 编译面，ObjC++ 消息发送语法与 ARC 落不进去，故这一腿只在
+  `.mm` 探针里——与 a11y 通道的「协议面探针 + 已授权客户端加强腿」完全同构。
+- **macOS 队列注入须先落一枚 priming 点击**（实测前提，非优化）：`NSView` 默认
+  `acceptsFirstMouse:` 为 NO，窗口未取得激活态时 AppKit 把落在本进程的第一次 `mouseDown:` 用作
+  「点击获焦」而**不转发给视图**——无铺垫时同一份判据十轮里两三次首点丢失，失败集合恒为「首点
+  未翻 + 次点翻到了 + 终态非未选中」，即少一次转发而非管线断裂。故 `aurora_verify_macos_os_input`
+  在两条腿之前先向无 widget 的角落投一次点击，并把「该点击不得改变勾选状态」自身列为判据；加铺垫
+  后连跑十轮 20/20 同数。另记两条反直觉前提：**key 态与前台态都不是本腿的前提**——该探针全程
+  `app_active=0 window_key=0 visible=1`（经命令行启动的二进制不是前台应用），队列路径按事件自带
+  的 `windowNumber:` 派发，与 key 态无关，故这些状态只打印供判读、不立为判据。
 - **opt-in 门控**：环境变量 `AURORA_E2E_OS_INPUT`（置 `1`/`on`/`yes`/`true` 方启用，大小写不敏感）。
   未置位时用例为 skip 桩，在默认 `ctest` 中天然不参与并行。SendInput 是全局注入、无法定向窗口，
   多窗口并存必然串台——既有模型「进程隔离 + 资源虚拟化」隔离的是资源，全局输入是无法虚拟化的
   **共享设备**，故该用例组须以独立 ctest 调用按 stem 独占执行（`ctest -L e2e -R etest_os_input`），
   **不使用 `RUN_SERIAL` 属性**（TEST-R7 禁止）。
 - **no_interactive_desktop 拒绝语义**：锁定屏幕/安全桌面/服务会话等非交互桌面（Windows 侧
-  `OpenInputDesktop` 打不开输入桌面）与无 X 显示（`DISPLAY` 未设）环境下，注入通道以明确原因
-  skip，不静默失败、不挂起、不误判通过（`os_input.h` 的 `interactive_desktop()`）。实测该探测
-  覆盖不到全部锁屏形态，须与下条落点守卫两道门互补。
+  `OpenInputDesktop` 打不开输入桌面）、无 X 显示（`DISPLAY` 未设）与无 WindowServer 主显示面
+  （macOS 无头 / SSH 无 Aqua 会话登录时 `CGMainDisplayID()` 为 0 或显示框为空）环境下，注入通道
+  以明确原因 skip，不静默失败、不挂起、不误判通过（`os_input.h` 的 `interactive_desktop()`）。
+  macOS 侧把「有没有显示面」与「有没有授权」**分成两道门**：前者归本探测，后者归
+  `cg_input_channel_available()`——两件事的原因与解法都不同，合成一道会把「有屏无授权」误报成
+  「无屏」。实测本探测覆盖不到全部锁屏形态，须与下条落点守卫两道门互补。
 - **SendInput 落点守卫**（`os_input.h` 的 `sendinput_landing_check`）：全局注入投给光标所在窗口，
   故注入前先 best-effort 抬升目标（`BringWindowToTop` → `SetForegroundWindow`，仍被盖时升
   `TOPMOST`），再用 `WindowFromPoint` 复核屏幕落点命中的**根窗口**仍是目标；不过即带原因拒绝，
@@ -1025,11 +1068,25 @@ Emscripten 下强制不纳入）；install-consumer 作业只验证 `find_packag
   `LockScreenBackstopFrame` 盖住一切，`SendInput` 不报错而是被静默吞掉（旁路守卫的对照实验里
   同坐标的 Checkbox 纹丝不动）——这类环境由落点守卫兜底；同坐标的 `post_click` 用例照常通过，
   正是「坐标没错、投递没到」的判别对照。守卫的放行分支须在真实可交互桌面（未锁屏）上取证。
+  macOS 的 CGEvent 腿**没有等价守卫**，口径如实写明：抬升只能做到 `Surface::raise()` +
+  `Surface::focus_window()`（对应 Win32 的 `BringWindowToTop` / `SetForegroundWindow`），而按屏幕点
+  复核命中需要读**客户区**原点——纯 C++ 侧拿不到（见下条坐标口径），`CGWindowListCopyWindowInfo`
+  另需「屏幕录制」这枚独立 TCC 权限。因此该腿只在已授权、且调用方确认刚抬升过目标时成立，环境
+  竞争（别的窗口压在落点上）会以「状态未翻转」的真实失败暴露，不静默跳过。
 - **窗口策略固定 `Normal`**：OS 输入投递到完全隐藏的窗口在 Win32 上语义不成立（SendInput 投给
   光标所在窗口，隐藏窗口不在命中路径）——本层用例不得改用 `Hidden` 档。
+- **本层用例不得调用 `Surface::set_event_handler`**：该槽是宿主的派发接线本身，写入即**覆盖**
+  `WindowHost` 为surface 装上的分发器（实测 macOS 腿：装上计数 handler 后事件仍被出队、窗口
+  存活、monitor 也看得到，但控件状态纹丝不动——派发落空）。要读派发结果一律用外部可读的实值：
+  语义快照（`Session::semantic_snapshot`）与帧像素（`Session::read_pixels`）。
 - 断言形态与交互流层一致：注入后断言**控件状态**（共享 `State` / 语义快照）与**渲染像素**
   （注入前后帧在控件区域有差异）；坐标换算为「语义盒（窗口绝对 dp）中心 × `scale_factor` =
-  客户区物理像素」，与宿主 `on_mouse` 的 px/scale 换算互逆。
+  客户区物理像素」，与宿主 `on_mouse` 的 px/scale 换算互逆。全局落点还得再加一次「客户区原点 →
+  屏幕原点」：Windows 走 `ClientToScreen`、X11 走 `XTranslateCoordinates`，两者都以客户区为原点；
+  macOS 的 `Surface::position()` 交回的是**窗口外框**原点（含标题栏）折算到左上原点的物理像素，
+  库面没有客户区原点的读点，故 etest 侧无法为 macos 腿算出正确的屏幕点——指针通道的屏幕坐标
+  折算由 `.mm` 探针经 AppKit 协议面（`accessibilityFrame` + `convertRectFromScreen:`）完成，
+  etest 的 macos 用例因此只跑不需要几何的键盘通道。
 - 库层接线修复（harness）：`Session` 由此改以 `WindowHost` 持有窗口并 `attach_surface()` 接上
   派发通道——此前 harness 直接持有裸 `Window`，surface 的 event handler 无人设置，真实 OS 输入
   经窗口过程上抛后**派发落空**（进程内模拟注入 `Inspector::simulate_*` 不经该通道，故既有测试

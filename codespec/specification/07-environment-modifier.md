@@ -123,13 +123,18 @@ auto root = au::MediaQueryProvider{
 | `Borderless` | 无标题栏，保留窗口阴影边距（margin 带可拖拽缩放）；移动靠**修饰键拖拽**（按住 `Super` / `Alt` 拖拽任意处 → `xdg_toplevel_move`） |
 | `Frameless` | 完全无装饰、无阴影边距，由应用自绘 UI 并经程序化窗口控制驱动状态 |
 
-**三后端映射**（策略解析纯函数 `csd::resolve_mode(policy, ssd_available)`，`src/aurora/window/detail/csd_decoration.h`；「有无 SSD」各后端构造期一次判定）：
+**四后端映射**（策略解析纯函数 `csd::resolve_mode(policy, ssd_available)`，`src/aurora/window/detail/csd_decoration.h`；「有无 SSD」各后端构造期一次判定。macOS 不走该纯函数——AppKit 恒有服务端装饰，无协商环节）：
 
 | 后端 | Auto / ServerSide | ClientSide | Borderless | Frameless |
 |:---|:---|:---|:---|:---|
 | Wayland | 有 `xdg-decoration` → SSD；无 → CSD（title+margin） | CSD（title+margin，即便合成器支持 SSD） | 仅 margin 带 | 无任何装饰 |
 | X11 | 保留 WM 装饰（X11 的 SSD 即 WM 原生口沿，无须协商） | `_MOTIF_WM_HINTS` 撤 WM 口沿后自绘标题栏 + 内缘八向热区 | 仅内缘热区 | 无任何装饰 |
 | Win32 | 保留 `DWM`/系统非客户区装饰 | 去 `WS_CAPTION`（保留 `WS_THICKFRAME` 系统缩放模态）+ `WM_NCCALCSIZE`（wParam=TRUE）吞非客户区使客户区 = 整窗，最大化把客户区拉回显示器工作区（经典 −8dp 边框问题修正）；`WM_NCHITTEST` 回报热区：内缘八向（复用 `csd::classify_resize_zone`，带宽 = `frame_margin_dp(frame, dwm_capable)`）→ `HTLEFT`/…、标题带空白 → `HTCAPTION`（系统白给拖拽/双击最大化/Aero Snap）、按钮 → `HTCLIENT`，修饰键（Alt/Meta）拖拽兜底 → `HTCAPTION`；标题栏自绘经 `paint_decoration` 于三表面 present 路径覆绘，按钮按压/释放结算与 X11/Wayland 共层；建窗 / `set_size` 的窗口矩形在吞框档**不做** `AdjustWindowRect` 非客户区外扩（窗口矩形 = 请求物理客户区，`DWMWA_EXTENDED_FRAME_BOUNDS` 实测 == 窗口矩形 ⇒ 整窗可见；外扩会让吞框后的客户区多出不可见边框带宽，布局视口与真实客户区错位——底部/右侧纯背景带） | 无标题栏，热区与修饰键拖拽同左（`csd_mod_move` 激活） | `WS_POPUP`，无任何装饰 |
+| macOS | `Titled\|Closable\|Miniaturizable`（`resizable` 时再加 `Resizable`）＝原生标题栏 | **退化为 SSD**（macOS 无「撤掉服务端装饰再自绘」的原生对应口，也不接 CSD / margin 层；顶边内缩实测 32pt） | `Titled\|Closable\|Miniaturizable\|FullSizeContentView`（`resizable` 时再加 `Resizable`）配标题带透明 + 标题文本隐藏 + 三枚标准窗钮逐枚隐藏 ⇒ 看不到标题栏而**内容区 == 窗框**（顶边内缩实测 0），边缘缩放由原生窗框视图承担，**不经 `begin_window_resize`** | `NSWindowStyleMaskBorderless`（实测无缩放能力、边缘拖拽不改尺）；`WindowStyleOptions::frameless` 与本档同路 |
+
+**macOS 一列的两条实测例外**（取证载体见 `tools/verify/macos_surface_live_probe.mm` 的装饰档位段）：其一，该档的缩放由 `NSWindow` 自己承担——建窗后向窗框右下角投递一次拖拽（AppKit 事件队列腿），300×200 确实被拖到 396×296，且新尺寸由 `Surface::size()` 同步读回。故 macOS **不设** `begin_window_resize` 覆写：Win32 的 `WM_NCLBUTTONDOWN + HT*` 与 Wayland 的 `xdg_toplevel.resize` 是「自绘边框的按下必须转交 OS 接管整段拖拽」的桥，而 AppKit 的窗框视图本就在做同一件事，补第二份实现只会让同一次拖拽有两个结局。其二，投递拖拽的前提是**窗口在序且事件队列已泵空**，`isKeyWindow` 不是前提——同一台机器上改尺成功的那一行既读到过 0 也读到过 1，故 key 读数只作观测、不构成判据（与 OS 输入探针 TC-WINDOW-024 的 priming 同族，但实测「点击获焦」语义没有挡住本腿改尺）。
+
+**控件侧消费现状**：`WindowChrome::begin_resize` / `Surface::begin_window_resize` 目前**无控件调用方**（`TitleBar` 只消费 `begin_move`，控件层没有边缘命中测试），X11 连 `begin_window_move` 亦未覆写（落基类空实现）。CSD 缩放整链是跨后端缺口、不属 macOS；macOS 侧由上段的原生窗框路径覆盖同一需求，故该缺口在 macOS 上无产品可见后果。
 
 **安全区**：CSD 标题栏 / 阴影边距占用区经 `Surface::content_inset()` 暴露，由 `present_root` 的下沉壳（`ContentInsetRoot`）自动消费（见 §3.1「客户端自绘装饰的安全区」）；根注入 `MediaQuery.padding` 恒为内容区口径（已消费 ⇒ 归零）。
 
@@ -182,7 +187,7 @@ margin 在 Maximized / FullScreen / tiled 态塌缩为 0（贴边无可拖缝隙
 
 **窗口阴影 underlay**：`csd::paint_window_shadow`（同头文件）以内容矩形为形状、零偏移、模糊半径 `margin−AURORA_SHADOW_BLUR_INSET_PX` 录制 `Painter::draw_shadow`，仅作 GPU/DisplayList 路径的阴影源（`record_client_decoration_underlay` → `Sink::begin_frame` 先于 app 帧回放，Shadow 管线写真 alpha 到透明清除的 swapchain）。软件 wl_shm 路径不经 Painter（Painter 目标画布恒不透明，混合恒写 alpha=255，画不出半透明柔影）：`present()` 在 RGBA→BGRA 预乘 swizzle 之后调 `csd::compose_shadow_margins_bgra`（`src/aurora/window/detail/csd_shadow_compose.h`）直接覆写 margin 环的 BGRA 字——内容矩形跳过、角部按两向欧氏距离衰减、外缘写透明字 0 且幂等。视觉参数两条路径同源于 `csd_geometry.h`（`AURORA_SHADOW_BASE_COLOR{0,0,0,70}` / `AURORA_SHADOW_BLUR_INSET_PX` / `shadow_attenuation`），由 `utest_csd_shadow_compose` 对 BGRA 字逐值守门。
 
-**`Surface` 相关虚函数**：`set_title_bar_icon(std::shared_ptr<Image>)`（图标槽）、`begin_window_move()` / `begin_window_resize(WindowResizeEdge)`（控件发起拖拽 / 缩放——**须在指针按下事件派发栈内同步调用**，受 Wayland `xdg` move / resize 的 serial 时效约束）。
+**`Surface` 相关虚函数**：`set_title_bar_icon(std::shared_ptr<Image>)`（图标槽）、`begin_window_move()` / `begin_window_resize(WindowResizeEdge)`（控件发起拖拽 / 缩放——**须在指针按下事件派发栈内同步调用**，受 Wayland `xdg` move / resize 的 serial 时效约束）。覆写分布：`begin_window_move` 落 Win32 两型与 Wayland 两型加 macOS（`performWindowDragWithEvent:`）；`begin_window_resize` 只落 Win32 两型与 Wayland 两型——macOS 的边缘缩放由原生窗框视图承担（见 §4.1 该档的实测例外），X11 两者皆未覆写、落基类空实现。
 
 **`WindowChrome` 服务**（`window/window_chrome.h`）：经 Environment 注入的窗口动作门面（`close` / `minimize` / `toggle_maximize` / `set_fullscreen` / `begin_move` / `begin_resize` / `content_inset`），由 `present_root` 注入根环境供控件消费（headless 安全 no-op）。
 

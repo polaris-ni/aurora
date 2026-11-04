@@ -967,7 +967,7 @@ au::Json j = au::debug::feature_flags_json();
 au::WindowOptions opts;
 opts.size  = au::Size{ 720, 480 };
 opts.title = "文档";
-opts.style.decoration = au::DecorationPolicy::Borderless;   // 移除系统标题栏（CSD 接管）
+opts.style.decoration = au::DecorationPolicy::Borderless;   // 移除系统标题栏，保留可拖拽缩放边框
 
 au::TitleBar bar;
 bar.set_title("文档")                                       // 主标题
@@ -991,6 +991,8 @@ if (chrome && chrome->valid()) {
     chrome->toggle_maximize();   // 经 Surface 驱动真实窗口动作（Wayland serial 时效约束：仅事件栈内调用）
 }
 ```
+
+**边缘缩放由谁承担随后端不同**：Wayland / X11 / Win32 上 `Borderless` 的缩放热区由应用自绘，拖拽须经 `chrome->begin_resize(edge)` 把按下交给 OS（Win32 回报 `HT*`、Wayland 发 `xdg_toplevel.resize`）；macOS 无此必要——该档落 `FullSizeContentView` 组合掩码，边缘缩放由原生窗框视图直接承担。本配方**当前不给控件级边缘命中测试**：`TitleBar` 只消费 `begin_move`，`begin_resize` 尚无调用方，跨后端的自绘缩放整链属未落地缺口（登记见 [`specification/07-environment-modifier.md`](specification/07-environment-modifier.md) §4.1「控件侧消费现状」）；需要该行为的形态请暂用 `ServerSide` 或 macOS 的 `Borderless`。
 
 ---
 

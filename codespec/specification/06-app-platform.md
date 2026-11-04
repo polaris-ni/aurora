@@ -2013,13 +2013,13 @@ PDF 写出器（`src/aurora/render/detail/pdf_writer.h`，内部头）产 PDF 1.
 
 | 能力 | 说明 |
 |:---|:---|
-| `CaptureSource{ Framebuffer, OnScreenWindow }` | 截图源。`Framebuffer` = 软件帧缓冲（全后端通用、确定性）；`OnScreenWindow` = 真实屏幕窗口（含 OS 装饰，Wayland / Headless 不支持） |
+| `CaptureSource{ Framebuffer, OnScreenWindow }` | 截图源。`Framebuffer` = 软件帧缓冲（全后端通用、确定性）；`OnScreenWindow` = 真实屏幕窗口（含 OS 装饰，尽力；macOS 原生后端取内容视图、不含标题栏；Wayland / Headless 不支持） |
 | `capture(Surface&, path, src = Framebuffer) -> Result<bool>` | 自动建父目录后转发 `Surface::save_snapshot` 或 `Surface::capture_window` |
 | `set_output_directory(dir)` / `output_directory()` / `resolve_output_path(path)` | 输出目录 API（无调试内部依赖，始终可用）；默认 `current_path()/aurora_debug` |
 | `feature_flags() -> FeatureFlags` / `feature_flags_json() -> Json` | 编译期 feature 宏开关运行时查询（始终可用，编译期常量快照）。强类型结构体字段 + JSON 导出（键 = 完整宏名）。C++ 侧宏镜像单点收口于 `src/aurora/debug/feature_flags.cpp`，应用代码零 `#ifdef`（需求 SPEC.PLATFORM.ZERO-IFDEF.001） |
 | `surface_state(const Surface&) -> Json` | `width` / `height` / `scale_factor` / `frame_count` / `clear_color` / `should_close` / `has_native_window`。`frame_count` = 该 Surface 的已上屏帧数，各后端在自身 `present()` 内自增：Headless / Win32 / Glfw / D3D11 / X11 / Wayland / macOS / WASM 与三个 wgpu 型均有值，跨后端比对读数前须先确认该后端是否计数 |
 
-**门控与 ODR 安全**：API 头**始终声明**，调试能力函数的 `.cpp` 体按 `AURORA_ENABLE_DEBUG` 裁切（例外：输出目录三函数的定义不裁切、无条件编译，与「始终可用」一致）；`Surface::save_snapshot` / `capture_window` 默认实现按运行时 `data()` 判空（宏无关），后端专属截图体门控。两函数在 `Surface` 上**始终声明**（vtable 槽稳定，属 `Surface` 契约）。Win32 家族两路（`Win32Surface` GDI 上屏 / `D3D11Surface` GPU 上屏，共用 `Win32Host` 宿主，经共享 `detail::capture_window_by_hwnd` 走 PrintWindow 路径）、X11、GLFW 在 `AURORA_ENABLE_DEBUG` + 对应后端下覆写 `capture_window`（GLFW：Windows 经原生 HWND 走 PrintWindow 含非客户区；X11/Wayland/Mac 走 GL 帧缓冲读回——软件路径先重放上一帧再 `glReadPixels`，GPU 路径经 `GpuGlRhi::read_pixels`，得客户区 framebuffer 尺寸画面，须在某次 present 之后调用）；Headless/Wayland 保持 unsupported（Wayland 客户端无法截图，属安全限制）。
+**门控与 ODR 安全**：API 头**始终声明**，调试能力函数的 `.cpp` 体按 `AURORA_ENABLE_DEBUG` 裁切（例外：输出目录三函数的定义不裁切、无条件编译，与「始终可用」一致）；`Surface::save_snapshot` / `capture_window` 默认实现按运行时 `data()` 判空（宏无关），后端专属截图体门控。两函数在 `Surface` 上**始终声明**（vtable 槽稳定，属 `Surface` 契约）。Win32 家族两路（`Win32Surface` GDI 上屏 / `D3D11Surface` GPU 上屏，共用 `Win32Host` 宿主，经共享 `detail::capture_window_by_hwnd` 走 PrintWindow 路径）、X11、GLFW 在 `AURORA_ENABLE_DEBUG` + 对应后端下覆写 `capture_window`（GLFW：Windows 经原生 HWND 走 PrintWindow 含非客户区；X11/Wayland/Mac 走 GL 帧缓冲读回——软件路径先重放上一帧再 `glReadPixels`，GPU 路径经 `GpuGlRhi::read_pixels`，得客户区 framebuffer 尺寸画面，须在某次 present 之后调用）；macOS 原生 `MacOSSurface` 走内容视图缓存位图（`bitmapImageRepForCachingDisplayInRect:` + `cacheDisplayInRect:toBitmapImageRep:` → PNG，客户区、不含标题栏；不经 WindowServer 抓屏，故背景图形会话可用且无需屏幕录制授权）；Headless/Wayland 保持 unsupported（Wayland 客户端无法截图，属安全限制）。
 
 `Surface` 另新增虚函数 `framebuffer_size()`（默认返回逻辑 `size()`）：`save_snapshot` 以它作 PNG 宽高；按 DPI 物理分辨率分配缓冲的后端须覆写返回物理像素，避免缩放比 ≠ 1 时 PNG 尺寸与像素数据错位。`native_handle()` 为 `const`（只读查询），**基类默认返回 `nullptr`**；真实窗口后端必须覆写为宿主原生句柄——Win32 家族两路（`Win32Surface` GDI 上屏 / `D3D11Surface` GPU 上屏，共用同一 `Win32Host` 宿主）**均**覆写为 `hwnd()`。上表 `surface_state()` 的 `has_native_window` 即由它非空判定，漏覆写会让真实窗口后端**恒报 false**，故由 `utest_native_surfaces` 的 `windows_family_native_handle_contract` 类型级守门。
 
