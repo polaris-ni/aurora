@@ -860,10 +860,11 @@ AURORA_TEST_CASE(websocket_refuses_non_utf8_text_before_writing_a_single_frame) 
     auto handle = scene.open();
     check_rejected(handle.send(std::string_view{"bad\xff"}), aurora::ErrorCode::WsProtocolError,
                    "text payload is not valid UTF-8 at byte 3");
-    aurora::test::net::pump_idle(AURORA_QUIET);
-
-    AURORA_TEST_CHECK_EQ(scene.log.count(AURORA_OP_TEXT), std::size_t{0});  // 一个字节都没上线
     AURORA_TEST_CHECK_TRUE(handle.is_open());  // 被拒的是这次发送，不是这条会话
+    // 被拒的调用一个字节都不上线：紧接其后的合法消息必是**首枚**被对端解出的帧，且载荷恰为该消息。
+    // 同一条连接上的字节 FIFO 保证「先被拒的调用若真的写了什么，一定排在这枚之前」——故这里不需要
+    // 「静默窗口」再等一轮：那段窗口会与对端 50 ms 观察读超时叠在一起，在慢腿上把「我方暂时没说话」
+    // 放大成一次空等（CI 上实测偶发），而判据强度并未因此增加。
     AURORA_TEST_REQUIRE(bool(handle.send("still fine")));
     drive_until_frames(scene.log, 1, AURORA_WAIT);
     const auto seen = scene.log.frame(0U);
@@ -871,6 +872,7 @@ AURORA_TEST_CASE(websocket_refuses_non_utf8_text_before_writing_a_single_frame) 
     // 前序 AURORA_TEST_REQUIRE 已断言持有值，断言宏的展开对 tidy 的路径分析不透明，属误报。
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     AURORA_TEST_CHECK_EQ(seen->payload, "still fine");
+    AURORA_TEST_CHECK_EQ(scene.log.count(AURORA_OP_TEXT), std::size_t{1});  // 且只有这一枚
 }
 
 AURORA_TEST_CASE(websocket_refuses_a_message_over_the_message_limit) {
