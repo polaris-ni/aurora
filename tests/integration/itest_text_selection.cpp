@@ -14,8 +14,10 @@
 #include "aurora/app/clipboard.h"
 #include "aurora/aurora.h"
 #include "framework/aurora_test.h"
+#include "framework/clipboard_memory_backend.h"
 
 namespace aurora::test_cases::itest_text_selection {
+namespace clipboard_memory = aurora::testing::clipboard_memory;
 
 namespace render = aurora::render;
 
@@ -635,13 +637,12 @@ AURORA_TEST_CASE(dispatcher_click_focus_enables_ctrl_c_copy) {
     AURORA_TEST_CHECK_EQ(t->selection().first, std::size_t{0});
     AURORA_TEST_CHECK_EQ(t->selection().second, src.size());
 
-    // Ctrl+C 的「落剪贴板」断言改走库侧**进程内**注入后端（Clipboard::install_test_backend）：
-    // Linux 的系统剪贴板由外部工具（xsel/xclip）实现，其 selection 所有权是**异步**的（xsel
-    // 二次写入依赖既有守护进程交接、xclip 常驻等待读者），内容还受各工具换行约定影响——拿它做
-    // 内容断言既非确定、也不是 aurora 自身的契约（本用例要证明的是「派发链把全文交给了剪贴板
-    // 抽象」，而不是「xsel 工作正常」）。双测试宏未开（Release：AURORA_ENABLE_DEBUG 自动 OFF）时
-    // install 返回 false，此时跳过内容断言；上面的焦点/选区断言与下面的 is_handled 断言仍生效。
-    const bool clipboard_backend_injected = Clipboard::install_test_backend();
+    // Ctrl+C 的「落剪贴板」断言改走测试框架的**进程内** memory 后端
+    // （clipboard_memory::install）：Linux 的系统剪贴板由外部工具（xsel/xclip）实现，其 selection
+    // 所有权是**异步**的（xsel 二次写入依赖既有守护进程交接、xclip 常驻等待读者），内容还受各工具
+    // 换行约定影响——拿它做内容断言既非确定、也不是 aurora 自身的契约（本用例要证明的是「派发链
+    // 把全文交给了剪贴板抽象」，而不是「xsel 工作正常」）。
+    AURORA_TEST_CHECK_TRUE(clipboard_memory::install());
 
     KeyEvent ke;
     ke.action = KeyAction::Down;
@@ -650,16 +651,10 @@ AURORA_TEST_CASE(dispatcher_click_focus_enables_ctrl_c_copy) {
     (void)EventDispatcher::dispatch(col, ke, fm);
     AURORA_TEST_CHECK_MSG(ke.is_handled, "Ctrl+C consumed by focused text");
 
-    if (clipboard_backend_injected) {
-        const auto copied = Clipboard::get_text();
-        AURORA_TEST_REQUIRE_MSG(copied.ok(), "clipboard read through the memory backend succeeds");
-        AURORA_TEST_CHECK_MSG(copied.value() == src, "full drag-selection copied to clipboard");
-        (void)Clipboard::remove_test_backend();
-    } else {
-        AURORA_TEST_TRACE(
-            "clipboard memory backend unavailable (needs AURORA_ENABLE_DEBUG + AURORA_ENABLE_TEST_HOOKS); "
-            "skipped clipboard content assertion — selection content was asserted above");
-    }
+    const auto copied = Clipboard::get_text();
+    AURORA_TEST_REQUIRE_MSG(copied.ok(), "clipboard read through the memory backend succeeds");
+    AURORA_TEST_CHECK_MSG(copied.value() == src, "full drag-selection copied to clipboard");
+    (void)clipboard_memory::remove();
 }
 
 AURORA_TEST_CASE(scaled_display_last_line_tail_fully_highlighted) {

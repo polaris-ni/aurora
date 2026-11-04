@@ -16,6 +16,7 @@
 #include "aurora/app/clipboard.h"
 #include "aurora/core/enums.h"
 #include "framework/aurora_test.h"
+#include "framework/clipboard_memory_backend.h"
 #include "support/paths.h"
 
 namespace aurora::test_cases::utest_test_framework {
@@ -215,15 +216,12 @@ AURORA_TEST_CASE(isolation_repo_root_resolves) {
 }
 
 AURORA_TEST_CASE(clipboard_test_backend_roundtrip) {
-    // 双宏齐备时注入生效（不触碰系统剪贴板）；任一关闭（含 Release 下 DEBUG 自动关）
-    // 返回 false → 运行时 skip，不伪造通过也不误报失败。
-    if (!aurora::Clipboard::install_test_backend()) {
-        AURORA_TEST_SKIP("test hooks disabled (AURORA_ENABLE_DEBUG / AURORA_ENABLE_TEST_HOOKS off)");
-    }
+    // 测试侧 memory 后端经内部接缝注册，不触碰系统剪贴板。
+    AURORA_TEST_CHECK(aurora::testing::clipboard_memory::install());
     aurora::Clipboard::set_text("aurora-clipboard-roundtrip");
     AURORA_TEST_CHECK_EQ(aurora::Clipboard::get_text().value(), "aurora-clipboard-roundtrip");
 
-    aurora::Clipboard::reset_test_backend();
+    aurora::testing::clipboard_memory::reset();
     AURORA_TEST_CHECK(aurora::Clipboard::get_text().value().empty());
 
     aurora::Image image;
@@ -237,8 +235,8 @@ AURORA_TEST_CASE(clipboard_test_backend_roundtrip) {
     AURORA_TEST_CHECK_EQ(restored.value().height, 1);
     AURORA_TEST_CHECK(restored.value().pixels == image.pixels);
 
-    AURORA_TEST_REQUIRE(aurora::Clipboard::remove_test_backend());
-    AURORA_TEST_CHECK(!aurora::Clipboard::remove_test_backend());  // 无后端可再卸
+    AURORA_TEST_CHECK(aurora::testing::clipboard_memory::remove());
+    AURORA_TEST_CHECK(!aurora::testing::clipboard_memory::remove());  // 无后端可再卸
 }
 
 }  // namespace aurora::test_cases::utest_test_framework

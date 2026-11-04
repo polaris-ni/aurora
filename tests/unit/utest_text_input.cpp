@@ -22,9 +22,11 @@
 #include "aurora/render/painter.h"
 #include "aurora/widget/text_input.h"
 #include "framework/aurora_test.h"
+#include "framework/clipboard_memory_backend.h"
 #include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_text_input {
+namespace clipboard_memory = aurora::testing::clipboard_memory;
 using aurora::testing::require_child;
 using aurora::testing::require_child_at;
 using aurora::testing::require_field;
@@ -742,7 +744,7 @@ AURORA_TEST_CASE(cut_keeps_text_when_clipboard_write_fails) {
     // 用户既没把内容交出去又丢了原文，是净损失；改签名前这条路径静默返回，无从设防。
     // 这里用「非法 UTF-8 在 EmptyClipboard 之前就被 MB_ERR_INVALID_CHARS 拒掉」做确定性失败入路，
     // 故本用例全程不会改动真实系统剪贴板的内容（也不必装 memory 后端——装了反而永不失败）。
-    (void)Clipboard::remove_test_backend();
+    (void)clipboard_memory::remove();
 
     const std::string junk{"keep\xF0\x28\x8C\x28me"};
     auto field = std::make_shared<TextInput>();

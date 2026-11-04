@@ -49,6 +49,8 @@ freeze: minor-versions-are-additive
 
 - **构建面迁移尾巴清理：TLS provider 装配的旧单值缓存变量 `AURORA_NET_TLS_PROVIDER` 删除**。该单值拼写是 TLS 后端可插拔化改造引入的过渡别名，供当时 CI 与 manual-test 的历史命令行过渡；如今 CI 与手工验收已全量改用列表型 `AURORA_NET_TLS_PROVIDERS`，mbedTLS 也已改为 `third_party/mbedtls` 内置源码构建，别名不再有消费场景。迁移路径：把命令行里的 `-DAURORA_NET_TLS_PROVIDER=<static|shared>:<prefix>` 改写为 `-DAURORA_NET_TLS_PROVIDERS=<static|shared>:<prefix>`（单条 entry 语义逐字等价）；「新旧拼写同设即 configure 期硬失败」的冲突诊断随别名一并删除。同批移除零引用遗留模块 `cmake/AuroraCheckTestRegistry.cmake`（`registry_integrity` 门禁不受影响，早已改由 `tools/check/check_test_registry.py` 直接注册）。详见 `codespec/changes/remove-tls-provider-alias/proposal.md`。
 
+- **剪贴板变更监听由「单回调替换」改为 `on_event` 纯多播**（契约见 [`codespec/specification/06-app-platform.md`](codespec/specification/06-app-platform.md) §8.2，变更提案 [`codespec/changes/clipboard-event-multicast/proposal.md`](codespec/changes/clipboard-event-multicast/proposal.md)）。删除 `Clipboard::on_ownership_lost` 与 `Clipboard::on_change`，新增 `ClipboardEventKind`（`ContentChanged` / `OwnershipLost`，可 `|` 组合）与 `Clipboard::on_event(kinds, callback)` 两个重载（句柄形态 / `Widget&` 弱守卫形态），返回既有 `aurora::Subscription`——析构或 `reset()` 即注销。语义：同一回调注册几次收几次（不再替换）；派发按注册序 FIFO 取快照逐条调用，回调内新注册的下一轮生效、回调内取消的立即止损（含本轮尚未轮到的条目）；`kinds` 必填且至少一类；空回调或空掩码为 `general-invalid-argument`；owner 非 `std::shared_ptr` 托管（弱守卫无从建立）同样为 `general-invalid-argument`；请求 `ContentChanged` 而本平台无监听机制仍如实报 `clipboard-listen-unsupported`，只请求 `OwnershipLost` 恒成功且不做能力校验；`clear()` 只清内容、不注销监听。带 owner 守卫的条目计数为 0 时任何入口都不清扫，计数 > 0 时全部公共入口按 5 秒窗口节流整表回收。**同批删除公共头 test-only 段**（`install_test_backend` / `reset_test_backend` / `remove_test_backend` / `emit_change` / `emit_ownership_lost` / `set_listen_supported`）：进程内 memory 后端整体迁至 [`tests/framework/clipboard_memory_backend.h`](tests/framework/clipboard_memory_backend.h)，经内部接缝 [`clipboard_backend.h`](src/aurora/app/detail/clipboard_backend.h) 注册到与平台后端**同一张全通道函数表**，`src/aurora/app/clipboard.cpp` 内 22 处 `AURORA_CLIPBOARD_TEST_BACKEND` 分支与自定宏归零，测试后端不再依赖 `AURORA_ENABLE_DEBUG` / `AURORA_ENABLE_TEST_HOOKS`。迁移路径见 §Migration；平台桥（Win32 / macOS / X11 / Wayland）与后端矩阵零改动。
+
 ### Added
 
 - **风格轴对照载体 `demo_theme_styles` 与 theming 模块八条风格手工用例**（上一条与下两条落的是库侧，本条落「人能看见」的那一面）：新增 `examples/demos/demo_theme_styles.cpp`，一页同时给出十格并排（五风格 × 明暗，每格自带主题盒与令牌表入口）、点格放大的单格大图（逐令牌取值表 + 实况区可现场改档）、风格 / 明暗两枚下拉、以及按本机惯例实开的对话框三档按钮序。控件套装在既有的 `Button` / `Checkbox` / `Divider` 之外补入 `Slider` 与 `Dropdown`（两枚的强调色槽未显式设值时都经 `inherit_theme(ctx)` 解算到 `roles.primary`——前者铺激活段与滑块、后者铺展开态边框与选中行，换档即整条轨道与选中项配色随动）。载体不引新公共 API，只调 `include/aurora/theming/*.h` 与 `window/*.h` 已声明的面。`codespec/manual-test/13-theming.md` 同批登记 `TC-THEMING-005`…`012` 八条：载体启动基线、十格并排观感分野、大图与令牌表自洽、实况区两轴重绘（含「`Unspecified` ≡ 明色」的像素核对）、三档对话框按钮序、字体族缺失回退、Linux 双外壳真机切换、无桌面环境回落 Material。前六条已在真机执行并留读数（配色取样经远程检视通道 `/api/debug/snapshot` 逐像素核对，Windows/Light 的 `#005A9E` 与 GNOME/Light 的 `#1C71D8` 差异肉眼在 150% 缩放下不可靠），后两条留空行待 Linux 真机。构建口径同批改写：`TC-THEMING-001` 步骤 1 一条命令列出两份载体（`demo_theme demo_theme_styles`），§1.2 补「`demo_theme` 不覆盖风格轴」的分工说明与载体四个观察面对应用例的映射；§1.8 另记六条载体已知局限（四枚无消费点的布局惯例、`Dialog` 不画卡片、`Dropdown` 盒与面板硬编码白底、`Text` 不自动读 `type_scale`、浮层按树序绘制被后序兄弟遮挡、风格档运行期不跟随外壳）。库代码与公共 API 零变化。
@@ -125,6 +127,20 @@ freeze: minor-versions-are-additive
 - **余下 6 条 Doxygen warning 全部清零，`docs` 目标回到「退出 0 且告警日志为空」的登记基线（只改注释与文档措辞，实现未动）**：上一条修掉的只是让构建提前终止的那 4 条，同树还剩三类 6 条，逐类以最小 fixture 实测定位根因后再改写法，不凭直觉换标记。三类各自的机制：**其一**，文档注释里用 Markdown 链接指向兄弟规格文件（反引号标题加相对路径链接）被 Doxygen 当显式 `\ref` 请求处理，目标按**被抽取头所在的目录**起算，`include/aurora/state/` 出发的两级相对路径永不可达，报 `unable to resolve reference to '../../specification/02-state.md' for \ref command` 两条；本仓 100+ 处同类引用一律写仓库相对路径纯文本（如 `specification/05-event-navigation.md §6.1`），两处改回该形态即与 §13.6「宁可不写链接、只留仓库相对路径文字」同色，引用的文件与章节锚点逐字可达。**其二**，详述命令写成缺尾字母的同名拼写（三处：`Application::active_window()`、`Application::record_dispatch()`、`ThreadPool::interruptible_wait_for()`），Doxygen 报 `Found unknown command '@detail'` 并**把该行起的详述整段丢弃**——比报错更糟的是文档内容静默失踪，消费者只看到一句 brief；§13.2 登记的允许子集里只有带尾字母那一枚，三处改回即段落回到详述位。**其三**，IPv4 内嵌 IPv6 地址那一枚内联码（两枚前导冒号紧跟 `ffff:`）让 Markdown 转换产出不成对的 `<tt>`，报 `found </tt> tag without matching <tt>`；实测只写回环本机地址那一枚内联码不复现，故把两枚前导冒号留在跨度之外即消警、注释文本逐字不变，并在该处写明「勿为统一风格把冒号合回去」。同批把两类触发形态回写 §13.6：既有那条「跨度以点开头发作」的外延补上实测复现的 `::` 形态（并记明触发点不止首字符是点，须按最小 fixture 定位），新增一条「内联码含注释收尾序列要改用 HTML `code` 标签」（承接上一条的实测，含两种被排除的直觉修法）。公共 API、类布局与运行行为零变化，`aurora_api.json` 零差异；验证面：全树 Doxygen 扫描（刻意关 `WARN_AS_ERROR`，防第一条掩盖后续头文件）告警 **0 条**、`docs` 目标退出 0 且告警日志为空、`check_doc_comments` 0 条、改动头文件 `clang-format` 全合格、重建后全量 `ctest --preset ninja-test` 450/450 绿。
 
 ### Migration
+
+- **剪贴板监听迁移到 `on_event`**（上条 Breaking 的具体改法）：
+
+| 旧写法 | 新写法 |
+| :--- | :--- |
+| `Clipboard::on_ownership_lost(cb)` | `Clipboard::on_event(ClipboardEventKind::OwnershipLost, cb)` |
+| `Clipboard::on_change(cb)` | `Clipboard::on_event(ClipboardEventKind::ContentChanged, cb)` |
+| 两样都收 | `Clipboard::on_event(ClipboardEventKind::ContentChanged \| ClipboardEventKind::OwnershipLost, cb)` |
+| `on_ownership_lost(nullptr)` / `on_change(nullptr)` 注销 | 销毁返回的 `Subscription`，或显式 `subscription.reset()` |
+| 依赖「新回调替换旧回调」 | 旧语义改由调用方保证：先 `reset()` 旧句柄再注册新句柄；或只注册一次（新语义是纯多播，不复用旧行为） |
+| 回调形参 `void()` | 回调形参 `void(ClipboardEventKind kind)`，按命中类别分支 |
+| 测试侧 `Clipboard::install_test_backend()` 等六件 | `#include "framework/clipboard_memory_backend.h"` 后调 `aurora::testing::clipboard_memory::install()` / `reset()` / `remove()` / `installed()` / `emit_change()` / `emit_ownership_lost()` / `set_listen_supported(bool)` |
+
+  需要「控件销毁即自动停投」时改用守卫形态 `on_event(Widget &owner, kinds, cb)`，owner 必须由 `std::shared_ptr` 托管（栈对象注册会得到 `general-invalid-argument`）。
 
 - **默认主题改到本机风格档后，取回旧观感的两种写法**（按诉求选一种即可）：
 

@@ -9,11 +9,11 @@
 //   - tmpdir：每个用例开始时创建**运行路径下 `test_temp/` 内的唯一子目录**
 //     （`fs::current_path()/test_temp/<case>`，见本框架约定）并接管 TMPDIR/TMP/TEMP，
 //     用例结束后清理，偏好 / 存储类用例的临时文件写入彼此隔离；
-//   - 剪贴板：用例结束兜底卸载库侧 memory 注入后端（Clipboard::remove_test_backend），
+//   - 剪贴板：用例结束兜底卸载内部接缝上的 memory 注入后端（clipboard::detail::remove_backend），
 //     防止用例把注入状态泄漏到后续用例。
 //
-// 库侧注入点（memory 剪贴板后端）见 include/aurora/app/clipboard.h 的 test-only 段，
-// 受 `AURORA_ENABLE_DEBUG && AURORA_ENABLE_TEST_HOOKS` 双宏控制，关闭时为 no-op。
+// 注入后端本体在 tests/framework/clipboard_memory_backend.h，经
+// `aurora/app/detail/clipboard_backend.h` 注册到与平台后端同一张表，测试构建恒可用。
 // ============================================================
 
 #include <string>

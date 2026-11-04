@@ -28,7 +28,8 @@
 //   5. `available_formats()` 如实包含上述三档（新 API 已声明 ≠ 格式已可用，这条是反向判据）。
 //   6. 惰性提供：`set_offer` 后 `provide` **零次**被调用；随后由原生 `GetClipboardData` 触发
 //      `WM_RENDERFORMAT`（同线程 SendMessage 直达 owner 的窗口过程），断言调用一次且字节正确。
-//   7. 变更监听：注册 `on_change` 后由原生写入触发 `WM_CLIPBOARDUPDATE`，泵消息后断言回调到达。
+//   7. 变更监听：注册 `on_event`（`ContentChanged`）后由原生写入触发 `WM_CLIPBOARDUPDATE`，
+//      泵消息后断言回调到达。
 //      ⚠️ 该判据依赖消息泵，未到达时记 SKIP 而非 FAIL（泵不到是环境问题，不是库的缺陷）。
 //   8. 清空：`clear()` 后原生 `EnumClipboardFormats` 计数为 0。
 //
@@ -243,9 +244,11 @@ auto run_auto_stage() -> int {
 
     // 7. 变更监听：`WM_CLIPBOARDUPDATE` 需消息泵才到达，泵不到如实记 SKIP。
     bool changed = false;
-    const auto listening = au::Clipboard::on_change([&changed] { changed = true; });
-    check(listening.ok(), "on_change registers on this platform");
+    auto listening = au::Clipboard::on_event(au::ClipboardEventKind::ContentChanged,
+                                             [&changed](au::ClipboardEventKind) { changed = true; });
+    check(listening.ok(), "on_event registers content change on this platform");
     if (listening.ok()) {
+        auto subscription = std::move(listening.value());
         if (OpenClipboard(nullptr) != 0) {
             EmptyClipboard();
             const HGLOBAL handle = GlobalAlloc(GMEM_MOVEABLE, 4U);
@@ -259,9 +262,9 @@ auto run_auto_stage() -> int {
         }
         pump_messages(20);
         if (changed) {
-            check(true, "on_change callback fires after a foreign clipboard write");
+            check(true, "on_event callback fires after a foreign clipboard write");
         } else {
-            skip("on_change callback did not arrive (message pump did not deliver WM_CLIPBOARDUPDATE)");
+            skip("on_event callback did not arrive (message pump did not deliver WM_CLIPBOARDUPDATE)");
         }
     }
 

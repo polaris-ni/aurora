@@ -102,7 +102,7 @@ class NotificationCenter {
     static auto emit_activated(const std::string &tag) -> void;
 
     /// @brief 安装「仅记录」后端：此后 `notify()` 只更新 `last_notification()`，不触达任何系统通知服务。
-    /// @return 安装是否生效（恒为 `true`；保留返回值以对齐 `Clipboard::install_test_backend` 的注入面形态）。
+    /// @return 安装是否生效（恒为 `true`；保留返回值以对齐测试侧注入面的既有形态）。
     /// @note 给 Headless 场景与单元测试用：装了它，单测可以在装有真实桌面的开发机上验证字段
     ///       往返而不真的弹出通知。进程级开关，卸载用 `remove_recording_backend()`。
     [[nodiscard]] static auto install_recording_backend() -> bool;

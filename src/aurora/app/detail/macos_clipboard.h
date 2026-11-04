@@ -13,7 +13,8 @@
 //
 // 两处如实申报的平台差异：
 // 1) **无变更监听**：`NSPasteboard` 只有 `changeCount` 轮询，没有系统变更通知，故本后端不填
-//    `set_change_listener`，`Clipboard::on_change` 在 macOS 上照旧返回 `clipboard-listen-unsupported`
+//    `set_change_listener`，`Clipboard::on_event` 请求 `ContentChanged` 时在 macOS 上照旧返回
+//    `clipboard-listen-unsupported`
 //    （轮询不是通知机制，填上便是谎报）。
 // 2) **整块替换**：每次写入都先 `clearContents`（与 Win32 平台路径「后写者接管整块剪贴板」同口径），
 //    `clear()` 仍走 `pbcopy` 空输入重写（门面既有实现）。

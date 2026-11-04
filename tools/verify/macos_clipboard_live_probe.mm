@@ -6,8 +6,9 @@
 //   ✅ `set_html` / `get_html` 往返，`available_formats` 如实列出 text/html；
 //   ✅ `set_files` / `get_files` 往返（原生 `public.file-url` + `text/uri-list` 双档）；
 //   ✅ 惰性提供：`set_offer` 后 `get_payload` 触发 `provide`，读回字节一致；
-//   ✅ 所有权丢失：持有要约时被本进程的立即写入接管，`on_ownership_lost` 回调被触发一次，
-//      要约状态归零；`on_change` 如实返回 `clipboard-listen-unsupported`（NSPasteboard 无变更通知）。
+//   ✅ 所有权丢失：持有要约时被本进程的立即写入接管，`on_event`（`OwnershipLost`）回调被触发
+//      一次，要约状态归零；`on_event` 请求 `ContentChanged` 时如实返回
+//      `clipboard-listen-unsupported`（NSPasteboard 无变更通知）。
 //
 //   ❌ 不证明**另一个应用**读取本进程的惰性要约（跨进程场景需要人手动复制粘贴）；本探针用
 //      同进程读取触发真实的 data provider 回调，不冒充跨应用验收。
@@ -155,7 +156,10 @@ auto main() -> int {
             return aurora::make_error(aurora::ErrorCode::ClipboardFormatUnsupported, "unexpected mime");
         };
         int ownership_lost = 0;
-        aurora::Clipboard::on_ownership_lost([&ownership_lost]() -> void { ++ownership_lost; });
+        auto ownership_subscription =
+            aurora::Clipboard::on_event(aurora::ClipboardEventKind::OwnershipLost,
+                                        [&ownership_lost](aurora::ClipboardEventKind) -> void { ++ownership_lost; });
+        check(ownership_subscription.ok(), "on_event registers ownership-lost");
         check(aurora::Clipboard::set_offer(offer).ok(), "set_offer succeeds");
         check(aurora::detail::macos_clipboard_has_offer(), "bridge reports a live offer");
         const auto lazy_text = aurora::Clipboard::get_payload(std::string{aurora::AURORA_MIME_TEXT_PLAIN});
@@ -173,11 +177,10 @@ auto main() -> int {
               "count=" + aurora_verify::format_int(ownership_lost));
 
         // ---- 无变更监听的如实申报 ----
-        const auto listener = aurora::Clipboard::on_change([]() -> void {});
+        const auto listener = aurora::Clipboard::on_event(aurora::ClipboardEventKind::ContentChanged,
+                                                          [](aurora::ClipboardEventKind) -> void {});
         check(!listener.ok() && listener.error().code_enum == aurora::ErrorCode::ClipboardListenUnsupported,
-              "on_change reports clipboard-listen-unsupported on macOS");
-        aurora::Clipboard::on_change(nullptr);
-        aurora::Clipboard::on_ownership_lost(nullptr);
+              "on_event reports clipboard-listen-unsupported for content changes on macOS");
 
         // ---- 清空 ----
         check(aurora::Clipboard::clear().ok(), "clear succeeds");

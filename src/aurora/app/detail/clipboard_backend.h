@@ -35,6 +35,16 @@ namespace aurora::clipboard::detail {
 /// 每个字段都可以缺席（为空）：缺席即「该子能力本平台没有」，门面对该入口如实报
 /// `ClipboardFormatUnsupported`——与未登记整表时的口径逐字相同，调用方无需区分两种缺位。
 struct PlatformBackend {
+    /// @brief 按 UTF-8 写入文本（空串的 no-op 语义由门面先行判定，桥只处理非空文本）。
+    std::function<Result<bool>(const std::string &text)> set_text;
+    /// @brief 读取文本（UTF-8）；可读但无文本为 `Ok("")`（空内容不是失败）。
+    std::function<Result<std::string>()> get_text;
+    /// @brief 写入 RGBA8 图像（空图像的 no-op 语义由门面先行判定，桥只处理非空图像）。
+    std::function<Result<bool>(const Image &image)> set_image;
+    /// @brief 读取 RGBA8 图像；无图像载荷为 `Ok(空 Image)`（空内容不是失败）。
+    std::function<Result<Image>()> get_image;
+    /// @brief 清空剪贴板全部内容（主动清空，与空写入的 no-op 语义相反）。
+    std::function<Result<void>()> clear;
     /// @brief 按 MIME 写入原始字节（空字节的 no-op 语义由门面先行判定，桥只处理非空载荷）。
     std::function<Result<bool>(const std::string &mime, const std::vector<std::uint8_t> &bytes)> set_payload;
     /// @brief 按 MIME 读原始字节；格式不存在为 `Ok(空字节)`（空内容不是失败）。
