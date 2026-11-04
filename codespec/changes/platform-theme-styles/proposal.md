@@ -11,7 +11,7 @@
 ## 动机
 
 1. **主题只有一根轴，风格轴被写死成 Material**。`include/aurora/theming/theme.h` 的 `Theme` 是「Material 3 色角色集 + M3 排版 15 档 + CSD 角色组 + 明暗档」的聚合，内置档位只有 `light()` / `dark()` 两支；`include/aurora/window/window.h` 的 `resolved_root_theme()` 在应用未显式 `set_theme` 时只按 OS 明暗二选一取 `Theme::dark()` / `Theme::light()`。也就是说：**明暗是解算出来的，风格是编译期钉死的**。同一份声明式代码在 Windows、macOS、GNOME、KDE 上拿到的是同一套 Material 观感，框架没有「这台机器的设计语言」这个概念。
-2. **换风格只能换色，换不了观感骨架**。形状与间距令牌尚不存在（`Theme` 无 `shapes` / `spacing` 字段），`Button` 的圆角 6、内边距 12/6、各控件的留白与控件基准高全部硬编码在控件公共头里（同一问题在 `codespec/changes/prop-accessor-theme-defaults/proposal.md` 动机第四条被登记为待 CHG-056 解决）。结果是「一套 Windows 风格」无法只靠改配色成立——圆角档位、控件基准高、密度、焦点环形状这些才是设计语言的骨架。
+2. **换风格只能换色，换不了观感骨架**。形状与间距令牌尚不存在（`Theme` 无 `shapes` / `spacing` 字段），`Button` 的圆角 6、内边距 12/6、各控件的留白与控件基准高全部硬编码在控件公共头里。结果是「一套 Windows 风格」无法只靠改配色成立——圆角档位、控件基准高、密度、焦点环形状这些才是设计语言的骨架。
 3. **平台原生观感已有真机标定资产，但没有和主题打通**。`include/aurora/window/title_bar_style.h` 已经按 libadwaita / Win11 DWM / macOS 标准窗口三套视觉语言钉过配色与度量（`CsdPreset` 六档 + 三条推导口径分治的理由都写在注释里），`include/aurora/theming/csd_style_bridge.h` 的派生通道却把基座恒取 `CsdPreset::AdwaitaLight` / `AdwaitaDark`——**当前框架在 Windows 上画的是 GNOME 标题栏**。已有的标定值是本提案最省成本的起点，也是「风格」概念在仓库里的既成事实。
 4. **平台侧有明暗探测、没有风格探测**。`include/aurora/window/platform.h` 的 `os_color_scheme()` 三平台到位（Win32 注册表、macOS `NSApp.effectiveAppearance`、Linux GTK 配置启发式），`platform()` 给编译期 `PlatformKind`；但没有任何桌面环境概念。Linux 上同一二进制会跑在 GNOME 与 KDE 上，观感应当不同却无从区分——这一条决定了本提案的探测必须是**运行期**的，只靠 `AURORA_PLATFORM_*` 编译期宏不够。
 5. **AI-first 视角下默认值错位**。SPEC.API.SENSIBLE-DEFAULTS.001 的口径是「默认值在声明处可见、运行时可查询、代码中可省略」。今天的现实是：省略主题声明的产物在任何平台上都得到 Material 观感，模型无法从「用户在 Windows 上跑」这个事实推出任何观感差异。`Theme::defaults()` 把「跟随这台机器的设计语言」变成零参数的默认路径，且风格枚举可入 `aurora_api.json`、可被代码生成如实枚举。
