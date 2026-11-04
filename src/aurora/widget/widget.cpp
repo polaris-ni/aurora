@@ -20,6 +20,7 @@
 #include "aurora/render/font_engine.h"
 #include "aurora/render/painter.h"
 #include "aurora/theming/theme_scope.h"
+#include "aurora/widget/props.h"
 
 namespace aurora {
 
@@ -1053,6 +1054,38 @@ auto Widget::unmount() -> void {
 auto Widget::request_focus() -> void {
     if (FocusManager *fm = current_focus_manager()) {
         fm->request_focus(this);
+    }
+}
+
+// ---- 属性链接槽的移动面（`widget.h` 中声明，定义点收在此 TU）----
+//
+// 两件都要越出 `PropsHost` 自己的指针：`take_over` 要把 `PropsHost *` 下行成 `Widget *`（本类的定义点在
+// `Widget` 之前，且 `props_link_->host` 按控件记账），`drop` 要经 `PropsLink` 置空宿主指针（它定义在
+// `widget/props.h`）——都只能离头定义。那次下行由构造保证：`PropsHost` 除了 `Widget` 的基类子对象没有
+// 第二种用途，故 `dynamic_cast` 在这里既拿不到「不是 Widget」的负例，又要给每只控件移动都要走的钩子
+// 加上 RTTI 判定；lint 口径见 `CODING_STANDARDS.md` §5.2 与 `include/aurora/window/window.h` 的先例。
+//
+// `take_over()` 只做一件事：把这条链接位的宿主指针改成本控件，而且**只在它确实还绑在刚被搬空的那只
+// 来源控件上时**才改。它不做任何「属性子对象在宿主里的位置」推算 —— 那是被否决过的相对偏移形态
+// （切出宿主搬移属性对象时会在宿主之外算出一个地址当 owner 用，即伪造指针）。宿主的槽认回新的属性
+// 子对象是属性侧移动构造的活，见 `AbstractProps` 的 `adopt()`；判据不同、各补一半，两端合起来才是
+// 一次完整的重绑。
+auto detail::PropsHost::take_over(PropsHost &source) -> void {
+    // NOLINTBEGIN(cppcoreguidelines-pro-type-static-cast-downcast): PropsHost 仅作为 Widget 的基类存在
+    if (props_link_ != nullptr && props_link_->host == static_cast<Widget *>(&source)) {
+        props_link_->host = static_cast<Widget *>(this);
+    } else {
+        // 来源那条链接已脱钩（或已被切出宿主的属性对象认走到别处）：本槽不认它，否则两只控件会争
+        // 同一条链接，先析构的一边会把另一边的接线清掉。
+        props_link_ = nullptr;
+    }
+    // NOLINTEND(cppcoreguidelines-pro-type-static-cast-downcast)
+}
+
+auto detail::PropsHost::drop() -> void {
+    if (props_link_ != nullptr) {
+        props_link_->drop_host();
+        props_link_ = nullptr;
     }
 }
 

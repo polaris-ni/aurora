@@ -44,7 +44,75 @@ class Painter;  // 前向声明（render 模块定义于 render/painter.h）
 class Widget;  // 前向声明（HitNode 以 std::weak_ptr<Widget> 作为成员；Widget 在下方定义）
 
 namespace detail {
-struct PropsLink;  // 前向声明（widget/props.h 定义；本类以 friend 关系给它开放「换源即重订阅」通道）
+struct PropsLink;  // 前向声明（widget/props.h 定义；本类与 `PropsHost` 各以 friend 关系给它开放一条通道）
+
+/// @brief 属性链接槽：`Widget` 的基类子对象，只持有「指向本控件属性对象链接位」这一枚指针。
+///
+/// 为什么是「一枚指针 + 一个基类」，而不是手写 `Widget(Widget &&)`：控件本体有数十枚数据成员，
+/// 逐成员搬运既冗长又会在成员增删时静默漏项；而**默认生成的移动面必然先移动基类子对象**，于是把
+/// 「移动后把链接位的宿主指向新控件」这件事收进一个只含一枚指针的基类，`Widget` 与全部派生控件的
+/// 移动面就能一律保持 `= default`——零逐成员代码、零逐控件手写。
+///
+/// 次序是这个设计成立的前提：派生控件（`class Button : public LeafWidget, public ButtonProps`）的
+/// 隐式移动面按基类声明次序处理，先 `Widget`（连带本槽）、后 `ButtonProps`。所以本槽先把接管来的
+/// 链接位的宿主改成新控件，属性子对象随后把自己登记为新控件的槽值——两端各补一半，整控件移动与
+/// 移动赋值之后标脏、换源重订阅照常命中**新**宿主，而移动来源彻底脱钩（其写入不再标脏）。
+///
+/// 双向链接在两端各自析构时互解：本槽只把那条链接位的宿主置空，属性侧只把宿主的槽置空（且仅当槽
+/// 确实指向自己）。于是「把已绑定的属性对象切出宿主单独搬移」这条不支持面也不留悬垂——两种销毁
+/// 次序都只退化成不标脏。
+class PropsHost {
+  public:
+    /// @brief 默认构造：未接线（本控件还没有属性对象与之相连）。
+    PropsHost() = default;
+    /// @brief 禁止拷贝构造（拷贝控件本身已被 `Widget` 删除，此处不留第二条路）。
+    PropsHost(const PropsHost &) = delete;
+    /// @brief 禁止拷贝赋值（同拷贝构造：`Widget` 的拷贝面整体不存在）。
+    /// @return 该重载恒为 `= delete`，任何拷贝赋值尝试止于编译期。
+    auto operator=(const PropsHost &) -> PropsHost & = delete;
+    /// @brief 移动构造：把来源槽指向的链接位接到本控件名下，并摘空来源。
+    /// @param other 来源控件的槽。
+    PropsHost(PropsHost &&other) noexcept : props_link_(other.props_link_) {
+        other.props_link_ = nullptr;
+        take_over(other);
+    }
+    /// @brief 移动赋值：先与本槽原链接位脱钩，再接管来源（语义同移动构造）。
+    /// @param other 来源控件的槽。
+    /// @return 赋值后的自身引用。
+    auto operator=(PropsHost &&other) noexcept -> PropsHost & {
+        if (this != &other) {
+            drop();
+            props_link_ = other.props_link_;
+            other.props_link_ = nullptr;
+            take_over(other);
+        }
+        return *this;
+    }
+    /// @brief 析构：与本槽指向的链接位脱钩，属性对象比宿主活得久时不留悬垂槽。
+    ~PropsHost() { drop(); }
+
+  private:
+    // 槽的值只由三处写：`PropsLink` 的接线件（`bind` 与属性子对象移动面，见 widget/props.h）、本类的
+    // 移动面、以及本类的析构。控件本体与全部派生类取不到它，于是「宿主 ↔ 链接位」的双向关系不存在
+    // 第四只手，也就不可能有一侧悄悄改了另一侧不认的接线。
+    friend struct PropsLink;
+
+    /// @brief 接管 `other` 让过来的那条链接位：它确实还绑在 `other` 所属的控件上才改绑到本控件，
+    ///        否则本槽清零（已脱钩的链接、或已被切出宿主的属性对象认走到别处的链接，都不认）。
+    ///
+    /// 「不认」这半是必需的：两只控件争同一条链接时，先析构的那一边会把另一边的接线清掉。
+    /// @param source 让出链接位的来源槽（与本槽现为同一条链接）。
+    /// @note 定义在 `src/aurora/widget/widget.cpp`：这里要把基类子对象 `PropsHost *` 下行成 `Widget *`，
+    ///       而本类的定义点在 `Widget` 之前。该下行由构造保证——`PropsHost` 除作 `Widget` 的基类外
+    ///       没有第二种用途，故取 `static_cast` 而非 `dynamic_cast`（口径详见定义点上方注释）。
+    auto take_over(PropsHost &source) -> void;
+    /// @brief 与本槽指向的链接位脱钩（把它那侧的宿主指针置空），随后清零本槽。
+    /// @note 定义位置同 `take_over`：置空宿主指针需要 `PropsLink` 完整，而它定义在 widget/props.h。
+    auto drop() -> void;
+
+    PropsLink *props_link_ = nullptr;  ///< 指向本控件属性对象的链接位（未接线为空）
+};
+
 }  // namespace detail
 
 /// @brief 上报**焦点变化**到无障碍事件通道（`AccessibilityEventKind::FocusChanged`）。
@@ -151,7 +219,7 @@ struct HitNode {
 /// 修饰链在基类的 layout/paint/hit_test 中统一包裹，避免各 widget 重复 props。
 /// @note Thread: main-thread only
 /// @note Rebuildable: yes, via from_json
-class Widget : public std::enable_shared_from_this<Widget> {
+class Widget : public std::enable_shared_from_this<Widget>, public detail::PropsHost {
   public:
     /// @brief 虚析构：控件一律以基类指针（`shared_ptr<Widget>`）销毁，故析构函数必须为虚。
     ///
@@ -173,6 +241,9 @@ class Widget : public std::enable_shared_from_this<Widget> {
     ///
     /// Widget 通常由 `Node` 以 shared_ptr 就地构造、不做移动，被移动后的源对象随即析构，
     /// 故此共享在实践中不可观测；若将来出现「移动后仍使用源对象」的形态须显式改派 id。
+    ///
+    /// 属性链接位不在此处手写：基类 `detail::PropsHost` 自带移动面，默认实现会先移动它，于是
+    /// 「控件整体移动 / 移动赋值后 setter 仍命中标脏」零逐控件代码（详见该类的次序说明）。
     Widget(Widget &&) = default;
     /// @brief 移动赋值保留默认实现（语义同移动构造：运行时身份随成员一并搬移，不重新分配）。
     /// @return 赋值后的自身引用。
@@ -1848,6 +1919,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
     // 属性机制层（widget/props.h）以本类的宿主链接位调用受保护的 `resubscribe_signals()`：
     // 来源型属性换源后必须重建订阅，而那条通道只该给表驱动的属性面用。friend 而非把成员
     // 升为 public / protected —— 前者不扩公共面，后者会让全部派生控件都能绕过换源契约。
+    // 同理，`bind` 接线与属性子对象移动时的自登记要写基类 `PropsHost` 的槽，也不经本类公共面。
     friend struct detail::PropsLink;
 
     /// @brief 采集本控件的全部信号并建立订阅（`mount` 与换源重建共用）。

@@ -975,8 +975,50 @@ namespace detail {
 /// friend：不扩公共面、不放大可见性、零分配。
 ///
 /// `host == nullptr` 即脱离宿主的构造期 DTO：写入只落字段，不产生任何标脏（与现状链式 DTO 一致）。
+///
+/// 宿主侧另有一枚对称的槽（`Widget` 的基类 `detail::PropsHost::props_link_`），两者**互指**才叫接上，
+/// 故下面四件接线件各管一次互指或解指、且两端析构时互解：整控件移动由 `PropsHost` 的移动面先把
+/// `host` 指向新控件，属性子对象的移动面再用 `adopt()` 把自己登记为新宿主的槽值。
 struct PropsLink {
     Widget *host = nullptr;  ///< 宿主控件（未接线为空）
+
+    /// @brief 接线：把本链接位与宿主互指（控件构造尾部 `bind` 的唯一调用点）。
+    /// @param new_host 承载本属性对象的控件（须与其生命周期一致）。
+    auto attach(Widget &new_host) -> void {
+        host = &new_host;
+        new_host.props_link_ = this;
+    }
+
+    /// @brief 整控件移动 / 移动赋值后自登记：宿主的槽认回本链接位。
+    ///
+    /// 调用点是属性子对象的移动面，此刻宿主指针已由 `PropsHost::take_over` 指到目标控件（基类的移动
+    /// 面先于兄弟基类执行），所以这里只补另一半：把目标控件的槽从「来源的链接位」换成「本链接位」。
+    auto adopt() -> void {
+        if (host != nullptr) {
+            host->props_link_ = this;
+        }
+    }
+
+    /// @brief 脱钩（属性侧）：属性对象析构或被移出宿主时调用；宿主的槽只在确实指向本链接位时才清零。
+    ///
+    /// 「确实指向」这一判据挡住的是切出宿主搬移属性对象之后的旧宿主：那时它的槽已被本链接位认走，
+    /// 若这里再清一次就会清掉别人（本链接位的新位置）的接线。
+    /// @note 宿主槽的清零走 `PropsHost::take_over` 一侧的判据是「链接位仍绑在让出的那只控件上」；
+    ///       两枚判据分别站在链的两端，合起来保证一条链接位同时只被一只控件引用。
+    auto detach() -> void {
+        if (host != nullptr) {
+            if (host->props_link_ == this) {
+                host->props_link_ = nullptr;
+            }
+            host = nullptr;
+        }
+    }
+
+    /// @brief 脱钩（宿主侧）：宿主析构或移动赋值覆盖旧接线时调用，只清本链接位的宿主指针。
+    ///
+    /// 与 `detach()` 的分工：本件在链接位这一侧，故不需要「槽是否还指着我」的判据 —— 指向本链接位的
+    /// 那只控件正是把它让出来的对象；宿主的槽随后由 `PropsHost::drop()` 自己清零。
+    auto drop_host() -> void { host = nullptr; }
 
     /// @brief 按表行档位标脏；未接线时是空操作。
     /// @param bits 该行的脏档位。
@@ -1057,7 +1099,8 @@ class AbstractProps {
     // 受保护构造仍允许它被继续当成普通模板类继承下去，所以唯一的干净形态是私有 + 朋友，而派生类
     // 自己的公共构造照常能调用私有的基类构造，析构同理。
     //
-    // 移动面在此只搬链接位；「移动后来源不再命中宿主」由控件侧的 `PropsLink *props_link_` 重绑承担。
+    // 移动面的分工见 `detail::PropsHost`：宿主侧先移动（把 `link_.host` 指向新控件），本侧随后
+    // `adopt()` 把新控件的槽认回自己，并把来源的 `host` 置空 ⇒ 整控件移动后标脏命中新宿主、来源脱钩。
 
     /// @brief 默认构造：未接线（构造期 DTO）。
     AbstractProps() = default;
@@ -1071,21 +1114,26 @@ class AbstractProps {
         (void)other;
         return *this;
     }
-    /// @brief 移动构造：把宿主链接搬过来并摘空来源，来源此后不再命中任何宿主。
+    /// @brief 移动构造：搬过链接位并自登记为新宿主的槽值，来源此后不再命中任何宿主。
     /// @param other 被移动的属性对象。
-    AbstractProps(AbstractProps &&other) noexcept : link_(other.link_) { other.link_.host = nullptr; }
-    /// @brief 移动赋值：同移动构造，先摘空来源再落位。
+    AbstractProps(AbstractProps &&other) noexcept : link_(other.link_) {
+        other.link_.host = nullptr;
+        link_.adopt();
+    }
+    /// @brief 移动赋值：先与本对象原宿主解链，再同移动构造（先摘来源、后落位自登记）。
     /// @param other 右值属性对象。
     /// @return 引用自身。
     auto operator=(AbstractProps &&other) noexcept -> AbstractProps & {
         if (this != &other) {
-            link_ = other.link_;
+            link_.detach();
+            link_.host = other.link_.host;
             other.link_.host = nullptr;
+            link_.adopt();
         }
         return *this;
     }
-    /// @brief 平凡析构：本类非多态侧（多态在控件本体）。
-    ~AbstractProps() = default;
+    /// @brief 析构：与宿主解链（属性对象比宿主活得久时，宿主的槽不留悬垂）。
+    ~AbstractProps() { link_.detach(); }
 
     // 唯一获准构造/析构本基类的类型：CRTP 派生类（构造期 DTO 与挂载后的对象都经它）。
     // 写 `friend Derived;` 而不是 `friend class Derived;`：后者在 `Derived` 是模板参数时是非法的
@@ -1271,7 +1319,9 @@ class AbstractProps {
 
     /// @brief 接上宿主控件：构造尾部调用一次，此后本属性对象的写入才落标脏与重订阅。
     /// @param host 承载本属性对象的控件（须与其生命周期一致）。
-    auto bind(Widget &host) -> void { link_.host = &host; }
+    /// @note 这是双向互指：宿主侧的槽（`detail::PropsHost`）同时记下本链接位，于是控件整体移动时
+    ///       两端各自重绑，不需要任何控件手写（判据见验收条款「移动与绑定」）。
+    auto bind(Widget &host) -> void { link_.attach(host); }
 
     // ---- 发射面：条目与顺序全部由表派生 ----
 

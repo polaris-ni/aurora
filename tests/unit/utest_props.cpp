@@ -157,9 +157,31 @@ class ProbeProps : public AbstractProps<ProbeProps> {
 template <typename Row>
 concept clearable = requires(ProbeProps props, Row row) { props.clear(row); };
 
+/// @brief 夹具控件：迁移后的真实控件只剩「公有继承 Props + 虚函数一行转调 + 构造尾部一次 `bind`」，
+///        本夹具照同一形态写 —— 宿主接线位与移动面重绑的全部判据都落在这只控件上（见文末三例）。
+class ProbeWidget : public LeafWidget, public ProbeProps {
+  public:
+    /// @brief 构造：按值接住属性对象（移动落位），尾部一次接线宿主 —— 控件侧唯一的接线仪式。
+    /// @param props 已链式配好的属性对象（此刻还是脱离宿主的 DTO，其写入不落任何标脏）。
+    explicit ProbeWidget(ProbeProps props = ProbeProps()) : ProbeProps(std::move(props)) { ProbeProps::bind(*this); }
+
+    [[nodiscard]] auto type_name() const -> const char * override { return "ProbeWidget"; }
+
+  protected:
+    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override { return c.constrain(sz_); }
+    auto on_paint(Painter &p, const Rect &b, const BuildContext & /*ctx*/) -> void override { p.fill_rect(b, col_); }
+    /// @brief 信号采集一行转调：来源型行的订阅面由表派生（`bind` 之后这条通道才活着）。
+    auto collect_signals(StateSink &out) -> void override { collect_prop_sources(out); }
+
+  private:
+    Size sz_{.width = 10.0F, .height = 10.0F};  ///< 固定尺寸（本夹具不测布局）
+    Color col_{0xFF, 0x00, 0x00, 0xFF};  ///< 固定底色（本夹具不测像素）
+};
+
 }  // namespace probe
 
 using probe::ProbeProps;
+using probe::ProbeWidget;
 
 AURORA_TEST_CASE(field_shape_drives_required_and_source_bits) {
     using LabelRow = decltype(ProbeProps::label_row());
@@ -434,6 +456,189 @@ AURORA_TEST_CASE(signal_collection_registers_stated_sources_only) {
     StateSink stated_sink;
     props.collect(stated_sink);
     AURORA_TEST_CHECK_EQ(stated_sink.sources().size(), std::size_t{2});
+}
+
+// ===========================================================================
+// 宿主接线位与移动面（第 7 条「宿主绑定与移动」，对应验收判据「移动与绑定」）
+// ===========================================================================
+
+/// @brief 标脏观察器：`Widget::on_dirty` 的 bool 入参把两档合一，这里拆成两枚计数器。
+///
+/// 用现成的公共观察件而不是新加接口：`mark_needs_layout()` 走 `request_frame(true)`、
+/// `mark_needs_paint()` 走 `request_frame(false)`，未入树的控件同样会在自己身上回调（无父可溯时
+/// `top == this`）。该回调是 `Widget` 的成员，随控件一起移动 ⇒ 移动前后观察到的是同一对计数器。
+struct DirtyCounter {
+    int paints = 0;  ///< 绘制档落账次数
+    int layouts = 0;  ///< 布局档落账次数
+
+    /// @brief 把观察回调挂到夹具控件上。
+    /// @param target 待观察的控件。
+    auto attach_to(ProbeWidget &target) -> void {
+        target.on_dirty = [this](bool layout) {
+            if (layout) {
+                ++layouts;
+            } else {
+                ++paints;
+            }
+        };
+    }
+};
+
+AURORA_TEST_CASE(unmounted_but_bound_widget_marks_per_tier) {
+    DirtyCounter dirty;
+    auto widget = ProbeWidget();  // 已 bind、未入树
+    dirty.attach_to(widget);
+
+    widget.set_radius(8.0F);  // 常量档行，档位 = 布局
+    AURORA_TEST_CHECK_EQ(dirty.layouts, 1);
+    AURORA_TEST_CHECK_EQ(dirty.paints, 0);
+
+    widget.set_color(Color{0x11, 0x22, 0x33, 0xFF});  // 令牌档行，档位 = 绘制
+    AURORA_TEST_CHECK_EQ(dirty.paints, 1);
+    AURORA_TEST_CHECK_EQ(dirty.layouts, 1);
+
+    widget.set_size(30.0F);  // 双档行：两档各落一次
+    AURORA_TEST_CHECK_EQ(dirty.layouts, 2);
+    AURORA_TEST_CHECK_EQ(dirty.paints, 2);
+
+    widget.set_radius(8.0F);  // 同值写入：判等短路挡住，不落账
+    widget.set_size(30.0F);
+    AURORA_TEST_CHECK_EQ(dirty.layouts, 2);
+    AURORA_TEST_CHECK_EQ(dirty.paints, 2);
+    AURORA_TEST_CHECK_NEAR(widget.radius(), 8.0F, 1e-4F);
+}
+
+AURORA_TEST_CASE(whole_widget_move_repoints_the_link_to_the_new_host) {
+    DirtyCounter dirty;
+    auto first = ProbeWidget(ProbeProps().set_radius(3.0F).set_color(Color{0x01, 0x02, 0x03, 0xFF}));
+    dirty.attach_to(first);
+    // 构造装入零落账：链式 DTO 那段写入发生在控件存在之前，且 `on_dirty` 装的时点在构造之后。
+    AURORA_TEST_CHECK_EQ(dirty.layouts, 0);
+    AURORA_TEST_CHECK_EQ(dirty.paints, 0);
+
+    first.set_radius(4.0F);  // 落一次布局档（4.0 也是常量档回落值，但字段未表态 ⇒ 与表态后的 3.0 不同值）
+    AURORA_TEST_CHECK_EQ(dirty.layouts, 1);
+
+    auto second = ProbeWidget(std::move(first));  // ① 整控件移动
+    AURORA_TEST_CHECK_EQ(dirty.layouts, 1);  // 移动本身不落账
+    AURORA_TEST_CHECK_EQ(dirty.paints, 0);
+    AURORA_TEST_CHECK_NEAR(second.radius(), 4.0F, 1e-4F);  // 字段值随控件搬过来了
+    second.set_radius(5.0F);  // 必须命中**新**宿主
+    AURORA_TEST_CHECK_EQ(dirty.layouts, 2);
+    second.set_color(Color{0x0A, 0x0B, 0x0C, 0xFF});
+    AURORA_TEST_CHECK_EQ(dirty.paints, 1);
+
+    auto third = ProbeWidget(std::move(second));  // ② 连续二次移动
+    third.set_radius(6.0F);
+    third.set_label("moved");
+    AURORA_TEST_CHECK_EQ(dirty.layouts, 3);
+    AURORA_TEST_CHECK_EQ(dirty.paints, 2);
+
+    auto target = ProbeWidget();  // ③ 移动赋值：目标原接线让位给搬进来的那条
+    const int layouts_before = dirty.layouts;
+    const int paints_before = dirty.paints;
+    target = std::move(third);
+    AURORA_TEST_CHECK_EQ(dirty.layouts, layouts_before);
+    AURORA_TEST_CHECK_EQ(dirty.paints, paints_before);
+    target.set_radius(7.0F);
+    target.set_hover(Color{0x20, 0x20, 0x20, 0xFF});
+    AURORA_TEST_CHECK_EQ(dirty.layouts, layouts_before + 1);
+    AURORA_TEST_CHECK_EQ(dirty.paints, paints_before + 1);
+
+    // 移动来源脱钩：给已被搬空的控件重新挂上观察回调再写，仍不落账（链接位的宿主已置空）。
+    dirty.attach_to(third);
+    third.set_radius(9.0F);
+    AURORA_TEST_CHECK_EQ(dirty.layouts, layouts_before + 1);
+    AURORA_TEST_CHECK_EQ(dirty.paints, paints_before + 1);
+}
+
+AURORA_TEST_CASE(node_wraps_a_widget_without_losing_the_marking) {
+    // `Node(W&&)` 走的是 `make_shared<W>(std::forward<W>(w))`：控件被移动进堆上的对象里，
+    // 这是全库最常见的整控件移动。标脏必须命中堆上那只活对象，而不是栈上的临时量。
+    auto node = Node(ProbeWidget(ProbeProps().set_radius(6.0F)));
+    // `Node::widget()` 交回 `Widget &`，而堆上那只对象由本用例构造、类型确定为 `ProbeWidget`。
+    auto &live = static_cast<ProbeWidget &>(node.widget());  // NOLINT(*-pro-type-static-cast-downcast)
+    DirtyCounter dirty;
+    dirty.attach_to(live);
+
+    AURORA_TEST_CHECK_NEAR(live.radius(), 6.0F, 1e-4F);
+    live.set_radius(7.0F);
+    live.set_opacity(0.5F);
+    AURORA_TEST_CHECK_EQ(dirty.layouts, 1);
+    AURORA_TEST_CHECK_EQ(dirty.paints, 1);
+}
+
+AURORA_TEST_CASE(props_copy_and_detached_dto_mark_nothing) {
+    DirtyCounter dirty;
+    auto host = ProbeWidget();
+    dirty.attach_to(host);
+
+    // 拷贝不携带绑定：从活控件上切一份属性对象出来，得到的是另一份未挂载 DTO。
+    auto clone = ProbeProps(host);
+    clone.set_radius(2.0F);
+    clone.set_color(Color{0x05, 0x06, 0x07, 0xFF});
+    AURORA_TEST_CHECK_EQ(dirty.layouts, 0);
+    AURORA_TEST_CHECK_EQ(dirty.paints, 0);
+    AURORA_TEST_CHECK_NEAR(clone.radius(), 2.0F, 1e-4F);  // 值照样写得进去，只是没人被标脏
+
+    // 对照：同一批写入经已接线的控件必须落账（证明上面那条不是因为夹具根本没接线）。
+    host.set_radius(2.0F);
+    AURORA_TEST_CHECK_EQ(dirty.layouts, 1);
+
+    // 脱离宿主的链式 DTO：写入只落字段，零落账。
+    auto dto = ProbeProps().set_radius(3.5F).set_size(12.0F);
+    AURORA_TEST_CHECK_EQ(dirty.layouts, 1);
+    AURORA_TEST_CHECK_EQ(dirty.paints, 0);
+    AURORA_TEST_CHECK_NEAR(dto.radius(), 3.5F, 1e-4F);
+}
+
+AURORA_TEST_CASE(resubscribe_channel_follows_the_moved_host) {
+    // 换源后的重订阅经同一枚链接位调宿主的受保护件（不用 std::function 转调 ⇒ 零堆分配）。
+    // 这里先移动、后挂载，再换源：来源变更的标脏必须落在移动目标上。
+    State<float> opacity{0.5F};
+    auto first = ProbeWidget();
+    auto moved = ProbeWidget(std::move(first));
+    DirtyCounter dirty;
+    dirty.attach_to(moved);
+    constexpr BuildContext bare_ctx;
+    moved.mount(bare_ctx);
+    // `StateSink::watch()` 给每条订阅都首跑一次（`run_first`），故挂载与每次重订阅都会按「当时的来源数」
+    // 标一轮双档脏。计数因此不为零、也不只反映本行档位 —— 基线取在换源之前，断言只看增量。
+    const int paints_after_mount = dirty.paints;
+    const int layouts_after_mount = dirty.layouts;
+
+    moved.bind_opacity(opacity);  // 换源 ⇒ 重订阅（按新来源数首跑一轮）＋ 本行档位标脏
+    AURORA_TEST_CHECK(dirty.paints > paints_after_mount);
+    AURORA_TEST_CHECK(dirty.layouts > layouts_after_mount);
+    const int paints_after_rebind = dirty.paints;
+    const int layouts_after_rebind = dirty.layouts;
+
+    // 订阅确实重建到了移动目标上：来源变更恰标一次双档。链接位若仍指着搬空的那只控件，这里会一分不落
+    // （那只控件未挂载，重订阅本就是空操作）。
+    opacity.set(0.9F);
+    AURORA_TEST_CHECK_EQ(dirty.paints, paints_after_rebind + 1);
+    AURORA_TEST_CHECK_EQ(dirty.layouts, layouts_after_rebind + 1);
+
+    moved.unmount();  // 先退订再让局部对象按逆序析构
+}
+
+AURORA_TEST_CASE(moved_from_source_destruction_keeps_the_new_host_wired) {
+    // 「一条链接位同时只被一只控件引用」不是自律，而是两端移动面各自清零的来源侧。这条用例走真会
+    // 出事的那条析构序：目标控件先声明、来源控件在内层块里后声明 ⇒ 来源**先**析构。若来源析构时仍
+    // 认着自己让出去的那条链接，它会在这一刻把目标控件的接线清掉，目标此后写什么都不标脏。
+    DirtyCounter dirty;
+    auto target = ProbeWidget();
+    {
+        auto source = ProbeWidget();
+        target = std::move(source);  // 移动赋值：目标的旧接线脱钩，再接管来源那条链接
+        dirty.attach_to(target);  // `on_dirty` 也是 `Widget` 的成员、随移动换人 ⇒ 移动之后再挂
+        target.set_radius(5.0F);
+        AURORA_TEST_CHECK_EQ(dirty.layouts, 1);
+    }  // `source` 在此析构：它已被搬空（槽与链接位双双归零），故析构不动目标控件的接线
+    target.set_radius(6.0F);
+    AURORA_TEST_CHECK_EQ(dirty.layouts, 2);
+    target.set_color(Color{0x01, 0x02, 0x03, 0xFF});
+    AURORA_TEST_CHECK_EQ(dirty.paints, 1);
 }
 
 }  // namespace aurora::test_cases::utest_props
