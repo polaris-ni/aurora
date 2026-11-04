@@ -857,6 +857,35 @@ AURORA_TEST_CASE(version_floor_below_peer_reaches_a_verdict) {
     peer.stop();
 }
 
+AURORA_TEST_CASE(tls12_reports_a_missing_client_certificate_inside_the_handshake) {
+    const aurora::test::tls::Assets assets;
+    // 两半只差 `-Verify 1`：同一张证书、同一版本下限，失败因此只能归因到「服务端要求客户端证书」。
+    aurora::test::tls::TlsPeer requiring{assets, {"-tls1_2", "-Verify", "1", "-CAfile", assets.certificate().string()}};
+    require_peer(requiring);
+    require_backend("needs a real handshake");
+    HostDriven host;
+
+    HandshakeLog refused;
+    handshake(connect_stream(requiring.port()), "localhost", trusted_context(assets), refused);
+    AURORA_TEST_CHECK_EQ(refused.calls.load(), 1);
+    AURORA_TEST_CHECK_FALSE(refused.ok);
+    AURORA_TEST_CHECK_FALSE(refused.transport.is_open());
+    // §8.8.18：TLS 1.2 及以下的服务端在 CertificateRequest 后直接告警终止，故结局必须落在握手内；
+    // fatal alert 与记录层失败同码，一律 `net-tls-handshake-failed`。
+    AURORA_TEST_CHECK_EQ(refused.code, std::string{"net-tls-handshake-failed"});
+    requiring.stop();
+
+    // 对照半：同版本、同证书，仅去掉客户端证书要求。它必须握手成功，否则上面那条失败可能来自版本或对端故障。
+    aurora::test::tls::TlsPeer tolerant{assets, {"-tls1_2"}};
+    require_peer(tolerant);
+    HandshakeLog allowed;
+    handshake(connect_stream(tolerant.port()), "localhost", trusted_context(assets), allowed);
+    AURORA_TEST_CHECK_EQ(allowed.calls.load(), 1);
+    AURORA_TEST_REQUIRE_MSG(allowed.ok, "the TLS 1.2 control peer refused an anonymous handshake: " + allowed.code);
+    allowed.transport.close();
+    tolerant.stop();
+}
+
 AURORA_TEST_CASE(client_identity_satisfies_a_verified_peer_request) {
     const aurora::test::tls::Assets assets{"localhost", true};
     aurora::test::tls::TlsPeer peer{assets, {"-Verify", "1", "-CAfile", assets.certificate().string()}};

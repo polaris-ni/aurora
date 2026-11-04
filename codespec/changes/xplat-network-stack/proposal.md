@@ -696,13 +696,13 @@ HTTP 语义件的**认证切片**已落地（§16 第 34 项）：新增公共�
 - `按裁决不做`：§16 明示首批不做，代码以能力位或显式错误表达，不留半成品。
 - `待外部验证`：代码已落地，但整项判定依赖 Apple SDK / 浏览器运行时，本机无法证实，不写成已通过。
 
-**结论**：48 项中已落地 44 项、按裁决不做 2 项（第 3、4 项）、待外部验证 2 项（第 21、37 项）。**代码侧缺口为 0**。剩余缺口只有两类：测试/验证缺口（第 3、19 项及若干平台腿）与外部环境缺口（第 21、37 项，以及第 2、6、12、48 项的 macOS 腿）。平台腿缺运行证据的条目在「缺口」列单列，不改变该项整体判定（该能力已在至少两条腿实跑）。
+**结论**：48 项中已落地 44 项、按裁决不做 2 项（第 3、4 项）、待外部验证 2 项（第 21、37 项）。**代码侧缺口为 0**。测试缺口中的第 3、19 项已在本机实跑补齐；剩余缺口只有平台腿与外部环境的运行证据（第 21、37 项，以及第 2、6、12、48 项的 macOS 腿）。平台腿缺运行证据的条目在「缺口」列单列，不改变该项整体判定（该能力已在至少两条腿实跑）。
 
 | 编号 | 能力项（§16 摘要） | 实现状态 | 证据（文件 / 符号 / 测试 / 规格） | 缺口 |
 |:---|:---|:---|:---|:---|
 | 1 | Linux TLS 后端=使用方 provider | 已落地 | `cmake/AuroraNetTls.cmake`、`src/aurora/net/tls_openssl.cpp`、`src/aurora/net/tls_mbedtls.cpp`；`tests/unit/utest_net_tls.cpp`；spec §8.8.18 | 无 |
 | 2 | 事件源注册口六宿主一次到位 | 已落地 | `include/aurora/app/event_source_registry.h`（`set_host_driven` / `sources` / `dispatch`）、`src/aurora/app/event_source_registry.cpp`、`tests/unit/utest_app_event_source_registry.cpp`；spec §8.8.2 | 仅缺运行腿：macOS / GLFW 宿主驱动腿本机未实跑（按第 12 项为宿主可选项） |
-| 3 | wasm WebSocket 首批不做 | 按裁决不做 | `include/aurora/net/websocket.h`（`net-platform-unavailable`）、`tests/unit/utest_net_websocket.cpp`（`AURORA_TEST_SKIP`）；spec §8.8.34 | 仅缺测试：wasm 构建下的负向断言未实跑；无代码缺失 |
+| 3 | wasm WebSocket 首批不做 | 按裁决不做 | `include/aurora/net/websocket.h`（`net-platform-unavailable`）、`tests/unit/utest_net_websocket.cpp`（`wasm_leg_refuses_a_websocket_before_any_socket_starts`，其余触网用例 `AURORA_TEST_SKIP`）；spec §8.8.34 | 无（负向断言已在 wasm 构建的 Node 运行时实跑通过；无代码缺失） |
 | 4 | 平台 HTTP 引擎首批不做 | 按裁决不做 | `src/aurora/net/engine.cpp`（`NullEngine` 装配）、`include/aurora/net/engine.h`；spec §8.8.4 | 无（裁决明确不做，接口留位） |
 | 5 | `Resource` 默认 30 s、`reload()` 不去抖 | 已落地 | `include/aurora/state/resource.h`（`ResourceOptions`）、`tests/unit/utest_state_resource.cpp`；spec `codespec/specification/02-state.md` §5.4 | 无 |
 | 6 | 代理族全量（PAC 除外） | 已落地 | `include/aurora/net/proxy.h`、`src/aurora/net/detail/system_proxy.cpp`、`src/aurora/net/detail/proxy_wire.cpp`、`src/aurora/net/detail/remote_connect.cpp`；`tests/unit/utest_net_proxy.cpp`、`tests/unit/utest_net_proxy_wire.cpp`、`tests/unit/utest_net_system_proxy.cpp`、`tests/unit/utest_net_remote_connect.cpp`、`tests/unit/utest_net_http_proxy.cpp`；spec §8.8.7–§8.8.10 | 仅缺运行腿：macOS 系统代理读取腿只到编译级，且无手工用例 |
@@ -718,7 +718,7 @@ HTTP 语义件的**认证切片**已落地（§16 第 34 项）：新增公共�
 | 16 | 绑定层四处形态改写 | 已落地 | `include/aurora/state/resource.h`、`tests/unit/utest_state_resource.cpp`；spec `codespec/specification/02-state.md` §5.4 | 无 |
 | 17 | 故障脚本七类 | 已落地 | `tests/framework/fake_engine.h`、`tests/framework/scripted_peer.h`、`tests/unit/utest_net_test_double.cpp`；spec §8.8.17 | 无 |
 | 18 | 常驻引擎单例不析构 | 已落地 | `src/aurora/net/engine.cpp`（进程级 `shared_engine`）、`tests/unit/utest_net_engine.cpp`；spec §8.8.4 | 无 |
-| 19 | mTLS 拒绝时机 | 已落地 | `tests/unit/utest_net_tls.cpp`、`tests/framework/tls_peer.h`；spec §8.8.18 | 仅缺测试：未以显式 `-tls1_2` 对端复证「1.2 在握手内即拒」这条版本关联 |
+| 19 | mTLS 拒绝时机 | 已落地 | `tests/unit/utest_net_tls.cpp`（`tls12_reports_a_missing_client_certificate_inside_the_handshake`）、`tests/framework/tls_peer.h`；spec §8.8.18 | 无（`-tls1_2` 的 `-Verify 1` 与无 `-Verify` 两半对照，断言失败落在握手内且码为 `net-tls-handshake-failed`；Windows Schannel 腿实跑通过） |
 | 20 | provider 能力缺口显式失败 | 已落地 | `src/aurora/net/tls_mbedtls.cpp`、`tests/unit/utest_net_tls.cpp`；spec §8.8.18 | 无 |
 | 21 | macOS SecureTransport 仅编译级 | 待外部验证 | `src/aurora/net/tls_securetransport.cpp`、CI `tls-providers` 矩阵的 `macos-securetransport-system` / `macos-securetransport-plus-openssl`；spec §8.8.18 | 仅缺外部运行证据；代码已落地，本机无 Apple SDK |
 | 22 | fatal alert 映射 | 已落地 | `src/aurora/net/tls.cpp`、`tests/unit/utest_net_test_double.cpp`；spec §8.8.17 | 无 |

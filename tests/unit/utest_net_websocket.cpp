@@ -42,6 +42,7 @@
 #include "aurora/net/blocking.h"
 #include "aurora/net/cancellation.h"
 #include "aurora/net/capabilities.h"
+#include "aurora/net/engine.h"
 #include "aurora/net/http.h"
 #include "aurora/net/http_client.h"
 #include "aurora/net/http_observability.h"
@@ -712,6 +713,25 @@ AURORA_TEST_CASE(websocket_handshake_refuses_a_leg_without_streaming_semantics) 
     AURORA_TEST_REQUIRE_FALSE(bool(outcome));
     AURORA_TEST_CHECK_EQ(outcome.error().code_enum, aurora::ErrorCode::NetPlatformUnavailable);
     AURORA_TEST_CHECK_EQ(sink.closes, 0);  // 绝不退化成「物化一次交换再冒充会话」
+}
+
+AURORA_TEST_CASE(wasm_leg_refuses_a_websocket_before_any_socket_starts) {
+#ifdef AURORA_PLATFORM_WASM
+    // 浏览器腿的引擎能力位 `streaming` 为假：能力闸在发起前失败，不进入 socket、不发任何字节。
+    // 这条断言不依赖宿主 pump，故可在 wasm 测试运行器里实跑。
+    AURORA_TEST_CHECK_FALSE(aurora::net::Engine::instance().capabilities().streaming);
+    const Client client;
+    RecordingSink sink;
+    auto task = client.connect_websocket(Request::get("ws://127.0.0.1:1/chat"), sink);
+    AURORA_TEST_REQUIRE(task.is_done());
+    // 外层是「协程交付了一次结果」，内层才是这次握手的结局；两层的搬法与另两腿同用 `inner()`。
+    const auto outcome = inner(task);
+    AURORA_TEST_REQUIRE_FALSE(bool(outcome));
+    AURORA_TEST_CHECK_EQ(outcome.error().code_enum, aurora::ErrorCode::NetPlatformUnavailable);
+    AURORA_TEST_CHECK_EQ(sink.closes, 0);
+#else
+    AURORA_TEST_SKIP("the negative assertion is specific to the browser leg (AURORA_PLATFORM_WASM)");
+#endif
 }
 
 // ---- 会话层：交付、发送两拍、上限闸、心跳与收摊 ----
