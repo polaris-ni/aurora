@@ -277,6 +277,8 @@ au::Text("Welcome").font_size(24).bold();
 
 `TextInput` 点击经 `FocusManager` 获焦；读当前文本用 `value()`（`text_input.h`），程序化改值用 `set_value()`；无 `.text()` 方法。
 
+窄盒 + 长文本：内容（选区 / 组合串 / 正文 / 光标）绘制时裁进自身盒，圆角盒按 `corner_radius` 走圆角裁剪；水平视口 `view_x_` 由 `ensure_caret_visible()` 随光标推进（键入、粘贴、删除、方向键、`Home` / `End`、点选与拖选、IME、无障碍选区与替换均收口于此），`Home` / `End` 各一次即把视口带回文本两端。绘制、指针命中、IME 候选窗与 `accessibility_char_bounds` 共用 `text_origin_offset`；RTL 未超宽仍右对齐，超宽由视口接管。
+
 ### 3.2 按钮与选择
 
 | 控件 | 关键属性 |

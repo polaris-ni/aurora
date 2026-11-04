@@ -39,6 +39,8 @@ struct TextInputProps {
 /// - 行为：`max_length` 限长（码点计数）、`read_only` 只读（可选可复制不可编辑）、
 /// `obscure_text` 密码掩码显示；
 /// - 回调：`on_changed`（每次编辑）与 `on_submit`（Enter 提交）。
+/// - 窄盒长文本：内容（选区/组合串/正文/光标）裁进自身盒，水平视口随光标自动滚动
+///   （`ensure_caret_visible`），不会画到相邻控件上。
 ///
 /// 继承扩展点（protected 虚函数）：`paint_frame`（背景+边框）；内部状态（选区/光标）
 /// 为 protected，子类可直接复用。
@@ -303,6 +305,7 @@ class TextInput : public LeafWidget {
             caret_ = b;
         }
         selecting_ = false;
+        ensure_caret_visible();
         mark_needs_paint();
     }
 
@@ -328,10 +331,14 @@ class TextInput : public LeafWidget {
             return std::nullopt;  // 无可用字体：度量不可用，交由真机验证
         }
         const std::size_t cp = byte_to_cp(v, utf8_index);
-        const float x0 = render::FontEngine::caret_x(v, cp, f);
-        const float x1 = render::FontEngine::caret_x(v, cp + 1, f);
+        const std::string shown = composed_text(display_value());
+        const float text_w = render::FontEngine::measure_width(shown, f, layout_opts());
+        const float area_w = text_area_width(box.size.width);
+        const float tx = box.origin.x + text_origin_offset(text_w, area_w);
+        const float x0 = render::FontEngine::caret_x(v, cp, f, layout_opts());
+        const float x1 = render::FontEngine::caret_x(v, cp + 1, f, layout_opts());
         const float th = render::FontEngine::measure_height(f);
-        return Rect{.origin = Point{.x = box.origin.x + padding_.left + x0, .y = box.origin.y + padding_.top},
+        return Rect{.origin = Point{.x = tx + x0, .y = box.origin.y + padding_.top},
                     .size = Size{.width = std::max(0.0F, x1 - x0), .height = th}};
     }
 
@@ -359,6 +366,7 @@ class TextInput : public LeafWidget {
         caret_ = caret_cp;
         sel_start_ = caret_cp;
         sel_end_ = AURORA_NO_SEL;
+        ensure_caret_visible();
         mark_needs_layout();
         mark_needs_paint();
         if (on_changed_) {
@@ -666,7 +674,9 @@ class TextInput : public LeafWidget {
         const std::string v = display_value();
         const Font f{.size_pt = font_size_ > 0.0F ? font_size_ : 14.0F};
         const render::TextLayoutOpts opts = layout_opts();
-        const float lx = e.local_position.x - padding_.left;  // 文本左内边距
+        // 文本空间横坐标：本地 x 先扣掉「自然原点 + 视口」偏移，命中与实绘同源。
+        const float text_w = render::FontEngine::measure_width(v, f, opts);
+        const float lx = e.local_position.x - text_origin_offset(text_w, text_area_width(size().width));
         if (e.action == MouseAction::Press) {
             // 含头含尾：选区端点用 hit_test_char_inclusive（点击字符任意位置均计入该字符），
             // caret_ 仍用 hit_test_char（caret 模型）作为编辑光标位置。
@@ -676,12 +686,14 @@ class TextInput : public LeafWidget {
             sel_end_ = AURORA_NO_SEL;  // 尚未形成选区，待拖拽
             selecting_ = true;
             request_focus();
+            ensure_caret_visible();
             mark_needs_paint();
             e.is_handled = true;
         } else if (e.action == MouseAction::Move && selecting_) {
             const size_t ch = render::FontEngine::hit_test_char_inclusive(v, lx, f, opts);
             caret_ = render::FontEngine::hit_test_char(v, lx, f, opts);
             sel_end_ = ch;  // 拖拽终点（含入字符）：按下与松开所在字符均计入选区
+            ensure_caret_visible();
             mark_needs_paint();
             e.is_handled = true;
         } else if (e.action == MouseAction::Release) {
@@ -712,6 +724,7 @@ class TextInput : public LeafWidget {
                 sel_end_ = AURORA_NO_SEL;
             }
             caret_ = n;
+            ensure_caret_visible();
             mark_needs_paint();
             e.is_handled = true;
             return;
@@ -781,6 +794,7 @@ class TextInput : public LeafWidget {
                 caret_ += cp_count(clip);
                 sel_start_ = caret_;
                 sel_end_ = AURORA_NO_SEL;
+                ensure_caret_visible();
                 notify_changed();
                 mark_needs_paint();
             }
@@ -827,6 +841,7 @@ class TextInput : public LeafWidget {
                 sel_start_ = caret_;
                 sel_end_ = AURORA_NO_SEL;  // 无选区
             }
+            ensure_caret_visible();
             mark_needs_paint();
             e.is_handled = true;
             return;
@@ -852,6 +867,7 @@ class TextInput : public LeafWidget {
                 const bool empty_extend = (n == 0U) || (!had_sel && prev == target);
                 sel_end_ = empty_extend ? AURORA_NO_SEL : (to_head ? 0U : n - 1U);
             }
+            ensure_caret_visible();
             mark_needs_paint();
             e.is_handled = true;
             return;
@@ -929,6 +945,7 @@ class TextInput : public LeafWidget {
         if (preedit_sel_end_ != AURORA_NO_SEL && preedit_sel_end_ < preedit_sel_start_) {
             preedit_sel_end_ = preedit_sel_start_;  // 端点倒置时退化为单点选区
         }
+        ensure_caret_visible();
         mark_needs_paint();
         notify_accessibility_event(AccessibilityEvent{.kind = AccessibilityEventKind::ValueChanged, .target = this});
     }
@@ -950,13 +967,9 @@ class TextInput : public LeafWidget {
         const std::string shown = composed_text(empty ? placeholder_ : display_value());
         const float th = render::FontEngine::measure_height(f);
         const render::TextLayoutOpts opts = layout_opts();
-        float tx = box.origin.x + padding_.left;
-        if (cached_direction_ == TextDirection::RTL) {
-            const float text_w = render::FontEngine::measure_width(shown, f, opts);
-            const float right_tx = box.origin.x + (box.size.width - padding_.right - text_w);
-            // tx 作 std::max 首参：右锚点为 NaN 时返回 tx，与原 `>` 判据同语义。
-            tx = std::max(tx, right_tx);
-        }
+        const float text_w = render::FontEngine::measure_width(shown, f, opts);
+        const float area_w = text_area_width(box.size.width);
+        const float tx = box.origin.x + text_origin_offset(text_w, area_w);
         const float ty = box.origin.y + padding_.top + ((box.size.height - padding_.top - padding_.bottom - th) * 0.5F);
         const size_t ci = composed_index(caret_) + preedit_cursor_;
         const float cx = tx + render::FontEngine::caret_x(shown, ci, f, opts);
@@ -1006,6 +1019,60 @@ class TextInput : public LeafWidget {
         return opts;
     }
 
+    /// @brief 文本区可视宽度：盒宽扣除左右内边距，负值归零。
+    /// @param box_w 控件盒宽（dp）。
+    /// @return 可用于排版文本的宽度（≥ 0）。
+    [[nodiscard]] auto text_area_width(float box_w) const -> float {
+        return std::max(0.0F, box_w - padding_.left - padding_.right);
+    }
+
+    /// @brief 文本自然原点的盒内偏移（左内边距 + RTL 右对齐 − 水平视口）。
+    ///
+    /// 绘制、命中测试、IME 候选窗与无障碍字符盒共用此式，保证四者读同一个视量。
+    /// @param text_w 当前显示串的全量排版宽度（dp）。
+    /// @param area_w 文本区可视宽度（`text_area_width` 的产物）。
+    /// @return 相对控件盒左沿的偏移；RTL 未超宽时额外右对齐，超宽时由视口夹取。
+    [[nodiscard]] auto text_origin_offset(float text_w, float area_w) const -> float {
+        const float align = (cached_direction_ == TextDirection::RTL) ? std::max(0.0F, area_w - text_w) : 0.0F;
+        return padding_.left + align - std::clamp(view_x_, 0.0F, std::max(0.0F, text_w - area_w));
+    }
+
+    /// @brief 把水平视口推到「光标可见」：光标左缘越出左界则回卷到光标处，
+    ///        右缘越出右界则推到光标贴右内边距；视口不越过文本两端。
+    ///
+    /// 所有改光标的路径（键入 / 粘贴 / 删除 / 方向键 / Home / End / 点选 / IME / 无障碍选区）
+    /// 都收口到此，绘制侧只读 `view_x_` 的生效值，不再各自推算。
+    /// @note Side-effects: 可能写 `view_x_` 并标脏
+    auto ensure_caret_visible() -> void { ensure_caret_visible_for(size().width); }
+
+    /// @brief 按指定盒宽执行「确保光标可见」（`on_layout` 在 `size_` 落定前调用）。
+    /// @param box_w 即将生效的控件盒宽（dp）。
+    /// @note Side-effects: 可能写 `view_x_` 并标脏
+    auto ensure_caret_visible_for(float box_w) -> void {
+        const Font f{.size_pt = font_size_ > 0.0F ? font_size_ : 14.0F};
+        const std::string shown = composed_text(display_value());
+        const float text_w = render::FontEngine::measure_width(shown, f, layout_opts());
+        const float area_w = text_area_width(box_w);
+        if (area_w <= 0.0F) {
+            return;  // 未布局/零宽盒：无视口可言，绘制侧按当前宽度夹取
+        }
+        const size_t ci = composed_index(caret_) + preedit_cursor_;
+        const float caret_rel = render::FontEngine::caret_x(shown, ci, f, layout_opts());
+        const float max_view = std::max(0.0F, text_w - area_w);
+        float v = view_x_;
+        if (caret_rel - v > area_w) {
+            v = caret_rel - area_w;  // 光标越右界：把它贴到右内边距
+        }
+        if (caret_rel - v < 0.0F) {
+            v = caret_rel;  // 光标越左界：回卷到光标处
+        }
+        v = std::clamp(v, 0.0F, max_view);
+        if (v != view_x_) {
+            view_x_ = v;
+            mark_needs_paint();
+        }
+    }
+
     auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
         // 缓存生效方向：事件路径（on_pointer_event/on_key_event）拿不到 BuildContext，
         // 与 Text 缓存 resolved_text 同模式——布局期解析一次，事件/绘制共用。
@@ -1016,7 +1083,10 @@ class TextInput : public LeafWidget {
         const float tw = render::FontEngine::measure_width(shown, f) + padding_.left + padding_.right;
         const float h = render::FontEngine::measure_height(f) + padding_.top + padding_.bottom;
         const float w = (c.max.width != Size::infinity().width) ? c.max.width : tw;
-        return c.constrain(Size{.width = w, .height = h});
+        const Size sz = c.constrain(Size{.width = w, .height = h});
+        // 盒宽变化（含收窄）后光标可能落到视口外：布局期即回卷，绘制不会出现「光标失踪」。
+        ensure_caret_visible_for(sz.width);
+        return sz;
     }
 
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
@@ -1025,6 +1095,14 @@ class TextInput : public LeafWidget {
         const bool disabled = !enabled_;
 
         paint_frame(p, bounds, ctx);
+        // 内容（选区 / 组合串 / 正文 / 光标）一律裁进自身盒：窄盒里的长文本不得画到邻居身上。
+        // 圆角盒走圆角裁剪，与 `paint_frame` 的圆角外观一致。
+        const bool rounded_clip = corner_radius_ > 0.0F;
+        if (rounded_clip) {
+            p.push_clip_rounded(bounds, corner_radius_);
+        } else {
+            p.push_clip(bounds);
+        }
 
         const bool empty = value_.get().empty() && !is_composing();
         const std::string shown = composed_text(empty ? placeholder_ : display_value());
@@ -1037,17 +1115,13 @@ class TextInput : public LeafWidget {
             }
             return text_color_;
         }();
-        const float th = render::FontEngine::measure_height(f);
-        // RTL：文本右对齐到控件右内边距处（逻辑首字符落在右缘），与 Text 控件方向相对语义一致；
-        // caret / 选区 / 组合下划线均以 tx 为锚，故 RTL 下一并右移，使 rtl_caret_paints_at_right_edge 成立。
+        // 文本原点 = 自然原点（左内边距；RTL 未超宽时右对齐到右内边距）+ 生效水平视口。
+        // 视口只由 `ensure_caret_visible()` 推进；绘制侧仅按当前文本宽度夹取，不写状态，
+        // 故显示列表录制与回放读到同一偏移。
         const float text_w = render::FontEngine::measure_width(shown, f, layout_opts());
-        float tx = bounds.origin.x + padding_.left;
-        if (cached_direction_ == TextDirection::RTL) {
-            const float right_tx = bounds.origin.x + (bounds.size.width - padding_.right - text_w);
-            // 文本未超宽才右对齐；超宽回退左对齐，避免文本溢出到控件右侧之外。
-            // tx 作 std::max 首参：右锚点为 NaN 时返回 tx，与原 `>` 判据同语义。
-            tx = std::max(tx, right_tx);
-        }
+        const float area_w = text_area_width(bounds.size.width);
+        const float tx = bounds.origin.x + text_origin_offset(text_w, area_w);
+        const float th = render::FontEngine::measure_height(f);
         const float ty =
             bounds.origin.y + padding_.top + ((bounds.size.height - padding_.top - padding_.bottom - th) * 0.5F);
 
@@ -1080,6 +1154,7 @@ class TextInput : public LeafWidget {
                              .size = Size{.width = is_composing() ? 2.0F : 1.5F, .height = th}},
                         cursor_color_);
         }
+        p.pop_clip();
     }
 
     /// @brief 绘制背景 + 边框（聚焦/禁用态切换；聚焦边框缺省跟随主题 primary）。子类可覆盖。
@@ -1164,6 +1239,7 @@ class TextInput : public LeafWidget {
         caret_ += cp_count(ins);
         sel_start_ = caret_;
         sel_end_ = AURORA_NO_SEL;
+        ensure_caret_visible();
         notify_changed();
         mark_needs_paint();
     }
@@ -1230,6 +1306,7 @@ class TextInput : public LeafWidget {
         preedit_cursor_ = 0;
         preedit_sel_start_ = 0;
         preedit_sel_end_ = AURORA_NO_SEL;
+        ensure_caret_visible();
         mark_needs_paint();
     }
 
@@ -1278,6 +1355,9 @@ class TextInput : public LeafWidget {
     size_t sel_start_ = 0;
     size_t sel_end_ = AURORA_NO_SEL;
     size_t caret_ = 0;
+    /// @brief 水平视口：文本空间左缘已滚出的距离（dp，0 = 首字符贴左内边距）。
+    ///        只由 `ensure_caret_visible()` 推进；绘制/命中读生效值（按当前文本宽度与盒宽夹取）。
+    float view_x_ = 0.0F;
     bool selecting_ = false;
     static constexpr size_t AURORA_NO_SEL = static_cast<size_t>(-1);
 
@@ -1343,6 +1423,7 @@ class TextInput : public LeafWidget {
         caret_ = a;
         sel_start_ = a;
         sel_end_ = AURORA_NO_SEL;  // 删除后无选区
+        ensure_caret_visible();
     }
     auto delete_before_caret() -> void {
         if (caret_ == 0) {
@@ -1366,6 +1447,7 @@ class TextInput : public LeafWidget {
         --caret_;
         sel_start_ = caret_;
         sel_end_ = AURORA_NO_SEL;  // 退格后无选区
+        ensure_caret_visible();
     }
 };
 

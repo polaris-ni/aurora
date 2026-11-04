@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <memory>
 #include <string>
+#include <utility>
 
 #include "aurora/app/clipboard.h"
 #include "aurora/core/diagnostics.h"
@@ -650,6 +651,99 @@ AURORA_TEST_CASE(rtl_caret_paints_at_right_edge) {
     AURORA_TEST_CHECK_TRUE(ltr_x < 100.0F);
     AURORA_TEST_CHECK_TRUE(rtl_x > 100.0F);
     AURORA_TEST_CHECK_TRUE(rtl_x > ltr_x + 40.0F);
+}
+
+AURORA_TEST_CASE(narrow_box_clips_content_and_scrolls_caret_into_view) {
+    // 窄盒 + 长文本：内容（正文/光标）裁进自身盒（盒外零墨迹）、光标恒在盒内，
+    // End / Home 各一次即把水平视口带回文本两端（真机走查缺口的结构化回归）。
+    const Color magenta{255, 0, 255, 255};
+    const std::string long_text = "abcdefghijklmnopqrstuvwxyz0123456789";
+    auto magenta_like = [](const Color &c) -> bool { return c.a > 180 && c.r > 180 && c.b > 180 && c.g < 80; };
+    auto press_key = [](KeyCode code) -> KeyEvent {
+        KeyEvent k;
+        k.key = static_cast<int>(code);
+        k.action = KeyAction::Down;
+        return k;
+    };
+
+    TextInput ti;
+    ti.set_value(long_text).set_cursor_color(magenta).set_padding(
+        EdgeInsets{.left = 4.0F, .top = 4.0F, .right = 4.0F, .bottom = 4.0F});
+    ti.on_focus_change(true);
+    BuildContext ctx;
+    ti.mount(ctx);
+    ti.layout(bounded(80.0F, 40.0F), ctx);
+    const float box_w = ti.size().width;
+    AURORA_TEST_REQUIRE_TRUE(render::FontEngine::measure_width(long_text, Font{.size_pt = 14.0F}) > box_w * 2.0F);
+
+    // 绘制到比控件更宽的画布：若内容未裁进盒，溢出墨迹会落在 [box_w, surface_w) 内。
+    auto paint_and_scan = [&]() -> std::pair<float, float> {
+        const float box_h = ti.size().height;
+        const int surface_w = static_cast<int>(box_w) + 40;
+        Painter p;
+        p.begin(surface_w, static_cast<int>(box_h));
+        const Rect bounds{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = box_w, .height = box_h}};
+        ti.paint(p, bounds, ctx);
+        float min_x = -1.0F;
+        float max_x = -1.0F;
+        bool outside_ink = false;
+        for (int x = 0; x < surface_w; ++x) {
+            for (int y = 0; y < static_cast<int>(box_h); ++y) {
+                const Color c = p.get_pixel(x, y);
+                if (x >= static_cast<int>(box_w) + 1 && c.a != 0) {
+                    outside_ink = true;  // 盒外任何墨迹都不允许
+                }
+                if (magenta_like(c)) {
+                    min_x = (min_x < 0.0F) ? static_cast<float>(x) : std::min(min_x, static_cast<float>(x));
+                    max_x = std::max(max_x, static_cast<float>(x));
+                }
+            }
+        }
+        AURORA_TEST_CHECK_FALSE(outside_ink);
+        return {min_x, max_x};
+    };
+
+    // End：视口推到文本尾，光标贴在右内边距内侧且仍在盒内。
+    KeyEvent end_key = press_key(KeyCode::End);
+    ti.on_key_event(end_key);
+    const auto [tail_min, tail_max] = paint_and_scan();
+    AURORA_TEST_REQUIRE_TRUE(tail_min >= 0.0F);
+    AURORA_TEST_CHECK_TRUE(tail_max < box_w);
+    AURORA_TEST_CHECK_TRUE(tail_max > box_w - 24.0F);
+
+    // Home：视口回卷到文本头，光标回到左内边距。
+    KeyEvent home_key = press_key(KeyCode::Home);
+    ti.on_key_event(home_key);
+    const auto [head_min, head_max] = paint_and_scan();
+    AURORA_TEST_REQUIRE_TRUE(head_min >= 0.0F);
+    AURORA_TEST_CHECK_TRUE(head_max < 10.0F);
+}
+
+AURORA_TEST_CASE(narrow_box_pointer_hit_maps_through_horizontal_viewport) {
+    // 视口已滚到文本尾后，点右缘必须落在「当前可见文本空间」而不是未扣视口的旧坐标：
+    // 命中偏移错位时，同一次点击会落到视口外很远的前文位置（表象是「点右缘插字插到中间」）。
+    const std::string long_text = "abcdefghijklmnopqrstuvwxyz0123456789";
+    TextInput ti;
+    ti.set_value(long_text).set_padding(EdgeInsets{.left = 4.0F, .top = 4.0F, .right = 4.0F, .bottom = 4.0F});
+    ti.on_focus_change(true);
+    BuildContext ctx;
+    ti.mount(ctx);
+    ti.layout(bounded(80.0F, 40.0F), ctx);
+
+    KeyEvent end;
+    end.key = static_cast<int>(KeyCode::End);
+    end.action = KeyAction::Down;
+    ti.on_key_event(end);
+
+    MouseEvent click;
+    click.local_position = Point{.x = ti.size().width - 6.0F, .y = 10.0F};
+    click.action = MouseAction::Press;
+    ti.on_pointer_event(click);
+
+    TextInputEvent ins;
+    ins.text = "!";
+    ti.on_text_input(ins);
+    AURORA_TEST_CHECK_EQ(ti.value(), long_text + "!");
 }
 
 AURORA_TEST_CASE(direction_prop_serialization_roundtrip) {
