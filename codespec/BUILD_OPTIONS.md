@@ -42,7 +42,6 @@
 | `cmake/AuroraInstall.cmake` | 安装 + `find_package(Aurora)` 导出（须在后端开关之后 include） |
 | `cmake/AuroraLint.cmake` | `AURORA_ENABLE_CLANG_TIDY`（`lint` / `lint-fix` 聚合目标，经 `tools/check/run_clang_tidy.py` 并行 lint 非 third_party 翻译单元，另可按 `AURORA_LINT_SHARD` 分片；须在全部目标定义之后 include） |
 | `cmake/AuroraFormat.cmake` | `AURORA_ENABLE_CLANG_FORMAT`（`format` / `format-check` 聚合目标，经 `tools/check/run_clang_format.py` 并行校验 / 重写非 third_party 源文件；与目标定义无关，放最后 include 亦可） |
-| `cmake/AuroraCheckTestRegistry.cmake` | **遗留模块**：当前无 CMake `include()` 引用（`registry_integrity` 已改由 `AuroraTests.cmake` 直接注册 python 脚本 `check_test_registry.py`）；保留仅供手工 / 历史参考，不计入常规构建 |
 | `cmake/AuroraNetTls.cmake` | TLS 后端装配的**唯一决策点**（TLS 切片）：系统栈开关 `AURORA_ENABLE_NET_TLS_SYSTEM` 与 provider 列表 `AURORA_NET_TLS_PROVIDERS` **各自独立生效**（共存装配）、逐条 entry 的头/库探测、引擎宏推导、按种类建导入目标并聚合为 `aurora::net::tls`。细则见 §1.2 |
 
 ### 1.2 TLS 后端引擎宏与 `AURORA_ENABLE_NET_TLS_SYSTEM` / `AURORA_NET_TLS_PROVIDERS`
@@ -73,7 +72,6 @@
 - **同一后端种类至多一枚 provider**：两个 OpenSSL 根没有可区分的语义，猜哪一个都是错，列表里重复命中即 configure 期硬失败。该变量回答的是「哪些栈存在」，不是「同一个栈的哪份安装」。
 - 库定位按**推导出的种类自己的库名**查找（OpenSSL 腿查 `ssl` / `crypto`，mbedTLS 腿查 `mbedtls` / `mbedcrypto` / `mbedx509`），只在 `<prefix>/lib` 及其 multiarch 子目录（`lib/<三元组>`，Debian 系的实际位置）内查，找不到即 configure 期硬失败并打印查找过的目录。名字不取两套库的并集——并集会让「头推导出 mbedTLS、却链上 OpenSSL 的库」在安装根混挂两套库时发生（实测于 WSL / Ubuntu：链接期 `undefined reference to psa_generate_random`），现在这类错配在装配面被构造性排除。mbedTLS 额外要求 `mbedx509`（证书链解析在 TLS 记录层之外）。
 - 每枚 provider 生成一个按种类命名的导入目标（`aurora::net::tls.openssl` / `aurora::net::tls.mbedtls`），再由它们聚合成 `aurora::net::tls`（`INTERFACE`）——本体 / 测试 / 工具 / 安装侧的引用点因此不随 provider 数目变化。静态 mbedTLS 的三枚 archive 按 GNU ld 左到右求解规则排为 `mbedtls → mbedx509 → mbedcrypto`。`shared` 的运行期寻址交宿主部署负责，本模块不写 RPATH、不拷 DLL（Windows 动态腿只证明链得上：`lib/` 下是导入库、`bin/` 下才是 DLL）。
-- **旧单值写法 `AURORA_NET_TLS_PROVIDER` 保留为别名**：只给旧名的命令行（现 CI 与 manual-test 的历史写法）语义不变；新旧**同时置值即 configure 期硬失败**并打印两个取值——同一旋钮的两种拼法没有「谁覆盖谁」的答案，猜就是口径漂移。
 - 仓库**自带 mbedTLS、不自带 OpenSSL 源码**：mbedTLS 走下条内置源码构建（`third_party/mbedtls`，「断网可构建」不变，其上游 LICENSE 随源码一并登记进 `THIRD_PARTY_LICENSES.md`）；OpenSSL 仍是外部 provider 安装根、本仓不内置。
 - **`AURORA_ENABLE_NET_TLS_MBEDTLS`（缺省 `OFF`）：mbedTLS 的构建方式由「用户手动传 provider 安装根」改轨为「仓库内置源码构建」**——置 `ON` 即 `add_subdirectory(third_party/mbedtls … EXCLUDE_FROM_ALL)` 编译并链接内置的 `mbedtls` / `mbedx509` / `mbedcrypto`（与 GLFW / SQLite 同口径：源码进仓库、版本确定、不改上游、无需外部根、不联网；子项目自带 `install()` 由 `SKIP_INSTALL_RULES` 抑制，以免污染本库手写的 AuroraConfig 导出包）。它与 `AURORA_NET_TLS_PROVIDERS` 里挂 mbedTLS 安装根的**旧写法互斥**：二者同置即 configure 期硬失败（同一引擎不留第二个真相源）。迁移期旧 provider-mbedTLS 路径暂存，待 `third_party/mbedtls` vendor 到位后删除该旧路径、CI 的 mbedTLS 装配从临时安装根前缀翻到本开关。
 - ⚠️ **CI 不用 `/usr` 当 mbedTLS 的安装根**：Debian / Ubuntu 的 `/usr` 同时挂着 openssl 与 mbedtls 两套头，多命中时按上条规则 OpenSSL 优先——把 mbedTLS 那条 entry 写成 `shared:/usr` 等价于永远选不中 mbedTLS，`tls_mbedtls.cpp` 这条编译面会悄悄消失。故流水线统一用 `.github/actions/setup-net-capability-flags` 搭一个只挂 mbedTLS 子树的安装根（`/opt/aurora-tls-mbedtls`：`include/mbedtls` 指向 `/usr/include/mbedtls`，`lib` 只放 `libmbedtls.a` / `libmbedx509.a` / `libmbedcrypto.a`），让该 entry 的推导确定性落到 `AURORA_ENABLE_NET_TLS_MBEDTLS`；需要 OpenSSL 的一侧则在列表里**追加一条 `shared:/usr`**，那里 openssl 头本就在优先命中位。

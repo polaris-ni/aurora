@@ -53,8 +53,6 @@ unset(_aurora_tls_system_default)
 
 set(AURORA_NET_TLS_PROVIDERS "" CACHE STRING
     "TLS providers as a ';'- or ','-separated list of <static|shared>:<prefix> values (prefix = install root with include/ and lib/)")
-set(AURORA_NET_TLS_PROVIDER "" CACHE STRING
-    "Legacy single-provider spelling of AURORA_NET_TLS_PROVIDERS; setting both is a configuration error")
 
 # mbedTLS 的构建方式：仓库内置源码构建（`third_party/mbedtls`，与 GLFW / SQLite 同口径——源码进仓库、
 # 断网可构建、版本确定、不改上游），不再作为 provider 安装根传入。缺省 OFF；置 ON 即编译并链接
@@ -88,17 +86,7 @@ else ()
 endif ()
 
 # ---- provider 腿（可多枚，与系统栈并存）----
-# 旧单值变量保留为别名：CI 与手工验收既有写法仍可用，但两者同时置值即口径冲突，不猜以谁为准。
-if (AURORA_NET_TLS_PROVIDER AND AURORA_NET_TLS_PROVIDERS)
-    message(FATAL_ERROR
-            "Both AURORA_NET_TLS_PROVIDER and AURORA_NET_TLS_PROVIDERS are set: they are the same knob in "
-            "two spellings, so there is no answer to \"which one wins\". Clear the legacy "
-            "AURORA_NET_TLS_PROVIDER and keep: ${AURORA_NET_TLS_PROVIDERS}")
-endif ()
 set(_aurora_tls_entries "${AURORA_NET_TLS_PROVIDERS}")
-if (NOT _aurora_tls_entries AND AURORA_NET_TLS_PROVIDER)
-    set(_aurora_tls_entries "${AURORA_NET_TLS_PROVIDER}")
-endif ()
 # `,` 归一为 `;` 后才进 foreach：分隔符口径只在这一处建立，下方逐条校验看到的已是 CMake 列表。
 string(REPLACE "," ";" _aurora_tls_entries "${_aurora_tls_entries}")
 
