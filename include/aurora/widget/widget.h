@@ -43,6 +43,10 @@ class Painter;  // 前向声明（render 模块定义于 render/painter.h）
 
 class Widget;  // 前向声明（HitNode 以 std::weak_ptr<Widget> 作为成员；Widget 在下方定义）
 
+namespace detail {
+struct PropsLink;  // 前向声明（widget/props.h 定义；本类以 friend 关系给它开放「换源即重订阅」通道）
+}  // namespace detail
+
 /// @brief 上报**焦点变化**到无障碍事件通道（`AccessibilityEventKind::FocusChanged`）。
 ///
 /// 定义在 `src/aurora/widget/widget.cpp`（与无障碍事件通道实现同处一个 TU，头内只留声明）。
@@ -1841,6 +1845,11 @@ class Widget : public std::enable_shared_from_this<Widget> {
     // NOLINTEND(*-non-private-member-variables-in-classes)
 
   private:
+    // 属性机制层（widget/props.h）以本类的宿主链接位调用受保护的 `resubscribe_signals()`：
+    // 来源型属性换源后必须重建订阅，而那条通道只该给表驱动的属性面用。friend 而非把成员
+    // 升为 public / protected —— 前者不扩公共面，后者会让全部派生控件都能绕过换源契约。
+    friend struct detail::PropsLink;
+
     /// @brief 采集本控件的全部信号并建立订阅（`mount` 与换源重建共用）。
     auto wire_signals() -> void;
 

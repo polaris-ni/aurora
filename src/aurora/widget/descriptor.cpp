@@ -9,7 +9,12 @@ auto descriptor_to_json(const PropDescriptor &p) -> Json {
 
     j.set("name", p.name);
     j.set("type", p.type);
-    j.set("default", p.default_value);
+    // 默认值优先落原生表示（属性表行可静态求值的回落点）；没有原生值时才落显示串。
+    if (!p.default_native.is_null()) {
+        j.set("default", p.default_native);
+    } else {
+        j.set("default", p.default_value);
+    }
     j.set("required", Json{p.required});
     if (!p.note.empty()) {
         j.set("note", p.note);

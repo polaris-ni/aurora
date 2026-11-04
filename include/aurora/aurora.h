@@ -227,6 +227,7 @@
 #include "aurora/widget/placeholder.h"
 #include "aurora/widget/popup.h"
 #include "aurora/widget/progress.h"
+#include "aurora/widget/props.h"
 #include "aurora/widget/provider.h"
 #include "aurora/widget/pull_to_refresh.h"
 #include "aurora/widget/radio_spin.h"

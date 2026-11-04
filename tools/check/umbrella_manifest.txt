@@ -219,6 +219,7 @@ aurora/widget/pie_chart.h
 aurora/widget/placeholder.h
 aurora/widget/popup.h
 aurora/widget/progress.h
+aurora/widget/props.h
 aurora/widget/provider.h
 aurora/widget/pull_to_refresh.h
 aurora/widget/radio_spin.h

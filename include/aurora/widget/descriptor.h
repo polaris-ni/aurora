@@ -22,6 +22,12 @@ struct PropDescriptor {
     std::string name;  ///< 属性键名（序列化键），如 "label"
     std::string type;  ///< C++ 类型名，如 "LocalizedString"
     std::string default_value;  ///< 字符串化默认值，如 "\"\""
+    /// @brief 默认值的**原生** JSON 表示（属性表行的回落点可静态求值时由发射面填入）。
+    ///
+    /// 空值（Null）即「没有原生表示」：默认值只能以显示串形态出现（活令牌档的 `"theme.primary"`、
+    /// 派生档的 `auto` / `none`）。非空时序列化按它落 `default` 键，保持 schema 里该键的 JSON 类型
+    /// 与运行时实测值一致（数字仍是数字、颜色仍是 `[r,g,b,a]`），不退化成字符串。
+    Json default_native;
     bool required = false;  ///< 是否必填
     std::string note;  ///< 可选说明（人类/AI 可读）
 

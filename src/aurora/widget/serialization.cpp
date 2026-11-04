@@ -511,13 +511,15 @@ auto component_schema(const std::string &name) -> Json {
         }
         if (const auto *native = serialized.at(pd.name); native != nullptr) {
             entry.set("default", *native);  // 原生值（实测序列化）覆盖描述符显示串
-        } else {
+        } else if (pd.default_native.is_null()) {
             // 无原生默认值可依（主题角色色、运行态项等）：显示串是该属性唯一的默认信息。
             entry.erase("default");
             if (!pd.default_value.empty()) {
                 entry.set("default_expr", pd.default_value);
             }
         }
+        // 第三种情形不留分支：属性未表态 ⇒ 实测序列化里没有这个键，而该行回落点可静态求值，
+        // `descriptor_to_json` 已按回落点落好同型的原生默认值，此处保持它、不降级成字符串。
         table.push_back(std::move(entry));
     }
     for (const auto &e : serialized.entries()) {
