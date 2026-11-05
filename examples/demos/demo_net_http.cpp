@@ -249,10 +249,10 @@ auto main() -> int {
     });
     (void)render;  // 凭证存活到 main 结束：首跑已在 effect 内完成，此后由资源状态自己驱动
 
-    aurora::Button reload{aurora::ButtonProps{.label = aurora::LocalizedString{"reload"}}};
+    aurora::Button reload{aurora::ButtonProps().set_label(aurora::LocalizedString{"reload"})};
     reload.on_click = [resource]() mutable -> void { resource.reload(); };
 
-    aurora::Button toggle{aurora::ButtonProps{.label = aurora::LocalizedString{"stop / resume serving"}}};
+    aurora::Button toggle{aurora::ButtonProps().set_label(aurora::LocalizedString{"stop / resume serving"})};
     toggle.on_click = [&stub]() -> void {
         stub.serving(!stub.serving());
         AURORA_LOG_INFO("net_demo", std::string{"serving = "} + (stub.serving() ? "on" : "off"));

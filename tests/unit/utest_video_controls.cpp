@@ -172,14 +172,14 @@ AURORA_TEST_CASE(tick_refreshes_playback_labels) {
     ControlsHook c(&player);
     // 初始：未播放 → "Play"；未静音 → "Mute"。
     c.tick_gestures(t_ms(0));
-    AURORA_TEST_CHECK_TRUE(c.play_button()->label().get() == LocalizedString{"Play"});
-    AURORA_TEST_CHECK_TRUE(c.mute_button()->label().get() == LocalizedString{"Mute"});
+    AURORA_TEST_CHECK_TRUE(c.play_button()->label() == LocalizedString{"Play"});
+    AURORA_TEST_CHECK_TRUE(c.mute_button()->label() == LocalizedString{"Mute"});
     // 播放 + 静音后 tick 反转文案。
     player.toggle_play();
     player.set_muted(true);
     c.tick_gestures(t_ms(16));
-    AURORA_TEST_CHECK_TRUE(c.play_button()->label().get() == LocalizedString{"Pause"});
-    AURORA_TEST_CHECK_TRUE(c.mute_button()->label().get() == LocalizedString{"Unmute"});
+    AURORA_TEST_CHECK_TRUE(c.play_button()->label() == LocalizedString{"Pause"});
+    AURORA_TEST_CHECK_TRUE(c.mute_button()->label() == LocalizedString{"Unmute"});
 }
 
 AURORA_TEST_CASE(tick_updates_time_text_from_controller) {
@@ -201,7 +201,7 @@ AURORA_TEST_CASE(public_tick_entry_refreshes_readouts) {
     c.tick(t_ms(0));
     // 回归点：`Widget::tick` 在 `needs_gesture_tick_` 为假时直接早退，叠层便永远停在初始
     // 「Play / 0:00 / 0:00」读数上——既有用例直调受保护 `tick_gestures`，掩盖了这个门。
-    AURORA_TEST_CHECK_TRUE(c.play_button()->label().get() == LocalizedString{"Pause"});
+    AURORA_TEST_CHECK_TRUE(c.play_button()->label() == LocalizedString{"Pause"});
     AURORA_TEST_CHECK_EQ(c.time_text()->content().get().text, "0:30 / 1:00");
 }
 
@@ -220,7 +220,7 @@ AURORA_TEST_CASE(backend_facts_do_not_fire_user_commands) {
     AURORA_TEST_CHECK_EQ(ctl.volume_calls, 0);
     AURORA_TEST_CHECK_EQ(ctl.mute_calls, 0);
     // tick 确实走了回填：文案与时间读数已随事实更新。
-    AURORA_TEST_CHECK_TRUE(c.play_button()->label().get() == LocalizedString{"Pause"});
+    AURORA_TEST_CHECK_TRUE(c.play_button()->label() == LocalizedString{"Pause"});
     AURORA_TEST_CHECK_EQ(c.time_text()->content().get().text, "0:24 / 1:00");
 
     // 子控件类型由 VideoControls 的固定布局决定（seek / volume 行内是 Slider），按已知结构取具体类型。

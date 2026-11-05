@@ -50,7 +50,7 @@ auto bounded(float w, float h) -> Constraints {
 
 /// @brief 一棵基础内容树（Column 内一个按钮）。
 /// @return 基础内容节点。
-auto base_content() -> Node { return Node{Button(ButtonProps{.label = "Base"})}; }
+auto base_content() -> Node { return Node{Button(ButtonProps().set_label("Base"))}; }
 
 /// @brief 挂载观测控件：记录挂载 / 卸载次数、挂载时看到的宿主身份与主题主色、布局时读到的主题主色。
 ///
@@ -107,7 +107,7 @@ AURORA_TEST_CASE(overlay_index_starts_at_one_and_is_removable) {
     auto host = std::make_shared<OverlayHost>(base_content());
     // 「检查 + 取值」走框架的 `require_value`：宏展开对 clang-tidy 的路径分析不透明，
     // 直接 `*first` 会被误报 unchecked-optional-access。
-    const std::size_t first = require_value(host->add_overlay(Node{Button(ButtonProps{.label = "Overlay"})}));
+    const std::size_t first = require_value(host->add_overlay(Node{Button(ButtonProps().set_label("Overlay"))}));
     AURORA_TEST_CHECK_EQ(first, 1U);
     AURORA_TEST_CHECK_EQ(host->overlay_count(), 1U);
 
@@ -122,7 +122,7 @@ AURORA_TEST_CASE(add_overlay_on_empty_host_is_not_removable) {
     LayoutEngine::layout(*host, bounded(240.0F, 200.0F));
     AURORA_TEST_CHECK_EQ(host->overlay_count(), 0U);
 
-    const std::optional<std::size_t> index = host->add_overlay(Node{Button(ButtonProps{.label = "Orphan"})});
+    const std::optional<std::size_t> index = host->add_overlay(Node{Button(ButtonProps().set_label("Orphan"))});
     AURORA_TEST_CHECK_FALSE(index.has_value());
 
     // 节点已入树（追加本身生效），但不计入浮层、也删不掉——这正是返回值要如实表达的情形。

@@ -18,7 +18,7 @@ auto main() -> int {
     auto todos = au::State<std::vector<Todo>>{std::vector{Todo{.id = 1, .title = "Explore widgets", .done = false},
                                                           Todo{.id = 2, .title = "Try theming", .done = true}}};
 
-    au::Button b_add{au::ButtonProps{.label = au::LocalizedString{"add 'new task'"}}};
+    au::Button b_add{au::ButtonProps().set_label(au::LocalizedString{"add 'new task'"})};
     b_add.on_click = [todos]() -> void {
         todos.update([](std::vector<Todo> next) -> std::vector<Todo> {
             next.push_back(Todo{.id = static_cast<int>(next.size()) + 1, .title = "new task", .done = false});

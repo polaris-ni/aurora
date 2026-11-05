@@ -1,8 +1,8 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/theming/shape_scale.h + spacing_scale.h + control_metrics.h + layout_conventions.h
 /// 测试说明: 钉死四组令牌的 Material 基线「逐位复现现行硬编码」这条零回归判据——形状 / 间距 / 度量
-/// 三组的可复现项与控件在无注入主题下的默认解算值（`Button` / `Divider` 的 `resolve_*` 通道）逐字段
-/// 相等，惯例组的默认项与落地前的排布行为一致。
+/// 三组的可复现项与控件在无注入主题下的默认生效值（`Button` 的属性行读件、`Divider` 的 `resolve_*`
+/// 通道）逐字段相等，惯例组的默认项与落地前的排布行为一致。
 /// 标「候选」的三项（控件紧凑档之外的命中下限、滚动条粗细）只断言声明值，不对账控件。
 
 #include "aurora/theming/theme.h"
@@ -14,11 +14,10 @@ namespace aurora::test_cases::utest_theme_tokens {
 
 namespace {
 
-/// 探针：把 protected 的 `resolve_*` 钩子与属性字段提到可读位置（对账走的与生产渲染同一条函数）。
+/// 探针：把库内消费的表态位提到可读位置——生效值本身已经是公共读件，不需要探针。
 class ButtonProbe final : public Button {
   public:
-    using Button::resolve_corner_radius;
-    using Button::resolve_padding;
+    using Button::present;
 };
 
 }  // namespace
@@ -31,12 +30,19 @@ AURORA_TEST_CASE(shape_scale_reproduces_current_button_corner) {
     AURORA_TEST_CHECK(shapes.medium == 8.0F);
     AURORA_TEST_CHECK(shapes.large == 12.0F);
     AURORA_TEST_CHECK(shapes.extra_large == 16.0F);
-    // 零回归对账：未显式设圆角时 Button 解算到的正是 `shapes.small`——接线批把默认值改成读令牌后，
-    // 这条判据从「props 常量相等」迁到「同一条 resolve 通道在无注入主题下相等」。
+    // 零回归对账：未表态时 Button 的圆角读件解算到的正是 `shapes.small`——本行回落点是活令牌，
+    // 「同一条读件在无注入主题下与令牌相等」即接线批的判据形态（原 `resolve_corner_radius` 钩子已退役）。
     const BuildContext bare;
     ButtonProbe b;
-    AURORA_TEST_CHECK_FALSE(b.corner_radius.has_value());  // 未设值才走主题档
-    AURORA_TEST_CHECK(b.resolve_corner_radius(bare) == shapes.small);
+    AURORA_TEST_CHECK_FALSE(b.present(ButtonProps::corner_radius_row()));  // 未表态才走主题档
+    AURORA_TEST_CHECK(b.corner_radius(bare) == shapes.small);
+    // 两态语义的另一半：表态后不再跟随档，撤表态又回到档。
+    b.set_corner_radius(11.5F);
+    AURORA_TEST_CHECK(b.present(ButtonProps::corner_radius_row()));
+    AURORA_TEST_CHECK(b.corner_radius(bare) == 11.5F);
+    b.clear(ButtonProps::corner_radius_row());
+    AURORA_TEST_CHECK_FALSE(b.present(ButtonProps::corner_radius_row()));
+    AURORA_TEST_CHECK(b.corner_radius(bare) == shapes.small);
 }
 
 AURORA_TEST_CASE(spacing_scale_reproduces_current_button_padding) {
@@ -48,15 +54,21 @@ AURORA_TEST_CASE(spacing_scale_reproduces_current_button_padding) {
     AURORA_TEST_CHECK(spacing.large == 12.0F);
     AURORA_TEST_CHECK(spacing.extra_large == 16.0F);
     AURORA_TEST_CHECK(spacing.huge == 24.0F);
-    // 零回归对账：未显式设内边距时 Button 解算到水平 = `large`、垂直 = `small`。
+    // 零回归对账：未表态时 Button 的内边距读件解算到水平 = `large`、垂直 = `small`。
+    // 本行是派生档（四边结构与单一标量档不同型，故由回落点按档拼装），生效值仍随主题间距档而变。
     const BuildContext bare;
     ButtonProbe b;
-    AURORA_TEST_CHECK_FALSE(b.padding.has_value());  // 未设值才走主题档
-    const EdgeInsets pad = b.resolve_padding(bare);
+    AURORA_TEST_CHECK_FALSE(b.present(ButtonProps::padding_row()));  // 未表态才走主题档
+    const EdgeInsets pad = b.padding(bare);
     AURORA_TEST_CHECK(pad.left == spacing.large);
     AURORA_TEST_CHECK(pad.right == spacing.large);
     AURORA_TEST_CHECK(pad.top == spacing.small);
     AURORA_TEST_CHECK(pad.bottom == spacing.small);
+    // 两态语义的另一半：表态后不再跟随档，撤表态又回到档。
+    b.set_padding(EdgeInsets{.left = 3.0F, .top = 5.0F, .right = 3.0F, .bottom = 5.0F});
+    AURORA_TEST_CHECK(b.padding(bare).left == 3.0F);
+    b.clear(ButtonProps::padding_row());
+    AURORA_TEST_CHECK(b.padding(bare).left == spacing.large);
 }
 
 AURORA_TEST_CASE(control_metrics_reproduces_current_widget_metrics) {

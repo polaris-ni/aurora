@@ -77,22 +77,38 @@ namespace detail {
     return std::ranges::find(k_aggregates, type) != k_aggregates.end();
 }
 
+/// @brief 属性写入面只由 `set_<键名>()` 链式写件承担的控件类型（属性单一声明形态）。
+///
+/// 这类 `*Props` 类的字段全部私有、公共面只剩逐属性的 `set_<词根>` 写件（词根与序列化键同名），
+/// 因此 **指定初始化器不再合法**（`au::ButtonProps{ .label = "OK" }` 编译红：无可直写的公有成员），
+/// 三种风格统一改发链式调用形态 `au::Button(au::ButtonProps().set_label("OK"))`。
+/// 未迁移的类型仍是「序列化键 == 公有同名成员」的聚合，继续走指定初始化器；每迁移一枚控件就把它的
+/// 类型名加进这张表，同时删掉 `prop_target_table` 里为该类型登记的手写落点（链式形态下由词根推出）。
+///
+/// @param type 序列化 type 名。
+/// @return 该类型的属性是否只能通过 `set_<键名>()` 链式写件装入。
+[[nodiscard]] constexpr auto props_chain_writers(std::string_view type) noexcept -> bool {
+    constexpr std::array<std::string_view, 1> k_chain = {"Button"};
+    return std::ranges::find(k_chain, type) != k_chain.end();
+}
+
 /// @brief 属性键在 C++ 侧的写入落点。
 struct PropTarget {
-    std::string_view lhs;  ///< 成员路径（可嵌套，如 `font.size_pt`）或链式 setter 名
+    std::string lhs;  ///< 成员路径（可嵌套，如 `font.size_pt`）或链式 setter 名
     bool via_setter = false;  ///< true = 生成 `w.lhs(值)`；false = 生成 `w.lhs = 值`
 };
 
-/// @brief 公开继承自身 `*Props` 聚合的类型（16 个，即 `has_props_aggregate` 去掉 `TextInput`）。
+/// @brief 公开继承自身 `*Props` 聚合的类型（`has_props_aggregate` 去掉 `TextInput` 与已迁移的链式类型）。
 ///
 /// 公开继承意味着「序列化键 == 公有同名成员」这条默认成立，`w.key = value;` 与 `.key = value` 都合法；
 /// `TextInput` 是唯一例外：它以 `TextInputProps` 为**构造参数**、把值拷进 protected 字段，对外只给
 /// `set_*()` / 链式 setter，故它的每个属性都必须走 `prop_target` 登记的写入路径。
+/// `props_chain_writers` 里的类型同样公开继承，但字段私有，故也归入「键名不等于公开成员名」。
 ///
 /// @param type 序列化 type 名。
-/// @return 类型是否公开继承自身 *Props（序列化键名即公开成员名）；TextInput 除外。
+/// @return 类型是否公开继承自身 *Props 且序列化键即公有同名成员；TextInput 与链式形态类型除外。
 [[nodiscard]] constexpr auto publicly_inherits_props(std::string_view type) noexcept -> bool {
-    return has_props_aggregate(type) && type != "TextInput";
+    return has_props_aggregate(type) && type != "TextInput" && !props_chain_writers(type);
 }
 
 /// @brief 构造签名 bespoke（既不接受通用 `T{ Node… }` 初始化列表，也没有 `*Props` 子节点槽）的类型。
@@ -235,7 +251,6 @@ struct PropTarget {
         {"Text.color", {.lhs = "text_color", .via_setter = false}},
         {"Text.font_size", {.lhs = "font.size_pt", .via_setter = false}},
         {"Text.font_weight", {.lhs = "font.weight", .via_setter = false}},
-        {"Button.font_size", {.lhs = "font.size_pt", .via_setter = false}},
         {"Column.main_axis_alignment", {.lhs = "flex.main_axis", .via_setter = false}},
         {"Column.cross_axis_alignment", {.lhs = "flex.cross_axis", .via_setter = false}},
         {"Column.main_axis_size", {.lhs = "flex.main_axis_size", .via_setter = false}},
@@ -289,10 +304,17 @@ struct PropTarget {
 }
 
 /// @brief 取 (类型, 键) 已登记的写入落点，未登记时回退同名赋值形态。
+///
+/// 链式形态的类型（`props_chain_writers`）不发赋值：词根与序列化键同名，落点直接由键名推出为
+/// `set_<键>`，无需逐键登记（这是属性单一声明形态的读面词根规则在发射侧的兑现）。
+///
 /// @param type 序列化 type 名。
 /// @param key 快照属性键名。
-/// @return 登记的 PropTarget；未登记时为键名同名、直接赋值的落点。
+/// @return 登记的 PropTarget；链式类型为由词根推出的 setter 落点；其余未登记时为键名同名、直接赋值的落点。
 [[nodiscard]] inline auto prop_target(const std::string &type, const std::string &key) -> PropTarget {
+    if (props_chain_writers(type)) {
+        return {.lhs = "set_" + key, .via_setter = true};
+    }
     const auto it = prop_target_table().find(type + "." + key);
     return it != prop_target_table().end() ? it->second : PropTarget{.lhs = key, .via_setter = false};
 }
@@ -322,7 +344,18 @@ struct PropTarget {
         return false;
     }
     const PropTarget target = prop_target(type, key);
-    return !target.via_setter && target.lhs.find('.') == std::string_view::npos;
+    return !target.via_setter && target.lhs.find('.') == std::string::npos;
+}
+
+/// @brief 该键能否进**构造表达式**（Fluent / DesignatedInit 的 Props 形片段）。
+///
+/// 两条合法路径：① `*Props` 聚合的顶层可设计成员（`.key = 值`）；② 链式形态类型由词根推出的
+/// `set_<key>(值)` 调用——它不是设计符，而是挂在 `TProps()` 之后的成员调用。
+/// @param type 序列化 type 名。
+/// @param key 快照属性键名。
+/// @return 该键是否可在构造期装入（表达式风格不丢这条属性）。
+[[nodiscard]] inline auto expressible(const std::string &type, const std::string &key) -> bool {
+    return designatable(type, key) || props_chain_writers(type);
 }
 
 /// @brief 该键能否以构造后语句写入。
@@ -339,7 +372,7 @@ struct PropTarget {
     if (no_write_path(type, key)) {
         return false;
     }
-    if (publicly_inherits_props(type) || has_prop_target(type, key)) {
+    if (publicly_inherits_props(type) || props_chain_writers(type) || has_prop_target(type, key)) {
         return true;
     }
     AURORA_LOG_WARN("codegen", type, ".", key,
@@ -775,7 +808,7 @@ struct PropEmit {
                 {.key = key, .lhs = std::string{target.lhs}, .expr = std::move(expr), .via_setter = target.via_setter});
             continue;
         }
-        if (use_statement ? !statement_assignable(type, key) : !designatable(type, key)) {
+        if (use_statement ? !statement_assignable(type, key) : !expressible(type, key)) {
             continue;
         }
         const PropTarget target = prop_target(type, key);
@@ -789,23 +822,43 @@ struct PropEmit {
     return out;
 }
 
-/// @brief 把可用属性渲染为 `.成员 = 值` 的逗号分隔片段（指定初始化器口径）。
+/// @brief 把可用属性渲染为构造表达式的 Props 形片段：聚合形态发 `.成员 = 值`（逗号分隔，须包进
+///        `{...}`），链式形态发 `.set_成员(值)`（无分隔符，直接续在 `TProps()` 之后）。
 /// @param props 快照属性对象。
-/// @param prefix 每个成员路径的前缀（当前传 `.`，为嵌套设计符预留）。
+/// @param prefix 每个成员路径的前缀（当前传 `.`，为嵌套设计符预留；链式调用同样以 `.` 起头）。
 /// @param type 序列化 type 名。
 /// @return 片段串；无可用属性时为空串。
 [[nodiscard]] inline auto emit_props(const Json &props, const char *prefix, const std::string &type) -> std::string {
+    const bool chain = props_chain_writers(type);  // 链式形态：片段是成员调用串，不是初始化列表
     std::string out{};
     for (const auto &emit : emit_prop_targets(type, props, false)) {
-        if (!out.empty()) {
+        if (!out.empty() && !chain) {
             out += ", ";
         }
         out += prefix;
         out += emit.lhs;
-        out += " = ";
-        out += emit.expr;
+        if (emit.via_setter) {
+            out += "(" + emit.expr + ")";
+        } else {
+            out += " = " + emit.expr;
+        }
     }
     return out;
+}
+
+/// @brief 把 Props 形片段包成构造表达式：聚合走 `au::T(au::TProps{ 片段 })`，链式走
+///        `au::T(au::TProps() 片段)`（片段自身已带 `.set_x(值)` 前导点）。
+/// @param cls C++ 类名（已去命名空间）。
+/// @param pr Props 类名。
+/// @param body Props 形片段。
+/// @param chain 是否链式形态类型。
+/// @return 该节点的构造表达式。
+[[nodiscard]] inline auto wrap_props_ctor(const std::string &cls, const std::string &pr, const std::string &body,
+                                          bool chain) -> std::string {
+    if (chain) {
+        return "au::" + cls + "(au::" + pr + "()" + body + ")";
+    }
+    return "au::" + cls + "(au::" + pr + "{" + body + "})";
 }
 
 /// @brief 子节点在其 `*Props` 聚合里的成员名：`Column`/`Row`/`Grid` 为 `children`、`Scroll`/
@@ -889,22 +942,25 @@ struct PropEmit {
         return "au::" + cls + (kids.empty() ? std::string{"{}"} : emit_child_list(kids, indent));
     }
     const std::string pr = cpp_props(type);
+    const bool chain = props_chain_writers(type);
     if (kids.empty()) {
-        return "au::" + cls + "(au::" + pr + "{" + props_str + "})";
+        return wrap_props_ctor(cls, pr, props_str, chain);
     }
     const std::string_view slot = props_child_slot(type);
     if (!slot.empty() && (unified_props || !props_str.empty())) {
         std::string body{std::string{"."} + std::string{slot}};
         body += (slot == std::string_view{"child"}) ? (" = " + kids.front()) : (" = " + emit_child_list(kids, indent));
         if (!props_str.empty()) {
-            body += ", " + props_str;
+            body += chain ? props_str : (", " + props_str);
         }
-        return "au::" + cls + "(au::" + pr + "{" + body + "})";
+        return wrap_props_ctor(cls, pr, body, chain);
     }
     if (is_flat_container(type)) {
         return "au::" + cls + emit_child_list(kids, indent);
     }
     std::string body = props_str;  // 兜底形态的 Props 成员片段累加器（先标量属性后 .children）
+    // 链式形态的类型今天全是叶子（`props_chain_writers` 里只有 `Button`），故这条兜底分支仍按聚合形态发射；
+    // 容器迁移时这条分支要改走 `set_children(...)`，与 `props_child_slot` 一并处理。
     if (!body.empty()) {
         body += ", ";
     }

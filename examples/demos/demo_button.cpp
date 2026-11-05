@@ -17,11 +17,11 @@ auto main() -> int {
         printf("%d", next);
     };
 
-    au::Button b_minus{au::ButtonProps{.label = au::LocalizedString{"-1"}}};
+    au::Button b_minus{au::ButtonProps().set_label(au::LocalizedString{"-1"})};
     b_minus.on_click = [counter, apply]() -> void { apply(counter->get() - 1); };
-    au::Button b_plus{au::ButtonProps{.label = au::LocalizedString{"+1"}}};
+    au::Button b_plus{au::ButtonProps().set_label(au::LocalizedString{"+1"})};
     b_plus.on_click = [counter, apply]() -> void { apply(counter->get() + 1); };
-    au::Button b_reset{au::ButtonProps{.label = au::LocalizedString{"reset"}}};
+    au::Button b_reset{au::ButtonProps().set_label(au::LocalizedString{"reset"})};
     b_reset.on_click = [apply]() -> void { apply(0); };
 
     au::Row btn_row{

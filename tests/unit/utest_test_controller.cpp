@@ -30,7 +30,7 @@ constexpr int AURORA_HEIGHT = 240;
 
 /// @brief 测试树干：Column[ Button#ok(label="OK"), Text#msg(content="hello"), TextInput#in ]。
 struct Fixture {
-    std::shared_ptr<Button> btn = std::make_shared<Button>(ButtonProps{.label = LocalizedString{"OK"}});
+    std::shared_ptr<Button> btn = std::make_shared<Button>(ButtonProps().set_label(LocalizedString{"OK"}));
     std::shared_ptr<Text> msg = std::make_shared<Text>(TextProps{.content = LocalizedString{"hello"}});
     std::shared_ptr<TextInput> input = std::make_shared<TextInput>();
     int clicks = 0;

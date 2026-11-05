@@ -30,7 +30,7 @@ VideoControls::VideoControls(VideoController *controller) : controller_(controll
 }
 
 auto VideoControls::build_children() -> void {
-    auto play = std::make_unique<Button>(ButtonProps{.label = play_label_});
+    auto play = std::make_unique<Button>(ButtonProps().set_label(play_label_));
     play->set_on_click([this]() -> void {
         if (controller_) {
             controller_->toggle_play();
@@ -49,7 +49,7 @@ auto VideoControls::build_children() -> void {
     auto time = std::make_unique<Text>(TextProps{.content = time_label_});
     time->color(Color::white());
 
-    auto mute = std::make_unique<Button>(ButtonProps{.label = mute_label_});
+    auto mute = std::make_unique<Button>(ButtonProps().set_label(mute_label_));
     mute->set_on_click([this]() -> void {
         if (controller_) {
             controller_->set_muted(!controller_->muted());

@@ -31,7 +31,7 @@ auto main() -> int {
             AURORA_LOG_INFO("demo", "[Lifecycle] on_unmount");
         });
 
-    au::Button toggle{au::ButtonProps{.label = au::LocalizedString{"Show/hide subtree (Show)"}}};
+    au::Button toggle{au::ButtonProps().set_label(au::LocalizedString{"Show/hide subtree (Show)"})};
     toggle.on_click = [visible]() -> void { visible.set(!visible.get()); };
 
     au::Node root = au::Column{

@@ -337,7 +337,7 @@ struct ProbeWidgets {
 /// @brief 一列带无障碍语义的控件（与 Win32 UIA 探针同族的三件套 + ReorderableList）。
 [[nodiscard]] auto build_probe_column() -> ProbeWidgets {
     // CJK-LITERAL: cjk-fixture - the client asserts the push button by this exact Han Name
-    auto button = aurora::Button{aurora::ButtonProps{.label = aurora::LocalizedString{"确定"}}};
+    auto button = aurora::Button{aurora::ButtonProps().set_label(aurora::LocalizedString{"确定"})};
     button.set_on_click([] { press_executed() = true; });
     // CJK-LITERAL: cjk-fixture - Han item labels pushed through the AT-SPI cache and children-changed events
     auto items = aurora::State<std::vector<std::string>>{std::vector<std::string>{"订单一", "订单二", "订单三"}};

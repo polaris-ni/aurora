@@ -444,8 +444,8 @@ AURORA_TEST_CASE(default_extra_hit_box_equals_own_layout_box) {
     // 两条判据：① 树上任何控件都不额外声明命中盒；② 密集取点上，命中链最深节点与
     // 「只按子布局盒判定」的参考实现逐点相同（参考实现即改动前的闸，故本用例可捕获任何漂移）。
     auto root = std::make_shared<Column>(
-        ColumnProps{.children = {Node{Button(ButtonProps{.label = "A"})}, Node{Button(ButtonProps{.label = "B"})},
-                                 Node{Button(ButtonProps{.label = "C"})}},
+        ColumnProps{.children = {Node{Button(ButtonProps().set_label("A"))}, Node{Button(ButtonProps().set_label("B"))},
+                                 Node{Button(ButtonProps().set_label("C"))}},
                     .gap = 8.0F});
     LayoutEngine::layout(*root, bounded(240.0F, 200.0F));
     AURORA_TEST_REQUIRE_EQ(root->child_count(), 3U);

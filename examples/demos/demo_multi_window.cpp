@@ -26,7 +26,7 @@ auto count_label(int n) -> au::LocalizedString { return au::LocalizedString{"win
 /// @brief 辅助窗口的 UI：自带关闭按钮（经 `WindowHost` 的 id 程序化关闭）+ 跨窗广播回显。
 auto aux_ui(int index, std::function<void()> close_self,
             const std::shared_ptr<au::State<au::LocalizedString>> &last_ping) -> au::Node {
-    au::Button close_btn{au::ButtonProps{.label = "Close this window"}};
+    au::Button close_btn{au::ButtonProps().set_label("Close this window")};
     close_btn.on_click = std::move(close_self);
     return au::Column{
         au::ColumnProps{
@@ -49,7 +49,7 @@ auto aux_ui(int index, std::function<void()> close_self,
 auto build_main_ui(au::Application &app, const std::shared_ptr<au::State<au::LocalizedString>> &label,
                    const std::shared_ptr<au::State<au::LocalizedString>> &last_ping, int &created,
                    au::WindowId &last_id, std::size_t &display_idx, int &ping_seq) -> au::Node {
-    au::Button new_btn{au::ButtonProps{.label = "New auxiliary window"}};
+    au::Button new_btn{au::ButtonProps().set_label("New auxiliary window")};
     new_btn.on_click = [&app, &created, &last_id, &last_ping]() -> void {
         ++created;
         au::WindowOptions o;
@@ -71,7 +71,7 @@ auto build_main_ui(au::Application &app, const std::shared_ptr<au::State<au::Loc
         AURORA_LOG_INFO("demo", "[multi_window] opened window id=", id, " total=", app.window_count());
     };
 
-    au::Button close_btn{au::ButtonProps{.label = "Close last auxiliary window"}};
+    au::Button close_btn{au::ButtonProps().set_label("Close last auxiliary window")};
     close_btn.on_click = [&app, &last_id]() -> void {
         if (last_id == au::AURORA_INVALID_WINDOW_ID) {
             return;
@@ -80,10 +80,10 @@ auto build_main_ui(au::Application &app, const std::shared_ptr<au::State<au::Loc
         last_id = au::AURORA_INVALID_WINDOW_ID;
     };
 
-    au::Button quit_btn{au::ButtonProps{.label = "Quit app (Application::quit)"}};
+    au::Button quit_btn{au::ButtonProps().set_label("Quit app (Application::quit)")};
     quit_btn.on_click = [&app]() -> void { app.quit(); };  // 任何退出策略下都能主动结束帧循环
 
-    au::Button modal_btn{au::ButtonProps{.label = "Open modal dialog (blocks main window)"}};
+    au::Button modal_btn{au::ButtonProps().set_label("Open modal dialog (blocks main window)")};
     modal_btn.on_click = [&app]() -> void {
         au::WindowOptions o;
         o.size = au::Size{.width = 360.0F, .height = 200.0F};
@@ -97,7 +97,7 @@ auto build_main_ui(au::Application &app, const std::shared_ptr<au::State<au::Loc
             return;
         }
         auto self_id = std::make_shared<au::WindowId>(au::AURORA_INVALID_WINDOW_ID);
-        au::Button close{au::ButtonProps{.label = "Close modal"}};
+        au::Button close{au::ButtonProps().set_label("Close modal")};
         close.on_click = [&app, self_id]() -> void { app.close_window(*self_id); };
         au::Node ui = au::Column{au::ColumnProps{.children = {
                                                      GradientTitle{"Modal dialog"},
@@ -109,7 +109,7 @@ auto build_main_ui(au::Application &app, const std::shared_ptr<au::State<au::Loc
         *self_id = app.open_window(std::move(w.value()), au::Scene{std::move(ui)}, o);
     };
 
-    au::Button display_btn{au::ButtonProps{.label = "Move main window to next display"}};
+    au::Button display_btn{au::ButtonProps().set_label("Move main window to next display")};
     display_btn.on_click = [&app, &display_idx]() -> void {
         const auto displays = au::app::list_displays();
         if (displays.size() < 2) {
@@ -123,7 +123,7 @@ auto build_main_ui(au::Application &app, const std::shared_ptr<au::State<au::Loc
         }
     };
 
-    au::Button cast_btn{au::ButtonProps{.label = "Broadcast to all windows (bus)"}};
+    au::Button cast_btn{au::ButtonProps().set_label("Broadcast to all windows (bus)")};
     cast_btn.on_click = [&app, &ping_seq]() -> void {
         ++ping_seq;
         // 携带发送者窗口 id：订阅侧可据此实现点对点过滤（这里全量广播）。

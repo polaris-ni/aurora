@@ -51,15 +51,15 @@ inline auto label(Container &parent, std::string_view text, TextProps props = {}
     return detail::make_add<Text>(parent, std::move(props));
 }
 
-/// @brief 按钮。`text` 为主文案（覆盖 `props.label`）；`on_click` 可选，连接后于点击触发。
+/// @brief 按钮。`text` 为主文案（覆盖 `label` 行）；`on_click` 可选，连接后于点击触发。
 /// @param parent 目标父容器
-/// @param text 主文案，写入 props.label
+/// @param text 主文案，经 `set_label` 写入
 /// @param props 按钮属性块（默认构造）
 /// @param on_click 点击回调（可空，非空时经 set_on_click 连接）
 /// @return 指向新建 `Button` 的裸指针，生命周期由 parent 子树持有
 inline auto button(Container &parent, std::string_view text, ButtonProps props = {},
                    std::function<void()> on_click = {}) -> Button * {
-    props.label = std::string(text);
+    props.set_label(std::string(text));
     auto *b = detail::make_add<Button>(parent, std::move(props));
     if (on_click) {
         b->set_on_click(std::move(on_click));

@@ -10,7 +10,7 @@ auto main() -> int {
     au::Column root;
     au::ui::label(root, "Aurora UI factory layer demo");
     au::ui::label(root, "Controls below are automatically added to root container by au::ui:: factory");
-    au::ui::button(root, "Click me", au::ButtonProps{}, []() -> void { /* 演示：点击无副作用 */ });
+    au::ui::button(root, "Click me", au::ButtonProps(), []() -> void { /* 演示：点击无副作用 */ });
     au::ui::input(root, "Editable text");
     au::ui::checkbox(root, true);
     au::ui::slider(root, 0.5);

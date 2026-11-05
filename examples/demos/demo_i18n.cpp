@@ -69,7 +69,7 @@ auto main() -> int {
     au::default_catalog().set_default_locale(AURORA_LOCALE_EN);
 
     auto locale = au::State<au::Locale>{AURORA_LOCALE_EN};
-    au::Button toggle{au::ButtonProps{.label = au::LocalizedString{"Switch locale (en / zh-Hans-CN)"}}};
+    au::Button toggle{au::ButtonProps().set_label(au::LocalizedString{"Switch locale (en / zh-Hans-CN)"})};
     toggle.on_click = [locale]() -> void {
         locale.set(locale.get().language == AURORA_LOCALE_EN.language ? AURORA_LOCALE_ZH : AURORA_LOCALE_EN);
     };

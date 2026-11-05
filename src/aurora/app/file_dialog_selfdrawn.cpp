@@ -337,14 +337,14 @@ FilePickerView::FilePickerView(PickerMode mode, const file_dialog::Options &opts
     auto list_scroll = std::make_shared<Scroll>(ScrollProps{.child = Node{list_}});
     list_scroll->height(Length::fixed(AURORA_PICKER_LIST_HEIGHT));
 
-    auto up_button = std::make_shared<Button>(ButtonProps{.label = "Up"});
+    auto up_button = std::make_shared<Button>(ButtonProps().set_label("Up"));
     up_button->set_on_click([this]() -> void { go_up(); });
 
-    confirm_button_ = std::make_shared<Button>(ButtonProps{.label = confirm_label(mode)});
+    confirm_button_ = std::make_shared<Button>(ButtonProps().set_label(confirm_label(mode)));
     confirm_button_->set_on_click([this]() -> void { confirm(); });
     confirm_button_->set_enabled(has_confirmable_selection());
 
-    auto cancel_button = std::make_shared<Button>(ButtonProps{.label = "Cancel"});
+    auto cancel_button = std::make_shared<Button>(ButtonProps().set_label("Cancel"));
     cancel_button->set_on_click([this]() -> void { cancel(); });
 
     // 路径行：上一级 + （保存形态）文件名输入框。

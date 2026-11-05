@@ -62,7 +62,7 @@ auto mouse(MouseAction action, float x, float y) -> MouseEvent {
 /// @param hits 被按钮回调自增的计数器（引用，生命周期覆盖两次派发）。
 /// @return 可直接交给 Dialog / Column 承载的内容节点。
 auto make_content(int &hits) -> Node {
-    auto btn = Button(ButtonProps{.label = "OK"});
+    auto btn = Button(ButtonProps().set_label("OK"));
     btn.set_on_click([&hits]() -> void { ++hits; });
     auto content = Column(ColumnProps{
         .children = {std::move(Text("Title").font_size(18).bold()), std::move(btn)},
@@ -191,7 +191,7 @@ AURORA_TEST_CASE(positive_control_column_content_also_clickable) {
     // 用于排除「探针接线错误判成通过」——若此对照红，说明问题在探针而非 Dialog。
     int hits = 0;
     auto root = std::make_shared<Column>();
-    auto btn = Button(ButtonProps{.label = "OK"});
+    auto btn = Button(ButtonProps().set_label("OK"));
     btn.set_on_click([&hits]() -> void { ++hits; });
     root->add(std::move(btn));
     LayoutEngine::layout(*root, full());
@@ -298,7 +298,7 @@ AURORA_TEST_CASE(overlay_host_dialog_does_not_penetrate_to_base) {
     int hits = 0;
     int base_hits = 0;
     auto base = std::make_shared<Column>();
-    auto base_btn = Button(ButtonProps{.label = "Base"});
+    auto base_btn = Button(ButtonProps().set_label("Base"));
     base_btn.set_on_click([&base_hits]() -> void { ++base_hits; });
     base->add(std::move(base_btn));
 

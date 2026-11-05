@@ -167,7 +167,7 @@ AURORA_TEST_CASE(panel_press_selects_option_via_real_dispatch) {
     // 端到端：Press 开合走真实派发，面板行 Press 触发 on_change 并改写选中序号。
     ChangeLog log;
     const std::shared_ptr<Dropdown> dd = make_dropdown(log);
-    auto btn = Button(ButtonProps{.label = "Below"});
+    auto btn = Button(ButtonProps().set_label("Below"));
     int btn_hits = 0;
     btn.set_on_click([&btn_hits]() -> void { ++btn_hits; });
     auto root =
@@ -201,7 +201,7 @@ AURORA_TEST_CASE(panel_point_reaches_dropdown_in_lazy_list_item) {
     ChangeLog log;
     const std::shared_ptr<Dropdown> dd = make_dropdown(log);
     int other_hits = 0;
-    auto other = std::make_shared<Button>(ButtonProps{.label = "Other"});
+    auto other = std::make_shared<Button>(ButtonProps().set_label("Other"));
     other->set_on_click([&other_hits]() -> void { ++other_hits; });
 
     auto list = std::make_shared<LazyList>(
@@ -230,7 +230,7 @@ AURORA_TEST_CASE(closed_dropdown_never_covers_the_sibling_below) {
     // 收起态逐位不变：追加盒为空，主框下方的点照旧归下方兄弟按钮。
     ChangeLog log;
     const std::shared_ptr<Dropdown> dd = make_dropdown(log);
-    auto btn = Button(ButtonProps{.label = "Below"});
+    auto btn = Button(ButtonProps().set_label("Below"));
     int btn_hits = 0;
     btn.set_on_click([&btn_hits]() -> void { ++btn_hits; });
     auto root =
@@ -258,7 +258,7 @@ AURORA_TEST_CASE(point_below_open_panel_still_goes_to_sibling) {
     // 覆盖区外不抢：面板底边以下的点（落在下方兄弟按钮盒内）仍归兄弟，不被追加盒吞掉。
     ChangeLog log;
     const std::shared_ptr<Dropdown> dd = make_dropdown(log);
-    auto btn = Button(ButtonProps{.label = "Below"});
+    auto btn = Button(ButtonProps().set_label("Below"));
     int btn_hits = 0;
     btn.set_on_click([&btn_hits]() -> void { ++btn_hits; });
     auto root =
@@ -317,8 +317,8 @@ AURORA_TEST_CASE(compat_entry_and_dispatch_entry_agree_pointwise) {
     // 树上只放可点击控件（Button/Dropdown）——纯叶控件（如 Text）不入链是另一条既有规则。
     ChangeLog log;
     const std::shared_ptr<Dropdown> dd = make_dropdown(log);
-    auto above = Button(ButtonProps{.label = "Above"});
-    auto below = Button(ButtonProps{.label = "Below"});
+    auto above = Button(ButtonProps().set_label("Above"));
+    auto below = Button(ButtonProps().set_label("Below"));
     auto root = std::make_shared<Column>(
         ColumnProps{.children = {Node{std::move(above)}, Node{dd}, Node{std::move(below)}}, .gap = 0.0F});
     LayoutEngine::layout(*root, host_constraints());
@@ -494,7 +494,7 @@ AURORA_TEST_CASE(scroll_and_lazy_list_agree_on_clipped_extra_hit_box) {
     {
         const std::shared_ptr<Dropdown> dd = make_dropdown(log);
         auto content = std::make_shared<Column>(
-            ColumnProps{.children = {Node{Button(ButtonProps{.label = "top"})}, Node{dd}}, .gap = 400.0F});
+            ColumnProps{.children = {Node{Button(ButtonProps().set_label("top"))}, Node{dd}}, .gap = 400.0F});
         auto scroller = std::make_shared<Scroll>(ScrollProps{.child = Node{content}});
         LayoutEngine::layout(*scroller, host_constraints());
         dd->set_open(true);

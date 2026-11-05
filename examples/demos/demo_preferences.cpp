@@ -44,7 +44,7 @@ auto main() -> int {
                                  }};
 
         // 删除该配置项按钮：移除 dark_mode 并落盘，随即隐藏 Switch（避免继续写已删除的键）。
-        au::Button del_btn{au::ButtonProps{.label = au::LocalizedString{"Delete dark_mode config item"}}};
+        au::Button del_btn{au::ButtonProps().set_label(au::LocalizedString{"Delete dark_mode config item"})};
         del_btn.on_click = [&prefs, show_switch]() -> void {
             prefs.remove("dark_mode");
             (void)prefs.flush();  // 墓碑随 flush 持久化并跨进程传播

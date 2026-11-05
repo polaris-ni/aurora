@@ -7,7 +7,7 @@
 auto main() -> int {
     auto visible = au::State<bool>{true};
 
-    au::Button toggle{au::ButtonProps{.label = au::LocalizedString{"toggle banner"}}};
+    au::Button toggle{au::ButtonProps().set_label(au::LocalizedString{"toggle banner"})};
     toggle.on_click = [visible]() -> void { visible.set(!visible.get()); };
 
     au::Node root = au::Column{

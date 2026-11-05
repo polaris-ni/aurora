@@ -361,35 +361,45 @@
         {
           "name": "border_width",
           "type": "float",
+          "default": 0.0,
           "note": "Border width (dp); 0 = no border",
-          "minimum": "0",
-          "default_expr": "0.0"
+          "minimum": "0"
         },
         {
           "name": "disabled_color",
           "type": "Color",
-          "note": "Disabled background color",
-          "default_expr": "{200,200,200}"
+          "default": [
+            200,
+            200,
+            200,
+            255
+          ],
+          "note": "Disabled background color"
         },
         {
           "name": "disabled_text_color",
           "type": "Color",
-          "note": "Disabled text color",
-          "default_expr": "{130,130,130}"
+          "default": [
+            130,
+            130,
+            130,
+            255
+          ],
+          "note": "Disabled text color"
         },
         {
           "name": "min_width",
           "type": "float",
+          "default": 0.0,
           "note": "Min width (dp)",
-          "minimum": "0",
-          "default_expr": "0.0"
+          "minimum": "0"
         },
         {
           "name": "min_height",
           "type": "float",
+          "default": 0.0,
           "note": "Min height (dp)",
-          "minimum": "0",
-          "default_expr": "0.0"
+          "minimum": "0"
         },
         {
           "name": "width",
@@ -417,7 +427,7 @@
       ],
       "children_policy": "none",
       "examples": [
-        "au::Button(au::ButtonProps{ .label = \"OK\" })"
+        "au::Button(au::ButtonProps().set_label(\"OK\"))"
       ]
     },
     {

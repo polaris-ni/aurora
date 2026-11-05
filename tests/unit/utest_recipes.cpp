@@ -149,8 +149,8 @@ AURORA_TEST_CASE(tab_view_switches_page_on_tab_activate) {
     // 同上，第二枚标签按钮。
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-static-cast-downcast)
     auto &btn_b = static_cast<Button &>(btn_row.child(1).widget());
-    AURORA_TEST_CHECK_EQ(btn_a.label().get().text, std::string{"A"});
-    AURORA_TEST_CHECK_EQ(btn_b.label().get().text, std::string{"B"});
+    AURORA_TEST_CHECK_EQ(btn_a.label().text, std::string{"A"});
+    AURORA_TEST_CHECK_EQ(btn_b.label().text, std::string{"B"});
 
     const BuildContext ctx;
     col.mount(ctx);  // 挂载后 TabBody 订阅内部 selected 状态（变化即标脏）

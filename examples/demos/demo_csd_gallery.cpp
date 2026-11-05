@@ -202,7 +202,7 @@ auto open_preview(au::Application &app, au::DecorationPolicy p, const std::share
         auto shadow_on = std::make_shared<bool>(true);
         auto icon_on = std::make_shared<bool>(false);
 
-        au::Button theme_btn{au::ButtonProps{.label = "Cycle title-bar theme (host self-draw)"}};
+        au::Button theme_btn{au::ButtonProps().set_label("Cycle title-bar theme (host self-draw)")};
         theme_btn.on_click = [self_id, &app, theme_idx, note]() -> void {
             *theme_idx = (*theme_idx + 1) % 8;
             const std::string label{theme_name(*theme_idx)};
@@ -215,7 +215,7 @@ auto open_preview(au::Application &app, au::DecorationPolicy p, const std::share
         kids.emplace_back(std::move(theme_btn));
         kids.emplace_back(gap(6));
 
-        au::Button shadow_btn{au::ButtonProps{.label = "Toggle window frame shadow"}};
+        au::Button shadow_btn{au::ButtonProps().set_label("Toggle window frame shadow")};
         shadow_btn.on_click = [self_id, &app, shadow_on, note]() -> void {
             *shadow_on = !*shadow_on;
             if (const auto *w = resolve_preview(app, self_id)) {
@@ -226,7 +226,7 @@ auto open_preview(au::Application &app, au::DecorationPolicy p, const std::share
         kids.emplace_back(std::move(shadow_btn));
         kids.emplace_back(gap(6));
 
-        au::Button icon_btn{au::ButtonProps{.label = "Toggle title-bar icon"}};
+        au::Button icon_btn{au::ButtonProps().set_label("Toggle title-bar icon")};
         icon_btn.on_click = [self_id, &app, icon_on, note]() -> void {
             *icon_on = !*icon_on;
             if (const auto *w = resolve_preview(app, self_id)) {
@@ -256,7 +256,7 @@ auto open_preview(au::Application &app, au::DecorationPolicy p, const std::share
     }
 
     kids.emplace_back(gap(14));
-    au::Button close_btn{au::ButtonProps{.label = "Close this preview"}};
+    au::Button close_btn{au::ButtonProps().set_label("Close this preview")};
     close_btn.on_click = [self_id, &app, note]() -> void {
         app.close_window(*self_id);
         note->set(au::LocalizedString{"preview closed"});
@@ -272,7 +272,7 @@ auto open_preview(au::Application &app, au::DecorationPolicy p, const std::share
                                  const std::shared_ptr<au::State<au::LocalizedString>> &note,
                                  au::DecorationPolicy &preview_policy) -> au::Node {
     const auto add_policy = [&](au::DecorationPolicy p, std::vector<au::Node> &kids) -> void {
-        au::Button b{au::ButtonProps{.label = std::string(policy_label(p)) + " preview"}};
+        au::Button b{au::ButtonProps().set_label(std::string(policy_label(p)) + " preview")};
         b.on_click = [&app, preview_id, preview_info, note, &preview_policy, p]() -> void {
             open_preview(app, p, preview_id, preview_info, note, preview_policy);
         };
@@ -297,7 +297,7 @@ auto open_preview(au::Application &app, au::DecorationPolicy p, const std::share
     kids.emplace_back(au::Text{au::TextProps{.content = *preview_info}});
     kids.emplace_back(gap(8));
 
-    au::Button quit_btn{au::ButtonProps{.label = "Quit"}};
+    au::Button quit_btn{au::ButtonProps().set_label("Quit")};
     quit_btn.on_click = [&app]() -> void { app.quit(); };
     kids.emplace_back(std::move(quit_btn));
 

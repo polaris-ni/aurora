@@ -308,7 +308,7 @@ namespace detail {
 ///         可直接交给 `Dialog` 承载。
 [[nodiscard]] inline auto alert(const std::string &title, const std::string &message, std::function<void()> on_ok = {},
                                 const Theme &theme = Theme::defaults()) -> Node {
-    auto ok_btn = Button(ButtonProps{.label = "OK"});
+    auto ok_btn = Button(ButtonProps().set_label("OK"));
     if (on_ok) {
         ok_btn.set_on_click(std::move(on_ok));
     }
@@ -335,8 +335,8 @@ namespace detail {
 [[nodiscard]] inline auto confirm(const std::string &title, const std::string &message,
                                   const std::function<void(bool)> &on_result = {},
                                   const Theme &theme = Theme::defaults()) -> Node {
-    auto yes_btn = Button(ButtonProps{.label = "Yes"});
-    auto no_btn = Button(ButtonProps{.label = "No"});
+    auto yes_btn = Button(ButtonProps().set_label("Yes"));
+    auto no_btn = Button(ButtonProps().set_label("No"));
     if (on_result) {
         yes_btn.set_on_click([on_result]() -> void { on_result(true); });
         no_btn.set_on_click([on_result]() -> void { on_result(false); });

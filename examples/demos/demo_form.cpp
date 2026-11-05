@@ -23,7 +23,7 @@ auto main() -> int {
     auto form =
         std::make_shared<au::Form>(std::move(fields), []() -> void { AURORA_LOG_INFO("demo", "Submit success!"); });
 
-    au::Button submit{au::ButtonProps{.label = "Submit"}};
+    au::Button submit{au::ButtonProps().set_label("Submit")};
     submit.on_click = [form]() -> void { AURORA_LOG_INFO("demo", form->submit() ? "Pass" : "Validation failed"); };
 
     au::Node root = au::Column{

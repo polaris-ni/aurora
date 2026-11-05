@@ -225,7 +225,7 @@ auto emit(const std::string &text) -> void { AURORA_LOG_RAW("verify", text, "\n"
     // 验收 `sibling_label_name` 兜底（叶子控件标签常为兄弟而非子节点）。
     return aurora::Node{aurora::Column{
         // CJK-LITERAL: cjk-fixture - Han widget texts painted in the live window and asserted via UIA Names
-        aurora::Button{aurora::ButtonProps{.label = aurora::LocalizedString{"确定"}}},
+        aurora::Button{aurora::ButtonProps().set_label(aurora::LocalizedString{"确定"})},
         // CJK-LITERAL: cjk-fixture - Han sibling label resolved into the Checkbox UIA Name
         aurora::Row{aurora::Text{aurora::TextProps{.content = aurora::LocalizedString{"启用自动更新"}}},
                     aurora::Checkbox{CHECKED}},

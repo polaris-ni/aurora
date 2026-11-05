@@ -88,10 +88,10 @@ auto main() -> int {
     // dynamic_cast 徒增 RTTI 依赖且把「构造即已知」的确定性换成运行期查找。
     // NOLINTBEGIN(cppcoreguidelines-pro-type-static-cast-downcast)
     // CJK-LITERAL: cjk-fixture - the CDP driver locates and clicks the mirror button by this Han name
-    au::Node btn_node{au::Button{au::ButtonProps{.label = au::LocalizedString{"确定"}}}};
+    au::Node btn_node{au::Button{au::ButtonProps().set_label(au::LocalizedString{"确定"})}};
     auto *btn = static_cast<au::Button *>(&btn_node.widget());
     // CJK-LITERAL: cjk-fixture - the CDP driver locates the announcement mirror button by this Han name
-    au::Node ann_node{au::Button{au::ButtonProps{.label = au::LocalizedString{"播报"}}}};
+    au::Node ann_node{au::Button{au::ButtonProps().set_label(au::LocalizedString{"播报"})}};
     auto *ann = static_cast<au::Button *>(&ann_node.widget());
     au::Node entry_node{au::TextInput{au::TextInputProps{.value = "abc"}}};
     auto *entry = static_cast<au::TextInput *>(&entry_node.widget());

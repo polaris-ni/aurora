@@ -20,10 +20,10 @@ auto main() -> int {
     // 值构造：只取构造瞬间的快照，之后是常量来源；与上面三行「共享句柄 + 派生」对照。
     const auto frozen = au::LocalizedString{"frozen = " + std::to_string(counter.get())};
 
-    au::Button up{au::ButtonProps{.label = au::LocalizedString{"State +1"}}};
+    au::Button up{au::ButtonProps().set_label(au::LocalizedString{"State +1"})};
     up.on_click = [counter]() -> void { counter.update([](const int &value) -> int { return value + 1; }); };
 
-    au::Button add{au::ButtonProps{.label = au::LocalizedString{"List append"}}};
+    au::Button add{au::ButtonProps().set_label(au::LocalizedString{"List append"})};
     add.on_click = [todos]() -> void {
         todos.update([](std::vector<std::string> next) -> std::vector<std::string> {
             next.emplace_back("gamma");

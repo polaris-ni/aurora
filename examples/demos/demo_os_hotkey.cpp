@@ -17,7 +17,7 @@ namespace {
 
 /// @brief 生成一个点击即执行 fn 的按钮节点（免写 Node{} 包裹）。
 auto action_button(const char *label, std::function<void()> fn) -> au::Node {
-    au::Button button{au::ButtonProps{.label = label}};
+    au::Button button{au::ButtonProps().set_label(label)};
     button.on_click = std::move(fn);
     return au::Node{std::move(button)};
 }

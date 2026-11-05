@@ -211,28 +211,28 @@ auto Button::paint_background(Painter &p, const Rect &bounds, Color bg, float ra
 
 auto Button::baseline_distance(const BuildContext & /*ctx*/) const -> std::optional<float> {
     // 与 paint_label 同源：标签在内容盒内垂直居中（ty = top + (h - th) / 2），
-    // 故基线 = 居中偏移 + 字体 ascent。字号兜底与 th 的口径均取自 paint_label。
-    const float fs = font.size_pt > 0.0F ? font.size_pt : 14.0F;
-    const Font f{.size_pt = fs};
+    // 故基线 = 居中偏移 + 字体 ascent。有效字体（含字号兜底）与 th 的口径均取自 paint_label。
+    const Font f = effective_font();
     const float th = render::FontEngine::measure_height(f);
     return ((size().height - th) * 0.5F) + render::FontEngine::measure_ascent(f);
 }
 
 auto Button::paint_border(Painter &p, const Rect &bounds, float radius) -> void {
-    if (border_width <= 0.0F || !border_color.has_value()) {
+    // 画不画看 border_color 行的表态位：未表态即「无边框」（填充按钮），不是「画一枚透明边框」。
+    if (border_width() <= 0.0F || !present(border_color_row())) {
         return;
     }
-    const Color bc = enabled ? *border_color : border_color->with_alpha(128);  // 禁用态边框半透淡化
+    const Color stated_border = border_color();
+    const Color bc = enabled() ? stated_border : stated_border.with_alpha(128);  // 禁用态边框半透淡化
     if (radius > 0.0F) {
-        p.draw_rounded_border(bounds, radius, border_width, bc);
+        p.draw_rounded_border(bounds, radius, border_width(), bc);
     } else {
         p.draw_rect(bounds, bc);
     }
 }
 
 auto Button::paint_label(Painter &p, const Rect &bounds, Color text_color, const std::string &display) -> void {
-    const float fs = font.size_pt > 0.0F ? font.size_pt : 14.0F;
-    const Font f{.size_pt = fs};
+    const Font f = effective_font();
     // 缓存失效：显示串变了（或尚未测过）就重测，避免复用另一 locale 下的旧宽。
     if (cached_display_text_ != display || cached_text_width_ <= 0.0F || cached_text_height_ <= 0.0F) {
         cached_display_text_ = display;
@@ -243,15 +243,15 @@ auto Button::paint_label(Painter &p, const Rect &bounds, Color text_color, const
     const float th = cached_text_height_;
     const float tx = bounds.origin.x + ((bounds.size.width - tw) * 0.5F);
     const float ty = bounds.origin.y + ((bounds.size.height - th) * 0.5F);
-    p.draw_text(Rect{.origin = Point{.x = tx, .y = ty}, .size = Size{.width = tw, .height = th}}, display, font,
+    p.draw_text(Rect{.origin = Point{.x = tx, .y = ty}, .size = Size{.width = tw, .height = th}}, display, f,
                 text_color);
 }
 
 auto Button::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void {
     // 绘制分阶段（继承扩展点）：背景 → 边框 → 文字；状态色由 resolve_* 钩子解析
-    // （未显式设色时经 ctx 取主题角色）。圆角同理：本帧解算一次（显式值优先，未设取主题
+    // （未显式设色时经 ctx 取主题角色）。圆角同理：本帧解算一次（表态值优先，未表态取主题
     // shapes.small），同一份值同时喂背景与边框两阶段，避免同帧换档时两阶段取到不同半径。
-    const float radius = resolve_corner_radius(ctx);
+    const float radius = corner_radius(ctx);
     paint_background(p, bounds, resolve_background(ctx), radius);
     paint_border(p, bounds, radius);
     // 本帧只解析一次：量宽与落笔共用 display 这一份副本。

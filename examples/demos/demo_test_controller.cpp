@@ -14,7 +14,7 @@
 namespace {
 
 auto run() -> int {
-    auto btn = std::make_shared<au::Button>(au::ButtonProps{.label = au::LocalizedString{"Tap me"}});
+    auto btn = std::make_shared<au::Button>(au::ButtonProps().set_label(au::LocalizedString{"Tap me"}));
     auto counter = std::make_shared<au::State<int>>(0);
     auto count_text = std::make_shared<au::State<au::LocalizedString>>(au::LocalizedString{"clicks = 0"});
 

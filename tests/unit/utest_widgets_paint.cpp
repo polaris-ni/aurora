@@ -120,7 +120,7 @@ AURORA_TEST_CASE(button_paint_border_branches) {
     round.set_label("X");
     round.set_corner_radius(8.0F);
     round.set_enabled(false);
-    round.set_border(Color{10, 20, 30, 255}, 2.0F);
+    round.set_border_color(Color{10, 20, 30, 255}).set_border_width(2.0F);
     round.paint(p, box, ctx);  // 222(with_alpha) + 223-224
 
     // 直角 + 禁用：走 draw_rect 兜底。
@@ -128,7 +128,7 @@ AURORA_TEST_CASE(button_paint_border_branches) {
     square.set_label("Y");
     square.set_corner_radius(0.0F);
     square.set_enabled(false);
-    square.set_border(Color{10, 20, 30, 255}, 2.0F);
+    square.set_border_color(Color{10, 20, 30, 255}).set_border_width(2.0F);
     square.paint(p, box, ctx);  // 222 + 226
 
     // 启用态：边框不淡化。
@@ -136,7 +136,7 @@ AURORA_TEST_CASE(button_paint_border_branches) {
     enabled.set_label("Z");
     enabled.set_corner_radius(8.0F);
     enabled.set_enabled(true);
-    enabled.set_border(Color{10, 20, 30, 255}, 2.0F);
+    enabled.set_border_color(Color{10, 20, 30, 255}).set_border_width(2.0F);
     enabled.paint(p, box, ctx);  // 222(无 with_alpha) + 223-224
 }
 

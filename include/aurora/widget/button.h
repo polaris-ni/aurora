@@ -3,128 +3,495 @@
 #include <algorithm>
 #include <optional>
 #include <string>
+#include <utility>
 
 #include "aurora/core/color.h"
 #include "aurora/core/font.h"
 #include "aurora/core/types.h"
-#include "aurora/environment/build_context.h"  // resolved_label 需完整类型以调 ctx.environment<Locale>()
+#include "aurora/environment/build_context.h"  // 带上下文的读件需完整类型以解主题作用域
 #include "aurora/i18n/localized_string.h"
 #include "aurora/i18n/message_catalog.h"
 #include "aurora/render/font_engine.h"
 #include "aurora/state/read_only_state.h"
-#include "aurora/theming/theme_scope.h"  // inherit_theme：未显式设色时取主题角色
+#include "aurora/theming/color_roles.h"  // 活令牌回落点：roles.primary / roles.on_primary
+#include "aurora/theming/shape_scale.h"  // 活令牌回落点：shapes.small
+#include "aurora/theming/spacing_scale.h"  // 派生回落点读 spacing.large / spacing.small
+#include "aurora/theming/theme_scope.h"  // inherit_theme
+#include "aurora/widget/props.h"
 #include "aurora/widget/widget.h"
 
 namespace aurora {
 
-/// @brief Button 属性（聚合）。未显式设置的 optional 颜色按状态自动派生（hover/pressed
-/// 由背景色调暗得到，禁用态用统一灰化）；背景色 / 文字色未显式设置时跟随主题
-/// （`roles.primary` / `roles.on_primary`），与 Checkbox 「缺省跟随主题」语义一致。
-/// 圆角与内边距同为 optional：**未显式设置时跟随主题的形状 / 间距令牌**（`shapes.small` 与
-/// `spacing.large` / `spacing.small`），切风格档即随标定档变化；显式设值（含 `ButtonProps{}`
-/// 聚合里给出数值）优先，两态语义与颜色字段一致。
-struct ButtonProps {
-    ReadOnlyState<LocalizedString> label;  ///< 按钮文字来源（只读；常量或 `State` 隐式接入）
-    ReadOnlyState<std::optional<Color>> color;  ///< 背景色来源；空 = 跟随主题 primary（ThemeScope 换肤即生效）
-    std::optional<Color> on_color;  ///< 文字色；空 = 跟随主题 on_primary
-    Font font = Font{};  ///< 字体
-    std::optional<float> corner_radius;  ///< 圆角半径（dp）；空 = 跟随主题 `shapes.small`，>0 时背景与圆角裁剪
-    std::optional<EdgeInsets>
-        padding;  ///< 文字与背景之间的内边距；空 = 跟随主题（水平 `spacing.large`、垂直 `spacing.small`）
-    bool enabled = true;  ///< 是否可点击（禁用态降级绘制并忽略点击）
-    /// @brief 状态/样式扩展（对标 Flutter ButtonStyle / Qt QPushButton）：以下悬停/按下/边框/
-    ///        禁用/最小尺寸字段均有默认派生值，未显式设置时按背景与状态计算。
-    std::optional<Color> hover_color;  ///< 悬停背景色；缺省 = 背景色 ×0.92 调暗
-    std::optional<Color> pressed_color;  ///< 按下背景色；缺省 = 背景色 ×0.80 调暗
-    std::optional<Color> border_color;  ///< 边框色；缺省 = 无边框（填充按钮）；搭配 border_width 可做描边按钮
-    float border_width = 0.0F;  ///< 边框线宽（dp）；0 = 不描边
-    std::optional<Color> disabled_color;  ///< 禁用态背景色；缺省 = {200,200,200}
-    std::optional<Color> disabled_text_color;  ///< 禁用态文字色；缺省 = {130,130,130}
-    float min_width = 0.0F;  ///< 最小宽度（dp）；文字+内边距不足时擑到此宽
-    float min_height = 0.0F;  ///< 最小高度（dp）
+/// @brief Button 的属性权威表：一行一字段，键名、私有字段、脏档位、约束与回落点只在行里声明一次。
+///
+/// 读件、写件、序列化、订阅采集与 schema 描述全部由这张表派生，因此本类不再有可直读的公有字段，
+/// 也不再有「字段名 / setter 名 / JSON 键名 / 描述符名」四份需要同步的拼写。三态语义与迁移前一致：
+/// - **必填行**（`label`）：字段本身就是生效值，不可撤表态；
+/// - **可空行**（其余）：未表态时取该行回落点，表态后不再跟随；撤表态走公共面上唯一的 `clear(row)`；
+/// - **来源行**（`label` / `color`）：另有一只同名写件收 `ReadOnlyState`，即响应式换源。
+///
+/// 回落点三档在本表里同时在场：
+/// - 活令牌档（`color` / `on_color` / `corner_radius`）：随作用域换肤而变，读件带 `BuildContext`；
+/// - 常量档（`font_size` / `enabled` / `border_*` / `disabled_*` / `min_*`）：全库唯一基线，读件无参；
+/// - 派生档（`padding` / `hover_color` / `pressed_color`）：回落点读同族他行或主题间距档再加工，
+///   读件带 `BuildContext`，schema 里的默认值只能是以 `.shows()` 给出的显示串。
+///
+/// `padding` 落派生档而非活令牌档：四边结构与单一标量档不同型（`SpacingScale` 的档位说明同口径），
+/// 故未表态时按「水平 `spacing.large`、垂直 `spacing.small`」现场拼装——与令牌层落地前的字面量
+/// 12/6/12/6 逐值相同，切风格档只换档、不换拼装规则。
+///
+/// @note Thread: main-thread only
+/// @note Side-effects: 写入经宿主链接位标脏并重建订阅；未挂载时是纯 DTO
+class ButtonProps : public AbstractProps<ButtonProps> {
+  public:
+    // ---- 权威表：参数顺序即 schema 顺序 ----
+
+    /// @brief 必填来源件：按钮文字。变更同时影响度量与绘制 ⇒ 布局 + 绘制两档都打。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto label_row() {
+        return prop_row<&ButtonProps::label_>("label").layout().paint().required().note("Button text");
+    }
+
+    /// @brief 可空来源件：背景色。未表态时取主题 `roles.primary`，换肤即随动。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto color_row() {
+        return prop_row<&ButtonProps::color_>("color").paint().fallback<&ColorRoles::primary>().note(
+            "Background color (follows theme primary when unset)");
+    }
+
+    /// @brief 可空值件：文字色。未表态时取主题 `roles.on_primary`。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto on_color_row() {
+        return prop_row<&ButtonProps::on_color_>("on_color")
+            .paint()
+            .fallback<&ColorRoles::on_primary>()
+            .note("Text color (follows theme on_primary when unset)");
+    }
+
+    /// @brief 可空值件：字号（pt）。参与度量 ⇒ 布局档；下界 0。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto font_size_row() {
+        return prop_row<&ButtonProps::font_size_>("font_size")
+            .layout()
+            .paint()
+            .bounds("0")
+            .fallback(&ButtonProps::font_size_default)
+            .note("Font size (pt)");
+    }
+
+    /// @brief 可空值件：圆角半径（dp）。未表态时取主题 `shapes.small`；下界 0。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto corner_radius_row() {
+        return prop_row<&ButtonProps::corner_radius_>("corner_radius")
+            .paint()
+            .bounds("0")
+            .fallback<&ShapeScale::small>()
+            .note("Corner radius (dp; follows theme shapes.small when unset)");
+    }
+
+    /// @brief 可空值件：内边距。派生档 ⇒ schema 只能给出显示串（没有实例求不出值）。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto padding_row() {
+        return prop_row<&ButtonProps::padding_>("padding")
+            .layout()
+            .paint()
+            .fallback(&ButtonProps::padding_default)
+            .shows("\"theme.spacing(large/small)\"")
+            .note("Padding (follows theme spacing when unset)");
+    }
+
+    /// @brief 可空值件：是否可点击。禁用态只降级绘制，不改度量。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto enabled_row() {
+        return prop_row<&ButtonProps::enabled_>("enabled")
+            .paint()
+            .fallback(&ButtonProps::enabled_default)
+            .note("Clickable");
+    }
+
+    /// @brief 可空值件：悬停背景色。派生档由当前背景调暗得到 ⇒ 默认值只能是显示串。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto hover_color_row() {
+        return prop_row<&ButtonProps::hover_color_>("hover_color")
+            .paint()
+            .fallback(&ButtonProps::hover_color_default)
+            .shows("auto")
+            .note("Hover background color (defaults to a darkened background)");
+    }
+
+    /// @brief 可空值件：按下背景色。派生档同上口径。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto pressed_color_row() {
+        return prop_row<&ButtonProps::pressed_color_>("pressed_color")
+            .paint()
+            .fallback(&ButtonProps::pressed_color_default)
+            .shows("auto")
+            .note("Pressed background color (defaults to a darkened background)");
+    }
+
+    /// @brief 可空值件：边框色。缺省「无边框」是语义事实，故给显示串而非透明色。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto border_color_row() {
+        return prop_row<&ButtonProps::border_color_>("border_color")
+            .paint()
+            .fallback(&ButtonProps::border_color_default)
+            .shows("none")
+            .requires_prop("border_width")
+            .note("Border color (no border by default)");
+    }
+
+    /// @brief 可空值件：边框线宽（dp）；0 即不描边。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto border_width_row() {
+        return prop_row<&ButtonProps::border_width_>("border_width")
+            .paint()
+            .bounds("0")
+            .fallback(&ButtonProps::border_width_default)
+            .note("Border width (dp); 0 = no border");
+    }
+
+    /// @brief 可空值件：禁用态背景色。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto disabled_color_row() {
+        return prop_row<&ButtonProps::disabled_color_>("disabled_color")
+            .paint()
+            .fallback(&ButtonProps::disabled_color_default)
+            .note("Disabled background color");
+    }
+
+    /// @brief 可空值件：禁用态文字色。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto disabled_text_color_row() {
+        return prop_row<&ButtonProps::disabled_text_color_>("disabled_text_color")
+            .paint()
+            .fallback(&ButtonProps::disabled_text_color_default)
+            .note("Disabled text color");
+    }
+
+    /// @brief 可空值件：最小宽度（dp）；只参与度量。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto min_width_row() {
+        return prop_row<&ButtonProps::min_width_>("min_width")
+            .layout()
+            .bounds("0")
+            .fallback(&ButtonProps::min_width_default)
+            .note("Min width (dp)");
+    }
+
+    /// @brief 可空值件：最小高度（dp）；只参与度量。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto min_height_row() {
+        return prop_row<&ButtonProps::min_height_>("min_height")
+            .layout()
+            .bounds("0")
+            .fallback(&ButtonProps::min_height_default)
+            .note("Min height (dp)");
+    }
+
+    /// @brief 权威表本体：本控件全部属性行的元组。
+    /// @return 按声明顺序排列的行元组（发射面与序列化面都遍历它）。
+    [[nodiscard]] static constexpr auto rows() {
+        return make_prop_rows(label_row(), color_row(), on_color_row(), font_size_row(), corner_radius_row(),
+                              padding_row(), enabled_row(), hover_color_row(), pressed_color_row(), border_color_row(),
+                              border_width_row(), disabled_color_row(), disabled_text_color_row(), min_width_row(),
+                              min_height_row());
+    }
+
+    // ---- 读面：每行恰一件，形态由该行回落点决定 ----
+
+    /// @brief 当前标签的生效值（必填来源件：无参读件）。
+    /// @return 标签的本地化值（显示串仍须经 `MessageCatalog` 解析）。
+    [[nodiscard]] auto label() const -> LocalizedString { return get(label_row()); }
+
+    /// @brief 当前作用域下生效的背景色。
+    /// @param ctx 构建上下文：未表态时据此解主题 `roles.primary`。
+    /// @return 生效背景色。
+    [[nodiscard]] auto color(const BuildContext &ctx) const -> Color { return resolve(color_row(), ctx); }
+
+    /// @brief 当前作用域下生效的文字色。
+    /// @param ctx 构建上下文：未表态时据此解主题 `roles.on_primary`。
+    /// @return 生效文字色。
+    [[nodiscard]] auto on_color(const BuildContext &ctx) const -> Color { return resolve(on_color_row(), ctx); }
+
+    /// @brief 当前生效字号（pt）：常量档回落点不随作用域变 ⇒ 无参读件。
+    /// @return 字号（pt）。
+    [[nodiscard]] auto font_size() const -> float { return stated(font_size_row()); }
+
+    /// @brief 当前作用域下生效的圆角半径（dp）。
+    /// @param ctx 构建上下文：未表态时据此解主题 `shapes.small`。
+    /// @return 生效圆角半径。
+    [[nodiscard]] auto corner_radius(const BuildContext &ctx) const -> float {
+        return resolve(corner_radius_row(), ctx);
+    }
+
+    /// @brief 当前作用域下生效的四边内边距。
+    /// @param ctx 构建上下文：未表态时按主题间距档现场拼装（见 `padding_default`）。
+    /// @return 生效内边距。
+    [[nodiscard]] auto padding(const BuildContext &ctx) const -> EdgeInsets { return resolve(padding_row(), ctx); }
+
+    /// @brief 当前是否可点击。
+    /// @return 生效的启用位。
+    [[nodiscard]] auto enabled() const -> bool { return stated(enabled_row()); }
+
+    /// @brief 当前作用域下生效的悬停背景色（未表态时由生效背景调暗）。
+    /// @param ctx 构建上下文。
+    /// @return 生效悬停色。
+    [[nodiscard]] auto hover_color(const BuildContext &ctx) const -> Color { return resolve(hover_color_row(), ctx); }
+
+    /// @brief 当前作用域下生效的按下背景色（未表态时由生效背景调暗得更深）。
+    /// @param ctx 构建上下文。
+    /// @return 生效按下色。
+    [[nodiscard]] auto pressed_color(const BuildContext &ctx) const -> Color {
+        return resolve(pressed_color_row(), ctx);
+    }
+
+    /// @brief 当前生效的边框色（未表态时取「无边框」回落基线；画不画由表态位决定）。
+    /// @return 生效边框色。
+    [[nodiscard]] auto border_color() const -> Color { return stated(border_color_row()); }
+
+    /// @brief 当前生效的边框线宽（dp）。
+    /// @return 生效线宽；0 即不描边。
+    [[nodiscard]] auto border_width() const -> float { return stated(border_width_row()); }
+
+    /// @brief 当前生效的禁用态背景色。
+    /// @return 生效禁用背景色。
+    [[nodiscard]] auto disabled_color() const -> Color { return stated(disabled_color_row()); }
+
+    /// @brief 当前生效的禁用态文字色。
+    /// @return 生效禁用文字色。
+    [[nodiscard]] auto disabled_text_color() const -> Color { return stated(disabled_text_color_row()); }
+
+    /// @brief 当前生效的最小宽度（dp）。
+    /// @return 生效最小宽度。
+    [[nodiscard]] auto min_width() const -> float { return stated(min_width_row()); }
+
+    /// @brief 当前生效的最小高度（dp）。
+    /// @return 生效最小高度。
+    [[nodiscard]] auto min_height() const -> float { return stated(min_height_row()); }
+
+    // ---- 写面：同名重载区分「装值」与「换源」，档位仍由行决定 ----
+
+    /// @brief 装入标签常量值（换入自有常量源，旧源退订）。
+    /// @param value 新标签值。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_label(const LocalizedString &value) -> ButtonProps & { return assign(label_row(), value); }
+
+    /// @brief 装入标签常量值（`std::string` 直写通道）。
+    /// @param value 新标签文本。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_label(const std::string &value) -> ButtonProps & { return set_label(LocalizedString{value}); }
+
+    /// @brief 装入标签常量值（C 字符串直写通道：消除字面量在值件与来源件之间的重载歧义）。
+    /// @param value 新标签文本。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_label(const char *value) -> ButtonProps & { return set_label(LocalizedString{value}); }
+
+    /// @brief 换绑标签来源（响应式换源：订阅重建，外部 `State` 继续驱动本属性）。
+    /// @param source 新的只读句柄来源。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_label(ReadOnlyState<LocalizedString> source) -> ButtonProps & {
+        return rebind(label_row(), std::move(source));
+    }
+
+    /// @brief 装入背景色常量值（表态即脱离主题 `roles.primary`）。
+    /// @param value 新背景色。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_color(Color value) -> ButtonProps & { return assign(color_row(), value); }
+
+    /// @brief 换绑背景色来源（响应式换源）。
+    /// @param source 新的只读句柄来源。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_color(ReadOnlyState<Color> source) -> ButtonProps & { return rebind(color_row(), std::move(source)); }
+
+    /// @brief 装入文字色（表态即脱离主题 `roles.on_primary`）。
+    /// @param value 新文字色。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_on_color(Color value) -> ButtonProps & { return assign(on_color_row(), value); }
+
+    /// @brief 装入字号（pt）。
+    /// @param value 新字号。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_font_size(float value) -> ButtonProps & { return assign(font_size_row(), value); }
+
+    /// @brief 装入圆角半径（dp）；表态即脱离主题形状档。
+    /// @param value 新半径；0 是「显式要直角」，与「未表态」不是同一件事。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_corner_radius(float value) -> ButtonProps & { return assign(corner_radius_row(), value); }
+
+    /// @brief 装入四边内边距；表态即脱离主题间距档。
+    /// @param value 新内边距。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_padding(EdgeInsets value) -> ButtonProps & { return assign(padding_row(), value); }
+
+    /// @brief 装入启用位。
+    /// @param value true 可点击；禁用态降级绘制并忽略点击。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_enabled(bool value) -> ButtonProps & { return assign(enabled_row(), value); }
+
+    /// @brief 装入悬停背景色；不调用则由生效背景自动调暗。
+    /// @param value 显式悬停色。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_hover_color(Color value) -> ButtonProps & { return assign(hover_color_row(), value); }
+
+    /// @brief 装入按下背景色；不调用则由生效背景自动调暗。
+    /// @param value 显式按下色。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_pressed_color(Color value) -> ButtonProps & { return assign(pressed_color_row(), value); }
+
+    /// @brief 装入边框色；画不画仍看本行表态位（见 `Button::paint_border`）。
+    /// @param value 边框色。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_border_color(Color value) -> ButtonProps & { return assign(border_color_row(), value); }
+
+    /// @brief 装入边框线宽（dp）；0 即不描边。
+    /// @param value 线宽。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_border_width(float value) -> ButtonProps & { return assign(border_width_row(), value); }
+
+    /// @brief 装入禁用态背景色。
+    /// @param value 禁用背景色。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_disabled_color(Color value) -> ButtonProps & { return assign(disabled_color_row(), value); }
+
+    /// @brief 装入禁用态文字色。
+    /// @param value 禁用文字色。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_disabled_text_color(Color value) -> ButtonProps & { return assign(disabled_text_color_row(), value); }
+
+    /// @brief 装入最小宽度（dp）。
+    /// @param value 最小宽度。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_min_width(float value) -> ButtonProps & { return assign(min_width_row(), value); }
+
+    /// @brief 装入最小高度（dp）。
+    /// @param value 最小高度。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_min_height(float value) -> ButtonProps & { return assign(min_height_row(), value); }
+
+    // ---- 回落点提供者：常量档与派生档的唯一基线（同族互读只经读件） ----
+
+    /// @brief 字号回落基线（pt）。
+    /// @return 14.0F。
+    [[nodiscard]] static auto font_size_default() -> float { return 14.0F; }
+
+    /// @brief 启用位回落基线。
+    /// @return true（默认可点击）。
+    [[nodiscard]] static auto enabled_default() -> bool { return true; }
+
+    /// @brief 边框色回落基线：全透明（填充按钮）。
+    /// @return 透明色。
+    [[nodiscard]] static auto border_color_default() -> Color { return Color{0, 0, 0, 0}; }
+
+    /// @brief 边框线宽回落基线。
+    /// @return 0.0F（不描边）。
+    [[nodiscard]] static auto border_width_default() -> float { return 0.0F; }
+
+    /// @brief 禁用态背景色回落基线。
+    /// @return 浅灰 {200,200,200,255}。
+    [[nodiscard]] static auto disabled_color_default() -> Color { return Color{200, 200, 200, 255}; }
+
+    /// @brief 禁用态文字色回落基线。
+    /// @return 中灰 {130,130,130,255}。
+    [[nodiscard]] static auto disabled_text_color_default() -> Color { return Color{130, 130, 130, 255}; }
+
+    /// @brief 最小宽度回落基线。
+    /// @return 0.0F（不擑宽）。
+    [[nodiscard]] static auto min_width_default() -> float { return 0.0F; }
+
+    /// @brief 最小高度回落基线。
+    /// @return 0.0F（不擑高）。
+    [[nodiscard]] static auto min_height_default() -> float { return 0.0F; }
+
+    /// @brief 内边距回落点（派生档）：按当前作用域的间距档拼装四边。
+    /// @param self 本属性对象（本回落点不读同族他行，形参由派生档签名固定）。
+    /// @param ctx 构建上下文：提供主题作用域。
+    /// @return 水平 `spacing.large`、垂直 `spacing.small` 的四边内边距。
+    [[nodiscard]] static auto padding_default(const ButtonProps &self, const BuildContext &ctx) -> EdgeInsets {
+        (void)self;
+        const auto &s = inherit_theme(ctx).spacing;
+        return EdgeInsets{.left = s.large, .top = s.small, .right = s.large, .bottom = s.small};
+    }
+
+    /// @brief 悬停色回落点（派生档）：读同族 `color` 行的**生效值**再压暗。
+    /// @param self 本属性对象（经它读 `color` 行，故显式设色时悬停色随该色压暗）。
+    /// @param ctx 构建上下文：未表态时 `color` 行本身还要解主题。
+    /// @return 生效背景 ×0.92 的悬停色。
+    [[nodiscard]] static auto hover_color_default(const ButtonProps &self, const BuildContext &ctx) -> Color {
+        return self.color(ctx).shaded(0.92F);
+    }
+
+    /// @brief 按下色回落点（派生档）：读同族 `color` 行的生效值再压暗得更深。
+    /// @param self 本属性对象。
+    /// @param ctx 构建上下文。
+    /// @return 生效背景 ×0.80 的按下色。
+    [[nodiscard]] static auto pressed_color_default(const ButtonProps &self, const BuildContext &ctx) -> Color {
+        return self.color(ctx).shaded(0.80F);
+    }
+
+  private:
+    ReadOnlyState<LocalizedString> label_;  ///< 标签来源（必填 ⇒ 裸句柄）
+    std::optional<ReadOnlyState<Color>> color_;  ///< 背景色来源（可空 ⇒ 未表态即无源可订）
+    std::optional<Color> on_color_;  ///< 文字色表态位
+    std::optional<float> font_size_;  ///< 字号表态位（pt）
+    std::optional<float> corner_radius_;  ///< 圆角表态位（dp）
+    std::optional<EdgeInsets> padding_;  ///< 内边距表态位
+    std::optional<bool> enabled_;  ///< 启用位表态位
+    std::optional<Color> hover_color_;  ///< 悬停色表态位
+    std::optional<Color> pressed_color_;  ///< 按下色表态位
+    std::optional<Color> border_color_;  ///< 边框色表态位
+    std::optional<float> border_width_;  ///< 边框线宽表态位（dp）
+    std::optional<Color> disabled_color_;  ///< 禁用背景色表态位
+    std::optional<Color> disabled_text_color_;  ///< 禁用文字色表态位
+    std::optional<float> min_width_;  ///< 最小宽度表态位（dp）
+    std::optional<float> min_height_;  ///< 最小高度表态位（dp）
+
+    friend class AbstractProps<ButtonProps>;
 };
 
 /// @brief 按钮控件（叶 widget）：填充背景 + 居中文字；点击激活 on_click。
 ///
 /// 视觉（对标 Material Filled/Outlined Button / Fluent Button）：
 /// - 填充态：背景色 + 圆角；悬停/按下自动调暗（或用 hover_color/pressed_color 显式指定）；
-/// - 描边态：设置 border_color + border_width（配合透明背景可做 Outlined 风格）；
+/// - 描边态：`set_border_color()` + `set_border_width()` 同时表态即描边（配合透明背景可做 Outlined）；
 /// - 禁用态：灰化并忽略点击。
 ///
-/// 继承扩展点（protected 虚函数，子类可单独覆盖某个绘制阶段）：
+/// 属性一律经 `ButtonProps` 的读写件访问（本类公有继承它，故 `btn.set_label(...)` 与
+/// `btn.label()` 都直接可用）；继承扩展点为 protected 虚函数：
 /// `resolve_background()` → `paint_background()` → `paint_border()` → `paint_label()`。
 ///
 /// 标签的 i18n 契约：`label` 是 `LocalizedString`，绘制与布局一律经 `resolved_label()` 查
 /// `MessageCatalog`（`Environment` 注入 `Locale` 时按它解析，否则回落缺省档）——不直读
-/// `label.get().text`，否则 `tr()` 构造的键会画成空白。`accessibility_label()` 与绘制同源。
+/// `label().text`，否则 `tr()` 构造的键会画成空白。`accessibility_label()` 与绘制同源。
 /// @note Thread: main-thread only
 /// @note Rebuildable: yes, via from_json
 ///
 class Button : public LeafWidget, public ButtonProps {
   public:
-    /// @brief 默认构造：全部属性取 `ButtonProps` 的聚合默认值——颜色跟随主题（`roles.primary` 底 +
+    /// @brief 默认构造：接线宿主并取全表回落点——颜色跟随主题（`roles.primary` 底 +
     ///        `roles.on_primary` 字），圆角与内边距同样跟随主题（`shapes.small` 与
-    ///        `spacing.large` / `spacing.small`；Material 档下实测为 6 与 12/6）。
-    Button() = default;
-    /// @brief 以一份完整属性聚合构造按钮（属性整体接管，避免逐字段赋值）。
-    /// @param props 按钮属性快照，移动进本实例的 `ButtonProps` 基类子对象
-    explicit Button(ButtonProps props)
-        : ButtonProps(std::move(props)), label_(static_cast<ButtonProps &>(*this).label),
-          color_(static_cast<ButtonProps &>(*this).color) {}
-    /// @brief 以文字构造按钮，其余属性取默认值。
-    /// @param label 按钮文字（存入 `label` 属性）
-    explicit Button(const std::string &label) { set_label(label); }
-    /// @brief 以字符串字面量构造按钮，其余属性取默认值。
-    /// @param label 按钮文字（隐式转为 `std::string` 后存入 `label`）
-    explicit Button(const char *label) { set_label(label); }
+    ///        `spacing.large` / `spacing.small`）。
+    Button() { bind(*this); }
+
+    /// @brief 以一份完整属性对象构造按钮（属性整体接管，避免逐字段赋值）。
+    /// @param props 属性快照；移动进本实例的 `ButtonProps` 基类子对象后接线宿主
+    explicit Button(ButtonProps props) : ButtonProps(std::move(props)) { bind(*this); }
+
+    /// @brief 以文字构造按钮，其余属性取回落点。
+    /// @param text 按钮文字（装入 `label` 行）
+    explicit Button(const std::string &text) : Button() { set_label(text); }
+
+    /// @brief 以字符串字面量构造按钮，其余属性取回落点。
+    /// @param text 按钮文字（装入 `label` 行）
+    explicit Button(const char *text) : Button() { set_label(text); }
 
     /// @brief 点击回调槽位：装配链/用户可替换，`activate()` 触发时同步调用。
+    ///        非属性行——它是回调而非可序列化状态，故留在控件本体。
     /// NOLINTNEXTLINE(*-non-private-member-variables-in-classes)
     std::function<void()> on_click;  ///< 点击回调（同步派发，见 specification/05-event-navigation.md §3）
 
-    /// @brief 运行时可查询的默认属性值（属性默认值的单一事实来源，需求 SPEC.API.SENSIBLE-DEFAULTS.001；经实例
-    /// `btn.defaults()` 调用亦可）。
-    /// @return 一份缺省构造的 `ButtonProps`，与 `ButtonProps{}` 完全一致
-    [[nodiscard]] static auto defaults() -> ButtonProps { return ButtonProps{}; }
-
-    /// @brief 当前标签来源（只读句柄按值返回）。
-    /// @return 已安装的标签来源。
-    [[nodiscard]] auto label() const -> ReadOnlyState<LocalizedString> { return label_; }
-
-    /// @brief 替换标签来源（展示属性换源）：常量由隐式 `ReadOnlyState` 构造接入。
-    /// @param next 新标签来源；挂载后调用会退订旧源、订阅新源并标脏。
-    /// @return 引用 `*this`，便于链式续写
-    auto set_label(ReadOnlyState<LocalizedString> next) -> Button & {
-        label_ = std::move(next);
-        mark_needs_layout();
-        mark_needs_paint();
-        resubscribe_signals();
-        return *this;
-    }
-
-    /// @brief 替换文字为常量文本（链式常量写法，换入自有常量来源）。
-    /// @param s 新按钮文本
-    /// @return 引用 `*this`，便于链式续写
-    auto set_label(const std::string &s) -> Button & { return set_label(ReadOnlyState<LocalizedString>{s}); }
-
-    /// @brief 替换文字为 C 字符串常量（消除 `const char*` 在两个常量重载间的歧义）。
-    /// @param s 新按钮文本；nullptr 语义由 `LocalizedString` 转换处理。
-    /// @return 引用 `*this`，便于链式续写
-    auto set_label(const char *s) -> Button & { return set_label(ReadOnlyState<LocalizedString>{LocalizedString{s}}); }
-
-    /// @brief 当前背景色来源（只读句柄按值返回）。
-    /// @return 已安装的背景色来源。
-    [[nodiscard]] auto background_source() const -> ReadOnlyState<std::optional<Color>> { return color_; }
-
-    /// @brief 替换背景色来源（展示属性换源）。
-    /// @param next 新的背景色来源；空 = 跟随主题 primary。
-    /// @return 引用 `*this`，便于链式续写
-    auto set_background_source(ReadOnlyState<std::optional<Color>> next) -> Button & {
-        color_ = std::move(next);
-        mark_needs_paint();
-        resubscribe_signals();
-        return *this;
-    }
+    /// @brief 运行时可查询的默认属性值（属性表的单一事实来源，需求 SPEC.API.SENSIBLE-DEFAULTS.001）。
+    /// @return 一份缺省构造的 `ButtonProps`：各行未表态，生效值即该行回落点
+    [[nodiscard]] static auto defaults() -> ButtonProps { return {}; }
 
     /// @brief 设置点击回调（链式）。
     /// @param fn 新回调；经 `std::move` 存入 `on_click`，点击时同步派发
@@ -134,100 +501,9 @@ class Button : public LeafWidget, public ButtonProps {
         return *this;
     }
 
-    /// @brief 设置背景色（链式常量写法，换入自有常量来源）。
-    /// @param c 背景色
-    /// @return 引用 `*this` 以继续链式配置
-    auto background(Color c) -> Button & {
-        return set_background_source(ReadOnlyState<std::optional<Color>>{std::optional<Color>{c}});
-    }
-
-    /// @brief 设置文字色（链式）。
-    /// @param c 文字色，写入 `on_color`
-    /// @return 引用 `*this` 以继续链式配置
-    auto text_color(Color c) -> Button & {
-        on_color = c;
-        return *this;
-    }
-
-    /// @brief 设置圆角半径（链式）；设定即脱离主题形状档。
-    /// @param r 圆角半径（dp）；>0 时背景与裁剪按圆角绘制，0 为直角
-    /// @return 引用 `*this` 以继续链式配置
-    /// @note 不调用本 setter 时圆角跟随主题 `shapes.small`（见 `resolve_corner_radius`）；
-    ///       传 0 是「显式要直角」，与「未设置」不是同一件事。
-    auto set_corner_radius(float r) -> Button & {
-        corner_radius = r;
-        return *this;
-    }
-
-    /// @brief 设置内边距（链式）；设定即脱离主题间距档。
-    /// @param e 文字与背景之间的四边内边距
-    /// @return 引用 `*this` 以继续链式配置
-    auto set_padding(const EdgeInsets &e) -> Button & {
-        padding = e;
-        return *this;
-    }
-
-    /// @brief 设置是否启用（链式）；禁用态降级绘制并忽略点击。
-    /// @param v true 可交互；变更后立即 `mark_needs_paint()` 重绘灰化/正常态
-    /// @return 引用 `*this` 以继续链式配置
-    auto set_enabled(bool v) -> Button & {
-        enabled = v;
-        mark_needs_paint();
-        return *this;
-    }
-
-    /// @brief 设置悬停背景色（链式）。不调用则由背景色自动调暗。
-    /// @param c 显式悬停色；`resolve_background` 在 hover 态直接取该值
-    /// @return 引用 `*this` 以继续链式配置
-    auto set_hover_color(Color c) -> Button & {
-        hover_color = c;
-        return *this;
-    }
-
-    /// @brief 设置按下背景色（链式）。不调用则由背景色自动调暗。
-    /// @param c 显式按下色；`resolve_background` 在 pressed 态直接取该值
-    /// @return 引用 `*this` 以继续链式配置
-    auto set_pressed_color(Color c) -> Button & {
-        pressed_color = c;
-        return *this;
-    }
-
-    /// @brief 设置边框（链式）；width<=0 不描边。搭配透明背景可做 Outlined 风格。
-    /// @param c     边框色，写入 `border_color`
-    /// @param width 边框线宽（dp），写入 `border_width`；缺省 1.5
-    /// @return 引用 `*this` 以继续链式配置
-    auto set_border(Color c, float width = 1.5F) -> Button & {
-        border_color = c;
-        border_width = width;
-        return *this;
-    }
-
-    /// @brief 设置禁用态颜色（链式）。不调用则用统一灰化默认值。
-    /// @param background 禁用态背景色（`disabled_color`）
-    /// @param text       禁用态文字色（`disabled_text_color`）
-    /// @return 引用 `*this` 以继续链式配置
-    auto set_disabled_colors(Color background, Color text) -> Button & {
-        disabled_color = background;
-        disabled_text_color = text;
-        return *this;
-    }
-
-    /// @brief 设置最小尺寸（链式）；文字+内边距不足时擑到此尺寸。
-    /// @param w 最小宽度（dp），参与 `on_layout` 的宽度取大
-    /// @param h 最小高度（dp），参与 `on_layout` 的高度取大
-    /// @return 引用 `*this` 以继续链式配置
-    auto set_min_size(float w, float h) -> Button & {
-        min_width = w;
-        min_height = h;
-        return *this;
-    }
-
-    /// @brief 登记需订阅的信号视图：影响外观的两个展示来源。
+    /// @brief 登记需订阅的信号视图：表里来源型行的当前句柄（未表态的行没有源可订）。
     /// @param out 末尾追加已安装的标签与背景色来源（框架据此订阅变更并触发重建）
-    auto collect_signals(StateSink &out) -> void override {
-        out.push(label_);
-        out.push(color_);
-    }
+    auto collect_signals(StateSink &out) -> void override { collect_prop_sources(out); }
 
     /// @brief 类型名：供注册表/日志/序列化按名分派。
     /// @return 静态字符串 `"Button"`
@@ -236,7 +512,7 @@ class Button : public LeafWidget, public ButtonProps {
     /// @brief 首行基线（内容盒顶 → 基线）：与 `paint_label` 同源——标签在内容盒内垂直居中
     ///        （`ty = top + (h - th) / 2`），故基线 = 居中偏移 + 有效字体 ascent。
     /// @param ctx 构建上下文；形参保留自基类钩子签名，本实现未使用
-    /// @return `(size().height - th) / 2 + ascent`：th/ascent 按有效字号（`size_pt`，非正时兜底 14）实测
+    /// @return `(size().height - th) / 2 + ascent`：th/ascent 按有效字号（`font_size()`，非正时兜底 14）实测
     [[nodiscard]] auto baseline_distance(const BuildContext &ctx) const -> std::optional<float> override;
 
     /// @brief 无障碍名称：取按钮文字（经 i18n 表解析后的最终显示串）。
@@ -248,7 +524,7 @@ class Button : public LeafWidget, public ButtonProps {
         if (!cached_display_text_.empty()) {
             return cached_display_text_;
         }
-        return label_.get().resolve(&default_catalog(), Locale{});
+        return label().resolve(&default_catalog(), Locale{});
     }
 
     /// @brief 悬停默认手型光标：按钮悬停 PointingHand；修饰链显式 `cursor(...)` 声明优先。
@@ -256,263 +532,52 @@ class Button : public LeafWidget, public ButtonProps {
     /// @return 恒为 `CursorShape::PointingHand`
     [[nodiscard]] auto cursor_shape() const -> std::optional<CursorShape> override { return CursorShape::PointingHand; }
 
-    /// @brief 运行时自描述（规格附录 B）。
-    /// @return 名为 "Button" 的描述表：属性项与 `ButtonProps` 字段一一对应，事件含 `on_click`，无子节点
+    /// @brief 运行时自描述（规格附录 B）：属性项全部由权威表发射，控件只补自己的事实。
+    /// @return 名为 "Button" 的描述表：`properties` 按 `rows()` 点名顺序，事件含 `on_click`，无子节点
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
-        return WidgetDescriptor{
-            .name = "Button",
-            .properties =
-                {
-                    {.name = "label",
-                     .type = "LocalizedString",
-                     .default_value = "\"\"",
-                     .required = true,
-                     .note = "Button text",
-                     .json_type = "string|$msg"},
-                    {.name = "color",
-                     .type = "Color",
-                     .default_value = "\"theme.primary\"",
-                     .required = false,
-                     .note = "Background color (follows theme primary when unset)",
-                     .json_type = "array"},
-                    {.name = "on_color",
-                     .type = "Color",
-                     .default_value = "\"theme.on_primary\"",
-                     .required = false,
-                     .note = "Text color (follows theme on_primary when unset)",
-                     .json_type = "array"},
-                    {.name = "font_size",
-                     .type = "float",
-                     .default_value = "14.0",
-                     .required = false,
-                     .note = "Font size (pt)",
-                     .json_type = "number",
-                     .enum_values = {},
-                     .min_value = "0"},
-                    {.name = "corner_radius",
-                     .type = "float",
-                     .default_value = "\"theme.shapes.small\"",
-                     .required = false,
-                     .note = "Corner radius (dp; follows theme shapes.small when unset)",
-                     .json_type = "number",
-                     .enum_values = {},
-                     .min_value = "0"},
-                    {.name = "padding",
-                     .type = "EdgeInsets",
-                     .default_value = "\"theme.spacing(large/small)\"",
-                     .required = false,
-                     .note = "Padding (follows theme spacing when unset)",
-                     .json_type = "object"},
-                    {.name = "enabled",
-                     .type = "bool",
-                     .default_value = "true",
-                     .required = false,
-                     .note = "Clickable",
-                     .json_type = "boolean"},
-                    {.name = "hover_color",
-                     .type = "Color",
-                     .default_value = "auto",
-                     .required = false,
-                     .note = "Hover background color (defaults to a darkened background)",
-                     .json_type = "array"},
-                    {.name = "pressed_color",
-                     .type = "Color",
-                     .default_value = "auto",
-                     .required = false,
-                     .note = "Pressed background color (defaults to a darkened background)",
-                     .json_type = "array"},
-                    {.name = "border_color",
-                     .type = "Color",
-                     .default_value = "none",
-                     .required = false,
-                     .note = "Border color (no border by default)",
-                     .json_type = "array",
-                     .enum_values = {},
-                     .min_value = "",
-                     .max_value = "",
-                     .pattern = "",
-                     .constraint = "",
-                     .requires_props = {"border_width"}},
-                    {.name = "border_width",
-                     .type = "float",
-                     .default_value = "0.0",
-                     .required = false,
-                     .note = "Border width (dp); 0 = no border",
-                     .json_type = "number",
-                     .enum_values = {},
-                     .min_value = "0"},
-                    {.name = "disabled_color",
-                     .type = "Color",
-                     .default_value = "{200,200,200}",
-                     .required = false,
-                     .note = "Disabled background color",
-                     .json_type = "array"},
-                    {.name = "disabled_text_color",
-                     .type = "Color",
-                     .default_value = "{130,130,130}",
-                     .required = false,
-                     .note = "Disabled text color",
-                     .json_type = "array"},
-                    {.name = "min_width",
-                     .type = "float",
-                     .default_value = "0.0",
-                     .required = false,
-                     .note = "Min width (dp)",
-                     .json_type = "number",
-                     .enum_values = {},
-                     .min_value = "0"},
-                    {.name = "min_height",
-                     .type = "float",
-                     .default_value = "0.0",
-                     .required = false,
-                     .note = "Min height (dp)",
-                     .json_type = "number",
-                     .enum_values = {},
-                     .min_value = "0"},
-                    {.name = "width",
-                     .type = "Length",
-                     .default_value = "auto",
-                     .required = false,
-                     .note = "",
-                     .json_type = "array"},
-                    {.name = "height",
-                     .type = "Length",
-                     .default_value = "auto",
-                     .required = false,
-                     .note = "",
-                     .json_type = "array"},
-                    {.name = "show",
-                     .type = "bool",
-                     .default_value = "true",
-                     .required = false,
-                     .note = "",
-                     .json_type = "boolean"},
-                },
-            .events = {"on_click"},
-            .children_policy = "none",
-            .examples = {"au::Button(au::ButtonProps{ .label = \"OK\" })"},
-        };
+        auto descriptor = props_descriptor("Button");
+        descriptor.events = {"on_click"};
+        descriptor.children_policy = "none";
+        descriptor.examples = {"au::Button(au::ButtonProps().set_label(\"OK\"))"};
+        return descriptor;
     }
+
     /// @brief 实例级自描述：Button 无实例差异描述，直接转发 `describe_static()`。
     /// @return 与 `describe_static()` 相同的静态描述表
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
-    /// @brief 序列化 Button 自有属性到 `props`（optional 颜色仅在显式设置时输出，保留派生语义）。
-    /// @param props 输出目标 JSON 对象，写入 label/color/on_color/font_size 等本类键
+    /// @brief 序列化自有属性到 `props`：必填行恒写，其余行只在表态时写（未表态不写键，回落语义不外泄）。
+    /// @param props 输出目标 JSON 对象；先由基类写 width/height/show，再叠本表行
     auto serialize_props(Json &props) const -> void override {
-        Widget::serialize_props(props);  // 先由基类写入 width/height/show 等通用属性
-        props.set("label", localizable_to_json(label_.get()));
-        // 背景色/文字色仅在显式设置时输出：保留「跟随主题」语义（与 Checkbox 同口径）
-        if (const auto &c = color_.get(); c.has_value()) {
-            props.set("color", color_to_json(*c));
-        }
-        if (on_color.has_value()) {
-            props.set("on_color", color_to_json(*on_color));
-        }
-        props.set("font_size", font.size_pt);
-        // 圆角 / 内边距同颜色口径：只在显式设置时输出，键缺失即「跟随主题档」（见 resolve_*）。
-        if (corner_radius.has_value()) {
-            props.set("corner_radius", *corner_radius);
-        }
-        if (padding.has_value()) {
-            props.set("padding", edge_insets_to_json(*padding));
-        }
-        props.set("enabled", Json{enabled});
-        // optional 颜色未显式设置不输出：保留「自动派生」语义
-        if (hover_color.has_value()) {
-            props.set("hover_color", color_to_json(*hover_color));
-        }
-        if (pressed_color.has_value()) {
-            props.set("pressed_color", color_to_json(*pressed_color));
-        }
-        if (border_color.has_value()) {
-            props.set("border_color", color_to_json(*border_color));
-        }
-        if (border_width > 0.0F) {
-            props.set("border_width", border_width);
-        }
-        if (disabled_color.has_value()) {
-            props.set("disabled_color", color_to_json(*disabled_color));
-        }
-        if (disabled_text_color.has_value()) {
-            props.set("disabled_text_color", color_to_json(*disabled_text_color));
-        }
-        if (min_width > 0.0F) {
-            props.set("min_width", min_width);
-        }
-        if (min_height > 0.0F) {
-            props.set("min_height", min_height);
-        }
+        Widget::serialize_props(props);
+        props_serialize(props);
     }
 
     /// @brief 从 JSON 重建自有属性（与 `serialize_props` 对偶；键缺失则保留现值）。
-    /// @param props 序列化属性对象，逐项 `contains` 检查后写回对应属性
+    /// @note 来源行写进**当前源**而不换绑：外部 `State` 的绑定与订阅数在一次回写后保持不变。
+    /// @note 非法值一律不写入：可空行撤表态（生效值退回该行回落点）并经 Diagnostics 上报。
+    /// @param props 序列化属性对象，按权威表逐行取键
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
-        if (props.contains("label")) {
-            set_label(localizable_from_json(*props.at("label")));
-        }
-        if (props.contains("color")) {
-            set_background_source(json_to_color(*props.at("color")));
-        }
-        if (props.contains("on_color")) {
-            on_color = json_to_color(*props.at("on_color"));
-        }
-        if (props.contains("font_size")) {
-            font.size_pt = props.at("font_size")->as_or<float>(0.0F);
-        }
-        // 键缺失时保持「未显式设置」：不填 Material 字面量，否则换风格档就不再跟随主题。
-        if (props.contains("corner_radius")) {
-            corner_radius = props.at("corner_radius")->as_or<float>(0.0F);
-        }
-        if (props.contains("padding")) {
-            padding = json_to_edge_insets(*props.at("padding"));
-        }
-        if (props.contains("enabled")) {
-            enabled = props.at("enabled")->as_or<bool>(false);
-        }
-        if (props.contains("hover_color")) {
-            hover_color = json_to_color(*props.at("hover_color"));
-        }
-        if (props.contains("pressed_color")) {
-            pressed_color = json_to_color(*props.at("pressed_color"));
-        }
-        if (props.contains("border_color")) {
-            border_color = json_to_color(*props.at("border_color"));
-        }
-        if (props.contains("border_width")) {
-            border_width = props.at("border_width")->as_or<float>(0.0F);
-        }
-        if (props.contains("disabled_color")) {
-            disabled_color = json_to_color(*props.at("disabled_color"));
-        }
-        if (props.contains("disabled_text_color")) {
-            disabled_text_color = json_to_color(*props.at("disabled_text_color"));
-        }
-        if (props.contains("min_width")) {
-            min_width = props.at("min_width")->as_or<float>(0.0F);
-        }
-        if (props.contains("min_height")) {
-            min_height = props.at("min_height")->as_or<float>(0.0F);
-        }
+        props_deserialize(props);
     }
 
-    /// @brief 触发点击：仅当 `enabled` 且已设置 `on_click` 时同步调用回调。
+    /// @brief 触发点击：仅当启用且已设置 `on_click` 时同步调用回调。
     auto activate() -> void override {
-        if (enabled && on_click) {
+        if (enabled() && on_click) {
             on_click();
         }
     }
 
     /// @brief Button 自带 on_click，作为点击目标消费事件（即便无 Clickable 修饰）。
-    /// @return `enabled` 且已设置 `on_click` 时为 true（禁用或无回调时不消费点击）
-    [[nodiscard]] auto wants_click() const -> bool override { return enabled && on_click != nullptr; }
+    /// @return 启用且已设置 `on_click` 时为 true（禁用或无回调时不消费点击）
+    [[nodiscard]] auto wants_click() const -> bool override { return enabled() && on_click != nullptr; }
 
     /// @brief 悬停反馈：背景色随悬停态变化（自动调暗或 hover_color）。
     /// @param entered true=指针进入，false=离开；启用态下据此标记重绘
     auto on_hover_change(bool entered) -> void override {
         Widget::on_hover_change(entered);  // 基类维护 hovered 状态并派发无障碍悬停事件
-        if (enabled) {
+        if (enabled()) {
             mark_needs_paint();
         }
     }
@@ -520,7 +585,7 @@ class Button : public LeafWidget, public ButtonProps {
     /// @brief 按下/松开时重绘以呈现 pressed 态（基类维护 pressed_ 与点击识别）。
     /// @param e 鼠标事件；禁用态直接标记 handled 吞掉点击
     auto on_pointer_event(MouseEvent &e) -> void override {
-        if (!enabled) {
+        if (!enabled()) {
             e.is_handled = true;  // 禁用态吞掉点击（不冒泡触发父级点击）
             return;
         }
@@ -531,87 +596,69 @@ class Button : public LeafWidget, public ButtonProps {
     }
 
   protected:
+    /// @brief 度量：文字实测 + 四边内边距，再与最小尺寸取大。
+    /// @param c 父级约束
+    /// @param ctx 构建上下文：内边距与标签解析都取当前作用域
+    /// @return 约束后的按钮尺寸
     auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
-        Font f = font;
-        if (f.size_pt <= 0.0F) {
-            f.size_pt = 14.0F;
-        }
-        // 显示串唯一来源：与绘制共用 resolved_label()，不再直读 label.get().text。
+        const Font f = effective_font();
+        // 显示串唯一来源：与绘制共用 resolved_label()，不直读 label().text。
         const std::string display = resolved_label(ctx);
-        // 内边距与绘制同源：显式设过用显式值，否则随主题间距档（见 resolve_padding）。
-        const EdgeInsets pad = resolve_padding(ctx);
+        // 内边距与绘制同源：表态过用表态值，未表态随主题间距档（见 padding_default）。
+        const EdgeInsets pad = padding(ctx);
         cached_display_text_ = display;
         cached_text_width_ = render::FontEngine::measure_width(display, f);
         cached_text_height_ = render::FontEngine::measure_height(f);
-        const float w = std::max(cached_text_width_ + pad.left + pad.right, min_width);
-        const float h = std::max(cached_text_height_ + pad.top + pad.bottom, min_height);
+        const float w = std::max(cached_text_width_ + pad.left + pad.right, min_width());
+        const float h = std::max(cached_text_height_ + pad.top + pad.bottom, min_height());
         return c.constrain(Size{.width = w, .height = h});
     }
 
-    auto on_paint(Painter &p, const Rect &bounds, const BuildContext & /*ctx*/) -> void override;
+    /// @brief 绘制本帧：解算一次背景/文字色与圆角，再交给三个绘制阶段。
+    /// @param p 绘制器
+    /// @param bounds 按钮区域
+    /// @param ctx 构建上下文：主题作用域与 locale 都经它
+    auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override;
 
     // ---- 继承扩展点：子类可单独覆盖某个绘制阶段，无需重写整个 on_paint ----
 
     /// @brief 解析当前状态（enabled/pressed/hover）下的背景色。
-    /// @param ctx 构建上下文：提供主题作用域，未显式设置 `color` 时取 `inherit_theme(ctx).roles.primary`。
+    /// @param ctx 构建上下文：提供主题作用域，未表态时取 `roles.primary`。
     /// @return 启用态按 pressed/hover 取按下色/悬停色（缺省为基色加深），禁用态取禁用色（缺省浅灰）。
     [[nodiscard]] virtual auto resolve_background(const BuildContext &ctx) const -> Color {
-        if (!enabled) {
-            return disabled_color.value_or(Color{200, 200, 200, 255});
+        if (!enabled()) {
+            return disabled_color();
         }
-        const Color bg = color_.get().value_or(inherit_theme(ctx).roles.primary);
         if (pressed_) {
-            return pressed_color.value_or(bg.shaded(0.80F));
+            return pressed_color(ctx);
         }
         if (hovered()) {
-            return hover_color.value_or(bg.shaded(0.92F));
+            return hover_color(ctx);
         }
-        return bg;
+        return color(ctx);
     }
 
     /// @brief 解析当前状态下的文字色。
-    /// @param ctx 构建上下文：提供主题作用域，未显式设置 `on_color` 时取 `inherit_theme(ctx).roles.on_primary`。
+    /// @param ctx 构建上下文：提供主题作用域，未表态时取 `roles.on_primary`。
     /// @return 启用态取 on_color（或其主题回退）；禁用态取禁用文字色（缺省中灰）。
     [[nodiscard]] virtual auto resolve_text_color(const BuildContext &ctx) const -> Color {
-        return enabled ? on_color.value_or(inherit_theme(ctx).roles.on_primary)
-                       : disabled_text_color.value_or(Color{130, 130, 130, 255});
-    }
-
-    /// @brief 解算本帧生效的圆角半径：显式设过取显式值，未设取主题形状档。
-    /// @param ctx 构建上下文：提供主题作用域，未显式设置 `corner_radius` 时取
-    ///        `inherit_theme(ctx).shapes.small`。
-    /// @return 用于背景填充与描边的半径（dp）；`0` 走直角，`< 0` 不可能出现（显式值原样透出，
-    ///         主题档为标定值）。
-    [[nodiscard]] virtual auto resolve_corner_radius(const BuildContext &ctx) const -> float {
-        return corner_radius.value_or(inherit_theme(ctx).shapes.small);
-    }
-
-    /// @brief 解算本帧生效的内边距：显式设过取显式值，未设取主题间距档。
-    ///
-    /// 未显式设置时按「水平取 `spacing.large`、垂直取 `spacing.small`」拼装四边——Material 档下
-    /// 即 12/6/12/6，与本件接线前的字面量逐值相同；切风格档只换档、不换拼装规则。
-    /// @param ctx 构建上下文：提供主题作用域。
-    /// @return 文字与背景之间的四边内边距（dp）。
-    [[nodiscard]] virtual auto resolve_padding(const BuildContext &ctx) const -> EdgeInsets {
-        if (padding.has_value()) {
-            return *padding;
-        }
-        const auto &s = inherit_theme(ctx).spacing;
-        return EdgeInsets{.left = s.large, .top = s.small, .right = s.large, .bottom = s.small};
+        return enabled() ? on_color(ctx) : disabled_text_color();
     }
 
     /// @brief 绘制背景（圆角填充）。
     /// @param p 绘制器。
     /// @param bounds 按钮区域。
     /// @param bg 当前状态解析出的背景色。
-    /// @param radius 本帧生效圆角半径（= `resolve_corner_radius(ctx)`，由 `on_paint` 解算一次后
+    /// @param radius 本帧生效圆角半径（= `corner_radius(ctx)`，由 `on_paint` 解算一次后
     ///        传给背景与边框两阶段，故二者不会因同帧内主题换档而分叉）。
     virtual auto paint_background(Painter &p, const Rect &bounds, Color bg, float radius) -> void;
-    /// @brief 绘制边框（border_width>0 且 border_color 已设置时）。
+
+    /// @brief 绘制边框（`border_color` 表态且 `border_width` > 0 时）。
     /// @param p 绘制器。
     /// @param bounds 按钮区域。
     /// @param radius 本帧生效圆角半径（与 `paint_background` 同一份，理由同彼）。
     virtual auto paint_border(Painter &p, const Rect &bounds, float radius) -> void;
+
     /// @brief 解析当前应显示的标签串（i18n 求值）：绘制与布局的**唯一显示串来源**。
     ///
     /// 与 `Text::resolved_text` 同口径：`Environment` 注入了 `Locale` 就按它解析，否则回落
@@ -623,7 +670,7 @@ class Button : public LeafWidget, public ButtonProps {
     /// @note Side-effects: reads i18n table
     [[nodiscard]] auto resolved_label(const BuildContext &ctx) const -> std::string {
         const auto *lp = ctx.environment<Locale>();
-        return label_.get().resolve(&default_catalog(), (lp != nullptr) ? *lp : Locale{});
+        return label().resolve(&default_catalog(), (lp != nullptr) ? *lp : Locale{});
     }
 
     /// @brief 绘制居中文字。
@@ -644,8 +691,12 @@ class Button : public LeafWidget, public ButtonProps {
     std::string cached_display_text_;  ///< 上次测量所用的显示串：与缓存宽度配套，串变即重测
 
   private:
-    ReadOnlyState<LocalizedString> label_;  ///< 已安装的标签来源（构建数据装入后唯一生效）
-    ReadOnlyState<std::optional<Color>> color_;  ///< 已安装的背景色来源（构建数据装入后唯一生效）
+    /// @brief 有效字体：字号取 `font_size` 行的生效值，非正时兜底 14pt。
+    /// @return 供度量与绘制共用的 `Font`（字号是本控件唯一的字体属性，族名/字重另有 `Text` 一族承载）
+    [[nodiscard]] auto effective_font() const -> Font {
+        const float fs = font_size();
+        return Font{.size_pt = fs > 0.0F ? fs : 14.0F};
+    }
 };
 
 }  // namespace aurora

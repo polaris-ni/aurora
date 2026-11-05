@@ -31,7 +31,7 @@ constexpr std::uint16_t AURORA_INSPECTOR_PORT = 6280;
 /// 索引 3 → 4 构成可远程观测的因果：`POST /api/input/click {"path":"3"}` 应使索引 4 的文本递增。
 auto build_form(const std::shared_ptr<au::State<int>> &count,
                 const std::shared_ptr<au::State<au::LocalizedString>> &label) -> au::Node {
-    au::Button submit{au::ButtonProps{.label = "Submit"}};
+    au::Button submit{au::ButtonProps().set_label("Submit")};
     submit.on_click = [count, label]() -> void {
         const int next = count->get() + 1;
         count->set(next);

@@ -18,7 +18,7 @@ auto main() -> int {
                                                            au::Node{au::Text{"User info form"}},
                                                            au::Node{std::move(name_input)},
                                                            au::Node{std::move(email_input)},
-                                                           au::Node{au::Button{au::ButtonProps{.label = "Submit"}}},
+                                                           au::Node{au::Button{au::ButtonProps().set_label("Submit")}},
                                                            au::Node{au::Checkbox{true}},
                                                        },
                                                    .gap = 8.0F}}};

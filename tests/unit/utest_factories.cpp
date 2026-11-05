@@ -26,9 +26,9 @@ AURORA_TEST_CASE(label_adds_text_and_overrides_content) {
 AURORA_TEST_CASE(button_adds_with_label_and_click) {
     aurora::Column root;
     int clicks = 0;
-    aurora::Button *b = ui::button(root, "OK", aurora::ButtonProps{}, [&clicks]() -> void { ++clicks; });
+    aurora::Button *b = ui::button(root, "OK", aurora::ButtonProps(), [&clicks]() -> void { ++clicks; });
     AURORA_TEST_REQUIRE_NOT_NULL(b);
-    AURORA_TEST_CHECK_EQ(b->label().get().text, "OK");
+    AURORA_TEST_CHECK_EQ(b->label().text, "OK");
     AURORA_TEST_REQUIRE_NOT_NULL(b->on_click);
     b->on_click();
     AURORA_TEST_CHECK_EQ(clicks, 1);
