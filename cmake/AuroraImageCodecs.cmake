@@ -38,8 +38,8 @@ if (AURORA_ENABLE_IMAGE_JPEG)
     # 自动展开为 #undef。生成后立即 unset，避免污染外层作用域。
     # JPEG_LIB_VERSION=80 对应 libjpeg v8 ABI（libjpeg-turbo 默认）。
     set(JPEG_LIB_VERSION "80")
-    set(VERSION "3.2.0")
-    set(LIBJPEG_TURBO_VERSION_NUMBER "3020000")
+    set(VERSION "3.2.1")
+    set(LIBJPEG_TURBO_VERSION_NUMBER "3020001")
     set(COPYRIGHT_YEAR "2026")
     set(BUILD "")
     set(HIDDEN "")

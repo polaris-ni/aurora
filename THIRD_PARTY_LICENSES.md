@@ -9,7 +9,7 @@ Aurora 在 `third_party/` 下以**仓库内源码**形式 vendored 以下第三�
 
 ## 1. FreeType — 字体栅格化
 
-- **版本**：2.14.3（`third_party/freetype/include/freetype/freetype.h`：`FREETYPE_MAJOR=2` / `MINOR=14` / `PATCH=3`）
+- **版本**：2.15.0（`third_party/freetype/include/freetype/freetype.h`：`FREETYPE_MAJOR=2` / `MINOR=15` / `PATCH=0`）
 - **来源**：vendored 于 `third_party/freetype/`
 - **用途**：将字体轮廓栅格化为位图（核心字渲染内核之一）
 - **许可**：FreeType License（FTL，GPL 兼容的自由许可），全文见 `third_party/freetype/LICENSE.TXT`
@@ -65,7 +65,7 @@ possibility of such damage.
 
 ## 2. HarfBuzz — 文本整形（shaping）
 
-- **版本**：14.2.1（`third_party/harfbuzz/src/hb-version.h`：`HB_VERSION_MAJOR=14` / `MINOR=2` / `MICRO=1`）
+- **版本**：15.1.0（`third_party/harfbuzz/src/hb-version.h`：`HB_VERSION_MAJOR=15` / `MINOR=1` / `MICRO=0`）
 - **来源**：vendored 于 `third_party/harfbuzz/`
 - **用途**：OpenType 整形（GSUB/GPOS/复杂文种与连字/字距/OT 特性），aurora `FontEngine` 经 `hb_ft_font_create` + `hb_shape` 生成 `ShapedGlyph`
 - **许可**：Old MIT License，全文见 `third_party/harfbuzz/COPYING`
@@ -208,8 +208,8 @@ freely, subject to the following restrictions:
 
 ## 8. SQLite — 存储后端（可选依赖）
 
-- **版本**：3.53.4（sqlite-amalgamation-3530400.zip，官方发布页校验 SHA3-256
-  `628a44cfe82c66aed1ccbbe85a562d2e33ebe64b3288981ed76285612227934e`）
+- **版本**：3.54.1（sqlite-amalgamation-3540100.zip，官方发布页校验 SHA3-256
+  `92281c86e2957f9b9305890f9ac04204caa7b677cc868dc326d942689df28e30`）
 - **来源**：vendored 于 `third_party/sqlite/`（仅取 amalgamation 的 `sqlite3.c` / `sqlite3.h` /
   `sqlite3ext.h`，`shell.c` 未入库；源码保持上游原样）
 - **用途**：`AURORA_ENABLE_STORAGE_SQLITE=ON` 时编译 `SqliteBackend` 存储后端（真事务 + 二进制

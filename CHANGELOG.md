@@ -111,6 +111,8 @@ freeze: minor-versions-are-additive
 
 - **`StreamResource<T>::fail()` 终态保留在途批次**（契约见 [`codespec/specification/02-state.md`](codespec/specification/02-state.md) §5.4 与 §7.3）：旧实现按「未提交批次丢弃」收尾，与新的队列排水形态合起来会让已抵达的交付在 EOF / 终态抢先时蒸发——`push()` 只累加批次并把提交经进程级唯一队列排队，终态若在同一次派发里抢在合批投递之前，批次既未入账又被丢弃。现改为进 `Failed` 之前把在途未提交批**先入账**（与 `flush` 同判据：`Append` 追加、`Replace` 只留最新一条，`batch_bytes` 同口径），宿主经 `items()` 仍看得见失败前的全部条目。`utest_state_resource` 的原「未提交批次丢弃」用例按新契约改写为「在途条目保留」。
 
+- **三方组件升级（安全与版本治理，PATCH 级、无 API 行为变化）**：`third_party/` 仍为直接 vendored 源码（无 submodule、不保留上游 git 历史），CMake 集成假设不变。`mbedTLS` 3.6.5 → **3.6.7**（清除 CVE-2026-25833 / 25834 / 25835 / 34874 / 35336：前四条全部由对端可控的证书 / 握手报文触发，正是内置源码 TLS 后端的输入面；`framework/` 构建子模块沿用 3.6 LTS 线同版本、兼容无改动）。`SQLite` 3.53.4 → **3.54.1**（清除 CVE-2026-119378 / 119371 / 119375 / 119591，单文件 amalgamation 替换 `sqlite3.c` / `sqlite3.h` / `sqlite3ext.h`）。`FreeType` 2.14.3 → **2.15.0**、`HarfBuzz` 14.2.1 → **15.1.0**、`libjpeg-turbo` 3.2.0 → **3.2.1**（`cmake/AuroraImageCodecs.cmake` 的 `VERSION` / `LIBJPEG_TURBO_VERSION_NUMBER` 常量同步）。GLFW 3.5.1 / libwebp 1.6.0 / wuffs / stb_image 经核实已是最新稳定版，未变动。`THIRD_PARTY_LICENSES.md` 的版本与校验和同批刷新。
+
 ### Fixed
 
 - **主题令牌头在 Windows 上被 SDK 的 `small` 宏打穿**：`rpcndr.h` 经 ole2 / oleauto 等头随 `windows.h` 带入 `#define small char`，任何「先开 Windows 头、再包含 aurora 主题头」的翻译单元（本轮为四个 Win32 真机探针）都会把 `ShapeScale` / `SpacingScale` 的字段声明改写成 `float char = ...`，报 C2632 并级联出按钮侧的字段错误。`shape_scale.h` / `spacing_scale.h` 在命名空间前显式 `#undef small`（与 `win32_host.cpp` 既有同类处置同口径），字段名与取值不变。同批修正 `itest_theme_root_injection` 的同值重推断言：该判据只对布局缓存生效（`AURORA_ENABLE_LAYOUT_CACHE` 关闭时每帧重排，`toggles (optimizations-off)` 上恒不成立），改为按宏门控并在关闭档留 trace；`inherit_theme` 的兜底静态档补 NOLINT 说明（进程内单份的懒初始化即设计意图）。

@@ -9,6 +9,7 @@ tests = [
   'test-base-minmax.c',
   'test-be-glyph-advance.c',
   'test-be-num-glyphs.c',
+  'test-be-subset-tables.c',
   'test-blob.c',
   'test-buffer.c',
   'test-c.c',
@@ -30,10 +31,12 @@ tests = [
   'test-ot-collect-glyphs.c',
   'test-ot-color.c',
   'test-ot-face.c',
+  'test-ot-fetch.c',
   'test-ot-glyphname.c',
   'test-ot-layout.c',
   'test-ot-ligature-carets.c',
   'test-ot-name.c',
+  'test-ot-nullable-output.c',
   'test-ot-math.c',
   'test-ot-meta.c',
   'test-ot-metrics.c',
@@ -47,6 +50,7 @@ tests = [
   'test-shape-plan.c',
   'test-style.c',
   'test-subset.c',
+  'test-subset-avar2.c',
   'test-subset-cmap.c',
   'test-subset-drop-tables.c',
   'test-subset-glyf.c',
@@ -61,8 +65,10 @@ tests = [
   'test-subset-gvar.c',
   'test-subset-hvar.c',
   'test-subset-vvar.c',
+  'test-subset-varc.c',
   'test-subset-sbix.c',
   'test-subset-gpos.c',
+  'test-subset-math.c',
   'test-subset-colr.c',
   'test-subset-cbdt.c',
   'test-unicode.c',
@@ -74,6 +80,10 @@ if conf.get('HAVE_FREETYPE', 0) == 1
   tests += [
     'test-ft.c',
   ]
+endif
+
+if conf.get('HAVE_GRAPHITE2', 0) == 1
+  tests += 'test-graphite2.c'
 endif
 
 if conf.get('HAVE_CORETEXT', 0) == 1
@@ -88,8 +98,17 @@ if conf.get('HAVE_DIRECTWRITE', 0) == 1
   ]
 endif
 
+if conf.get('HAVE_CAIRO', 0) == 1
+  tests += 'test-cairo.c'
+endif
+
 if conf.get('HAVE_PTHREAD', 0) == 1
   tests += 'test-multithread.c'
+endif
+
+if conf.get('HB_EXPERIMENTAL_API', 0) == 1
+  tests += 'test-ot-depend.c'
+  tests += 'test-shape-justify.c'
 endif
 
 # Default test running environment
@@ -107,7 +126,7 @@ foreach source : tests
           libharfbuzz_cairo_dep,
           libharfbuzz_icu_dep]
   suite = ['api']
-  if test_name.contains('-subset') or test_name.contains('-instance')
+  if test_name.contains('-subset') or test_name.contains('-instance') or test_name.contains('-depend')
     if get_option('subset').disabled()
       continue
     endif
@@ -115,7 +134,7 @@ foreach source : tests
     suite += 'subset'
   endif
 
-  if test_name.contains('-instance')
+  if test_name.contains('-instance') or test_name.contains('-justify')
     cpp_args += '-DHB_EXPERIMENTAL_API'
   endif
 
