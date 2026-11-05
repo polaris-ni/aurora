@@ -191,8 +191,10 @@ class Clipboard {
 
     /// @brief 读取剪贴板里的本地路径清单（解码 `AURORA_MIME_URI_LIST`）。
     ///
-    /// 只返回可映射为本地路径的条目：非 `file` scheme 的行（`http://` 等）静默跳过；全部条目都
-    /// 被跳过时为 `Ok(空清单)`——空内容不是失败。完整原始行经 `get_payload` 取得。
+    /// 只返回可映射为本地路径的条目：非 `file` scheme 的行（`http://` 等）静默跳过；解码出口另有
+    /// 结构性闸门，带内嵌 NUL / 控制字节、独立 `..` 段、空条目或非空 authority 的条目按同一口径
+    /// 跳过。全部条目都被跳过时为 `Ok(空清单)`——空内容不是失败。完整原始行经 `get_payload` 取得。
+    /// **过滤不等于授权**：库不校验路径是否落在允许的目录内，符号链接、允许目录与权限仍由调用方负责。
     /// @return `Ok(路径清单)`；本平台无该格式的读取机制为 `ClipboardFormatUnsupported`。
     [[nodiscard]] static auto get_files() -> Result<std::vector<std::string>>;
 

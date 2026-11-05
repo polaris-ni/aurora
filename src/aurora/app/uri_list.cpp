@@ -95,6 +95,41 @@ auto append_percent_encoded(std::string &out, char c) -> void {
     return lines;
 }
 
+/// @brief 判断解码后的条目是否是结构性合法的本地路径。
+///
+/// 只做载荷层面可判定的拒绝：控制字节（含内嵌 NUL 与解码后现形的 CRLF）在任何平台的本地路径里
+/// 都不合法；`file://` 之后必须是绝对形态（前导 `/` 或 `X:` 盘符），否则解出的首段是非空
+/// authority 而非路径；独立的 `..` 段是路径遍历，按 `/` 与 `\` 两种分隔符切段判定，字面形与
+/// 百分号编码形在此同形。反斜杠、盘符与 UTF-8 多字节序列属合法路径字符，不在此列——过滤不等于
+/// 授权，真实文件系统边界（允许目录、符号链接、权限）仍由调用方负责。
+[[nodiscard]] auto is_structurally_safe(std::string_view path) -> bool {
+    if (path.empty()) {
+        return false;
+    }
+    for (const char c : path) {
+        const auto byte = static_cast<std::uint8_t>(c);
+        if (byte < 0x20U || byte == 0x7FU) {
+            return false;
+        }
+    }
+    const bool has_drive_prefix = path.size() >= 2U && path[1] == ':' &&
+                                  ((path[0] >= 'A' && path[0] <= 'Z') || (path[0] >= 'a' && path[0] <= 'z'));
+    if (path.front() != '/' && !has_drive_prefix) {
+        return false;
+    }
+    std::size_t start = 0;
+    for (std::size_t i = 0; i < path.size(); ++i) {
+        if (path[i] != '/' && path[i] != '\\') {
+            continue;
+        }
+        if (path.substr(start, i - start) == "..") {
+            return false;
+        }
+        start = i + 1U;
+    }
+    return path.substr(start) != "..";
+}
+
 }  // namespace
 
 auto encode(const std::vector<std::string> &paths) -> std::string {
@@ -146,6 +181,9 @@ auto decode(std::string_view payload) -> std::vector<std::string> {
         if (path.size() >= 3U && path[0] == '/' && path[2] == ':' &&
             ((path[1] >= 'A' && path[1] <= 'Z') || (path[1] >= 'a' && path[1] <= 'z'))) {
             path.erase(path.begin());
+        }
+        if (!is_structurally_safe(path)) {
+            continue;  // 结构性非法条目与非 file scheme 同口径静默跳过，不带错误通道
         }
         paths.push_back(std::move(path));
     }

@@ -38,8 +38,9 @@
 /// - **解码在物化之后、值层之前**：分帧（`Content-Length` / chunked）解出的仍是编码字节，本件按
 ///   `Content-Encoding` 链反序逐层还原，随后才交给 `Response`。`Response::text()` 的 charset 解码发生在
 ///   这一层之外，两条解码各自的失败互不掩盖。无体应答（HEAD / 1xx / 204 / 304）不校验编码名。
-/// - **解压产物另有上限**：`max_decompressed_bytes()` 缺省跟随 `max_body_bytes()`，越限落
-///   `http-body-too-large` 且在 detail 点名越的是哪一枚旋钮（炸弹防护护的是解压产物，不是线上字节）。
+/// - **解压产物另有上限**：物化入口 `send` 上 `max_decompressed_bytes()` 未设则跟随 `max_body_bytes()`；
+///   流式入口 `open_stream` / `open_sse` 不跟随该旋钮，未设即解压产物不限，处理不可信对端时须显式设限。
+///   越限一律落 `http-body-too-large` 且在 detail 点名越的是哪一枚旋钮（炸弹防护护的是解压产物，不是线上字节）。
 ///
 /// 进度观测（`Request::on_progress()`）同样在本件源头合流，三条口径与内容编码并列成立：
 /// - **每方向在一次可发射机会里至多一发**：字节到达只更新槽值，发射发生在协程恢复出的宿主回合上；装了
@@ -162,10 +163,12 @@ class Client {
     /// @return 已设则返回之；否则 `nullopt`（不限）。
     [[nodiscard]] auto max_body_bytes() const -> std::optional<std::uint64_t> { return max_body_bytes_; }
 
-    /// @brief 设定透明解压产物的字节上限（解压炸弹防护；`std::nullopt` = 跟随 `max_body_bytes()`）。
+    /// @brief 设定透明解压产物的字节上限（解压炸弹防护）。
     ///
-    /// 两枚旋钮管的是不同的字节：`max_body_bytes()` 管线上到达的字节，本旋钮管还原之后的字节。缺省跟随
-    /// 前者是「压缩不该让调用方拿到比不设限更多」的最小口径；需要收得更紧（或更松）时显式设定。
+    /// 两枚旋钮管的是不同的字节：`max_body_bytes()` 管线上到达的字节，本旋钮管还原之后的字节。
+    /// `std::nullopt` 的缺省口径**按交付路径分**：物化入口 `send` 跟随 `max_body_bytes()`（压缩不该让
+    /// 调用方拿到比不设限更多）；流式入口 `open_stream` / `open_sse` 不物化、也不跟随该旋钮，未设即
+    /// 解压产物不限——处理不可信对端或压缩应答时必须显式设定本旋钮。需要收得更紧（或更松）时显式设定。
     /// 越限落 `http-body-too-large`，其 detail 点名越的是本旋钮。
     /// @param value 上限字节数。
     /// @return 自身引用，便于链式调用。
@@ -174,8 +177,8 @@ class Client {
         return *this;
     }
 
-    /// @brief 查看解压产物上限的**已设值**（未设即跟随 `max_body_bytes()`）。
-    /// @return 已设则返回之；否则 `nullopt`（表示跟随，不表示不限）。
+    /// @brief 查看解压产物上限的**已设值**。
+    /// @return 已设则返回之；否则 `nullopt`：物化入口按 `max_body_bytes()` 跟随，流式入口表示不限。
     [[nodiscard]] auto max_decompressed_bytes() const -> std::optional<std::uint64_t> {
         return max_decompressed_bytes_;
     }
@@ -407,7 +410,8 @@ class Client {
     /// - **完成事实是 `StreamOutcome`**：交出的恒是最终一跳的头部块 + 两枚口径的字节数 + 停读事实，
     ///   `response.body()` 恒为空——体的字节已经逐段交给 `sink`，库内不再留存。
     /// - **线上字节不设限**：`max_body_bytes()` 管的是物化路径的内存，本路径不物化，故它对本入口没有任何
-    ///   约束（也不会因为设过它而提前失败）。解压产物照 `max_decompressed_bytes()` 限，越限落
+    ///   约束（也不会因为设过它而提前失败）。解压产物只照 `max_decompressed_bytes()` 限，**本入口不跟随
+    ///   `max_body_bytes()`**：该旋钮未设即解压产物不限，处理不可信对端时必须显式设定，越限落
     ///   `http-body-too-large` 且在 detail 点名越的是这一枚旋钮。
     /// - **`deflate` 的两型按包装头判定**：物化路径可以先试 zlib、解不开再回落裸流；本路径的字节一旦交给
     ///   宿主就收不回来，重播等于让宿主重写已写下那段。故只看该环节最前两枚输入字节能否构成合法 zlib 头

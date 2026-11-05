@@ -119,7 +119,8 @@ class StreamingDecoder {
     /// 未全部注册时，**在建链这一步**就落 `http-content-encoding-unsupported`，而不是等字节流进半程才失败
     /// ——宣告与支持集同源，本构建根本不该收到带编码的载荷，来了就是要么畸形要么对端越界，两种都早失败为好。
     /// @param chain 已解析的编码链（应用次序；本函数自右向左建环）。
-    /// @param max_output_bytes 逐层的解压产物上限（`std::nullopt` = 不设限）；越限落 `http-body-too-large`。
+    /// @param max_output_bytes 逐层的解压产物上限（`std::nullopt` = 逐层不设限，流式入口未显式设定
+    ///        `max_decompressed_bytes()` 时即取此值）；越限落 `http-body-too-large`。
     /// @param emit 产出出口；空函数即 `general-invalid-argument`（用法错误，不当协议错误报）。
     /// @return 成功携就绪实例；失败携对应 `http-*` / `general-*` 码。
     [[nodiscard]] static auto create(const std::vector<Coding> &chain, std::optional<std::uint64_t> max_output_bytes,

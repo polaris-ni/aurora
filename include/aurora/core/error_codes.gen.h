@@ -2138,8 +2138,9 @@ inline constexpr std::array<ErrorMeta, 166> AURORA_ERROR_TABLE = {
             .hint = "The guard is what keeps a wrong URL (a video behind a shortened link) from exhausting memory. The "
                     "detail says which ceiling was crossed: max_body_bytes bounds the bytes that arrived on the wire, "
                     "max_decompressed_bytes bounds the transparently decompressed payload (the decompression-bomb "
-                    "guard). Raise the one that fired if the payload is legitimately large, or switch to open_stream "
-                    "so the body is delivered in bounded chunks instead of materialized",
+                    "guard). Raise the one that fired if the payload is legitimately large. Switching to open_stream "
+                    "only removes the wire-byte ceiling: that entry does not follow max_body_bytes for decompression, "
+                    "so set max_decompressed_bytes explicitly when the streamed peer is untrusted",
         },
         {
             .code = ErrorCode::HttpCharsetUnsupported,

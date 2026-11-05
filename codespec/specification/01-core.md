@@ -935,7 +935,7 @@ initial bias 72 / initial n 0x80，前缀 `xn--`、定界符 `-`。
 
 - **格式 ID 是小写字符串，显式入参，不做内容嗅探**：格式与线上包装的对应是精确的——`AURORA_COMPRESS_FORMAT_GZIP` = RFC 1952 包装、`AURORA_COMPRESS_FORMAT_ZLIB` = RFC 1950 包装、`AURORA_COMPRESS_FORMAT_DEFLATE` = RFC 1951 裸 DEFLATE。内置三格式经头文件预定义常量暴露（先例：`net/detail/http_encoding.h` 的 `AURORA_HTTP_ACCEPT_ENCODING`）；自定义格式（zstd / brotli / 应用私有 ID）由应用自选字符串注册。格式 ID 按字节精确匹配、大小写敏感：拼错的 ID 在运行期落 `compression-unavailable` 且 detail 点名（诚实失败，不静默回落）。HTTP 的 `Content-Encoding: deflate` 名义上是 zlib 格式但存在历史服务器发裸流的歧义，该歧义的消解（先试 zlib、失败回落裸流）属 HTTP 层编排，不进本通用 API。
 - **实现可替换、注册即用**：全部入口经 `CompressionCodecRegistry` 按格式 ID 分派；`register_codec` 为**覆盖语义**（同格式 ID 后注册者替换先注册者，内置 wuffs 实现即被覆盖对象），`unregister_codec` 清除覆盖并回落内置（若有）——注销即回默认态，测试隔离因此确定。编解码器只写流式解压即自动获得一次性入口（框架派生）；编解码器方法返回的错误原样透传（不包装、不改码）。
-- **解压炸弹防护双层**：实现层收到的 `DecompressOptions::max_output_bytes` 即产出上限，实现应自行止步（CPU 视角不白烧）；框架层再以计数装饰器兜底——越限即止交并落 `compression-output-too-large`，不依赖实现是否自觉。限额的单一事实源是 `DecompressOptions`，装饰器是兜底而非第二真源。
+- **解压炸弹防护双层**：实现层收到的 `DecompressOptions::max_output_bytes` 即产出上限，实现应自行止步（CPU 视角不白烧）；框架层再以计数装饰器兜底——越限即止交并落 `compression-output-too-large`，不依赖实现是否自觉。限额的单一事实源是 `DecompressOptions`，装饰器是兜底而非第二真源；是否注入限额由各消费面决定，HTTP 流式入口在未显式设定 `max_decompressed_bytes()` 时逐层不限。
 - **注入路径恒在**：`AURORA_ENABLE_COMPRESSION`（默认 ON）只门控内置 wuffs 编解码器的**注册**；编解码器抽象、注册表与自由函数恒编入——关闭宏的构建里注册自定义编解码器即可用（诚实降级不静默把压缩字节当明文交出）。
 
 ### 12.2 接口契约

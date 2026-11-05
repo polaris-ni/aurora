@@ -2,7 +2,8 @@
 /// 目标单元: src/aurora/app/uri_list.h
 /// 测试说明: `text/uri-list` 编解码的纯逻辑——本地路径 ↔ `file://` URI 往返保真（空格、`%`、`#`、`?`、
 /// 反斜杠与 UTF-8 多字节中文）、`file://` 与 `http://` 混合行的分类、CRLF / LF / CR 三种分隔符与空行
-/// 容错、空清单编解码为空的往返，以及 MIME 常量表取值与编解码产物的对照
+/// 容错、空清单编解码为空的往返、解码出口对结构性非法条目的过滤与良性形态的保留，以及 MIME
+/// 常量表取值与编解码产物的对照
 
 #include <string>
 #include <string_view>
@@ -95,6 +96,55 @@ AURORA_TEST_CASE(empty_list_roundtrips_to_empty) {
     AURORA_TEST_CHECK_STREQ(encode({""}), "");
     AURORA_TEST_CHECK_EQ(decode(""), std::vector<std::string>{});
     AURORA_TEST_CHECK_EQ(decode(encode({})), std::vector<std::string>{});
+}
+
+// 变异自证：把 `decode` 出口的 `is_structurally_safe` 闸门短路成恒真，本用例的七组断言会成片
+// 转红；良性对照组（下一条用例）同时证明判据不是「一律拒绝」的恒真式断言。
+AURORA_TEST_CASE(decode_drops_structurally_unsafe_entries) {
+    const std::vector<std::string> none{};
+    // 遍历段：字面形与百分号编码形在解码后同形，判定必须发生在解码之后才能一并挡住。
+    AURORA_TEST_CHECK_EQ(decode("file:///srv/aurora/../../etc/passwd\r\n"), none);
+    AURORA_TEST_CHECK_EQ(decode("file:///srv/%2E%2E/etc/passwd\r\n"), none);
+    AURORA_TEST_CHECK_EQ(decode("file:///srv/aurora/..\\escape.txt\r\n"), none);
+    // 注入与截断：内嵌 NUL、解码后现形的 CRLF、其余控制字节在任何平台路径里都不合法。
+    AURORA_TEST_CHECK_EQ(decode("file:///srv/aurora/%00shadow.txt\r\n"), none);
+    AURORA_TEST_CHECK_EQ(decode("file:///srv/aurora/report%0D%0Ainjected.txt\r\n"), none);
+    AURORA_TEST_CHECK_EQ(decode("file:///srv/aurora/%01ctl.txt\r\n"), none);
+    // 空条目与非空 authority：`file://` 之后既非前导 `/` 亦非盘符形态，解出的首段不是本地路径。
+    AURORA_TEST_CHECK_EQ(decode("file://\r\n"), none);
+    AURORA_TEST_CHECK_EQ(decode("file://evil.example/srv/secret.txt\r\n"), none);
+}
+
+// 良性对照组：闸门只针对结构性非法，不按「出现了平台分隔符」一刀切，逐字节往返契约因此不变。
+// 变异自证：把反斜杠或 UTF-8 多字节误判成非法，本用例与既有八条往返用例同时转红。
+AURORA_TEST_CASE(decode_keeps_legitimate_path_forms) {
+    // CJK-LITERAL: cjk-fixture - 汉字是 UTF-8 三字节序列，用来证解码出口不误杀多字节路径
+    const std::vector<std::string> expected{"/srv/aurora/report.txt", "C:\\aurora\\report.txt",
+                                            "/srv/文档/report.txt",   "/srv/aurora/report.txt",
+                                            "/srv/aurora/report.txt", "/srv/aurora/report.txt"};
+    const std::string payload =
+        "file:///srv/aurora/report.txt\r\n"
+        "file:///C:%5Caurora%5Creport.txt\r\n"
+        "file:///srv/%E6%96%87%E6%A1%A3/report.txt\r\n"
+        // 编码分隔符解码后仍是合法路径字符，按保留集口径保留，不笼统标成危险。
+        "file:///srv%2Faurora/report.txt\r\n"
+        "FILE:///srv/aurora/report.txt\r\n"
+        "http://example.com/skip.txt\r\nfile:///srv/aurora/report.txt\r\n";
+    AURORA_TEST_CHECK_EQ(decode(payload), expected);
+}
+
+// 混排：闸门作用于条目粒度，只丢危险条目，良性条目的取值与相对次序都不变。
+// 变异自证：把闸门改成「整份载荷一旦有非法条目就返回空清单」，本用例立即转红。
+AURORA_TEST_CASE(decode_drops_only_unsafe_entries_and_keeps_benign_order) {
+    const std::string payload =
+        "file:///srv/one.txt\r\n"
+        "file:///srv/../escape.txt\r\n"
+        "file:///srv/two.txt\r\n"
+        "file://evil.example/three.txt\r\n"
+        "file:///srv/four%00.txt\r\n"
+        "file:///srv/five.txt\r\n";
+    const std::vector<std::string> expected{"/srv/one.txt", "/srv/two.txt", "/srv/five.txt"};
+    AURORA_TEST_CHECK_EQ(decode(payload), expected);
 }
 
 // 常量表是剪贴板与系统拖放的单一真源：这里钉住取值形态，编码产物再与之对照，

@@ -141,7 +141,8 @@ struct RetryPolicy {
 /// 已存应答再交出、`no-store` 强制 bypass、`must-revalidate` 过期后绝不交付。
 ///
 /// `max_entries` 管的是**条数**而非单条应答的大小：体量上限另有 `Client::max_body_bytes()` 与
-/// `Client::max_decompressed_bytes()` 两枚旋钮管字节，本库不用一份容量口径管两件事。越界时逐出最久未使用的
+/// `Client::max_decompressed_bytes()` 两枚旋钮管字节（后者只在物化入口缺省跟随前者，流式入口不跟随），
+/// 本库不用一份容量口径管两件事。越界时逐出最久未使用的
 /// 那条；`0` 与「不存任何东西」同义（保留 `enabled` 作可读开关，语义上两者都关）。
 /// @note Thread: thread-safe（值类型）
 /// @note Side-effects: none

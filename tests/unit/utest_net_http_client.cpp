@@ -154,6 +154,10 @@ template <std::size_t N>
 const unsigned char AURORA_GZIP_HELLO[] = {31, 139, 8,  0,   0,  0,  0, 0, 2,   255, 203, 72,  205, 201, 201, 87,
                                            72, 44,  45, 202, 47, 74, 4, 0, 214, 230, 105, 148, 12,  0,   0,   0};
 #ifdef AURORA_ENABLE_COMPRESSION
+// 高压缩比载荷：gzip 包装的 100 枚 'a'，线上 24 字节、解压产物 100 字节。用来把「跟随来的解压上限」
+// 与线上字节闸分开——取 50 字节上限时线上过得去、产物过不去。
+const unsigned char AURORA_GZIP_EXPANDS[] = {31,  139, 8, 0, 0,   0,   0,   0,   2,   255, 75, 76,
+                                             164, 61,  0, 0, 100, 122, 112, 175, 100, 0,   0,  0};
 const unsigned char AURORA_RAW_HELLO[] = {203, 72, 205, 201, 201, 87, 72, 44, 45, 202, 47, 74, 4, 0};
 const unsigned char AURORA_GZIP_THEN_ZLIB[] = {120, 156, 147, 239, 230, 96,  0,   1,  166, 255, 167, 61,  206,
                                                158, 60,  25,  238, 161, 163, 123, 74, 223, 139, 133, 225, 218,
@@ -1296,6 +1300,28 @@ AURORA_TEST_CASE(send_enforces_the_decompressed_ceiling) {
     AURORA_TEST_CHECK_EQ(peer.accepts(), 2);
 }
 
+// 两路径对照之一：只设 `max_body_bytes`、不设 `max_decompressed_bytes` 时，物化入口按公共契约跟随。
+// 载荷刻意选「线上 24 < 50、解压产物 100 > 50」，排除线上字节闸，只让跟随来的解压上限生效。
+AURORA_TEST_CASE(send_follows_materialized_body_ceiling_for_decompression) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+    const auto wire = length_framed("Content-Encoding: gzip\r\n", bytes(AURORA_GZIP_EXPANDS));
+    ScriptedPeer peer(reply_after_reading(1, wire));
+    AURORA_TEST_REQUIRE(peer.valid());
+    const aurora::test::net::HostDriven host;
+
+    Client client;
+    allow_test_cleartext(client);
+    client.max_body_bytes(std::optional<std::uint64_t>{std::uint64_t{50}});
+    auto task = client.send(Request::get(loopback_url(peer.port())));
+    AURORA_TEST_CHECK(aurora::test::net::drive_until("followed done", [&task] { return task.is_done(); }).satisfied);
+    const auto refused = inner(task);
+    AURORA_TEST_REQUIRE_FALSE(bool(refused));
+    AURORA_TEST_CHECK_EQ(refused.error().code_enum, aurora::ErrorCode::HttpBodyTooLarge);
+    AURORA_TEST_CHECK(refused.error().message.find("max_decompressed_bytes") != std::string::npos);
+}
+
 AURORA_TEST_CASE(send_advertises_the_supported_codings_by_default) {
 #ifdef AURORA_PLATFORM_WASM
     AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
@@ -1388,6 +1414,13 @@ AURORA_TEST_CASE(send_undoes_a_multi_stage_chain_in_reverse) {
 }
 
 AURORA_TEST_CASE(send_enforces_the_decompressed_ceiling) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+    AURORA_TEST_SKIP("AURORA_ENABLE_COMPRESSION is not enabled (build with -DAURORA_ENABLE_COMPRESSION=ON)");
+}
+
+AURORA_TEST_CASE(send_follows_materialized_body_ceiling_for_decompression) {
 #ifdef AURORA_PLATFORM_WASM
     AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
 #endif

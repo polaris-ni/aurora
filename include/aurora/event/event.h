@@ -340,8 +340,11 @@ class DragPayload : public std::enable_shared_from_this<DragPayload> {
     auto read_async(const std::string &mime, std::function<void(Result<std::vector<std::uint8_t>>)> callback) const
         -> void;
 
-    /// @brief 便利读取：文件清单（解码 `text/uri-list`，只返回可映射为本地路径的条目）。
-    /// @return `Ok(路径清单)`；无该格式时为 `Ok(空清单)`。非 `file` scheme 的行静默跳过
+    /// @brief 便利读取：文件清单（解码 `text/uri-list`，只返回结构性合法的本地路径条目）。
+    ///
+    /// 非 `file` scheme 的行静默跳过；解码出口另已过滤内嵌 NUL / 控制字节、独立 `..` 段、空条目
+    /// 与非空 authority。**过滤不等于授权**：路径是否落在允许目录内、符号链接与权限由调用方负责。
+    /// @return `Ok(路径清单)`；无该格式时为 `Ok(空清单)`
     ///         （完整原始行经 `bytes("text/uri-list")` 取得）。
     [[nodiscard]] auto files() const -> Result<std::vector<std::string>>;
 
@@ -439,6 +442,9 @@ struct SystemDropEvent : Event {
     std::shared_ptr<const DragPayload> payload;
 
     /// @brief 便利读取：文件清单（委托 `DragPayload::files`；无载荷时为空清单）。
+    ///
+    /// 过滤口径与边界责任同 `DragPayload::files`：解码出口只挡结构性非法条目，允许目录、符号链接
+    /// 与权限仍由调用方负责。
     /// @return `Ok(路径清单)`；无载荷或无该格式时为 `Ok(空清单)`。
     [[nodiscard]] auto files() const -> Result<std::vector<std::string>>;
 
@@ -459,7 +465,8 @@ struct SystemDropEvent : Event {
     ///
     /// 与同步 `files()` 并列而非替换：大载荷走本入口，读取期间帧循环不停顿。无载荷时**同步**按
     /// 空口径兑现（没有会话可排空）；有载荷时经 `system_drag::pump_reads()` 在帧内排空兑现，
-    /// 宿主不排空 ⇒ 回调不到。回调只被调用一次。
+    /// 宿主不排空 ⇒ 回调不到。回调只被调用一次。解码出口的过滤口径与边界责任同
+    /// `DragPayload::files`：只挡结构性非法条目，真实路径边界仍由调用方负责。
     /// @param callback 兑现回调（`Ok(路径清单)` 或结构化 `Error`）。
     auto files_async(std::function<void(Result<std::vector<std::string>>)> callback) const -> void;
 
