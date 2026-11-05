@@ -618,6 +618,7 @@ CI 配置位于 `.github/workflows/`：
 | 改了什么 | 必跑门禁（CTest 名 / 目标） | 回写落点 |
 |:---|:---|:---|
 | 公共 API：签名、类 / 类型、信号、属性键、枚举 | `check_api_schema_sync`（先 `--target aurora_api_json`）、`check_naming_conventions`、`check_api_budget`、`check_doc_comments`、`lint`、`format-check` | `specification/NN-*.md`（按模块域）+ `CODING_STANDARDS.md` §6 + 必要时 `CONCEPTS.md` |
+| 控件属性面（`XxxProps` 的字段、权威表行、读写件） | `check_props_table_coverage`（三方计数 / 回落与必填二选一 / 读面每行恰一件 / 写件转调对号 / 表外名字与公共面白名单） | `specification/04-widget.md` §2.5 / §4.1 |
 | `include/aurora/aurora.h` 伞头 | `check_umbrella_header`（直连集合不得相对 `tools/check/umbrella_manifest.txt` 缩减） | `tools/check/umbrella_manifest.txt` 基线 |
 | `core/` 层依赖、模块边界、目录 | `check_core_layer_boundary`、`check_arch_module_map` | 本文件 §2 / §4 |
 | 平台 / 后端分支、feature 宏 | `check_platform_macros` + CI `toggles` 矩阵 + **扩面后的 `lint`**（主 Linux 遍开全部非 Windows / macOS 特有宏；`lint-wasm` 补浏览器面，`lint-windows` / `lint-macos` 各只扫平台相关 TU） | `BUILD_OPTIONS.md` §3 / §4 |

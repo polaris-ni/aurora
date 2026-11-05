@@ -161,6 +161,13 @@ if (AURORA_BUILD_TESTS)
         add_test(NAME check_nolint_layout
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_nolint_layout.py"
                 WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
+        # 属性权威表覆盖门禁（单一声明口径的机械判据）：已迁移的 XxxProps 须「一字段一行一键」三方计数
+        # 相等、回落点与必填二选一、读面每行恰一件（形状由回落点是否随作用域变决定）、写件逐行转调对号，
+        # 且公共面不得出现表外名字（句柄读件 / 合成读件 / 组合便利写件 / 具名撤表态件）。未迁移的公有字段
+        # 聚合体按现状放行——迁移期两种形态并存，判据不得反过来咬未迁的控件。
+        add_test(NAME check_props_table_coverage
+                COMMAND ${PYTHON3_EXE} "${_check_dir}/check_props_table_coverage.py"
+                WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
         # 伞头（include/aurora/aurora.h）完整性门禁。两层检查：① 文件健康——include 被行尾
         # 注释吞并 / 一行多指令 / 重复 / 路径缺失 / 编码损坏（私用区字符）/ 行结束符混用；
         # ② 覆盖契约——直连集合不得相对基线缩减，且每个 public 头必须「直连 ∨ 从直连集合可达

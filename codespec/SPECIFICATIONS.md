@@ -325,6 +325,7 @@ ctest -R itest_ai_compat
 | API token 预算 | `ctest -R check_api_budget`（SPEC.PERF.API.TOKEN-EFFICIENCY.001：`aurora_api.json` 估算 token 数 ≤ 预算） | `check_api_budget` |
 | 无写死本机路径 | `ctest -R check_no_hardcoded_paths`（禁止盘符 / 用户主目录等本机专属绝对路径入库，外部路径须显式传入） | `check_no_hardcoded_paths` |
 | 豁免指令排版 | `ctest -R check_nolint_layout`（clang-tidy 豁免只在物理行生效：理由夹在指令与代码之间、被豁免语句折行、注释散文抄裸令牌，三类均静默失效，见 `CODING_STANDARDS.md` §5.2） | `check_nolint_layout` |
+| 属性权威表覆盖 | `ctest -R check_props_table_coverage`（单一声明口径的机械判据：已迁移的 `XxxProps` 须「一私有字段 / 一表行 / 一 JSON 键」三方计数相等、每行回落点与必填二选一、读面每行恰一件且形状由回落点决定、写件逐行转调对号，公共面不得出现句柄读件 / 合成读件 / 组合便利写件 / 具名撤表态件；未迁移的公有字段聚合体放行） | `check_props_table_coverage` |
 | codespec 交叉引用 | `ctest -R check_codespec_xref` | `check_codespec_xref` |
 | 代码-文档同步 | `ctest -R check_code_doc_sync` | `check_code_doc_sync` |
 | Doxygen 注释规范 | `ctest -R check_doc_comments`（`CODING_STANDARDS.md` §13 的 DOC-R1–DOC-R8：标记唯一 / `@` 前缀 / `///` 须挂声明 / `include/` 公共声明须 `///` / 覆盖与命令必选矩阵 / 排版次序 / 矩阵禁写侧（`@param` 名须真实、`void` 与构造析构不写 `@return`）/ `///<` 只挂真实成员） | `check_doc_comments` |
