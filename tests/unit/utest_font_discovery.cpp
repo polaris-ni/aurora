@@ -448,8 +448,10 @@ AURORA_TEST_CASE(macos_system_fallbacks_cover_cjk_behind_the_builtin_default) {
     // ② 表意文字 / 假名 / 谚文在全链里至少一枚 face 有字形。判据取 `FT_Get_Char_Index` 而非度量宽度：
     // 豆腐块也有宽度，只有字形索引为 0 才说明全链都缺字。
 #ifndef AURORA_PLATFORM_MACOS
+    // 非 Apple 主机上本例的前提不成立：`register_system_fallbacks()` 的 macOS 一支根本不会被编进库。
+    // 这里不写 `return;`——下面的 `#else` 体在本形态下已被预处理器整块剔除，函数到 skip 记录即结束，
+    // 补一条 return 只会被 tidy 判为 `readability-redundant-control-flow`。
     AURORA_TEST_SKIP("macOS-only leg: register_system_fallbacks() reads /System/Library/Fonts on Apple hosts");
-    return;
 #else
     render::init_font_discovery();
     const auto faces = render::resolve_faces("");
