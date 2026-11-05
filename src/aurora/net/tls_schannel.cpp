@@ -15,6 +15,10 @@
 // ALPN 的唯一通路是首枚 `InitializeSecurityContext` 随附的 `SECBUFFER_APPLICATION_PROTOCOLS` 输入缓冲，
 // 本层按该布局装载（见 `build_alpn_advertisement`）；`ISC_REQ_ALPN` 请求位实测非必要，故不带。
 //
+// 主机名判定按 SAN 优先：SAN 扩展存在即以其中的 dNSName 为唯一清单（没有 dNSName 就拒绝，绝不回看 CN），
+// 只有扩展完全不存在时才回落到传统 CN。CN-only 证书上的平台策略分叉是唯一被保留的差异，权威表述在
+// 规格 §8.8.18，逐格结论见跨后端对账用例。
+//
 // 危险开关（`allow_insecure_certificate`）的落点是「本层跳过链与主机名判定」，并必留一条 warning 诊断
 // （在 `net/tls.cpp` 发起处）；pin 判定不受它影响（同在 `net/tls.cpp` 里执行）。
 //
@@ -273,9 +277,14 @@ auto name_matches(std::string_view pattern, std::string_view host) -> bool {
     return host.substr(dot) == suffix;
 }
 
-/// 证书里可核对的 dNSName 集合（SAN 形态）；SAN 缺失或解码失败即返回空集，由调用方回落到 CN。
-auto certificate_dns_names(PCCERT_CONTEXT cert) -> std::vector<std::string> {
+/// 证书里可核对的 dNSName 集合（SAN 形态），并以出参回报 SAN 扩展是否真的存在。
+///
+/// 「扩展不存在」与「扩展存在但里面没有 dNSName」是两件事：只有前者允许调用方回落到 CN，后者已经
+/// 明确给出了可核对名字的清单（只是清单里不含 DNS 名），再拿 CN 兜底等于替证书补一条它没授权的名字。
+/// 扩展存在却解码失败也按「存在」计：解码不了时宁可拒绝，不能静默放宽成 CN 回落。
+auto certificate_dns_names(PCCERT_CONTEXT cert, bool &san_present) -> std::vector<std::string> {
     std::vector<std::string> names;
+    san_present = false;
     if (cert == nullptr || cert->pCertInfo == nullptr) {
         return names;
     }
@@ -285,6 +294,8 @@ auto certificate_dns_names(PCCERT_CONTEXT cert) -> std::vector<std::string> {
         if (extension.pszObjId == nullptr || ::lstrcmpA(extension.pszObjId, szOID_SUBJECT_ALT_NAME2) != 0) {
             continue;
         }
+        // 先记「存在」再谈解码：这一行的位置就是 CN 回落是否被允许的唯一裁决点。
+        san_present = true;
         auto *decoded = static_cast<PCERT_ALT_NAME_INFO>(nullptr);
         DWORD size = 0;
         // 结构类型常量与扩展 OID 同串（SDK 里 `X509_ALT_NAME` 就是 `szOID_SUBJECT_ALT_NAME2`）。
@@ -907,18 +918,25 @@ auto SchannelBackend::verify_hostname() const -> Result<void> {
         return tls_error(ErrorCode::NetTlsCertRejected,
                          "peer presents no certificate to match against '" + host_ + "'");
     }
-    const auto names = certificate_dns_names(peer_cert_);
-    if (!names.empty()) {
+    bool san_present = false;
+    const auto names = certificate_dns_names(peer_cert_, san_present);
+    if (san_present) {
         for (const auto &name : names) {
             if (name_matches(name, host_)) {
                 return Result<void>{};
             }
         }
+        // SAN 存在而无一命中即收口，不再回看 CN；诊断把「清单里一个 dNSName 都没有」单独说出来，
+        // 免得把「证书压根没声明 DNS 名」和「声明的是另一个名字」混成同一句。
+        if (names.empty()) {
+            return tls_error(ErrorCode::NetTlsCertRejected,
+                             "certificate carries a SAN extension without any dNSName for '" + host_ + "'");
+        }
         return tls_error(ErrorCode::NetTlsCertRejected,
                          "certificate is issued for a different name than '" + host_ + "'");
     }
-    // 只有 SAN 完全没给出 dNSName 才回落到 CN：SAN 存在却没有 dNSName 时，证书已经明确表达了
-    // 「可核对的名字不在这张证书里」，再拿 CN 兜底等于把现代证书的规则退回 2000 年代。
+    // SAN 扩展完全不存在：传统 CN 回落按本后端既有裁决保留。平台策略腿在这类证书上的分叉由
+    // `utest_net_tls` 的跨后端对账用例逐格记录，不在本函数里替它们统一。
     const auto common = certificate_common_name(peer_cert_);
     if (!common.empty() && name_matches(common, host_)) {
         return Result<void>{};

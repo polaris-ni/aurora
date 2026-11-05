@@ -23,8 +23,9 @@
 // 一份链引擎——链构建与名字核对是最容易两条腿分叉的地方。追加是**合并**而非替换：
 // `SSL_CTX_set_default_verify_paths` 先把系统缺省根装进 ctx 自己的 store，PEM 再逐张加进同一枚
 // store；因此对接公网端点的证书照旧可信。主机名走 `SSL_set1_host`（校验器内的 RFC 6125 通路：
-// SAN 的 dNSName 优先、有 SAN 就不再回看 CN、通配只认最左标签且不跨点），与 Schannel 腿手写的
-// `name_matches` 是同一套规则。
+// SAN 的 dNSName 优先、有 SAN 就不再回看 CN、通配只认最左标签且不跨点）。与 Schannel 腿相同的是
+// 「名字判定留在各自那一侧、不另写一条公共匹配规则」这条取舍，不是「两套实现逐值同色」：CN-only
+// 证书上平台策略与手写回落可以不同，实际分叉由跨后端对账用例逐格记录。
 //
 // 危险开关（`allow_insecure_certificate`）在本层的落点是 `SSL_VERIFY_NONE`——链、有效期、主机名
 // 一次全跳过；那条 warning 诊断由 `net/tls.cpp` 在发起处统一打（两腿同一条，本层重复打就是把同

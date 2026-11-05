@@ -16,9 +16,10 @@
 //     `SecTrustEvaluateWithError`。校验完**必须再调一次** `SSLHandshake` 续跑——那是文档规定的动作。
 //   - **主机名交系统核**：`SecPolicyCreateSSL(true, hostname)` 的文档写明「指定该值即要求它与叶子证书里的
 //     名字匹配」，这一条就是平台的 RFC 6125 通路，本层不再自己写一份匹配规则——与 OpenSSL 腿把名字判定交给
-//     `SSL_set1_host` 是同一取舍。与 Schannel 腿因此有一处**已知不重合**：那腿的手工校验通路拿不到名字判定
-//     （`InitializeSecurityContext` 的目标名只用于 SNI 与票据），只能自己实现，于是它对「只有 CN、没有 SAN」
-//     的证书回落到 CN，而本平台按自己的现行策略裁决。这一处差异是平台策略而非本层规则，跨腿对账按此读。
+//     `SSL_set1_host` 是同一取舍。与 Schannel 腿的已知不重合只发生在
+//     「只有 CN、没有 SAN 扩展」的证书上——那腿的手工校验通路拿不到名字判定（`InitializeSecurityContext`
+//     的目标名只用于 SNI 与票据），只能自己实现并回落到 CN，本平台则按自己的现行策略裁决。SAN 扩展存在时
+//     两腿都不回看 CN。差异属平台策略而非本层规则，逐格结论见跨后端对账用例，不在注释里猜。
 //     失败诊断仍带上目标名（公共面 `net-tls-cert-rejected` 的可归因要求），并把系统的 CFError 描述一并带出。
 //   - **读链与评估的次序**：`SecTrustGetCertificateAtIndex` 与 `SecTrustGetCertificateCount` 的文档都写
 //     明「调用之前必须先 `SecTrustEvaluateWithError`」，但那条前置只对**评估成功**的 trust 成立：评估判

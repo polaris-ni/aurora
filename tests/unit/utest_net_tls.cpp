@@ -14,7 +14,9 @@
 ///           这一次握手实际由哪条腿服务（取值恒在注册表表面内，关闭后落 `net-socket-failed`），共存装配下
 ///           表面里**每一枚**后端都要各完成一次真握手（只走缺省那条等于另一枚编进库里却从没被走过），而
 ///           指名后端（`TlsContext::backend`）落空时恰一次以 `net-tls-engine-unavailable` 收尾且**绝不回落**到
-///           下一枚；取消让未完成的
+///           下一枚；名字判定按 SAN 优先——SAN 扩展存在但没有 dNSName 时 CN 同名也不兜底，同名 SAN 对照组
+///           证明这不是链失败造成的假红，四类证书 × 每一套注册后端的逐格结论带可归因错误码记录进用例输出
+///           （CN-only 证书上的平台策略分叉只记录、不强制同色）；取消让未完成的
 ///           握手恰一次以 `net-cancelled` 收尾；`close()` 幂等且此后通道不再开放，对端进程消失后挂起的读
 ///           必有结局而不是悬挂。
 ///           对端是宿主 `openssl s_server` 子进程（`framework/tls_peer.h`）：证书链、记录分帧、close_notify
@@ -278,6 +280,60 @@ auto trusted_context(const aurora::test::tls::Assets &assets) -> TlsContext {
     TlsContext context;
     context.trusted_certificates = {assets.certificate_pem()};
     return context;
+}
+
+/// @brief 跨后端名字判定对账表里的「一格」：某后端对某张证书的一次真实握手结局。
+struct NameVerdict {
+    std::string backend;  ///< 注册表 id
+    bool accepted = false;  ///< 握手是否成功（成功即「名字核对放行」）
+    std::string code;  ///< 失败码；成功态写 `accepted`
+    std::string message;  ///< 失败诊断（可归因现场）
+};
+
+/// @brief 指名一枚后端，对同一台对端跑一次「链可信、只差名字判定」的真握手。
+/// @param assets 对端证书资产（同时作为追加可信根）。
+/// @param peer 已起好的回环对端。
+/// @param backend 指名的后端 id。
+/// @param target 要求核对的主机名。
+/// @return 这一格的结论。
+auto name_verdict(const aurora::test::tls::Assets &assets, const aurora::test::tls::TlsPeer &peer,
+                  std::string_view backend, std::string_view target) -> NameVerdict {
+    auto context = trusted_context(assets);
+    context.backend = std::string{backend};
+    HandshakeLog log;
+    handshake(connect_stream(peer.port()), target, context, log);
+    AURORA_TEST_REQUIRE_MSG(log.calls.load() == 1, "backend " + std::string{backend} + " never delivered a verdict");
+    NameVerdict row;
+    row.backend = std::string{backend};
+    row.accepted = log.ok;
+    row.code = log.ok ? std::string{"accepted"} : log.code;
+    row.message = log.message;
+    if (log.ok) {
+        AURORA_TEST_REQUIRE(log.transport.is_open());
+        log.transport.close();
+    }
+    return row;
+}
+
+/// @brief 对注册表面里的每一枚后端各跑一格，并把逐格结论写进用例输出。
+///
+/// 输出不是装饰：四套后端装不进同一个 CI 作业，差异若只留在注释里就无法防止后续改动悄悄扩大它。
+/// @param shape 证书名字形态标签（只进输出文本）。
+/// @param assets 对端证书资产。
+/// @param peer 已起好的回环对端。
+/// @param target 要求核对的主机名。
+/// @return 逐格结论，顺序与注册表面一致。
+auto name_verdicts(std::string_view shape, const aurora::test::tls::Assets &assets,
+                   const aurora::test::tls::TlsPeer &peer, std::string_view target) -> std::vector<NameVerdict> {
+    std::vector<NameVerdict> rows;
+    for (const auto &id : aurora::net::available_tls_backends()) {
+        auto row = name_verdict(assets, peer, id, target);
+        const std::string line = "[tls-name-parity] shape=" + std::string{shape} + " backend=" + row.backend +
+                                 " target=" + std::string{target} + " verdict=" + row.code + " " + row.message + "\n";
+        ::fprintf(stderr, "%s", line.c_str());
+        rows.push_back(std::move(row));
+    }
+    return rows;
 }
 
 /// @brief 捕获 Logger 的 sink 以断言诊断留痕；析构恢复全局缺省，不泄漏给其它用例。
@@ -658,6 +714,87 @@ AURORA_TEST_CASE(hostname_mismatch_is_rejected_even_when_chain_is_trusted) {
     AURORA_TEST_CHECK_FALSE(log.ok);
     AURORA_TEST_CHECK_EQ(log.code, std::string{"net-tls-cert-rejected"});
     AURORA_TEST_CHECK_THAT(log.message, m::has_substr("not-the-peer-name.invalid"));
+}
+
+// SAN 扩展存在却没有 dNSName：证书已经把「可核对名字」列完了，只是清单里没有 DNS 名。此时 CN 同名
+// 也不能兜底，否则一张现代证书会被按 2000 年代的规则解释。对照组用同名 SAN 证明链本身是可信的，
+// 拒绝不是「根没加上」造成的假红。
+AURORA_TEST_CASE(san_extension_without_dns_name_is_rejected_despite_matching_cn) {
+    const aurora::test::tls::Assets assets{"localhost", false, aurora::test::tls::Lifetime::Valid,
+                                           aurora::test::tls::NameShape::SanWithoutDns};
+    aurora::test::tls::TlsPeer peer{assets};
+    require_peer(peer);
+    require_backend("needs a real handshake for the SAN-priority verdict");
+    HostDriven host;
+    const auto surface = aurora::net::available_tls_backends();
+    AURORA_TEST_REQUIRE_FALSE(surface.empty());
+
+    for (const auto &id : surface) {
+        const auto rejected = name_verdict(assets, peer, id, "localhost");
+        AURORA_TEST_CHECK_MSG(
+            !rejected.accepted,
+            "backend " + id + " accepted a certificate whose SAN has no dNSName: " + rejected.message);
+        AURORA_TEST_CHECK_EQ(rejected.code, std::string{"net-tls-cert-rejected"});
+    }
+
+    // 对照组：同一套链、同一个目标名，只把 SAN 换回同名 dNSName。它必须全部放行，否则上面那组
+    // 「恒拒」有可能只是追加根没生效，判据就成了恒真断言。
+    const aurora::test::tls::Assets control{"localhost", false, aurora::test::tls::Lifetime::Valid,
+                                            aurora::test::tls::NameShape::SanAndCn};
+    aurora::test::tls::TlsPeer control_peer{control};
+    require_peer(control_peer);
+    for (const auto &id : surface) {
+        const auto accepted = name_verdict(control, control_peer, id, "localhost");
+        AURORA_TEST_CHECK_MSG(accepted.accepted, "backend " + id + " rejected the matching-SAN control: " +
+                                                     accepted.code + " " + accepted.message);
+    }
+}
+
+// 四类证书 × 本构建注册到的每一套后端，逐格记录结论。不强制各腿同色：CN-only 证书上的分叉是平台策略，
+// 权威表述在规格 §8.8.18，这里只要求「每格都有确定结论且错误可归因」，并把实际差异写进用例输出。
+AURORA_TEST_CASE(certificate_name_shapes_are_reconciled_across_backends) {
+    require_backend("needs the registered backend surface");
+    HostDriven host;
+    const auto surface = aurora::net::available_tls_backends();
+    AURORA_TEST_REQUIRE_FALSE(surface.empty());
+
+    // （形态标签，证书形态，目标名）三元组；平台 / 能力分支都留在用例体内。
+    struct Shape {
+        std::string_view label;
+        aurora::test::tls::NameShape shape;
+        std::string_view target;
+    };
+    const std::vector<Shape> shapes{
+        {.label = "san-and-cn-match", .shape = aurora::test::tls::NameShape::SanAndCn, .target = "localhost"},
+        {.label = "san-dns-mismatch",
+         .shape = aurora::test::tls::NameShape::SanAndCn,
+         .target = "not-the-peer-name.invalid"},
+        {.label = "san-without-dns", .shape = aurora::test::tls::NameShape::SanWithoutDns, .target = "localhost"},
+        {.label = "cn-only", .shape = aurora::test::tls::NameShape::CnOnly, .target = "localhost"},
+    };
+
+    for (const auto &shape : shapes) {
+        const aurora::test::tls::Assets assets{"localhost", false, aurora::test::tls::Lifetime::Valid, shape.shape};
+        aurora::test::tls::TlsPeer peer{assets};
+        require_peer(peer);
+        const auto rows = name_verdicts(shape.label, assets, peer, shape.target);
+        AURORA_TEST_REQUIRE_EQ(rows.size(), surface.size());
+
+        for (const auto &row : rows) {
+            // 结论必须落在「放行」或「名字 / 链被拒」两格之一；`net-socket-failed`、
+            // `net-tls-engine-unavailable` 一类属于没有结论，不能算进对账表。
+            AURORA_TEST_CHECK_MSG(row.accepted || row.code == "net-tls-cert-rejected",
+                                  "backend " + row.backend + " returned an undecidable verdict for " +
+                                      std::string{shape.label} + ": " + row.code + " " + row.message);
+            if (shape.label == "san-and-cn-match") {
+                AURORA_TEST_CHECK_MSG(row.accepted, "matching-SAN control failed on " + row.backend + ": " + row.code);
+            } else if (shape.label != "cn-only") {
+                // CN-only 一格只记录、不强制：各平台现行策略可以不同，这正是要对账出来的对象。
+                AURORA_TEST_CHECK_MSG(!row.accepted, std::string{shape.label} + " must be rejected on " + row.backend +
+                                                         ": " + row.message);
+            }
+        }
+    }
 }
 
 AURORA_TEST_CASE(dangerous_switch_skips_verification_but_leaves_a_trace) {
