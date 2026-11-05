@@ -938,7 +938,7 @@
           "name": "color",
           "type": "Color",
           "note": "Line color (follows theme outline_variant when unset)",
-          "default_expr": "theme.outline_variant"
+          "default_expr": "\"theme.outline_variant\""
         },
         {
           "name": "indent",
@@ -979,7 +979,7 @@
       "children_policy": "none",
       "examples": [
         "au::Divider()",
-        "au::Divider(au::DividerProps{ .orientation = Orientation::Vertical })"
+        "au::Divider(au::DividerProps().set_orientation(Orientation::Vertical))"
       ]
     },
     {

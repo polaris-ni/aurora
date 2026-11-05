@@ -74,10 +74,12 @@ AURORA_TEST_CASE(spacing_scale_reproduces_current_button_padding) {
 AURORA_TEST_CASE(control_metrics_reproduces_current_widget_metrics) {
     const ControlMetrics controls;
     // 可对账项：与控件公共头 / Widget 常量的现值逐位相等。
-    // Divider 的线厚在控件侧改读 `controls.separator_thickness`（未显式设值时），对账同走 resolve 通道。
+    // Divider 的线厚在控件侧改读 `controls.separator_thickness`（未表态时），对账同走带 ctx 的读件。
     const Divider divider;
-    AURORA_TEST_CHECK_FALSE(divider.thickness.has_value());
-    AURORA_TEST_CHECK(divider.resolve_thickness(BuildContext{}) == controls.separator_thickness);
+    Json divider_props = Json::object();
+    divider.serialize_props(divider_props);
+    AURORA_TEST_CHECK_FALSE(divider_props.contains("thickness"));  // 未表态即不写键
+    AURORA_TEST_CHECK(divider.thickness(BuildContext{}) == controls.separator_thickness);
     // 焦点环现值住在 `Widget` 的受保护常量里（绘制与脏区共用），测试侧不可直读，故只钉声明值 2.0 / 2.0。
     // 本模块未改读这两枚令牌：环宽除绘制侧还决定脏区外扩，而 `dirty_bounds()` 没有 `BuildContext`
     // 可拿主题，单接绘制侧会让「画的环」与「标脏的盒」取到不同宽度（残影像素）。留待脏区具备

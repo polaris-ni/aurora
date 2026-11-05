@@ -68,7 +68,7 @@ auto click_center(Widget &w) -> void {
 }  // namespace
 
 AURORA_TEST_CASE(base_widgets_compose_and_render) {
-    Column col{Node{Divider{}},       Node{Divider{DividerProps{.orientation = Orientation::Vertical}}},
+    Column col{Node{Divider{}},       Node{Divider{DividerProps().set_orientation(Orientation::Vertical)}},
                Node{Checkbox{false}}, Node{Switch{true}},
                Node{Slider{0.5}},     Node{ProgressIndicator{0.3}}};
     render_tree(col, 320.0F, 480.0F);
