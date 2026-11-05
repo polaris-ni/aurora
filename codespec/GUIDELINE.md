@@ -65,7 +65,7 @@ int main() {
 au::Node root = au::Node{ au::Column(au::ColumnProps{ .children = {
     au::Node{ au::Text("标题").font_size(24) },
     au::Node{ au::Text("副标题") },
-    au::Node{ au::Button(au::ButtonProps{ .label = "点我" }) },
+    au::Node{ au::Button(au::ButtonProps().set_label("点我")) },
 }}) };
 
 au::Node row = au::Node{ au::Row(au::RowProps{ .children = {
@@ -172,7 +172,7 @@ au::Node fixed = std::move(wide);        // Node 仅移动派生对象（Widget 
 
 au::Theme theme = au::Theme::light();
 theme.roles.primary = au::colors::AURORA_BLUE;   // 覆写色角色
-auto themed = au::ThemeProvider{ theme, au::Button(au::ButtonProps{ .label = "主题按钮" }) };
+auto themed = au::ThemeProvider{ theme, au::Button(au::ButtonProps().set_label("主题按钮")) };
 ```
 
 ### 10.1 色角色与类型安全扩展
@@ -655,7 +655,7 @@ using namespace au;
 auto target_tree = []() -> au::Node {
     return au::Node{ au::Column(au::ColumnProps{ .children = {
         au::Node{ au::Text("Hello") },
-        au::Node{ au::Button(au::ButtonProps{ .label = "Click" }) },
+        au::Node{ au::Button(au::ButtonProps().set_label("Click")) },
     } }) };
 };
 
@@ -799,11 +799,11 @@ AURORA_TEST_CASE(button_click_smoke) {
 ```cpp
 // Outlined 风格按钮：透明背景 + 描边 + 自定义悬停/按下色 + 最小尺寸
 auto btn = au::Button("Save");
-btn.background(au::colors::AURORA_TRANSPARENT)
-   .text_color(au::Color{ 0, 90, 200, 255 })
-   .set_border(au::Color{ 0, 90, 200, 255 }, 1.5f)
+btn.set_color(au::colors::AURORA_TRANSPARENT)
+   .set_on_color(au::Color{ 0, 90, 200, 255 })
+   .set_border_color(au::Color{ 0, 90, 200, 255 }).set_border_width(1.5f)
    .set_hover_color(au::Color{ 0, 90, 200, 24 })   // 不设则由背景色自动调暗
-   .set_min_size(96.0F, 36.0F);
+   .set_min_width(96.0F).set_min_height(36.0F);
 
 // 步进滑块 + 自定义轨道 / 滑块；active_color 不设则跟随主题 primary
 auto sl = au::Slider();
@@ -1109,7 +1109,7 @@ auto main() -> int {
     auto root = Column{ColumnProps{.children = {
         Text{"Main window"},
         Text{TextProps{.content = ping_label}},
-        Button{ButtonProps{.label = "Broadcast"}},
+        Button{ButtonProps().set_label("Broadcast")},
     }}};
 
     WindowOptions opts;
@@ -1370,7 +1370,7 @@ au::State<bool> agreed{false};
 au::Scene build_ui() {
     return au::Column{
         au::Text{au::TextProps{ .content = "订单总额" }},
-        au::Button{au::ButtonProps{ .label = "提交" }},
+        au::Button{au::ButtonProps().set_label("提交")},
         au::TextInput{au::TextInputProps{ .value = "abc", .placeholder = "请输入" }},
         au::Slider{volume},
         au::Checkbox{agreed},
@@ -2222,7 +2222,7 @@ auto line = au::computed([quote]() -> au::LocalizedString {
     return au::LocalizedString{"失败：" + quote.error().value_or(au::Error{}).message};
 });
 
-aurora::Button reload{aurora::ButtonProps{.label = au::LocalizedString{"reload"}}};
+aurora::Button reload{aurora::ButtonProps().set_label(au::LocalizedString{"reload"})};
 reload.on_click = [quote]() mutable -> void { quote.reload(); };  // 掐在途连接 + 重发
 
 // widget 直接读派生值：au::Text{au::TextProps{.content = line}}

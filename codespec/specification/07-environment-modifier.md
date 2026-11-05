@@ -497,7 +497,7 @@ locale 沿 `Environment` 向下传播，两个注入点：
 `Modifier` 是**不可变值**（`.then()` 除外）：除 `.then()` 外每个方法返回新副本，可链式组合并赋值给任意组件的 `.modifier` 属性。
 
 ```cpp
-auto save_btn = au::Button(au::ButtonProps{ .label = "保存" });
+auto save_btn = au::Button(au::ButtonProps().set_label("保存"));
 save_btn.modifier = au::Modifier{}
     .padding(12)                      // 内边距（float 或 EdgeInsets）
     .background(au::colors::AURORA_BLUE)   // 背景填充
@@ -589,7 +589,7 @@ auto info = au::Button::describe_static();
 //   },
 //   .events = {"on_click"},
 //   .children_policy = "none",
-//   .examples = {"au::Button(au::ButtonProps{ .label = \"OK\" })"}
+//   .examples = {"au::Button(au::ButtonProps().set_label(\"OK\"))"}
 // }
 
 au::Button btn;

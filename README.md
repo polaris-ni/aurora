@@ -57,7 +57,7 @@ namespace au = aurora;
 int main() {
     au::Node root = au::Node{ au::Column(au::ColumnProps{.children = {
         au::Node{ std::move(au::Text("Hello, Aurora!").font_size(24)) },
-        au::Node{ au::Button(au::ButtonProps{.label = "Click me"}) },
+        au::Node{ au::Button(au::ButtonProps().set_label("Click me")) },
     }})};
 
     au::WindowOptions base{ .title = "Hello Aurora" }; // .title 为基类成员，指定初始化器不能指名基类

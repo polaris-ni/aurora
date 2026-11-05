@@ -246,7 +246,7 @@ theme.update([](const au::Theme &t) {
     next.primary = au::colors::AURORA_BLUE;
     return next;
 });
-au::Node root = au::ThemeProvider{theme, au::Button(au::ButtonProps{ .label = "主题按钮" })};
+au::Node root = au::ThemeProvider{theme, au::Button(au::ButtonProps().set_label("主题按钮"))};
 // 子组件内部：const Theme* t = ctx.environment<Theme>();   // 最近祖先优先
 // theme.set(...) 换肤时子树自动重渲染
 ```

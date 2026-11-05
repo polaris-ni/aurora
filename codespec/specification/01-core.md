@@ -295,7 +295,7 @@ auto widget = restored.value();
 `au::TODO`（根级 `todo.h`）是占位回调，用于标记尚未实现的事件处理——编译通过，运行时触发时经 `Diagnostics::warn("TODO", what)` 输出警告。它是占位回调而非错误码。
 
 ```cpp
-auto btn = au::Button(au::ButtonProps{ .label = "OK" });
+auto btn = au::Button(au::ButtonProps().set_label("OK"));
 btn.set_on_click(au::TODO("handle_click"));   // 编译通过，运行时留可读警告
 ```
 

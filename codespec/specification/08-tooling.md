@@ -1200,7 +1200,7 @@ std::string dump = au::dump_tree_json(root).dump();
   "events": ["on_click"],
   "children_policy": "none",
   "examples": [
-    "au::Button(au::ButtonProps{ .label = \"Submit\" }).set_on_click(handle_submit)"
+    "au::Button(au::ButtonProps().set_label(\"Submit\")).set_on_click(handle_submit)"
   ]
 }
 ```
@@ -1242,8 +1242,8 @@ int main() {
         .gap = 8,
         .children = {
             std::move(au::Text("Button Examples").font_size(20).bold()),
-            au::Button(au::ButtonProps{ .label = "Primary" }),
-            std::move(au::Button(au::ButtonProps{ .label = "Disabled" }).set_enabled(false)),
+            au::Button(au::ButtonProps().set_label("Primary")),
+            std::move(au::Button(au::ButtonProps().set_label("Disabled").set_enabled(false))),
         },
     });
     root.modifier = au::Modifier{}.padding(20);

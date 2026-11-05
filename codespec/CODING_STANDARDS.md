@@ -583,17 +583,17 @@ BREAKING CHANGE: 自定义 Widget 的 on_paint 实现须改用全局坐标，
 
 ```cpp
 // 形态一：链式 setter（setter 返回引用）
-auto btn = au::Button(au::ButtonProps{ .label = "OK" });
+auto btn = au::Button(au::ButtonProps().set_label("OK"));
 btn.set_on_click(fn);
 
 // 形态二：*Props 具名聚合
-auto btn2 = au::Button(au::ButtonProps{ .label = "OK" });
-btn2.on_click = fn;
+auto btn2 = au::Button(au::ButtonProps().set_label("OK"));
+btn2.set_on_click(fn);
 
 // 形态三：对已构造对象逐行赋值
 auto btn3 = au::Button();
-btn3.label = au::LocalizedString{ "OK" };
-btn3.on_click = fn;
+btn3.set_label(au::LocalizedString{ "OK" });
+btn3.set_on_click(fn);
 ```
 
 **关键约束：**
@@ -602,6 +602,7 @@ btn3.on_click = fn;
 - 指定初始化器**仅适用于 `*Props` 聚合结构**与 `Theme` 等纯数据聚合；其中字段顺序无关，遗漏字段回退默认值。
 - 链式 setter 返回引用；作为子节点放入 `children` 时必须用 `std::move` 包裹（`Widget` 拷贝构造被删除，`Node` 仅移动派生对象）。
 - 嵌套声明推荐 `au::Column(au::ColumnProps{ .children = { ... } })` 的树形结构。
+- **迁移期两种形态并存**：`Button` 的 `ButtonProps` 已无公有字段，形态二写作链式装入 `au::Button(au::ButtonProps().set_label("OK"))`、形态三的逐行赋值改走 `set_*()` 写件（`btn.set_label(...)`），直写成员名不再合法；其余采用继承式双模的控件仍是公有字段聚合，两种写法各自照旧。
 - 控件可用 `au::` 或 `aurora::` 前缀；推荐 `namespace au = aurora;`。
 
 **验收标准：** 同一界面用三种形态各写一遍，编译产物与运行时行为一致；AI 只需记住「属性名 + `*Props`」即可生成整棵嵌套树，无需记忆顺序位置参数。
@@ -672,7 +673,7 @@ button.alignment(au::Alignment::Cenetr);   // 编译错误：拼写错误立刻�
 **需求陈述：** 只需写「与默认值不同」的部分；默认值须适用于绝大多数场景，避免 AI 每次都要显式指定。
 
 ```cpp
-au::Button(au::ButtonProps{ .label = "OK" });
+au::Button(au::ButtonProps().set_label("OK"));
 // 默认：enabled=true, visible=true,
 //       alignment=Center, font_size=14,
 //       padding={12,6,12,6}, corner_radius=6

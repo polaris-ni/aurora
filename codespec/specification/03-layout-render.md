@@ -980,7 +980,7 @@ Level 3  像素快照（PNG）—— 人类视觉回归测试用
 **快照测试：**
 
 ```cpp
-au::Node btn_node{ au::Button(au::ButtonProps{ .label = "Test" }) };
+au::Node btn_node{ au::Button(au::ButtonProps().set_label("Test")) };
 btn_node->width(au::px(100)).height(au::px(40));
 const au::Json snap = au::render_to_logical_snapshot(btn_node, 100, 40);
 AURORA_TEST_CHECK(std::string{ snap["type"].get<std::string>() } == "Button");
