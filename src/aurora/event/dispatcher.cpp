@@ -61,8 +61,10 @@ auto deliver_chain(std::vector<HitNode> &chain, MouseEvent &e) -> void {
 auto EventDispatcher::update_hover(const std::vector<HitNode> &chain) -> void {
     // 命中链 diff：旧链有、新链无 → 离开；新链有、旧链无 → 进入。链长度通常 ≤ 几十，
     // 线性查找足够；先发离开再发进入，与主流框架 enter/leave 顺序一致。
-    // 控件以弱引用持有：若某控件已在两次 hover 之间被虚拟列表回收（如 LazyList 滚动复用
-    // 子项），其弱引用失效，lock 返回空即跳过，绝不解引用悬垂指针（避免 use-after-free）。
+    // 控件以生命周期守卫持有：若某控件已在两次 hover 之间被虚拟列表回收（如 LazyList
+    // 滚动复用子项），守卫失效，lock 返回空即跳过，绝不解引用悬垂指针（避免 use-after-free）。
+    // 取到存活控件后仍须把强引用持到通知回调返回之后：回调可能丢掉该控件最后一个强引用，
+    // 而返回后基类 on_hover_change 还要写自身状态位。
     auto contains = [](const std::vector<HitNode> &c, const Widget *w) -> bool {
         if (w == nullptr) {
             return false;
@@ -70,7 +72,8 @@ auto EventDispatcher::update_hover(const std::vector<HitNode> &chain) -> void {
         return std::ranges::any_of(c, [w](const HitNode &n) -> bool { return n.get() == w; });
     };
     for (const HitNode &old_n : hover_chain_) {
-        Widget *sp = old_n.get();
+        std::shared_ptr<Widget> keepalive;  // 离开回调可能销毁该控件，须持强引用跨越调用
+        Widget *sp = old_n.lock(keepalive);
         if (sp == nullptr) {
             continue;  // 已回收，跳过离开通知
         }
@@ -79,7 +82,8 @@ auto EventDispatcher::update_hover(const std::vector<HitNode> &chain) -> void {
         }
     }
     for (const HitNode &new_n : chain) {
-        Widget *sp = new_n.get();
+        std::shared_ptr<Widget> keepalive;  // 进入回调同理
+        Widget *sp = new_n.lock(keepalive);
         if (sp == nullptr) {
             continue;
         }
@@ -104,9 +108,11 @@ auto EventDispatcher::resolve_cursor(const std::vector<HitNode> &chain) -> Curso
     // 自最深（链尾）向根（链头）回溯：内层控件的光标声明覆盖外层容器。
     // 优先级：修饰链 CursorNode > Widget::cursor_shape() 虚钩子 > 含 Clickable → PointingHand。
     for (const auto &it : std::views::reverse(chain)) {
-        const Widget *sp = it.get();
+        // modifier() 返回控件成员的引用，须把强引用持住直到整段读取与虚钩子调用结束。
+        std::shared_ptr<Widget> keepalive;
+        const Widget *sp = it.lock(keepalive);
         if (sp == nullptr) {
-            continue;  // 弱引用已回收，安全跳过
+            continue;  // 守卫已失效或控件已在跨事件间被回收，安全跳过
         }
         const Modifier &mod = sp->modifier();
         if (const auto declared = mod.cursor_shape()) {
@@ -512,7 +518,10 @@ auto EventDispatcher::dispatch(Widget &root, ScrollEvent &e) -> bool {
         root.hit_test_chain(e.position, Rect{.origin = Point{}, .size = root.size()}, BuildContext{});
     bool has_scrollable = false;
     for (const auto &it : std::views::reverse(chain)) {
-        auto *w = it.ptr;
+        // 命中链节点可能已被虚拟列表回收：先按守卫判活，再在整跳派发期间持住强引用
+        // （on_scroll 回调可能重建页面、丢掉本控件最后一个强引用）。
+        std::shared_ptr<Widget> keepalive;
+        Widget *w = it.lock(keepalive);
         if (w == nullptr || !w->wants_scroll()) {
             continue;
         }

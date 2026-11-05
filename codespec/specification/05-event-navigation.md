@@ -351,7 +351,7 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 
 `dispatch(Widget&, ScrollEvent&)`（`event/dispatcher.cpp`）把滚轮判给**最近可滚动祖先**，并在内层吃到端点后把余量交给外层：
 
-1. 取命中链，自**最深**（链尾）向根遍历，跳过 `wants_scroll()` 为假的控件——可点击子控件（`Button` 等）不拦截滚轮，嵌套时最深滚动者优先。
+1. 取命中链，自**最深**（链尾）向根遍历；每个节点先按 `HitNode` 守卫经 `lock()` 判活并在整跳派发期间持住强引用，已回收节点整跳跳过（不得读裸 `ptr`），再跳过 `wants_scroll()` 为假的控件——可点击子控件（`Button` 等）不拦截滚轮，嵌套时最深滚动者优先。
 2. 每一跳先把 `e.remaining_y` 归零再调 `on_scroll`：**不写余量的 handler 视为全量消费**（默认 0），与旧「一次性消费、不冒泡」约定逐位兼容，既有自定义 `on_scroll` 无需改动。
 3. 该跳回传非零余量（clamp 后没吃尽的增量，与 `delta_y` 同单位同号）⇒ 令 `e.delta_y = e.remaining_y`，继续交给更浅一层可滚动祖先。
 4. 链上存在可滚动者但全部吃完仍有剩 ⇒ 止步（返回 `true`）；链上**无可滚动者** ⇒ 兜底回落点命中目标直接派发一次、不再冒泡（保持历史行为）。

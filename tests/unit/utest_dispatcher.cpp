@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -428,6 +429,123 @@ auto make_field_tree() -> FieldTree {
         Rect{.origin = Point{.x = 40.0F, .y = 0.0F}, .size = Size{.width = 40.0F, .height = 40.0F}});
     return FieldTree{.row = row, .left = left, .field = field};
 }
+
+/// 可注入自定义命中链的根：覆写后代命中钩子，把测试构造的 `HitNode` 送进派发器。
+/// 真实树无法自然产生「守卫已失效但控件仍存活」与「回调内销毁自身」这两类状态。
+class ChainInjectingRoot final : public LeafWidget {
+  public:
+    std::vector<HitNode> injected;
+    bool scrollable = false;
+    int scroll_calls = 0;
+
+    auto type_name() const -> const char * override { return "ChainInjectingRoot"; }
+
+    auto on_layout(const Constraints &c, [[maybe_unused]] const BuildContext &ctx) -> Size override {
+        size_ = c.constrain(Size{.width = 80.0F, .height = 40.0F});
+        return size_;
+    }
+
+    auto on_paint([[maybe_unused]] Painter &p, [[maybe_unused]] const Rect &bounds,
+                  [[maybe_unused]] const BuildContext &ctx) -> void override {}
+
+    [[nodiscard]] auto wants_scroll() const -> bool override { return scrollable; }
+
+    auto on_scroll(ScrollEvent &e) -> void override {
+        ++scroll_calls;
+        e.is_handled = true;
+        e.remaining_y = 0.0F;
+    }
+
+    auto on_hit_test_chain(const Point &local, [[maybe_unused]] const Rect &bounds,
+                           [[maybe_unused]] const BuildContext &ctx) -> std::vector<HitNode> override {
+        // 盒内才注入；盒外返回空链，使「移开」路径可构造。
+        if (local.x >= 0.0F && local.x < 80.0F && local.y >= 0.0F && local.y < 40.0F) {
+            return injected;
+        }
+        return {};
+    }
+};
+
+/// 造一枚「守卫已失效、但所指控件对象仍存活」的命中链节点。
+/// 别名 `shared_ptr` 让弱引用绑定一个独立控制块：控制块的最后一个强引用消失后 `lock()`
+/// 返回空，而控件本身由另一枚 `shared_ptr` 持有，`ptr` 仍指向有效对象——判据因此不依赖
+/// 悬垂内存是否碰巧未被复用，是可确定性区分的读数。
+[[nodiscard]] auto make_stale_node(Widget *live, const Point &origin = Point{}) -> HitNode {
+    auto block = std::make_shared<int>(42);
+    std::shared_ptr<Widget> alias(block, live);
+    std::weak_ptr<Widget> stale_guard = alias;
+    HitNode node(live, stale_guard, origin);
+    alias.reset();
+    block.reset();
+    return node;
+}
+
+/// 回调内释放自身用的外部观测台：所有状态都放在控件之外，
+/// 使控件即使在回调中被销毁，判据也只读外部内存，测试也无需向下转型。
+struct SelfReleaseProbe {
+    std::function<void()> release;  ///< 丢掉测试持有的最后一个强引用
+    bool destroyed = false;
+    bool destroyed_during_callback = false;
+    int hover_calls = 0;
+    bool release_on_hover = false;
+    bool release_on_cursor = false;
+    std::optional<CursorShape> declared_cursor = CursorShape::IBeam;
+};
+
+/// 在通知 / 虚钩子回调里经外部释放器丢掉自身最后一个强引用。
+/// 释放前先把观测台指针与释放器地址缓存到局部变量，释放后不读 `this` 的任何成员。
+class SelfReleasingBox final : public LeafWidget {
+  public:
+    explicit SelfReleasingBox(SelfReleaseProbe *probe) : probe_(probe) {}
+
+    ~SelfReleasingBox() override {
+        if (probe_ != nullptr) {
+            probe_->destroyed = true;
+        }
+    }
+
+    SelfReleasingBox(const SelfReleasingBox &) = delete;
+    SelfReleasingBox(SelfReleasingBox &&) = delete;
+    auto operator=(const SelfReleasingBox &) -> SelfReleasingBox & = delete;
+    auto operator=(SelfReleasingBox &&) -> SelfReleasingBox & = delete;
+
+    auto type_name() const -> const char * override { return "SelfReleasingBox"; }
+
+    auto on_layout(const Constraints &c, [[maybe_unused]] const BuildContext &ctx) -> Size override {
+        size_ = c.constrain(Size{.width = 40.0F, .height = 40.0F});
+        return size_;
+    }
+
+    auto on_paint([[maybe_unused]] Painter &p, [[maybe_unused]] const Rect &bounds,
+                  [[maybe_unused]] const BuildContext &ctx) -> void override {}
+
+    auto on_hover_change(bool entered) -> void override {
+        SelfReleaseProbe *const probe = probe_;
+        ++probe->hover_calls;
+        Widget::on_hover_change(entered);
+        if (!probe->release_on_hover) {
+            return;
+        }
+        auto *const release = &probe->release;  // 函数对象在外部，不随控件销毁
+        (*release)();
+        probe->destroyed_during_callback = probe->destroyed;
+    }
+
+    [[nodiscard]] auto cursor_shape() const -> std::optional<CursorShape> override {
+        SelfReleaseProbe *const probe = probe_;
+        const auto declared = probe->declared_cursor;
+        if (!probe->release_on_cursor) {
+            return declared;
+        }
+        auto *const release = &probe->release;
+        (*release)();
+        probe->destroyed_during_callback = probe->destroyed;
+        return declared;
+    }
+
+  private:
+    SelfReleaseProbe *probe_ = nullptr;
+};
 
 }  // namespace
 
@@ -1630,6 +1748,84 @@ AURORA_TEST_CASE(synthesized_pointer_and_scroll_events_carry_no_modifiers) {
     AURORA_TEST_CHECK_TRUE(real_scroll->scroll_by(-60.0F));  // 向下滚：视口下移
     AURORA_TEST_CHECK_NEAR(real_scroll->offset_y(), 60.0F, 1e-3F);
     AURORA_TEST_CHECK_EQ(static_cast<int>(content->scroll_count), 0);  // 未派发到子控件（无命中链）
+}
+
+AURORA_TEST_CASE(scroll_skips_recycled_hit_chain_nodes) {
+    auto root = std::make_shared<ChainInjectingRoot>();
+    root->scrollable = true;
+    root->layout(Constraints{}, BuildContext{});
+    auto live = std::make_shared<RecordingScroller>();
+
+    // 对照组：守卫有效时，最深节点先消费，更浅的可滚动祖先收不到。
+    std::weak_ptr<Widget> live_guard = live;
+    root->injected = {HitNode(live.get(), live_guard, Point{})};
+    ScrollEvent alive_event;
+    alive_event.position = Point{.x = 20.0F, .y = 20.0F};
+    alive_event.delta_y = -3.0F;
+    AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*root, alive_event));
+    AURORA_TEST_CHECK_EQ(static_cast<int>(live->modifier_log.size()), 1);
+    AURORA_TEST_CHECK_EQ(root->scroll_calls, 0);
+
+    // 判据组：同一控件对象仍存活，但守卫已失效 ⇒ 必须跳过它，把滚轮交给存活祖先。
+    root->injected = {make_stale_node(live.get())};
+    ScrollEvent stale_event;
+    stale_event.position = Point{.x = 20.0F, .y = 20.0F};
+    stale_event.delta_y = -3.0F;
+    AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*root, stale_event));
+    AURORA_TEST_CHECK_EQ(static_cast<int>(live->modifier_log.size()), 1);  // 没有新增
+    AURORA_TEST_CHECK_EQ(root->scroll_calls, 1);
+}
+
+AURORA_TEST_CASE(hover_keeps_widget_alive_across_leave_callback) {
+    auto root = std::make_shared<ChainInjectingRoot>();
+    root->layout(Constraints{}, BuildContext{});
+    SelfReleaseProbe probe;
+    std::shared_ptr<Widget> holder = std::make_shared<SelfReleasingBox>(&probe);
+    probe.release = [&holder] { holder.reset(); };
+
+    std::weak_ptr<Widget> guard = holder;
+    root->injected = {HitNode(holder.get(), guard, Point{})};
+
+    EventDispatcher dispatcher;
+    MouseEvent enter;
+    enter.position = Point{.x = 20.0F, .y = 20.0F};
+    enter.action = MouseAction::Move;
+    AURORA_TEST_CHECK_TRUE(dispatcher.dispatch_mouse(*root, enter));
+    AURORA_TEST_CHECK_EQ(probe.hover_calls, 1);  // 进入通知已送达
+
+    // 移到盒外：旧链上的控件收到离开通知；回调内丢掉测试持有的最后一个强引用。
+    probe.release_on_hover = true;
+    MouseEvent leave;
+    leave.position = Point{.x = 500.0F, .y = 500.0F};
+    leave.action = MouseAction::Move;
+    dispatcher.dispatch_mouse(*root, leave);
+
+    AURORA_TEST_CHECK_EQ(probe.hover_calls, 2);  // 离开通知确实送达
+    AURORA_TEST_CHECK_FALSE(probe.destroyed_during_callback);  // 回调期间控件不得析构
+}
+
+AURORA_TEST_CASE(cursor_resolution_keeps_widget_alive_across_hook) {
+    auto root = std::make_shared<ChainInjectingRoot>();
+    root->layout(Constraints{}, BuildContext{});
+    SelfReleaseProbe probe;
+    std::shared_ptr<Widget> holder = std::make_shared<SelfReleasingBox>(&probe);
+    probe.release = [&holder] { holder.reset(); };
+    probe.release_on_cursor = true;
+
+    std::weak_ptr<Widget> guard = holder;
+    root->injected = {HitNode(holder.get(), guard, Point{})};
+
+    EventDispatcher dispatcher;
+    std::vector<CursorShape> emitted;
+    dispatcher.set_cursor_handler([&emitted](CursorShape s) { emitted.push_back(s); });
+    MouseEvent move;
+    move.position = Point{.x = 20.0F, .y = 20.0F};
+    move.action = MouseAction::Move;
+    dispatcher.dispatch_mouse(*root, move);
+
+    AURORA_TEST_CHECK_FALSE(probe.destroyed_during_callback);
+    AURORA_TEST_REQUIRE_EQ(static_cast<int>(emitted.size()), 1);
+    AURORA_TEST_CHECK(emitted.back() == CursorShape::IBeam);
 }
 
 }  // namespace aurora::test_cases::utest_dispatcher

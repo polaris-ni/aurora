@@ -183,8 +183,9 @@ class EventDispatcher {
     std::unordered_map<int, std::vector<HitNode>> pointer_capture_;
 
     /// @brief 上次无捕获 Move 的悬停命中链。
-    ///        HitNode.widget 为 `std::weak_ptr<Widget>`：虚拟列表（LazyList）等滚动回收子控件时，
-    ///        悬停链中对应的弱引用失效，`update_hover` 经 `lock()` 检测后安全跳过，绝不解引用悬垂指针。
+    ///        `HitNode` 带生命周期守卫：虚拟列表（LazyList）等滚动回收子控件时，悬停链中
+    ///        对应的守卫失效，`update_hover` 经 `lock()` 判活后跳过已回收节点；对存活节点也
+    ///        持住强引用跨越 `on_hover_change` 通知，绝不在回调后解引用已释放的控件。
     std::vector<HitNode> hover_chain_;
 
     /// @brief 连击判定状态（按「按键 + 指针」独立计数）；阈值取 `click_window_ms` / `click_radius_dp`。

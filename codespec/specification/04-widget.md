@@ -572,6 +572,8 @@ Aurora 的「真值来源」仍是声明式 `Node` 树加 `XxxProps` 聚合属�
 
 凡要**解引用**命中链节点（调用 `on_pointer_event` / `focusable()` 等）都必须用 `lock()`：派发回调（用户 `on_click`）可能销毁控件自身所在子树（如点击按钮触发 `push_replacement` 重建页面），而回调返回后基类 `Widget::on_pointer_event` 仍要写 `pressed_` 等成员，用裸指针即 use-after-free。
 
+滚轮派发（`dispatch(Widget&, ScrollEvent&)`）、悬停 diff（`update_hover`）与悬停光标解析（`resolve_cursor`）三条链路径同样一律经 `lock()`：先按守卫判活、已回收节点整跳跳过，强引用持到该跳的通知 / 虚钩子调用结束。滚轮主路径不得读 `ptr` 绕过守卫；`get()` 只留在「是否同一控件」这类不解引用的比较里。
+
 **验收标准：** 控件继承深度 ≤ 2；`Widget` 上不存在任何几何字段；命中链的解引用路径全部经 `lock()` 持有强引用。
 
 ### 6.2 SPEC.FEAT.TOOLING.UI-TO-CODE.001 可逆性：UI → 代码的参考还原（控件侧）
