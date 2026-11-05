@@ -320,7 +320,7 @@ ctest -R itest_ai_compat
 | 全量构建 | `cmake --build build` 0 error | — |
 | 完整测试 | `ctest` 全绿（含 `aurora_test_runner` 单元 / 集成） | — |
 | API 漂移 | `ctest -R check_api_schema_sync` | `check_api_schema_sync` |
-| 命名一致性 | `ctest -R check_naming_conventions`（SPEC.API.NAMING-CONSISTENCY.001：类型 PascalCase、属性/事件/函数 snake_case、事件 `on_` 前缀） | `check_naming_conventions` |
+| 命名一致性 | `ctest -R check_naming_conventions`（SPEC.API.NAMING-CONSISTENCY.001：类型 PascalCase、属性/事件/函数 snake_case、事件 `on_` 前缀；另带属性公共面白名单一腿——继承链上类的 public 区除 `clear` 与 `rows` 外不得出现机制件（`assign` / `rebind` / `resolve` / `stated` / `get` / `read` / `present` / `bind` / `props_*`），也不得经 `using 基类::机制件;` 把 protected 的那一面再暴露出来；链外同名接口不归它管） | `check_naming_conventions` |
 | 零原生平台宏 | `ctest -R check_platform_macros`（SPEC.PLATFORM.ZERO-IFDEF.001：预处理分支禁原生平台/架构宏，规范化宏密度仅报告） | `check_platform_macros` |
 | API token 预算 | `ctest -R check_api_budget`（SPEC.PERF.API.TOKEN-EFFICIENCY.001：`aurora_api.json` 估算 token 数 ≤ 预算） | `check_api_budget` |
 | 无写死本机路径 | `ctest -R check_no_hardcoded_paths`（禁止盘符 / 用户主目录等本机专属绝对路径入库，外部路径须显式传入） | `check_no_hardcoded_paths` |
