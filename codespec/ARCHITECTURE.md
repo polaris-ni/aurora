@@ -424,7 +424,7 @@ Aurora 内置轻量级运行时性能检测体系，提供帧级指标采集、�
 ### 10.5 硬约束
 
 - **快速路径逐位一致**：所有快速路径必须与慢路径 golden 零差异，修改后须跑 `utest_offscreen` 全量回归。
-- **SIMD 双实现确定性**：SIMD 路径必须与标量黄金路径逐位一致（`-ffp-contract=off`、同浮点运算序列、整型 `cvtt` 截断）；CI 由 `utest_simd_parity` 逐位比对，一票否决。
+- **SIMD 双实现确定性**：SIMD 路径必须与标量黄金路径逐位一致（`-ffp-contract=off`、同浮点运算序列、整型 `cvtt` 截断）；CI 由 `utest_simd_parity` 逐位比对，一票否决。实物落点是 `tests/unit/utest_simd_parity.cpp`：五组「标量 ↔ SSE2 ↔ AVX2」三元组各以同一份确定性输入逐字节比对，混合与扫描线覆盖非 4/8 倍数的尾部回落，关闭档与非 x86 档在用例体内按能力退让声明不失踪；「文档声明的现役门禁名是否真的注册」另由 `check_declared_gates` 守护（见 §14.6）。
 
 ### 10.6 调试能力的设计依据
 
@@ -627,6 +627,7 @@ CI 配置位于 `.github/workflows/`：
 | i18n 词表数据（`codespec/i18n_builtin.json`、`gen_i18n` 及其 fixture、`AUM1` 布局） | `check_i18n_gen_golden`（先 `--target gen_i18n`；确定性 / 参数序无关 / golden 逐字节 / 内置同源锁 / 错误类不落盘 / warn-only / 非空转七条腿）+ `itest_i18n_pipeline` | `specification/08-tooling.md`（CLI 与校验）、`specification/07-environment-modifier.md` §6（值模型与 bin 布局） |
 | NOLINT 豁免排版 | `check_nolint_layout` | `CODING_STANDARDS.md` §5.2 |
 | 测试文件 | `registry_integrity`、`check_test_temp_hygiene`、`framework_selftest` | `CODING_STANDARDS.md` §3 |
+| 在文档 / CI 里声明为「现役一票否决」的 CTest 名 | `check_declared_gates`（以 `tools/check/declared_gates.txt` 的显式审定清单核对本构建 `CTestTestfile.cmake` 的 `add_test()` 集合；清单为空 / 解析不到注册名 / 声明名未注册 / 名字同时进豁免表均硬失败，分片名 `<stem>_s<N>` 亦算命中）；`utest_simd_parity` 另跑逐位比对 | `specification/08-tooling.md` §7.4.3、`BUILD_OPTIONS.md` §4.2、`CODING_STANDARDS.md` §6.8；新增声明时同步清单与豁免表 |
 | `codespec/` 文档与交叉引用 | `check_codespec_xref`、`check_code_doc_sync` | 本文件 §14 / §15 |
 | `codespec/manual-test/*.md` | `check_manual_test_format` | — |
 | 仓库入口 `AGENTS.md` 本身 | `check_agents_size`（> 8 KiB 红灯；超限时把细节下沉 `codespec/`，不得放宽阈值） | 本表（把细则搬回这里） |

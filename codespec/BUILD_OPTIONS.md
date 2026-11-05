@@ -419,7 +419,7 @@ cmake -S . -B build-trace -DCMAKE_BUILD_TYPE=Release -DAURORA_ENABLE_TRACING=ON
 | feature 宏 | 注入 `AURORA_ENABLE_SIMD`，**仅库内部使用，不 PUBLIC 传播、不导出给消费者** |
 | 编译期行为 | `ON`：编译 `painter_simd.inl` 中的 SSE2（x86-64 基线恒可用）+ AVX2（运行时 CPUID 分发）快路径；`OFF`：仅编译标量黄金路径（`gradient_*_scanline_scalar`），无 SIMD 代码生成 |
 | 运行时分发 | `detect_simd_level()` 懒初始化 `g_simd_level`；SSE2 恒可用，AVX2 仅在 CPU 支持时启用，未支持则回退 SSE2 / 标量尾补 |
-| 确定性约束 | SIMD 路径必须与标量黄金路径**逐位一致**（`-ffp-contract=off` 禁 FMA + 同序浮点运算 + `cvtt` 整型截断）；CI 由 `utest_simd_parity` 逐位比对，一票否决 |
+| 确定性约束 | SIMD 路径必须与标量黄金路径**逐位一致**（`-ffp-contract=off` 禁 FMA + 同序浮点运算 + `cvtt` 整型截断）；CI 由 `utest_simd_parity` 逐位比对，一票否决。实物是 `tests/unit/utest_simd_parity.cpp`（ON 档五组三元组逐字节比对、OFF 档在用例体内 `AURORA_TEST_SKIP` 且套件仍注册）；「声明现役即须真实注册」由 `check_declared_gates` 核对清单与 CTest 注册集合，判据见 `ARCHITECTURE.md` §14.6 与 `specification/08-tooling.md` §7.4.3 |
 
 该开关为**纯内部优化开关**：消费者代码与 ABI 均不感知 SIMD 是否存在，关闭后仅损失性能、不改变任何像素输出。开启 SIMD 不引入新的公共 API；相关函数位于 `aurora::detail`（`include/aurora/render/detail/painter_simd.h`），不计入 `aurora_api.json`。
 

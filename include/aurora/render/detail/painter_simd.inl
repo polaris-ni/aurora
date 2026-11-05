@@ -1,5 +1,6 @@
 // Aurora — 光栅内核 SIMD 双实现
-// 本文件被 painter.cpp 与 tests/test_simd_parity.cpp 共同 include，故全部为 header 内联。
+// 本文件被 painter.cpp 与 tests/unit/utest_simd_parity.cpp 共同 include，故全部为 header 内联；
+// 后者拿同一份内联定义逐位比对标量黄金与 SSE2 / AVX2，不复刻一份实现去比对复刻件。
 // 浮点运算序列严格镜像标量黄金实现（-ffp-contract=off 由 CMake 保证），整型截断用 cvtt。
 #pragma once
 #include <cmath>

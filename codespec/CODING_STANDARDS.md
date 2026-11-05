@@ -357,7 +357,7 @@
 
 - **动机**：① 双实现随时间演化漂移会产生「SIMD 开启 / 关闭给出不同像素」的静默正确性 bug；② parity 测试覆盖不到的边界输入（alpha = 0 / 255、非 8 倍数宽、负坐标、裁剪边界）是漂移高发区。
 - **约束**：SIMD 路径须沿用标量浮点运算序列（同序、`-ffp-contract=off` 禁 FMA），整型截断统一用 `cvtt`（`_mm_cvttps_epi32` / `_mm256_cvttps_epi32`），sRGB 转换沿用同一 LUT；禁止为「提速」引入标量未做的近似或重排。
-- **验收**：每次改动后 `utest_simd_parity` 必须 0 failure（一票否决）；若某函数无法在保持逐位一致前提下向量化，停下来单独提出，不擅自放宽。
+- **验收**：每次改动后 `utest_simd_parity` 必须 0 failure（一票否决）；若某函数无法在保持逐位一致前提下向量化，停下来单独提出，不擅自放宽。实物在 `tests/unit/utest_simd_parity.cpp`，五组三元组逐字节比对且每例以非空缓冲为前提；新写一条「现役门禁」声明时同步 `tools/check/declared_gates.txt`，由 `check_declared_gates` 核对它真的注册在 CTest 里——**声明现役即须真实注册**，示例 / 历史 / 规划名进带理由的豁免表，不进清单。
 - **开关**：`AURORA_ENABLE_SIMD` 默认 ON，OFF 时仅编译标量路径；双实现均属 `aurora::detail` 内部，不计入 `aurora_api.json`。
 
 ### 6.9 错误可机读与局部修复建议

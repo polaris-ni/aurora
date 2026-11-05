@@ -651,6 +651,16 @@ gen_i18n --emit-builtin <out.hpp> <builtin.json>
 
 > 与 C++ 侧的分工：`tests/integration/itest_i18n_pipeline.cpp` 验「生成件能被 `MessageCatalog` 正确载入并解析」，本门禁验「生成件本身没漂移」。两条都要跑，缺一条就是半边失控。
 
+### 7.4.3 现役门禁声明的注册核对（`check_declared_gates`）
+
+文档与 CI 注释把某个 CTest 名写成「逐位比对、一票否决」时，此前没有任何门禁核对这个名字是不是真的注册过。`cmake/AuroraTests.cmake` 按 `tests/*.cpp` 的文件 stem GLOB 注册，源文件不存在即零验证；`check_codespec_xref` 的 R4 只校验带扩展名且含路径分隔符的反引号 token（裸名当符号提及跳过），`check_test_registry.py` 比对的是 runner 用例表与源码宏、完全不读文档。于是「声明为现役」到「CTest 真实注册」之间是空的。
+
+**门禁 `check_declared_gates`**（`tools/check/check_declared_gates.py <build-dir>`）以本构建目录的 `CTestTestfile.cmake`（含 `subdirs()` 递归）为注册真值，逐项核对 `tools/check/declared_gates.txt` 里**显式审定**的现役声明名；分片 runner 注册的 `<stem>_s<N>` 亦算 `<stem>` 命中。四类硬失败：清单解析为空、注册集合解析为空、任一声明名未注册、同一名字同时进清单与豁免表。`tools/check/declared_gates_exemptions.txt` 逐条写明命名示例 / 历史退场 / 提案待建 / 正则误抓的理由；豁免名哪天真的注册了只打印清理提示、不判红。
+
+> 为什么不做「扫文档裸名自动判」：全量审计 21 个未注册名里只有 1 个是真幽灵，其余 20 个是命名示例、已随源退场的历史引用、提案里的待建名与 `check_color` 一类属性名，自动判误报率过高。生成器依赖型门禁（`check_api_schema_sync` 等）在 Emscripten 交叉构建下按 `AuroraTests.cmake` 的口径不注册，故**不进声明清单**，否则会把本来绿的交叉构建判红。
+
+配套实物 `tests/unit/utest_simd_parity.cpp` 直接包含 `painter_simd.inl` 拿同源内联定义，对五组「标量黄金 ↔ SSE2 ↔ AVX2」三元组以同一份确定性输入逐字节比对，扫描线两组按 SIMD 返回值裁剪向量段、再按生产分发形态用标量补齐尾部后比整行；`AURORA_ENABLE_SIMD=OFF` 或非 x86 档五例在**用例体内** `AURORA_TEST_SKIP`，声明不被 `#ifdef` 摘掉，`registry_integrity` 不漂移。
+
 ### 7.5 真机验收探针（`tools/verify/`）
 探针证明的是**无头 CI 无法证明**的平台接线：单元测试只能断言到「平台中立层」（快照 / diff / 偏移映射 / 动作路由），而「平台回调是否真的到达、平台侧对象是否真的可查」只能建真实窗口、在真实桌面会话里验收。全部由 `cmake/AuroraVerify.cmake` 定义、`AURORA_BUILD_VERIFY_TOOLS` 门控、**不进 CTest**（会创建真实窗口 / 读取屏幕状态，非确定且干扰用户桌面）。
 

@@ -186,6 +186,14 @@ if (AURORA_BUILD_TESTS)
         add_test(NAME check_no_cjk_literals
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_no_cjk_literals.py"
                 WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
+        # 幽灵门禁守护：文档声明为现役的 CTest 名必须在本次构建里真实注册。以显式审定的
+        # declared_gates.txt 为基准（不扫文档裸名：全量审计 21 个未注册名里 20 个是示例 /
+        # 历史 / 规划 / 误抓），declared_gates_exemptions.txt 逐条写明豁免理由；清单为空、
+        # 解析不到任何注册名、声明名未注册、名字同时进清单与豁免表一律硬失败。
+        # 注册真值取本构建目录的 CTestTestfile.cmake，故需把构建目录作位置参数传入。
+        add_test(NAME check_declared_gates
+                COMMAND ${PYTHON3_EXE} "${_check_dir}/check_declared_gates.py" "${CMAKE_BINARY_DIR}"
+                WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
     endif ()
 
     # ---- 空源集 guard ----

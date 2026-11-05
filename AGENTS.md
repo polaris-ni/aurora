@@ -38,6 +38,7 @@ cmake --build build --target aurora_api_json # 改 widget / 类型 / 属性键�
 | `core/` 依赖/边界/目录/伞头 | `check_core_layer_boundary`、`check_arch_module_map`、`check_umbrella_header` |
 | 平台/后端分支、feature 宏 | `check_platform_macros` + CI `toggles` 矩阵 |
 | `codespec/` 文档与交叉引用 | `check_codespec_xref`、`check_code_doc_sync`、`check_manual_test_format`、`check_change_proposals` |
+| 新增「现役一票否决」门禁声明 | `check_declared_gates`（同步 `tools/check/declared_gates.txt`；声明须真实注册） |
 
 `lint` 门禁耗时较长，本地只跑改动文件。
 
