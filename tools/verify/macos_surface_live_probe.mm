@@ -115,11 +115,41 @@ auto pump_queue(int rounds) -> void {
 /// @param steps 拖拽段数。
 /// @param step_pt 每段位移（AppKit point，作用于窗口自身坐标系）。
 auto post_corner_drag(NSWindow *window, int steps, double step_pt) -> void {
-    // 先把窗口置于序上并泵空队列，再投拖拽。实测前提是这两件事而不是 key 位：不这样做时同一份
-    // 投递一次改尺都不发生，而改尺成功的那一行 `isKeyWindow` 在本机读到过 0 也读到过 1（观测行见下），
-    // 故 key 读数只作观测、不进判据。这与 OS 输入探针的 priming 同族，但实测该语义没有挡住本腿改尺。
+    // 前提一：窗口在序且队列已泵空——不这样做时同一份投递一次改尺都不发生。
     [window makeKeyAndOrderFront:nil];
     pump_queue(60);
+    // 前提二：起笔前先向窗框几何中心（本探针的窗口无控件内容，落点中性）补投一次「按下—抬起」作 priming。
+    // 不加这层 priming 时本腿偶发转红（同一份二进制三连跑里两轮 `300x200 -> 300x200`），加上之后稳定改尺。
+    // key 位不是这里的机制：后台图形会话里 `isKeyWindow` 恒为 0 而改尺照常发生，primed 到位的轮次同样读 0。
+    // 与实测形态最不矛盾的解释是 AppKit「点击获焦」的一次性代价——非 key 窗口欠着的第一个 `mouseDown:`
+    // 被用作获焦而不转给窗框视图（与 OS 输入探针的 priming 同族语义），于是拖拽起笔被吃掉；priming 把这笔
+    // 代价提前吃掉，起笔才落到窗框上。该解释未取证，故判据只锚「priming 之后必须改尺」，不锚任何 key /
+    // 焦点读数，也不做「按 key 位重试」（后台会话取不到 key 位，那种重试判据恒不成立）。轮数取实测下界：
+    // 单轮即稳定（本机连跑六轮、格式化后复跑一轮同为 82/82）。
+    constexpr int k_priming_rounds = 1;
+    for (int round = 0; round < k_priming_rounds; ++round) {
+        const NSRect self_frame = [window frame];
+        const NSPoint center =
+            NSMakePoint(NSMidX(self_frame) - self_frame.origin.x, NSMidY(self_frame) - self_frame.origin.y);
+        const NSTimeInterval prime_base = [NSProcessInfo processInfo].systemUptime;
+        const auto post_prime = [&](NSEventType type, NSInteger number) {
+            NSEvent *event = [NSEvent mouseEventWithType:type
+                                                location:center
+                                           modifierFlags:0
+                                               timestamp:prime_base + (0.01 * static_cast<double>(number))
+                                            windowNumber:[window windowNumber]
+                                                 context:nil
+                                             eventNumber:number
+                                              clickCount:1
+                                                pressure:1.0F];
+            if (event != nil) {
+                [NSApp postEvent:event atStart:NO];
+            }
+        };
+        post_prime(NSEventTypeLeftMouseDown, 1);
+        post_prime(NSEventTypeLeftMouseUp, 2);
+        pump_queue(60);
+    }
     const NSRect frame = [window frame];
     // 起笔取屏幕坐标的窗框右下角（与本库 `position()` 的左上原点口径无关，这里是 AppKit 的
     // 左下原点屏幕系），再换算进窗口自身坐标系——直接按约定手算会把拖拽点静默投偏。
@@ -130,13 +160,14 @@ auto post_corner_drag(NSWindow *window, int steps, double step_pt) -> void {
                    fmt_float(frame.origin.y), " screen_corner=(", fmt_float(screen_corner.x), ",",
                    fmt_float(screen_corner.y), ") local=(", fmt_float(start.x), ",", fmt_float(start.y),
                    ") visible=", [window isVisible] != 0 ? "1" : "0", " key=", [window isKeyWindow] != 0 ? "1" : "0",
-                   "\n");
+                   " primed=", k_priming_rounds, " mouse_loc=", [NSEvent mouseLocation].x, ",",
+                   [NSEvent mouseLocation].y, "\n");
     // 时间戳基准取系统开机秒（AppKit 事件时间戳的同源时基）而非 `[NSApp currentEvent]`：队列此刻
     // 可能为空，currentEvent 为 nil 会把整串拖拽压到 0.0 附近，AppKit 的窗框跟踪逻辑按时间戳判序，
     // 实测那种形态下一个事件都不生效。
-    const NSTimeInterval base = static_cast<NSTimeInterval>([NSProcessInfo processInfo].systemUptime);
+    const NSTimeInterval base = [NSProcessInfo processInfo].systemUptime;
 
-    const auto post = [&](NSEventType type, NSPoint at, NSInteger number, NSTimeInterval when, CGFloat pressure) {
+    const auto post = [&](NSEventType type, NSPoint at, NSInteger number, NSTimeInterval when, float pressure) {
         NSEvent *event = [NSEvent mouseEventWithType:type
                                             location:at
                                        modifierFlags:0
@@ -150,15 +181,15 @@ auto post_corner_drag(NSWindow *window, int steps, double step_pt) -> void {
             [NSApp postEvent:event atStart:NO];
         }
     };
-    post(NSEventTypeLeftMouseDown, start, 1, base + 0.01, 1.0);
+    post(NSEventTypeLeftMouseDown, start, 1, base + 0.01, 1.0F);
     for (int i = 1; i <= steps; ++i) {
         const double moved = static_cast<double>(i) * step_pt;
-        post(NSEventTypeLeftMouseDragged, NSMakePoint(start.x + moved, start.y - moved), static_cast<NSInteger>(10 + i),
-             base + 0.02 * static_cast<double>(i), 1.0);
+        post(NSEventTypeLeftMouseDragged, NSMakePoint(start.x + moved, start.y - moved), static_cast<NSInteger>(i) + 10,
+             base + (0.02 * static_cast<double>(i)), 1.0F);
     }
     const double total = static_cast<double>(steps) * step_pt;
     post(NSEventTypeLeftMouseUp, NSMakePoint(start.x + total, start.y - total), 99,
-         base + 0.02 * static_cast<double>(steps + 1), 0.0);
+         base + (0.02 * static_cast<double>(steps + 1)), 0.0F);
     pump_queue(400);
 }
 
