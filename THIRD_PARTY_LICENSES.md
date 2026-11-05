@@ -221,7 +221,43 @@ freely, subject to the following restrictions:
 
 ---
 
-## 9. Unicode Character Database — 码点宽度判定数据
+## 9. mbedTLS — TLS 后端（可选依赖）
+
+- **版本**：3.6.7（`third_party/mbedtls/include/mbedtls/build_info.h`：`MBEDTLS_VERSION_MAJOR=3` / `MINOR=6` / `PATCH=7`，3.6 LTS 线）
+- **来源**：vendored 于 `third_party/mbedtls/`（含 `framework/` 子模块内容，源码保持上游原样、不做本地修改）
+- **用途**：`AURORA_ENABLE_NET_TLS_MBEDTLS=ON` 时编译内置 `TlsBackendMbedTls` 后端（TLS 1.2/1.3、X.509 校验证书链、PSA Crypto 同树），见 `codespec/BUILD_OPTIONS.md`
+- **集成方式**：仅开关开启时经 `add_subdirectory(third_party/mbedtls EXCLUDE_FROM_ALL)` 源码构建，产出静态归档 `mbedtls` / `mbedx509` / `mbedcrypto`（链接序 mbedtls → mbedx509 → mbedcrypto），关闭测试与示例（`ENABLE_TESTING=OFF` / `ENABLE_PROGRAMS=OFF`）。默认 OFF，关闭时链接产物完全不含该组件；与 OpenSSL provider 互斥共存于 TLS 注册表
+- **许可**：双许可 **Apache-2.0 OR GPL-2.0-or-later**（用户可任选其一），SPDX 标识 `Apache-2.0 OR GPL-2.0-or-later`；两份完整文本并列于 `third_party/mbedtls/LICENSE`（同文件内含 Apache 2.0 与 GPL 2.0 全文）
+- **许可声明（节选）**
+
+```
+Mbed TLS files are provided under a dual Apache-2.0 OR GPL-2.0-or-later license.
+This means that users may choose which of these licenses they take the code under.
+```
+
+---
+
+## 10. libjpeg-turbo — JPEG 编解码（可选依赖）
+
+- **版本**：3.2.1（`cmake/AuroraImageCodecs.cmake`：`VERSION "3.2.1"` / `LIBJPEG_TURBO_VERSION_NUMBER "3020001"`；`JPEG_LIB_VERSION=80` 对应 libjpeg v8 ABI）
+- **来源**：vendored 于 `third_party/libjpeg-turbo/`（其 CMakeLists 显式禁止 `add_subdirectory`，故由本仓直编指定 `.c` 源 + `configure_file` 生成 `jconfig.h` / `jconfigint.h`）
+- **用途**：`AURORA_ENABLE_IMAGE_JPEG=ON` 时经 `jpeg_turbo_codec.cpp` 以 `<jpeglib.h>` 接口编解码 JPEG（仅取 libjpeg API 库，turbojpeg / cjpeg / djpeg 工具与示例有意不编）
+- **集成方式**：独立静态源编入 `aurora`，`AURORA_ENABLE_IMAGE_JPEG` 默认 OFF，关闭时链接产物完全不含该组件
+- **许可**：双 BSD 风格许可，均宽松、兼容静态链接分发：
+  - **IJG License**（Independent JPEG Group，见 `third_party/libjpeg-turbo/README.ijg`）——适用于 libjpeg API 库及继承自 libjpeg 的代码与修改
+  - **Modified (3-clause) BSD License**（见 `third_party/libjpeg-turbo/LICENSE.md`）——适用于 TurboJPEG API 库、构建/测试系统
+  - SIMD 源码与内置 zlib 以 zlib License 覆盖，在该组件整体语境下被上述两许可吸收
+- **许可全文（节选）**
+
+```
+libjpeg-turbo is covered by two compatible BSD-style open source licenses:
+- The IJG (Independent JPEG Group) License, which is listed in README.ijg
+- The Modified (3-clause) BSD License, which is listed below
+```
+
+---
+
+## 11. Unicode Character Database — 码点宽度判定数据
 
 - **版本**：18.0.0（`EastAsianWidth-18.0.0.txt` 与 `DerivedGeneralCategory-18.0.0.txt`，文件头日期
   2026-06-29）
@@ -256,7 +292,7 @@ Full text: https://www.unicode.org/license.txt
 
 ---
 
-## 10. CLDR Plural Rules — 复数规则判定数据
+## 12. CLDR Plural Rules — 复数规则判定数据
 
 - **版本**：CLDR 48（Unicode 16.0.0；`cldr-json` 仓库 `cldr-json/cldr-core/supplemental/plurals.json` 与
   `ordinals.json`）
@@ -266,13 +302,13 @@ Full text: https://www.unicode.org/license.txt
   `@integer` / `@decimal` 样例
 - **用途**：`aurora::plural_category()` 与 `plural_category_ordinal()`（`include/aurora/i18n/plural.h`）把计数
   值映射到 CLDR 复数类别，见 `codespec/specification/07-environment-modifier.md` §6
-- **许可**：Unicode License v3（全文同第 9 节；再生成判定表时须带上所依据的数据文件与 CLDR 版本，以便追溯
+- **许可**：Unicode License v3（全文同第 11 节；再生成判定表时须带上所依据的数据文件与 CLDR 版本，以便追溯
   数据口径）
 
 ---
 
 ## 合规说明
 
-- 上述组件均以源码形式 vendored 于仓库内，版本锁定、可审计；除 wgpu-native 的 Rust 依赖树（首次构建需 cargo 在线拉取，见第 8 节）外均可无网络构建。第 9 节 Unicode UCD 与第 10 节 CLDR Plural Rules 是**同类例外**：源数据文件不入库，入库的是按其许可导出的判定表，版本与导出来源就写在各节内，可审计口径不变。
-- FreeType（FTL）与 HarfBuzz（Old MIT）、zlib（zlib）、stb_image（Public Domain/MIT）、Noto Sans（OFL）、GLFW（zlib/libpng，仅 `AURORA_BACKEND_GLFW=ON` 时编入）、wgpu-native（MIT OR Apache-2.0，仅 `AURORA_BACKEND_GPU_WGPU=ON` 时编入）、SQLite（Public Domain，仅 `AURORA_ENABLE_STORAGE_SQLITE=ON` 时编入）、Unicode UCD（Unicode License v3，导出区间表随库交付）、CLDR Plural Rules（Unicode License v3，导出判定表随库交付）均为自由/宽松/公版许可，兼容 Aurora 的静态库分发模式。
+- 上述组件均以源码形式 vendored 于仓库内，版本锁定、可审计；除 wgpu-native 的 Rust 依赖树（首次构建需 cargo 在线拉取，见第 7 节）外均可无网络构建。第 11 节 Unicode UCD 与第 12 节 CLDR Plural Rules 是**同类例外**：源数据文件不入库，入库的是按其许可导出的判定表，版本与导出来源就写在各节内，可审计口径不变。
+- FreeType（FTL）与 HarfBuzz（Old MIT）、zlib（zlib）、stb_image（Public Domain/MIT）、Noto Sans（OFL）、GLFW（zlib/libpng，仅 `AURORA_BACKEND_GLFW=ON` 时编入）、wgpu-native（MIT OR Apache-2.0，仅 `AURORA_BACKEND_GPU_WGPU=ON` 时编入）、SQLite（Public Domain，仅 `AURORA_ENABLE_STORAGE_SQLITE=ON` 时编入）、mbedTLS（Apache-2.0 OR GPL-2.0-or-later 双许可，仅 `AURORA_ENABLE_NET_TLS_MBEDTLS=ON` 时编入）、libjpeg-turbo（IJG License + Modified BSD 3-Clause 双 BSD 风格许可，仅 `AURORA_ENABLE_IMAGE_JPEG=ON` 时编入）、Unicode UCD（Unicode License v3，导出区间表随库交付）、CLDR Plural Rules（Unicode License v3，导出判定表随库交付）均为自由/宽松/公版许可，兼容 Aurora 的静态库分发模式。
 - 许可全文以各组件目录内原始 `LICENSE.TXT` / `COPYING` / 头注释为权威来源；本文件仅作索引与归档。
