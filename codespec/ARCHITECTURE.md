@@ -251,6 +251,7 @@ drain_posted → pump_all_once → on_frame_ → 关闭闸门询问步 poll_clos
 
 - **`Painter`**：纯软件栅格（RGBA8 帧缓冲），不依赖 GPU；接口为纯函数式（给定节点 + 约束 → 确定像素），支持确定性快照比对。
 - **圆角抗锯齿裁剪**：`Painter` 用 SDF coverage + 1px 羽化。
+- **圆角填充的行级全覆写快路径**：`fill_rect_slow_path` 逐行先求「coverage 恒为 1」的 x 区间，区间内整行批量混合、只有过渡区逐像素求 SDF，避免整块矩形都付 `sqrt` 的代价。区间求解的半径必须是**含 AA 阈值的有效半径** `rad + t`（`t = −0.5` 抗锯齿 / `0` 硬边）：圆弧段解根 `sqrt((rad + t)² − py²)`、越界判定 `py > rad + t`、直边段半宽 `hw + t`；右界取 `floor(cx + half_range) + 1`。把 `t` 直接当半径会漏掉几乎全部行——**胶囊形（半径 = 半高）会整条退回逐像素**，普通圆角矩形只在两端各 `rad` 行受影响，因此该缺陷只在胶囊控件上成片显形。快路径必须在这些形态上与逐像素 coverage 逐位一致（判据见 §10.5）。
 - **矢量描边原语**：`draw_line(a, b, width, color)`（点到线段距离 SDF，圆帽 + 1px 羽化）、`fill_rounded_rect(r, radius, color)`、`draw_rounded_border(r, radius, thickness, color)`（圆角矩形 SDF 带状覆盖、向内描边）；三者均接入 Display List 录制回放，回放与直绘逐位一致。
 - **GPU 栅格后端（`GpuGlRhi`）**：`DisplayList` 的第二类消费者（与软件 `Painter` 平级，见 §2 命令流与执行分离）。语义与软件路径**同源**——渐变经 1D LUT 纹理复现软件采样；图像预乘 alpha（PMA）上传、`ONE/ONE_MINUS_SRC_ALPHA` 混合规避半透明缩放暗晕；文本复用软件 `GlyphAtlas` 光栅化（经字形发射桥 `emit_text_glyphs`，shaping / 度量 / 缓存单一代码路径）；Shadow/Blur/Blend/Mask 按软件逐像素公式以 SDF / ping-pong pass 等价实现。GL 函数表自写最小 loader（无 GLAD/gl3w），GL 上下文创建与呈现由所在 Surface（GLFW）承担，本后端只做「DisplayList → 批渲染」。**常驻资源双通道**：GPU 层缓存把 `cache_layer` 子树重定向到 FBO 常驻层纹理（epoch + 尺寸键控失效，干净帧仅一条 `DrawLayer` 合成；软件回退经 `SoftwareRhi` 进程级全局层存储语义对齐）；流式纹理常驻槽按 `stream_key` 寻址、`stream_version` 门控增量子上传（视频 / 大图逐帧更新免全量重传）。能力位 `RhiCapabilities` 与原生 GPU 表面导入 `import_native_surface` 为后端无关契约位（GL 恒返回 0，供平台互操作后端兑现）。
 - **wgpu GPU 栅格后端（`WgpuRhi` + `WgpuWin32Surface`）**：跨平台 GPU 主力路径——同一套 WGSL 管线经 wgpu-native（Rust 静态库，源码 vendored 于 `third_party/wgpu-native/`，cargo 构建）覆盖 Vulkan / D3D12 / Metal / GLES。命令消费面与 `GpuGlRhi` 实现同一 `RhiBackend` + `RhiFrameSink` 契约、语义同源（SDF 裁剪 / LUT 渐变 / PMA 图像 / 字形图集复用 / 层缓存 + 流式槽）；另有离屏模式（`read_pixels` 全帧读回，测试与探针通道）。compute 实路径：静态大图整条 mip 链由 `cs_mip` compute shader 逐级生成、`DrawImage` 缩小走三线性 mip 采样（`compute` 能力位 Vulkan/D3D12/Metal 端为 true，GLES 端与管线构建失败时如实回落单级 + lod0）。宿主接线：`WgpuWin32Surface` 复用 `Win32Host` 宿主、`WgpuX11Surface` / `WgpuWaylandSurface` 组合内嵌 `X11Surface` / `WaylandSurface` 宿主，做 GPU 直渲上屏（`end_frame` 内 present），失败永久回退软件上传路径（GDI / XPutImage / wl_shm）；`RendererPreference::GpuWgpu` 强制路由不降级（Linux `create_native_window` 运行期按 `WAYLAND_DISPLAY` 会话择宿主）。规格见 `specification/03-layout-render.md` §8.8。
@@ -423,7 +424,7 @@ Aurora 内置轻量级运行时性能检测体系，提供帧级指标采集、�
 
 ### 10.5 硬约束
 
-- **快速路径逐位一致**：所有快速路径必须与慢路径 golden 零差异，修改后须跑 `utest_offscreen` 全量回归。
+- **快速路径逐位一致**：所有快速路径必须与慢路径 golden 零差异，修改后须跑 `utest_offscreen` 全量回归。圆角填充的行级全覆写快路径由 `utest_painter` 的逐位用例单独钉住：以「圆角裁剪 + 逐像素 `blend_pixel`」作独立基准，对正胶囊 / 胶囊偏锚点 / 普通圆角 / 普通圆角偏锚点四种形态比对 `fill_rounded_rect` 的输出，要求 0 像素差异——覆盖度差一档即转红。
 - **SIMD 双实现确定性**：SIMD 路径必须与标量黄金路径逐位一致（`-ffp-contract=off`、同浮点运算序列、整型 `cvtt` 截断）；CI 由 `utest_simd_parity` 逐位比对，一票否决。实物落点是 `tests/unit/utest_simd_parity.cpp`：五组「标量 ↔ SSE2 ↔ AVX2」三元组各以同一份确定性输入逐字节比对，混合与扫描线覆盖非 4/8 倍数的尾部回落，关闭档与非 x86 档在用例体内按能力退让声明不失踪；「文档声明的现役门禁名是否真的注册」另由 `check_declared_gates` 守护（见 §14.6）。
 
 ### 10.6 调试能力的设计依据

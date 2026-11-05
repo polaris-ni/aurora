@@ -3,8 +3,10 @@
 /// 测试说明: 覆盖 Painter 的画布分配与零基底、fill_rect 覆写与 alpha 混合、clear_rect 复位、draw_rect 描边、
 /// 裁剪栈（矩形/圆角/边界查询）、global_alpha 乘入、blend_pixel、draw_image 缩放、线性渐变方向、
 /// draw_line 覆盖、shift_pixels 垂直搬移、to_image 导出与 get_pixel 越界兜底、draw_text_runs 与逐个
-/// draw_text 的逐位一致及空批无操作、带 opts/aa_mode 的批量入口与逐个 draw_text(..., aa_mode, opts) 逐位一致
+/// draw_text 的逐位一致及空批无操作、带 opts/aa_mode 的批量入口与逐个 draw_text(..., aa_mode, opts) 逐位一致、
+/// 圆角填充的行级全覆写快路径与逐像素 coverage 在胶囊/普通圆角（含非整数锚点）上逐位一致
 
+#include <cmath>
 #include <span>
 #include <string>
 
@@ -202,6 +204,56 @@ AURORA_TEST_CASE(rounded_fill_cuts_corners) {
 
     AURORA_TEST_CHECK_EQ(p.get_pixel(4, 4), Color::red());  // 中心填满
     AURORA_TEST_CHECK_LT(p.get_pixel(0, 0).a, 255);  // 圆角外未填满
+}
+
+// 圆角填充的「行级全覆写快路径」必须与逐像素 coverage 逐位一致。胶囊形（radius 等于半高）
+// 是行级快路径的边界形态：直边段高度为零，每一行都落在圆弧带里。旧实现把这一形态整行判成
+// 「无全覆写区」而退回逐像素 sqrt（结果正确但慢一个数量级），本用例钉住「走出快路径后结果不变」。
+AURORA_TEST_CASE(rounded_fill_row_fast_path_matches_per_pixel_coverage) {
+    struct Shape {
+        Rect rect{};
+        float radius = 0.0F;
+    };
+    const Shape shapes[] = {
+        {.rect = rect_at(7.0F, 7.0F, 40.0F, 40.0F), .radius = 20.0F},  // 正胶囊：radius == 半高
+        {.rect = rect_at(6.5F, 9.25F, 37.0F, 21.0F), .radius = 10.5F},  // 胶囊 + 非整数锚点
+        {.rect = rect_at(10.0F, 12.0F, 44.0F, 30.0F), .radius = 8.0F},  // 普通圆角：直边段非零
+        {.rect = rect_at(8.5F, 8.5F, 51.0F, 47.0F), .radius = 6.0F},  // 普通圆角 + 非整数锚点
+    };
+    // 不透明源色：两路在「覆盖度恒为 1 的内部」必然写出逐值相同的 RGB，于是任何差异都只可能
+    // 来自快路径把**覆盖度不足 1** 的像素误判进全覆写区（这正是本用例要钉的东西）。
+    // 若改用半透明源色，内部快写走 sRGB 空间朴素 lerp、逐像素路径走线性光伽马混合，
+    // 二者本就是两套口径（既有行为），会把覆盖度判据淹没在混色差里。
+    const Color color{200, 90, 40, 255};
+    const Rect canvas = rect_at(0.0F, 0.0F, 64.0F, 64.0F);
+    for (const Shape &s : shapes) {
+        // 不透明底：真实绘制总是叠在不透明背景上，边缘像素的 gamma 混合需要非零基底才可观测。
+        Painter subject;
+        subject.begin(64, 64);
+        subject.fill_rect(canvas, Color::white());
+        subject.fill_rounded_rect(s.rect, s.radius, color);
+
+        // 独立基准：圆角裁剪下逐像素 blend_pixel（其实现即 set_pixel，走 coverage 的 SDF
+        // 精确求解），不使用行级快路径，与 subject 的计算路径正交。
+        Painter reference;
+        reference.begin(64, 64);
+        reference.fill_rect(canvas, Color::white());
+        reference.push_clip_rounded(s.rect, s.radius);
+        // 迭代域与 fill_rect 的取整口径一致：[floor(左), ceil(右)) × [floor(上), ceil(下))，
+        // 否则会拿「边界列是否入选」这种 fill_rect 层面的口径差当覆盖度差。
+        const int rx0 = static_cast<int>(std::floor(s.rect.origin.x));
+        const int ry0 = static_cast<int>(std::floor(s.rect.origin.y));
+        const int rx1 = static_cast<int>(std::ceil(s.rect.right()));
+        const int ry1 = static_cast<int>(std::ceil(s.rect.bottom()));
+        for (int y = ry0; y < ry1; ++y) {
+            for (int x = rx0; x < rx1; ++x) {
+                reference.blend_pixel(x, y, color);
+            }
+        }
+        reference.pop_clip();
+
+        AURORA_TEST_CHECK_EQ(count_diff_pixels(subject, reference), 0);
+    }
 }
 
 AURORA_TEST_CASE(blend_pixel_writes_single_pixel) {

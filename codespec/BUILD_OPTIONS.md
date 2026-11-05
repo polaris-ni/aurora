@@ -226,11 +226,12 @@ cmake --build build -j $(nproc)
 
 ### 3.3 架构级渲染 / 布局优化（恒开）
 
-三项互不依赖的架构级优化恒编入库中，**没有 CMake 选项、没有 feature 宏、没有退化路径**：
+四项互不依赖的架构级优化恒编入库中，**没有 CMake 选项、没有 feature 宏、没有退化路径**：
 
 - **布局约束缓存**：约束不变且非 layout dirty 时跳过子树 layout 递归；
 - **遮挡剔除**：跳过不与 Painter 裁剪区相交的子控件绘制；
-- **Display List 录制 / 回放**：子树未脏时直接 replay 命令，跳过 paint 遍历。
+- **Display List 录制 / 回放**：子树未脏时直接 replay 命令，跳过 paint 遍历；
+- **圆角填充行级全覆写快路径**：逐行求出 coverage 恒为 1 的区间后整行批量混合，只有过渡区逐像素求 SDF；半径按含 AA 阈值的有效值 `rad + t` 求解，胶囊形（半径 = 半高）与普通圆角一视同仁。
 
 历史上的 `AURORA_ENABLE_LAYOUT_CACHE` / `AURORA_ENABLE_OCCLUSION_CULLING` / `AURORA_ENABLE_DISPLAY_LIST` 三枚开关已删除（见 `CHANGELOG.md` 破坏性变更条目）；再传 `-D...=OFF` 不会关闭任何能力，只会留下未使用的缓存变量。`aurora::debug::feature_flags()` 也不再报告这三项。
 
