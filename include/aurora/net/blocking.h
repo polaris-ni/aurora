@@ -33,6 +33,7 @@
 /// }
 /// @endcode
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <span>
@@ -142,8 +143,9 @@ class StreamSocket {
 };
 
 /// @brief 本机回环 TCP 监听套接字（move-only RAII，析构自动关闭）。
-/// @note Thread: 不 thread-safe（单所有权句柄）；`close()` 允许与另一线程的 `wait_readable`/
-/// `accept` 竞态唤醒（设计用途：宿主以 close 中断 accept 线程）。
+/// @note Thread: 句柄与端口按原子发布；`close()` 可与另一线程的 `wait_readable`/`accept` 并发
+///       唤醒（设计用途：宿主以 close 中断 accept 线程）。读侧只取一次句柄快照，`close()` 以原子
+///       交换裁决，故并发停机不构成未定义行为；借出的 `native_handle()` 仍是未关闭期间的瞬时值。
 /// @note Side-effects: 网络 I/O（仅限 loopback）
 class Listener {
   public:
@@ -182,18 +184,19 @@ class Listener {
 
     /// @brief 句柄是否有效。
     /// @return 未关闭且非默认构造时为 true。
-    [[nodiscard]] auto is_valid() const -> bool { return handle_ != AURORA_INVALID_HANDLE; }
+    [[nodiscard]] auto is_valid() const -> bool { return handle_.load() != AURORA_INVALID_HANDLE; }
 
     /// @brief 实际绑定端口。
     /// @return `listen_loopback` 成功时的端口（port=0 时为系统分配值）；无效态为 0。
-    [[nodiscard]] auto port() const -> std::uint16_t { return port_; }
+    [[nodiscard]] auto port() const -> std::uint16_t { return port_.load(); }
 
     /// @brief 借出原生句柄（不转移所有权）：交 `wait_ready` 或事件源注册口做可中断等待。
     ///
     /// 与 `StreamSocket::native_handle()` 同口径：仅在本对象存活且未 `close()` 期间有效，调用方不得
     /// 自行关闭；Windows 为 `SOCKET`、POSIX 为文件描述符，以 `std::intptr_t` 承载、`-1` 恒无效。
+    /// 并发 `close()` 期间取到的是交换前后的某一个瞬时值，不保证后续系统调用仍落在该监听口上。
     /// @return 监听句柄的 `intptr_t` 承载值。
-    [[nodiscard]] auto native_handle() const -> std::intptr_t { return handle_; }
+    [[nodiscard]] auto native_handle() const -> std::intptr_t { return handle_.load(); }
 
     /// @brief 可中断地等待监听口进入可读（有连接挂起）状态。
     /// @param timeout 最长等待时长。
@@ -207,12 +210,15 @@ class Listener {
 
     /// @brief 先 `shutdown(both)` 再关闭（幂等）：唤醒并终止另一线程可能阻塞其中的
     /// `wait_readable`/`accept`，语义与 InspectorServer 停机场径一致。
+    ///
+    /// 以一次原子交换取出待关闭的句柄并立即发布无效值：任意数量的并发调用中恰有一个执行
+    /// shutdown 与 close，其余直接返回；读侧在入口各取一次快照，整段系统调用不重读成员。
     auto close() -> void;
 
   private:
     static constexpr std::intptr_t AURORA_INVALID_HANDLE = -1;
-    std::intptr_t handle_ = AURORA_INVALID_HANDLE;
-    std::uint16_t port_ = 0;
+    std::atomic<std::intptr_t> handle_{AURORA_INVALID_HANDLE};
+    std::atomic<std::uint16_t> port_{0};
 };
 
 }  // namespace aurora::net::blocking

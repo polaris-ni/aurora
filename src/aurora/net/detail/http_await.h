@@ -10,18 +10,20 @@
 // - **续体经 `post_to_main` 恢复**：与 `state::co_async` 同一条回投通道（进程级唯一队列），
 //   保证「完成恒在值班主线程」，上层协程体内可安全触碰响应式状态；无值班循环时投递被
 //   「打烊取消」——协程随循环终结，绝不就地跨线程恢复。
-// - **awaiter 的生命周期由协程帧担保**：`co_await` 的 awaiter 临时活到该表达式结束（含恢复之后），
-//   故 `await_suspend` 里捕获的 `this` 在回调触发那一刻必然存活；结果先落 `result_`、再投恢复，
-//   `await_resume` 取用时恒有值。
+// - **awaiter 的生命周期由协程帧担保**：`co_await` 的 awaiter 临时活到该表达式结束（含恢复之后）。
+//   完成回调整体改为捕获一份共享决议态与续体句柄的值、不捕获 `this`：结果先落决议态、再投恢复，
+//   `await_resume` 取用时恒有值；决议态由一把互斥量串行化，完成回调即使在引擎线程抵达也安全。
 // - **同步完成不抢挂起点**：`await_suspend` 返回 `bool`。发起器在本次调用内就交回结局（循环套接字上的
 //   写、窗口非正的读、已取消的退避都走这条）时返回 `false`，协程在挂起表达式内就地前进；此时的完成
 //   绝不能经 `post_to_main` 投递——本帧还在 `await_suspend` 里、尚未真正挂起，排水一旦提前 resume，
 //   等于在挂起表达式返回后又跑一遍挂起点之后的代码，协程经一条路收尾释放帧后，另一条路迟到的回调
 //   再恢复已释放的帧即成 heap-use-after-free。发起器已返回（armed）后抵达的回调才一律走投递器。
+//   「写结果 + 读闸」与「写闸 + 读结果」分别在同一把锁下完成，两次裁决成全序，故跨线程抵达时不会
+//   出现两边都判定对方该恢复的双重 resume；`post_to_main` 一律在锁外调用。
 // - **不吞取消**：`Cancellation` 被 cancel 后，在途操作的回调以 `net-cancelled` 恰一次抵达，awaiter 原样
 //   把它作为 `Result<T>` 交回协程，由上层决定改道成 `http-timeout` 还是 `net-cancelled`——本层不解释取消。
 //
-// @note Thread: single-threaded（每个 awaiter 随一条协程帧串行使用，无共享状态）
+// @note Thread: 完成决议 thread-safe（完成回调可能在引擎线程抵达；续体恢复恒回主线程）
 // @note Side-effects: 触发一次异步传输发起；恢复经主线程投递器
 
 #include <atomic>
@@ -31,6 +33,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <string>
@@ -58,7 +61,7 @@ auto note_connection_outcome(bool connected, bool loopback_peer, std::optional<E
 
 /// @brief 通用回调→协程等待体：持一枚「接受完成回调的发起器」，挂起协程直到该回调携 `Result<T>` 抵达。
 /// @tparam T 传输操作的成功值类型（`StreamTransport` / `TlsTransport` / `std::size_t`）。
-/// @note Thread: single-threaded（随一条协程帧使用）
+/// @note Thread: 完成决议 thread-safe（完成回调可能在引擎线程抵达，决议态是唯一跨线程共享点）
 /// @note Side-effects: await_suspend 触发一次异步发起
 /// @note Rebuildable: no
 template <typename T>
@@ -73,7 +76,8 @@ class CallbackAwaiter {
     CallbackAwaiter(const CallbackAwaiter &) = delete;
     auto operator=(const CallbackAwaiter &) -> CallbackAwaiter & = delete;
     // 允许移动：发起侧把明文 / TLS 两条流的读写经 std::function 统一时需移动 awaiter；移动只发生在
-    // `co_await` 之前（此时 handle_ / result_ 尚未使用），最终对象承接 await 三件套，语义安全。
+    // `co_await` 之前（此时决议态尚未被完成回调触碰），最终对象承接 await 三件套，语义安全。共享态
+    // 用 shared_ptr 承载而非把互斥量直接放成成员，正是为保住这里的默认移动。
     CallbackAwaiter(CallbackAwaiter &&) = default;
     auto operator=(CallbackAwaiter &&) -> CallbackAwaiter & = default;
     ~CallbackAwaiter() = default;
@@ -94,33 +98,45 @@ class CallbackAwaiter {
     /// @param handle 待恢复的协程句柄；异步完成的结果落地后经 `post_to_main` 恢复之。
     /// @return `true` = 保持挂起，等异步完成经全局队列恢复；`false` = 发起期间已同步完成，就地恢复。
     auto await_suspend(std::coroutine_handle<> handle) -> bool {
-        handle_ = handle;
-        start_([this](Result<T> result) -> void {
-            result_.emplace(std::move(result));
-            if (armed_) {
-                aurora::detail::post_to_main([handle = handle_]() -> void { handle.resume(); });
+        // 完成回调可能由引擎线程执行：捕获共享态与句柄的值，不读 awaiter 的任何成员。
+        auto completion = completion_;
+        start_([completion, handle](Result<T> result) -> void {
+            std::coroutine_handle<> to_post;  // 非空 = 判定为异步完成，须经投递器恢复
+            {
+                std::scoped_lock guard(completion->mutex);
+                completion->result.emplace(std::move(result));
+                if (completion->armed) {
+                    to_post = handle;
+                }
+                // 未 armed（发起器尚未返回）：同步完成只落结果，恢复交给 await_suspend 的返回值
             }
-            // 未 armed（发起器尚未返回）：同步完成只落结果，恢复交给 await_suspend 的返回值
+            if (to_post) {
+                aurora::detail::post_to_main([to_post]() -> void { to_post.resume(); });
+            }
         });
-        armed_ = true;  // 发起器已返回：此后抵达的回调一律经投递器恢复
-        return !result_.has_value();
+        std::scoped_lock guard(completion->mutex);
+        completion->armed = true;  // 发起器已返回：此后抵达的回调一律经投递器恢复
+        return !completion->result.has_value();
     }
 
     /// @brief awaiter 协议：取回传输操作的结局。
     /// @return 完成回调写入的 `Result<T>`（移出）。
-    /// NOLINTNEXTLINE(bugprone-unchecked-optional-access) 契约：续体只可能经写入 result_ 的那次 resume 前进
-    auto await_resume() -> Result<T> { return std::move(*result_); }
+    /// NOLINTNEXTLINE(bugprone-unchecked-optional-access) 契约：续体只可能经写入 result 的那次 resume 前进
+    auto await_resume() -> Result<T> {
+        std::scoped_lock guard(completion_->mutex);
+        return std::move(*completion_->result);
+    }
 
   private:
+    // 唯一的跨线程共享点。放在 shared_ptr 里是为了保住等待体的默认移动：互斥量直接作成员会把它删掉。
+    struct Completion {
+        std::mutex mutex;
+        std::optional<Result<T>> result;
+        bool armed = false;
+    };
+
     std::function<void(Sink)> start_;  ///< 发起器（含目标句柄/参数副本，await_suspend 时调一次）
-    std::coroutine_handle<> handle_;  ///< 被挂起、待恢复的续体
-    std::optional<Result<T>> result_;  ///< 完成结果；resume 前必有值
-    /// @brief 发起器已返回的闸。
-    ///
-    /// `false` 期间抵达的完成只落 `result_`、不投恢复（同步完成：恢复交给 `await_suspend` 的返回值）；
-    /// 置 `true` 之后抵达的一律经 `post_to_main` 恢复。防的是「本帧尚未挂起就被提前 resume」
-    /// 在 `await_suspend` 内重入协程帧的那条路，完整机理见 `await_suspend` 的文档。
-    bool armed_{false};
+    std::shared_ptr<Completion> completion_ = std::make_shared<Completion>();
 };
 
 /// @brief 把一枚「交出 `Result<T>` 的协程任务」桥成可 `co_await` 的结局。

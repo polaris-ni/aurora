@@ -696,23 +696,19 @@ auto Listener::bind(const Endpoint &endpoint, int backlog) -> Result<Listener> {
     }
     // NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast)
     Listener listener;
-    listener.handle_ = to_handle(s);
-    listener.port_ = actual_port;
+    listener.handle_.store(to_handle(s));
+    listener.port_.store(actual_port);
     return listener;
 }
 
-Listener::Listener(Listener &&other) noexcept : handle_(other.handle_), port_(other.port_) {
-    other.handle_ = AURORA_INVALID_HANDLE;
-    other.port_ = 0;
-}
+Listener::Listener(Listener &&other) noexcept
+    : handle_(other.handle_.exchange(AURORA_INVALID_HANDLE)), port_(other.port_.exchange(0)) {}
 
 auto Listener::operator=(Listener &&other) noexcept -> Listener & {
     if (this != &other) {
         close();
-        handle_ = other.handle_;
-        port_ = other.port_;
-        other.handle_ = AURORA_INVALID_HANDLE;
-        other.port_ = 0;
+        handle_.store(other.handle_.exchange(AURORA_INVALID_HANDLE));
+        port_.store(other.port_.exchange(0));
     }
     return *this;
 }
@@ -720,7 +716,13 @@ auto Listener::operator=(Listener &&other) noexcept -> Listener & {
 Listener::~Listener() { close(); }
 
 auto Listener::wait_readable(std::chrono::milliseconds timeout) const -> Result<bool> {
-    const NativeSocket s = from_handle(handle_);
+    // 整段等待只用这一次快照：并发 close 换走句柄后不再重读成员，系统调用不会落到半途改变的数值上。
+    // 无效快照直接按失败口径回报：FD_SET 不接受 -1，停机路径上另一线程读到的正是这个值。
+    const std::intptr_t snapshot = handle_.load();
+    if (snapshot == AURORA_INVALID_HANDLE) {
+        return net_error(ErrorCode::NetWaitFailed, "listener closed");
+    }
+    const NativeSocket s = from_handle(snapshot);
     fd_set read_fds;
     FD_ZERO(&read_fds);
     FD_SET(s, &read_fds);
@@ -742,10 +744,15 @@ auto Listener::wait_readable(std::chrono::milliseconds timeout) const -> Result<
 }
 
 auto Listener::accept() const -> Result<StreamSocket> {
+    // 与 wait_readable 同一条快照纪律：停机期间读到无效句柄就按失败口径回报，不把 -1 交给 accept。
+    const std::intptr_t snapshot = handle_.load();
+    if (snapshot == AURORA_INVALID_HANDLE) {
+        return net_error(ErrorCode::NetAcceptFailed, "listener closed");
+    }
     sockaddr_storage peer{};
     AddrLen name_len = sizeof(peer);
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
-    const NativeSocket client = ::accept(from_handle(handle_), reinterpret_cast<sockaddr *>(&peer), &name_len);
+    const NativeSocket client = ::accept(from_handle(snapshot), reinterpret_cast<sockaddr *>(&peer), &name_len);
     if (native_is_invalid(client)) {
         return net_error(ErrorCode::NetAcceptFailed, "accept");
     }
@@ -753,19 +760,20 @@ auto Listener::accept() const -> Result<StreamSocket> {
 }
 
 auto Listener::close() -> void {
-    if (!is_valid()) {
+    // 一次原子交换兼做「判有效」与「发布无效」：并发调用中恰有一个拿到真实句柄去关，其余直接返回。
+    // 先 shutdown 再 close：唤醒另一线程可能阻塞其中的 wait_readable/accept（InspectorServer
+    // 停机协议）。shutdown 与 close 全程只用这次取出的快照，不重读已被发布的成员。
+    const std::intptr_t previous = handle_.exchange(AURORA_INVALID_HANDLE);
+    if (previous == AURORA_INVALID_HANDLE) {
         return;
     }
-    // 先 shutdown 再 close：唤醒另一线程可能阻塞其中的 wait_readable/accept（InspectorServer
-    // 停机协议）。
 #ifdef AURORA_PLATFORM_WINDOWS
-    (void)::shutdown(from_handle(handle_), SD_BOTH);
+    (void)::shutdown(from_handle(previous), SD_BOTH);
 #else
-    (void)::shutdown(from_handle(handle_), SHUT_RDWR);
+    (void)::shutdown(from_handle(previous), SHUT_RDWR);
 #endif
-    native_close(from_handle(handle_));
-    handle_ = AURORA_INVALID_HANDLE;
-    port_ = 0;
+    native_close(from_handle(previous));
+    port_.store(0);
 }
 
 }  // namespace blocking
