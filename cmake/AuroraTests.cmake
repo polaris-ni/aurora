@@ -168,6 +168,19 @@ if (AURORA_BUILD_TESTS)
         add_test(NAME check_props_table_coverage
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_props_table_coverage.py"
                 WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
+        # 控件接线门禁：属性基类必须是**最后一个公有基类**（基类子对象先于兄弟成员移动，次序颠倒
+        # 会让整体移动失联），且每枚非转调构造的尾部恰有一次 `bind(*this)`——这是单一声明口径下
+        # 唯一保留的手写仪式，漏写不报错（控件照样能画，只是写入不落标脏），故必须机械钉住。
+        add_test(NAME check_widget_bind_pattern
+                COMMAND ${PYTHON3_EXE} "${_check_dir}/check_widget_bind_pattern.py"
+                WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
+        # 可空态不外泄门禁：已迁移属性面的公共签名只许裸 T 与裸句柄——`std::optional` 留在私有
+        # 存储（未表态由 `present(row)` 回答）、句柄只作换源写件的实参、`PropRow` 只作 `*_row()`
+        # 的返回值。判定面收窄到已迁移的属性类而非全公共头：库内有 164 处合法的非属性可空签名
+        # （如基线查询返回 `std::optional<float>`），全量扫会逼无关接口一起改。
+        add_test(NAME check_no_optional_in_public_signature
+                COMMAND ${PYTHON3_EXE} "${_check_dir}/check_no_optional_in_public_signature.py"
+                WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
         # 伞头（include/aurora/aurora.h）完整性门禁。两层检查：① 文件健康——include 被行尾
         # 注释吞并 / 一行多指令 / 重复 / 路径缺失 / 编码损坏（私用区字符）/ 行结束符混用；
         # ② 覆盖契约——直连集合不得相对基线缩减，且每个 public 头必须「直连 ∨ 从直连集合可达

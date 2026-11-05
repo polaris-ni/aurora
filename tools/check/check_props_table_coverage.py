@@ -28,6 +28,11 @@
 #   C9  表序即 schema 序：`rows()` 里的点名次序必须等于 `x_row()` 的声明次序。
 #   C10 派生档必带显示串：派生档行须有 `.shows(...)`，否则发射面给不出默认值表示。
 #
+# 解析件（去注释、类体定位、成员与字段扫描）取自同目录 `props_scan`：本门禁与
+# `check_widget_bind_pattern` / `check_no_optional_in_public_signature` 判的是同一张权威表
+# 的三个侧面（表内自洽 / 控件接线 / 签名不外泄可空态）。「什么算一行」「公共面到哪为止」
+# 必须是同一个答案——两份各自实现的解析器迟早给出两个答案，而两个答案都绿不代表口径成立。
+#
 # 输出必须全 ASCII（ctest 侧代码页约束）。
 #
 # Exit code: 1 when any violation is found; otherwise 0.
@@ -36,186 +41,12 @@
 #   python3 tools/check/check_props_table_coverage.py [--root <aurora_root>] [--verbose]
 # ============================================================================
 import argparse
-import os
 import re
 import sys
 
-SCAN_DIRS = ("include",)
+import props_scan
+
 PUBLIC_FACE_WHITELIST = ("clear", "rows")
-# 未迁移的 `XxxProps` 声明形态：不继承 AbstractProps 的聚合体（机制基类 `AbstractProps` 自身除外）。
-PROPS_DECL_RE = re.compile(r"^\s*(?:class|struct)\s+(?!AbstractProps\b)(\w*Props)\b", re.M)
-MIGRATED_DECL_RE = re.compile(r"(?:class|struct)\s+(\w*Props)\s*(?:final\s*)?:\s*public\s+AbstractProps\s*<\s*\1\s*>")
-
-
-def repo_root_of(path):
-    d = os.path.dirname(os.path.abspath(path))
-    while d and d != os.path.dirname(d):
-        if os.path.isfile(os.path.join(d, "CMakeLists.txt")):
-            return d
-        d = os.path.dirname(d)
-    return d
-
-
-def strip_comments(text):
-    """去注释保行结构：注释字符替换为空格，字符串与字符字面量原样保留（键名在其中）。"""
-    out = []
-    i, n = 0, len(text)
-    while i < n:
-        c = text[i]
-        if c == "/" and i + 1 < n and text[i + 1] == "/":
-            while i < n and text[i] != "\n":
-                out.append(" ")
-                i += 1
-        elif c == "/" and i + 1 < n and text[i + 1] == "*":
-            while i < n and not (text[i] == "*" and i + 1 < n and text[i + 1] == "/"):
-                out.append("\n" if text[i] == "\n" else " ")
-                i += 1
-            out.append("  ")
-            i += 2
-        elif c in "\"'":
-            quote = c
-            out.append(c)
-            i += 1
-            while i < n:
-                if text[i] == "\\":
-                    out.append(text[i:i + 2])
-                    i += 2
-                    continue
-                out.append(text[i])
-                if text[i] == quote:
-                    i += 1
-                    break
-                i += 1
-        else:
-            out.append(c)
-            i += 1
-    return "".join(out)
-
-
-def matching(text, open_idx, open_ch, close_ch):
-    """返回 (内容, 闭括号后的下标)；open_idx 指向 open_ch。找不到闭括号返回 (None, open_idx)。"""
-    depth = 0
-    i = open_idx
-    n = len(text)
-    while i < n:
-        ch = text[i]
-        if ch == open_ch:
-            depth += 1
-        elif ch == close_ch:
-            depth -= 1
-            if depth == 0:
-                return text[open_idx + 1:i], i + 1
-        i += 1
-    return None, i
-
-
-def line_of(text, idx):
-    return text.count("\n", 0, idx) + 1
-
-
-def angle_stripped(sig):
-    """去掉尖括号内内容，便于判断「参数表之外是否还有括号」。"""
-    out, depth, i = [], 0, 0
-    while i < len(sig):
-        c = sig[i]
-        if c == "<":
-            depth += 1
-        elif c == ">" and depth:
-            depth -= 1
-        elif c == "," and depth:
-            pass
-        elif depth == 0:
-            out.append(c)
-        i += 1
-    return "".join(out)
-
-
-class Member:
-    __slots__ = ("name", "params", "ret", "body", "is_static", "access", "line")
-
-    def __init__(self, name, params, ret, body, is_static, access, line):
-        self.name = name
-        self.params = params
-        self.ret = ret
-        self.body = body
-        self.is_static = is_static
-        self.access = access
-        self.line = line
-
-    def has_ctx_param(self):
-        return "BuildContext" in self.params
-
-
-def parse_members(body_text, _unused=None):
-    """扫类体内的函数成员：`auto <name>(<params>) [const] [-> ret] { ... }`。"""
-    members = []
-    spans = parse_access_spans(body_text)
-    for m in re.finditer(r"\bauto\s+(\w+)\s*\(", body_text):
-        name = m.group(1)
-        open_paren = m.end() - 1
-        params, after_paren = matching(body_text, open_paren, "(", ")")
-        if params is None:
-            continue
-        # 参数表之后到函数体：可能带 `const`、`noexcept`、尾置返回类型
-        rest = body_text[after_paren:]
-        brace = rest.find("{")
-        semi = rest.find(";")
-        if brace < 0:
-            continue
-        tail = angle_stripped(rest[:brace])
-        ret_m = re.search(r"->\s*([^{};]+?)\s*$", tail)
-        ret = ret_m.group(1).strip() if ret_m else ""
-        prefix = body_text[:m.start()]
-        is_static = bool(re.search(r"\bstatic\b[^\n]*$", prefix))
-        access = access_for(spans, m.start())
-        if semi >= 0 and semi < brace:
-            # 声明而非定义（纯虚 / 外联实现）：只登记名字，体为空
-            fbody = ""
-        else:
-            fbody, _ = matching(body_text, after_paren + brace, "{", "}")
-            if fbody is None:
-                continue
-        members.append(Member(name, params.strip(), ret, fbody, is_static, access,
-                              line_of(body_text, m.start())))
-    return members
-
-
-def parse_access_spans(body_text):
-    """返回 [(offset, access)]，按 `public:` / `private:` / `protected:` 出现次序。"""
-    spans = [(0, "public")]
-    for m in re.finditer(r"^(\s*)(public|private|protected)\s*:", body_text, re.M):
-        spans.append((m.start(), m.group(2)))
-    return spans
-
-
-def access_for(spans, offset):
-    cur = "public"
-    for pos, kind in spans:
-        if pos <= offset:
-            cur = kind
-        else:
-            break
-    return cur
-
-
-def parse_fields(body_text, spans):
-    """私有数据成员：以 `name_;` 或 `name_ = ...;` 收尾、且落在 private 区的行（本库一行一枚）。"""
-    fields = []
-    lines = body_text.splitlines()
-    for idx, line in enumerate(lines, 1):
-        stripped = line.strip()
-        if not stripped.endswith(";") or stripped.startswith("friend"):
-            continue
-        if "(" in angle_stripped(stripped.split("=")[0]):
-            continue
-        fm = re.search(r"\b([a-z][a-z0-9_]*)_\s*(?:=\s*.*)?;$", stripped)
-        if not fm:
-            continue
-        offset = sum(len(l) + 1 for l in lines[:idx - 1])
-        if access_for(spans, offset) != "private":
-            continue
-        fields.append((fm.group(1) + "_", idx))
-    return fields
 
 
 def extract_row_calls(row_body):
@@ -229,15 +60,8 @@ def extract_row_calls(row_body):
     return m.group(2), m.group(3), row_body
 
 
-def check_props_class(rel, text, class_name, body, body_start, findings, stats):
-    spans = parse_access_spans(body)
-    members = parse_members(body)
-    fields = parse_fields(body, spans)
-    # 违例报的是文件行号：类体内的相对行号加上类体起始行
-    line_base = text.count("\n", 0, body_start)
-    for m in members:
-        m.line += line_base
-
+def check_props_class(rel, class_name, body, members, fields, findings, stats):
+    # 违例报的是文件行号：`props_scan.parse_members` 已按类体起始行换算过 `Member.line`
     rows = {}
     order = []
     providers = {m.name: m for m in members if m.is_static}
@@ -414,25 +238,19 @@ def check_props_class(rel, text, class_name, body, body_start, findings, stats):
     stats["rows"] += len(rows)
 
 
-def scan_file(path, rel, findings, stats):
-    with open(path, encoding="utf-8", errors="replace") as f:
-        raw = f.read()
-    text = strip_comments(raw)
-    declared = PROPS_DECL_RE.findall(text)
-    if declared:
-        stats["declared"] += len(declared)
-    for m in MIGRATED_DECL_RE.finditer(text):
+def scan_text(rel, text, findings, stats):
+    stats["declared"] += len(props_scan.PROPS_DECL_RE.findall(text))
+    for m in props_scan.MIGRATED_DECL_RE.finditer(text):
         name = m.group(1)
-        brace = text.find("{", m.end())
-        if brace < 0:
-            findings.append(f"{rel}: [C1] `{name}` derives AbstractProps but no class body found")
-            continue
-        body, _ = matching(text, brace, "{", "}")
+        body, _brace, line_offset = props_scan.class_body(text, m)
         if body is None:
-            findings.append(f"{rel}: [C1] `{name}` class body is not brace-balanced")
+            findings.append(f"{rel}: [C1] `{name}` derives AbstractProps but its class body is missing "
+                            "or is not brace-balanced")
             continue
         stats["migrated"] += 1
-        check_props_class(rel, text, name, body, brace, findings, stats)
+        spans = props_scan.parse_access_spans(body)
+        check_props_class(rel, name, body, props_scan.parse_members(body, line_offset),
+                          props_scan.parse_fields(body, spans), findings, stats)
 
 
 def main():
@@ -440,24 +258,15 @@ def main():
     ap.add_argument("--root", default=None, help="Aurora repo root (default: two levels above this script)")
     ap.add_argument("--verbose", action="store_true", help="print the per-class census before the verdict")
     args = ap.parse_args()
-    root = args.root or repo_root_of(__file__)
+    root = args.root or props_scan.repo_root_of(__file__)
 
     findings = []
     files_scanned = 0
     stats = {"declared": 0, "migrated": 0, "classes": 0, "rows": 0}
 
-    for sd in SCAN_DIRS:
-        base = os.path.join(root, sd)
-        if not os.path.isdir(base):
-            continue
-        for dirpath, _dirnames, filenames in os.walk(base):
-            for fn in sorted(filenames):
-                if not fn.endswith((".h", ".hpp", ".inl")):
-                    continue
-                path = os.path.join(dirpath, fn)
-                rel = os.path.relpath(path, root).replace(os.sep, "/")
-                files_scanned += 1
-                scan_file(path, rel, findings, stats)
+    for path, rel in props_scan.header_files(root):
+        files_scanned += 1
+        scan_text(rel, props_scan.read_stripped(path), findings, stats)
 
     if args.verbose:
         print(f"[info] scanned {files_scanned} headers; migrated {stats['migrated']} / declared "
