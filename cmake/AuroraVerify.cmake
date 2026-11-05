@@ -434,6 +434,18 @@ if (AURORA_BUILD_VERIFY_TOOLS)
         else ()
             aurora_log("codesign not found: macOS tray probe will not run from a bundle")
         endif ()
+
+        # ---- macOS 系统双击速度（+[NSEvent doubleClickInterval] 的读取腿）----
+        # 自动段独立再读一遍 AppKit 秒值、以探针自带算式折算毫秒后与 `os_double_click_ms()` 比对
+        # （抓「分支改回恒回退库级常量」这类无头 CI 抓不到的回归），并核对两派发器的初值接线。
+        # 本机出厂值与回退常量同为 500ms 时该等值判据不具区分力，探针如实记 WARN；「挪动系统双击
+        # 速度滑杆后读数是否随之变化」只有人在 GUI 会话里判得，故 --interactive 段按秒轮询，
+        # 未观察到变化报 PENDING（退出码 3）。
+        aurora_add_verify_probe(aurora_verify_macos_double_click
+                "${_aurora_verify_dir}/macos_double_click_live_probe.mm"
+                OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED ON)
+        target_compile_options(aurora_verify_macos_double_click PRIVATE -fobjc-arc)
+        list(APPEND _aurora_verify_targets aurora_verify_macos_double_click)
     endif ()
 
     # ---- GLFW 光标（跨平台真实窗口）：GLFW 无光标查询 API → 自动能力核对 + 人工目视（--interactive）----

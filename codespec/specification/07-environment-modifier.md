@@ -56,8 +56,8 @@ au::Text("Hi").color(ctx.environment<au::Theme>() ? ctx.environment<au::Theme>()
 | `size` | 当前窗口 / 子树可用逻辑尺寸（dp） |
 | `scale_factor` | 设备像素比（`dpi / 96`；由 `Window::present_root` 从 `Surface::scale_factor()` 注入到 `BuildContext::scale_factor`，是本地坐标缩放的**唯一权威来源**）。**Win32 已收敛为单点真值源**：宿主内 `Impl::scale` 一个成员经 `to_physical` / `to_logical` 两个换算函数供给全部坐标面（见 `03-layout-render.md` 的 DPI 感知条与 `08-tooling.md` §8.2）；**X11 / Wayland / GLFW 的缩放变化上报仍未实现**（`Surface::set_scale_change_handler` 未被它们 override），跨屏或改系统缩放时该值不会自动更新 |
 | `text_scale_factor` | 系统字体缩放（辅助功能） |
-| `orientation` | 由 `size`（非 Win32）/ `screen_size`（Win32）派生：宽 ≥ 高判为 `Landscape`，正方形归入 `Landscape`。枚举 `ScreenOrientation{Portrait, Landscape}`，与 `divider.h` 的 `Orientation` 语义不同，**不复用** |
-| `screen_size` | 物理屏幕的逻辑尺寸（dp） |
+| `orientation` | 由 `size`（未接屏幕的后端）/ `screen_size`（Win32、macOS）派生：宽 ≥ 高判为 `Landscape`，正方形归入 `Landscape`。枚举 `ScreenOrientation{Portrait, Landscape}`，与 `divider.h` 的 `Orientation` 语义不同，**不复用** |
+| `screen_size` | 物理屏幕的逻辑尺寸（dp）：Win32 取 `GetSystemMetrics(SM_CXSCREEN) ÷ scale`，macOS 取主显示器 `Display::bounds`（物理像素）÷ 本 Surface 的 dp 比；其余后端退化为 Surface 尺寸（拿窗口尺寸冒充屏幕尺寸，改窗口形状会连带改 `orientation` 判定） |
 | `platform` | 编译期常量——Win32 下为 `Windows`，其余 `Unknown`（不做运行时 OS 探测）。枚举含 `Unknown/Windows/MacOs/Linux/Web` |
 | `device` | 编译期常量——Win32 下为 `Desktop`，其余 `Unknown`。枚举含 `Unknown/Desktop/Mobile/Tablet` |
 | `padding` | 安全区（刘海 / 状态栏）内边距（dp），默认 0 |
@@ -72,7 +72,7 @@ au::Text("Hi").color(ctx.environment<au::Theme>() ? ctx.environment<au::Theme>()
 | 工厂 | 说明 |
 |:---|:---|
 | `MediaQuery::of(float scale)` | 轻量构造，仅设缩放因子 |
-| `MediaQuery::from_surface(const Surface&)` | 跨平台成型：非 Windows 取 Surface 尺寸与默认值，并把 `s.content_inset()` 并入 `padding`；Win32 取真实屏幕逻辑尺寸与减弱动效 |
+| `MediaQuery::from_surface(const Surface&)` | 跨平台成型：把 `s.content_inset()` 并入 `padding`；Win32 取真实屏幕逻辑尺寸与减弱动效；macOS 取真实主显示器尺寸与由其派生的 `orientation`（`platform` / `device` / `prefer_reduced_motion` 在 macOS 仍未接线，落结构体默认值——三者与 OS 无障碍偏好的接线口径跨后端一致，待变更提案）；其余后端取 Surface 尺寸与默认值 |
 | `MediaQuery::of(const BuildContext&)` | 读最近祖先 Provider，无则返回进程级默认实例 |
 
 **读取 API**（`MediaQueryProvider` 是 `using` 别名，无法加静态 `of`，故提供自由函数）：

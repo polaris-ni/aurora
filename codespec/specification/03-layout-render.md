@@ -508,6 +508,8 @@ au::Column{}
 
 **默认字体**是内置 Noto Sans（OFL），引擎首次使用时自动注册为 `""` / `"sans-serif"` / `"Noto Sans"` / `"default"`，含 Headless，保证跨机文本渲染逐位确定。缺字按候选 `FT_Face` 链回退（含系统 CJK 字体）避免豆腐块；无任何可用字体文件时回退内置 `BitmapFont` 保底。
 
+**系统保底链的平台清单**（`register_system_fallbacks()`，库内部、经 `add_default_face()` 追加在内置 Noto Sans **之后**，故纯拉丁度量逐位不变、只补齐此前无面可落的 CJK 请求）：Windows 8 个文件名（msyh / simsun / MSGOTHIC 等）、Linux 10 个路径、**macOS 9 个路径**（`Helvetica.ttc` / `LucidaGrande.ttc` / `Supplemental/Songti.ttc` / `Hiragino Sans GB.ttc` / `PingFang.ttc` / `AquaKana.ttc` / `AppleSDGothicNeo.ttc` / 两处 `Arial Unicode`）——清单形态三平台一致（显式候选、不存在者跳过），不引 CoreText、不依赖发现层成败。本批实测（macOS 26.7.2 虚拟机）：除 `PingFang.ttc` 缺席外均在位，默认链首仍是 Noto Sans，`中` / `あ` 经全链 `FT_Get_Char_Index` 取得真实字形索引；该条由 `tests/unit/utest_font_discovery.cpp` 的平台门控用例钉住（非 Apple 构建记 SKIP，本机无 CJK 字体文件时也如实 SKIP 而非假绿）。
+
 **主题风格档带来的族名偏好**（口径详见 [`07-environment-modifier.md`](07-environment-modifier.md) §5.1）：四套平台风格在标定字阶时整组替换 `Font::family`——Windows 档 `Segoe UI Variable Text`、macOS 档 `SF Pro Text`、GNOME 档 `Adwaita Sans`、KDE 档 `Noto Sans`；Material 档不动族名，十五档保持默认键 `sans-serif`。**族名是偏好而非保证**：`resolve_faces` 先在注册表命中（内置 Noto Sans 的四个键即在此层），未命中才按系统字体目录懒加载该族，仍解析不到则落默认链，**全程不报错**。
 
 对 §10.1 的确定性渲染需求（SPEC.TEST.RENDER.DETERMINISTIC-SNAPSHOT.001）的影响分两面。**无头 / CI / 未装该系统字体的机器**上四档的族名一律解析到同一份内置 Noto Sans，字面与度量逐位不变——风格档换的是取值表，不是字形来源，golden 基线因此与风格轴正交（字号仍随档变，但那是同一字面下的确定缩放）。**真机装了该系统字体**时，文本度量随平台所装字体而异，这是「观感跟随平台」的预期结果而非漂移；两机的字体确定性差值属仍在测项，不作为本节的既成承诺。

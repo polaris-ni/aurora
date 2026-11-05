@@ -8,6 +8,8 @@
 //   ✅ `set_position` / `position` 的物理像素往返（左上原点 / y 向下）；
 //   ✅ `display_id` 与 `app::list_displays` / `primary_display` / `display_containing`
 //      的同一 id 空间（CGDirectDisplayID）；
+//   ✅ `MediaQuery::from_surface` 的 macOS 腿：`screen_size` 取主显示器物理框 ÷ dp 比（不是窗口
+//      尺寸）、`orientation` 随之判定；
 //   ✅ `os_color_scheme()` 对 NSApp 外观切换的实时跟随（Dark / Aqua 双向）；
 //   ✅ `capture_window` 的内容视图缓存截图：PNG 可解码、像素尺寸等于帧缓冲、含已绘像素。
 //   ✅ 装饰档位映射：`Borderless` 保住原生边缘缩放——`isResizable` 为真、内容区铺满窗框（顶边
@@ -17,6 +19,12 @@
 //   ❌ 本探针不验收鼠标/键盘事件翻译、输入法、系统拖放、光标形状：前两者需真实人机
 //      输入（见 macos_cursor_live_probe / macos_drag_live_probe），后两者各有专用探针。
 //      装饰档位段投递的拖拽只驱动**原生窗框**的缩放，不经过控件派发链，故不构成事件翻译证据。
+//   ❌ 本探针不验收 `MediaQuery::platform` / `device` / `prefer_reduced_motion`：macOS 这三项仍落结构体
+//      默认值（`PlatformKind::Unknown` / `DeviceKind::Unknown` / `false`）——前两者的公共注释是「只在
+//      Win32 后端填」的后端矩阵陈述，`platform` 又是 `Theme::default_style` 的风格判据来源；后者须把
+//      OS 的减弱动画开关（实测 `NSWorkspace.accessibilityDisplayShouldReduceMotion` 可读）接进无障碍
+//      设置链。三者都属跨后端一致性变更，待变更提案定口径，不在本批；探针只打印 NOTE 观测值，
+//      不判绿也不判红，免被读成「已接线」。
 //   ❌ 不经 WindowServer 抓屏证明「屏幕上真的显示了」：AppKit 的 `displayIfNeeded` 已同步
 //      提交到 WindowServer，但背景会话下 `screencapture` 不可用；`capture_window` 取的是视图
 //      自身的缓存绘制结果，本探针证明的是提交前的帧缓冲内容与提交调用成功。
@@ -44,6 +52,7 @@
 #endif
 
 #include "aurora/app/display.h"
+#include "aurora/environment/media_query.h"
 #include "aurora/render/painter.h"
 #include "aurora/window/macos_surface.h"
 #include "aurora/window/platform.h"
@@ -397,6 +406,33 @@ auto main() -> int {
             }
         }
         check(id_seen, "display_id present in list_displays", aurora_verify::format_int(wid));
+
+        // ---- MediaQuery 的 macOS 腿：屏幕尺寸取主显示器，不再拿窗口尺寸冒充 ----
+        // 口径与 Win32 支一致：`Display::bounds` 为物理像素，按本 Surface 的 dp 比折算成逻辑 dp。
+        const aurora::MediaQuery mq = aurora::MediaQuery::from_surface(surface);
+        const float screen_w = static_cast<float>(primary.bounds.size.width) / scale;
+        const float screen_h = static_cast<float>(primary.bounds.size.height) / scale;
+        check(nearly(mq.screen_size.width, screen_w) && nearly(mq.screen_size.height, screen_h),
+              "MediaQuery screen_size == display bounds / scale",
+              fmt_size(mq.screen_size) + " vs " + fmt_float(screen_w) + "x" + fmt_float(screen_h));
+        check(mq.screen_size.width >= surface.size().width && mq.screen_size.height >= surface.size().height,
+              "MediaQuery screen_size is not the window size",
+              fmt_size(mq.screen_size) + " vs window " + fmt_size(surface.size()));
+        const aurora::ScreenOrientation expect_orient =
+            (screen_w >= screen_h) ? aurora::ScreenOrientation::Landscape : aurora::ScreenOrientation::Portrait;
+        const auto orient_name = [](aurora::ScreenOrientation o) -> const char * {
+            return o == aurora::ScreenOrientation::Landscape ? "Landscape" : "Portrait";
+        };
+        check(mq.orientation == expect_orient, "MediaQuery orientation follows the screen",
+              std::string{orient_name(mq.orientation)} + " vs " + orient_name(expect_orient));
+        // `platform` / `device` 不判绿也不判红：macOS 仍落结构体默认值，改动属后端矩阵陈述，
+        // 待变更提案定口径（见文件头 ❌ 段），此处只打印观测值以免被读成「已接线」。
+        AURORA_LOG_RAW("verify", "NOTE   MediaQuery platform/device not wired on macOS: device=",
+                       aurora_verify::format_int(static_cast<long long>(mq.device)),
+                       " platform=", aurora_verify::format_int(static_cast<long long>(mq.platform)),
+                       " reduced_motion=", mq.prefer_reduced_motion ? "true" : "false", "\n");
+        check(nearly(mq.size.width, surface.size().width) && nearly(mq.size.height, surface.size().height),
+              "MediaQuery size follows the surface", fmt_size(mq.size));
 
         // ---- OS 明暗偏好：NSApp 外观切换后实时跟随 ----
         const aurora::ColorScheme initial = aurora::os_color_scheme();

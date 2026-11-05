@@ -486,12 +486,15 @@ if (AURORA_BACKEND_MACOS)
     # app/detail/macos_clipboard.cpp 是 NSPasteboard 富格式/惰性提供腿（ObjC++，语言按本表标记）。
     # app/detail/macos_shell_integration.cpp 是桌面外壳集成桥（Launch Services / SMAppService /
     # NSPrintOperation / kAEGetURL，ObjC++）。
+    # event/detail/macos_click_config.cpp 是 `os_double_click_ms()` 的 macOS 读取腿（+[NSEvent
+    # doubleClickInterval]，秒 → 毫秒的折算留在同目录的纯函数头里，非 Apple runner 可单测）。
     # 全部文件的门控都在自身 `#if` 内，非 Apple 平台编译为空 TU——与 x11_drag.cpp /
     # wayland_drag.cpp 在别的平台上的处置同构。
     foreach(_macos_objc_src "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/window/macos_surface.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/window/detail/macos_ax_bridge.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/window/detail/macos_drag.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/window/macos_platform.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/event/detail/macos_click_config.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/window/detail/macos_recent_documents.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/window/detail/macos_menu_bar.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/app/display_macos.cpp"

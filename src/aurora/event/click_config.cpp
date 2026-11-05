@@ -11,6 +11,10 @@
 #define WIN32_LEAN_AND_MEAN  // NOLINT(readability-identifier-naming)
 #endif
 #include <windows.h>
+#elif defined(AURORA_PLATFORM_MACOS) && defined(AURORA_BACKEND_MACOS)
+// 本文件是纯 C++，AppKit 读取落在 `detail::macos_double_click_ms()` 那条 ObjC++ TU 里（同
+// `os_color_scheme()` 的 macOS 分支定位）；这里只 include 它的声明。
+#include "aurora/event/detail/macos_click_config.h"
 #elif defined(AURORA_PLATFORM_LINUX) && !defined(AURORA_PLATFORM_ANDROID)
 #include <dlfcn.h>
 #endif
@@ -112,8 +116,13 @@ auto os_double_click_ms() -> std::uint32_t {
     return static_cast<std::uint32_t>(ms);
 #elif defined(AURORA_PLATFORM_LINUX) && !defined(AURORA_PLATFORM_ANDROID)
     return linux_double_click_ms();
+#elif defined(AURORA_PLATFORM_MACOS) && defined(AURORA_BACKEND_MACOS)
+    // AppKit 发布的系统双击速度（`+[NSEvent doubleClickInterval]`，单位秒）折算成毫秒；
+    // 折算与回退口径见 `event/detail/macos_click_config.h`（与非正 / 非有限值一律回落库级常量）。
+    return detail::macos_double_click_ms();
 #else
-    // macOS / Wasm / Headless / Android 无「可零依赖读取」的公开系统双击速度 API，回退库内常量。
+    // Wasm / Headless / Android 与「macOS 后端关闭」的形态无「可零依赖读取」的公开系统双击速度 API，
+    // 回退库内常量。
     return AURORA_DEFAULT_CLICK_WINDOW_MS;
 #endif
 }

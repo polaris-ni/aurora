@@ -30,13 +30,16 @@ inline constexpr std::uint32_t AURORA_DEFAULT_CLICK_WINDOW_MS = 500;
 ///
 /// 默认跟随系统：`EventDispatcher` / `TouchDispatcher` 的 `click_window_ms` 初值即取此函数。
 /// - Windows 走 `GetDoubleClickTime()`，取真实系统值（通常 100–1000ms）；
-/// - macOS / Wasm / Headless / Android 等无「可零依赖读取」公开 API 的平台，回退到
-///   `AURORA_DEFAULT_CLICK_WINDOW_MS`（库内约定常量）；Linux 经 GLib GSettings
-///   （`org.gnome.desktop.peripherals.mouse` → `double-click`）读取真实系统值，缺库/无会话时回退同常量。
+/// - macOS 走 AppKit 的 `+[NSEvent doubleClickInterval]`（System Settings → Mouse 的双击速度滑杆，
+///   单位秒），按四舍五入折算成毫秒；报出非正 / 非有限值时回退 `AURORA_DEFAULT_CLICK_WINDOW_MS`；
+/// - Linux 经 GLib GSettings（`org.gnome.desktop.peripherals.mouse` → `double-click`）读取真实系统值，
+///   缺库 / 无会话时回退同常量；
+/// - Wasm / Headless / Android 与「macOS 后端关闭」的形态无「可零依赖读取」公开 API，回退到
+///   `AURORA_DEFAULT_CLICK_WINDOW_MS`（库内约定常量）。
 ///
 /// 应用可显式写 `click_window_ms` 覆盖系统值（置 0 关闭连击判定、置极大值使窗口恒开），
-/// 再读本函数回填即可恢复「跟随系统」。Linux 已先经 GLib GSettings
-/// 读取真实系统值，其余平台回退常量；新增平台分支只改本函数。
+/// 再读本函数回填即可恢复「跟随系统」。三桌面平台（Windows / macOS / Linux）均已读到真实系统值，
+/// 其余形态回退常量；新增平台分支只改本函数。
 /// @return 连击时间窗（毫秒），恒为正（≥1）。
 [[nodiscard]] auto os_double_click_ms() -> std::uint32_t;
 

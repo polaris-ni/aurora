@@ -636,7 +636,7 @@ au::FontEngine::set_text_aa_mode(au::TextAAMode::ClearType);
 ```
 
 - `family` 为空字符串 / `"sans-serif"` / `"Noto Sans"` / `"default"` 均指向内置默认字体。
-- 缺字（如未注册 CJK 的 Latin 字体）自动沿系统字体回退链（msyh / simsun / MSGOTHIC 等）查找，避免豆腐块。
+- 缺字（如未注册 CJK 的 Latin 字体）自动沿系统字体回退链（Windows msyh / simsun / MSGOTHIC；macOS Songti / Hiragino Sans GB / PingFang / AquaKana / Apple SD Gothic Neo / Arial Unicode）查找，避免豆腐块。
 - 度量（`measure_width` / `caret_x` / `hit_test_char`）与绘制（`draw_text`）在逻辑 dp 空间一致；`display_*` 系列按物理像素尺寸折算，用于缩放屏下的实显命中校正（见 [`specification/03-layout-render.md`](specification/03-layout-render.md) §8.2）。
 
 ---

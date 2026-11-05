@@ -87,10 +87,10 @@ struct Event {
 
 | 成员 | 初值 | 常量 | 语义 |
 |:---|:---|:---|:---|
-| `click_window_ms` | `os_double_click_ms()` | `AURORA_DEFAULT_CLICK_WINDOW_MS`（系统不可读时回退） | 连击时间窗（毫秒）；**默认跟随系统双击速度**（Windows `GetDoubleClickTime()`、Linux 经 GLib GSettings 读取、其余（macOS / Wasm / Headless / Android）回退库级常量）；**置 0 即关闭连击判定**（任何间隔都不累加），置极大值使窗口恒开——供测试注入极端阈值，无需全局时钟钩子 |
+| `click_window_ms` | `os_double_click_ms()` | `AURORA_DEFAULT_CLICK_WINDOW_MS`（系统不可读时回退） | 连击时间窗（毫秒）；**默认跟随系统双击速度**（Windows `GetDoubleClickTime()`、macOS `+[NSEvent doubleClickInterval]`、Linux 经 GLib GSettings 读取、其余（Wasm / Headless / Android 与 macOS 后端关闭）回退库级常量）；**置 0 即关闭连击判定**（任何间隔都不累加），置极大值使窗口恒开——供测试注入极端阈值，无需全局时钟钩子 |
 | `click_radius_dp` | 4 | `AURORA_DEFAULT_CLICK_RADIUS_DP` | 连击位移半径（逻辑 dp） |
 
-阈值默认**跟随系统双击速度设置**（`os_double_click_ms()`）：Linux 走 GLib GSettings（`org.gnome.desktop.peripherals.mouse` → `double-click`）取真实系统值，macOS / Wasm / Headless / Android 回退库级常量 `AURORA_DEFAULT_CLICK_WINDOW_MS`；应用可显式写 `click_window_ms` 覆盖，再读 `os_double_click_ms()` 回填即恢复跟随系统。
+阈值默认**跟随系统双击速度设置**（`os_double_click_ms()`）：三桌面平台都读真实系统值——Windows `GetDoubleClickTime()`（已是毫秒）、macOS `+[NSEvent doubleClickInterval]`（**秒**，按四舍五入折算成毫秒；亚毫秒夹为 1、非正 / 非有限回退常量，折算落在可单测的纯函数 `src/aurora/event/detail/macos_click_config.h`，AppKit 调用在同名 `.cpp` 的 ObjC++ TU）、Linux 经 GLib GSettings（`org.gnome.desktop.peripherals.mouse` → `double-click`）；Wasm / Headless / Android 与「macOS 后端关闭」的形态回退库级常量 `AURORA_DEFAULT_CLICK_WINDOW_MS`。应用可显式写 `click_window_ms` 覆盖，再读 `os_double_click_ms()` 回填即恢复跟随系统。真机取证见 `aurora_verify_macos_double_click` / `aurora_verify_linux_double_click` / `aurora_verify_windows_double_click`（`08-tooling.md` §7.5）：macOS 一支以独立 AppKit 读回作交叉见证，并如实申报本机出厂值 0.5s 与回退常量同为 500ms、该等值判据在此刻不具区分力（`--interactive` 段现场挪滑杆才算跟）。
 
 **窗口装饰层（Wayland CSD 标题栏双击最大化）直接引用同一对常量**（`AURORA_DEFAULT_CLICK_WINDOW_MS` / `AURORA_DEFAULT_CLICK_RADIUS_DP`），不另写一套，避免「库内两套阈值」漂移。两者语义正交：CSD 标题栏属窗口装饰层、不进 widget 树、不经 `EventDispatcher`，因此它读不到（也无需读）派发器实例上的可调成员，只能引常量。历史值为 300ms / 5px，统一后与其它平台一致为 500ms / 4dp。
 

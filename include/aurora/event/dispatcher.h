@@ -102,8 +102,9 @@ class EventDispatcher {
     auto dispatch_mouse(Widget &root, MouseEvent &e, FocusManager *fm = nullptr) -> bool;
 
     /// @brief 连击判定时间窗（毫秒）：本次 Press 与上次**已完成**点击（Release）的间隔不超过该值才累加序号。
-    ///        初值取 `os_double_click_ms()`（默认跟随系统双击速度：Windows `GetDoubleClickTime()`，
-    ///        其余平台回退 `AURORA_DEFAULT_CLICK_WINDOW_MS`）。可写：显式赋值即覆盖系统值；
+    ///        初值取 `os_double_click_ms()`（默认跟随系统双击速度：Windows `GetDoubleClickTime()`、
+    ///        macOS `+[NSEvent doubleClickInterval]`、Linux 经 GLib GSettings，其余形态回退
+    ///        `AURORA_DEFAULT_CLICK_WINDOW_MS`）。可写：显式赋值即覆盖系统值；
     ///        置 0 使每次点击都重置为 1；置极大值使窗口恒开。测试据此注入极端阈值；
     ///        再读 `os_double_click_ms()` 回填即可恢复「跟随系统」。
     std::uint32_t click_window_ms = os_double_click_ms();
