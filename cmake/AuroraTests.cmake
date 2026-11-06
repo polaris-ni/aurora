@@ -375,27 +375,38 @@ if (AURORA_BUILD_TESTS)
             # 而非断言失败）。NODERAWFS 让 node 直接透传宿主文件系统，与原生跑法语义一致。
             # 仅测试 runner 需要：库与其它 wasm 产物保持默认（浏览器中无宿主 FS 可透传）。
             #
-            # ALLOW_MEMORY_GROWTH：NODERAWFS 产物的堆**默认不可增长**（实测：带
-            #   -sNODERAWFS=1 -O3 -fexceptions 时分配 200MB 即 Aborted(OOM)，而不带
-            #   NODERAWFS 的同源程序可增长）。测试 runner 需要它——itest_play_repository
-            #   的程序化合成 catalog（192 项 × 图标/截图/横幅位图）远超初始堆。
-            #
             # --post-js wasm_noderawfs_cwd.js：NODERAWFS 在 Windows 宿主下 FS.cwd() 返回
             #   `D:\...`（盘符 + 反斜杠），musl getcwd 判 ENOENT → fs::current_path() /
             #   fs::absolute(相对路径) 全线失效（详见该文件头部注释）。Linux/macOS 宿主本
             #   就是 POSIX 形态，shim 为恒等变换。
+            #
+            # 堆增长按 -pthread 分叉：NODERAWFS 产物的堆默认不可增长（实测：带
+            #   -sNODERAWFS=1 -O3 -fexceptions 时超过初始堆即 Aborted(OOM)，而不带 NODERAWFS
+            #   的同源程序可增长），单线程腿保持 ALLOW_MEMORY_GROWTH=1 以容纳峰值用例。
+            #   -pthread 腿改为链接期定容：共享内存在线程运行期增长会触发上游引擎缺陷——
+            #   V8 Liftoff 缓存的内存边界在 memory.grow 后不刷新，另一线程的原子访问即 trap
+            #   "memory access out of bounds"（Chrome 157 才修，Node 各 release 线均无修复）。
+            #   全量 ctest 实测堆峰值约 84MiB，定容 256MiB 留 3 倍余量，运行期不再发生增长；
+            #   若峰值估计不足，emscripten 直接 OOM 报错而非带着失效边界继续跑，失败形态可诊断。
+            #   单线程腿无共享内存、浏览器产物不走 NODERAWFS，均不受该缺陷影响。
             target_link_options(${tgt} PRIVATE
                     -sNODERAWFS=1
-                    -sALLOW_MEMORY_GROWTH=1
                     # STACK_SIZE：Emscripten 3.1.27+ 默认栈仅 64KB，而 JSON 解析器是递归下降
                     # （sax.cpp emit_value → emit_object/emit_array → emit_value(depth+1)），
                     # max_depth 默认 512 且深度检查在递归入口——会先扎满 512 层才折返；每层帧携带
                     # Result<bool>（variant 里的 Error 含 7 个 std::string，单帧 200+ 字节），
                     # 512 层双帧 ≈ 200KB+，远超 64KB ⇒ wasm 下表现为 RuntimeError: memory access
                     # out of bounds（栈溢出的 wasm 形态）。native 栈 8MB 无感，仅 wasm 需要显式放大；
-                    # 4MB = 实测需求（200KB+）的 8 倍余量，ALLOW_MEMORY_GROWTH 下初始内存足够容纳。
+                    # 4MB = 实测需求（200KB+）的 8 倍余量，定容后的初始内存足够容纳。
                     -sSTACK_SIZE=4194304
                     "--post-js=${AURORA_SOURCE_DIR}/tests/support/wasm_noderawfs_cwd.js")
+            if (AURORA_ENABLE_WASM_PTHREADS)
+                target_link_options(${tgt} PRIVATE
+                        -sALLOW_MEMORY_GROWTH=0
+                        -sINITIAL_MEMORY=268435456)
+            else ()
+                target_link_options(${tgt} PRIVATE -sALLOW_MEMORY_GROWTH=1)
+            endif ()
         endif ()
     endfunction()
 
