@@ -171,7 +171,7 @@ auto info = au::Button::describe_static();
 
 ### 2.5 双模 API 与 Props 约定
 
-**部分控件**（布局 / 文本 / 图片 / 滚动 / 导航 / 图表 / 下拉刷新类）采用**继承式双模 API**：`class Xxx : public XxxProps`，属性声明只有 `XxxProps` 这一处，控件不再用私有 `m_*` 重复声明同一属性；已迁形态把 `XxxProps` 的字段收为私有、只留读件与链式写件（见下句），未迁形态下这些字段仍是控件自身的公有字段。采用此模式的控件（共 16 个）：`BarChart` / `BottomNavBar` / `Button` / `Column` / `Divider` / `Grid` / `ImageView` / `LazyRow` / `LineChart` / `PieChart` / `PullToRefresh` / `Row` / `ScatterChart` / `Scroll` / `Sparkline` / `Text`（见各自头声明）。**迁移期两种形态并存**：`Button` / `Divider` / `Sparkline` 三型已改为「私有字段 + 权威表 + 链式写件」——`ButtonProps` / `DividerProps` / `SparklineProps` 没有任何可直写的公有成员，属性只经 `set_<键>()` 装入，生效值只经读件读取（无参 `x()` 或带上下文 `x(const BuildContext &)`，逐行由其回落点决定，见 §4.1）；其余 13 类仍是「序列化键 == 公有同名成员」的聚合。例外——`Checkbox` / `Switch` / `Slider` / `ProgressIndicator` / `Dropdown` / `RadioGroup` / `SpinBox` / `SegmentedControl` / `Chip` / `TextInput` 等仍使用私有 `*_` 成员 + setter，未采用双模。
+**部分控件**（布局 / 文本 / 图片 / 滚动 / 导航 / 图表 / 下拉刷新类）采用**继承式双模 API**：`class Xxx : public XxxProps`，属性声明只有 `XxxProps` 这一处，控件不再用私有 `m_*` 重复声明同一属性；已迁形态把 `XxxProps` 的字段收为私有、只留读件与链式写件（见下句），未迁形态下这些字段仍是控件自身的公有字段。采用此模式的控件（共 16 个）：`BarChart` / `BottomNavBar` / `Button` / `Column` / `Divider` / `Grid` / `ImageView` / `LazyRow` / `LineChart` / `PieChart` / `PullToRefresh` / `Row` / `ScatterChart` / `Scroll` / `Sparkline` / `Text`（见各自头声明）。**迁移期两种形态并存**：`Button` / `Divider` / `Sparkline` / `LazyRow` 四型已改为「私有字段 + 权威表 + 链式写件」——`ButtonProps` / `DividerProps` / `SparklineProps` / `LazyRowProps` 没有任何可直写的公有成员，属性只经 `set_<键>()` 装入，生效值只经读件读取（无参 `x()` 或带上下文 `x(const BuildContext &)`，逐行由其回落点决定，见 §4.1）；其余 12 类仍是「序列化键 == 公有同名成员」的聚合。例外——`Checkbox` / `Switch` / `Slider` / `ProgressIndicator` / `Dropdown` / `RadioGroup` / `SpinBox` / `SegmentedControl` / `Chip` / `TextInput` 等仍使用私有 `*_` 成员 + setter，未采用双模。
 
 ```cpp
 // 形态一：*Props 具名聚合（推荐，可分块生成）
@@ -188,7 +188,7 @@ au::Text("Welcome").font_size(24).bold();
 
 **关键约束：**
 
-- **控件类不是聚合类型**，不能用 `au::Button{ .label = ... }` 这类指定初始化器构造控件（编译失败）。指定初始化器**仅适用于尚未迁移的 `*Props` 聚合结构**与 `Theme` 等纯数据聚合，其中字段顺序无关，遗漏字段回退默认值；已迁到链式形态的 `Button` / `Divider` / `Sparkline` 不在此列（`au::ButtonProps{ .label = ... }`、`au::SparklineProps{ .values = {...} }` 编译红，须写 `au::ButtonProps().set_label(...)`、`au::SparklineProps().set_values({...})`）。
+- **控件类不是聚合类型**，不能用 `au::Button{ .label = ... }` 这类指定初始化器构造控件（编译失败）。指定初始化器**仅适用于尚未迁移的 `*Props` 聚合结构**与 `Theme` 等纯数据聚合，其中字段顺序无关，遗漏字段回退默认值；已迁到链式形态的 `Button` / `Divider` / `Sparkline` / `LazyRow` 不在此列（`au::ButtonProps{ .label = ... }`、`au::SparklineProps{ .values = {...} }` 编译红，须写 `au::ButtonProps().set_label(...)`、`au::SparklineProps().set_values({...})`）。
 - 初始化列表形式 `au::Column{ au::Text("A"), au::Text("B") }` 可用——`Column` / `Row` 接受 `std::initializer_list<Node>`。
 - 链式 setter 返回引用；作为子节点放入 `children` 时必须用 `std::move` 包裹（`Widget` 拷贝构造被删除，`Node` 仅移动派生对象）。
 - `Widget::defaults()` 不是虚成员；仅 `Button` 提供静态 `defaults()`（如 `au::Button::defaults() -> ButtonProps`，见 `button.h`），返回该控件的默认 `Props`；其余控件的默认属性来源待补。
@@ -368,7 +368,7 @@ au::Text("Welcome").font_size(24).bold();
 | 控件 | 关键属性 |
 |:---|:---|
 | `LazyList` | `count`、`item_extent`（固定行高，默认 48dp）、`scroll_offset`、`cache_extent`（可见区外预取缓冲）、`restore_key`、`snap_extent` / `snap_paging` / `snap_alignment`（`0` 表示无吸附）；辅助 API `set_scroll_offset` / `scroll_to_item` / `scroll_to` / `scroll_to_end`（末尾锚定，布局前即为意图，口径见 §3.3）/ `set_snap` / `offset_signal` / `set_on_scroll_changed`（偏移变更回调）/ `is_gliding` / `visible_range` / `live_item_count` / `set_cache_extent` / `set_restore_key` / `set_item_builder`（JSON 重建后挂条目）/ `invalidate_items`（刷新条目内容，下一帧生效）；滚轮滚动经 `on_scroll` 覆写处理（`widget/lazy_list.h`） |
-| `LazyRow` | 主轴为水平；`item_count`、`item_extent`（子项固定宽度，默认 96）、`cache_extent`、`padding`、`restore_key`；辅助 API `scroll_offset` / `max_scroll_offset` / `set_scroll_offset`（仅标绘制脏——可见窗口在 `on_paint` 现算，与 `LazyList` 需标布局脏不同）/ `set_item_builder`（JSON 重建后挂条目）；`set_padding` 与 `set_on_item_click`（`on_item_click` 事件，参数为索引）属本控件（`widget/lazy_row.h`） |
+| `LazyRow` | 主轴为水平；五枚属性 `item_count`、`item_extent`（子项固定宽度，默认 96）、`cache_extent`、`restore_key`、`padding`（表尾追加，schema 顺序即此序）已迁到属性单一声明形态（§2.5）：字段私有，写入 `set_item_count(...)` 一类链式写件，取值走无参读件（五行回落点都是库内常量提供者，故本型没有 `x(ctx)` 读件），撤表态走 `clear(LazyRowProps::item_extent_row())`；序列化只写已表态行，而运行时偏移键 `offset` 是**表外键**、不属任何行、恒输出（与 §4.1 的「未表态不序列化」不同源，见 `widget/lazy_row.h`）；条目构建器 `item_builder` 同样出表，是控件面的公有槽位（回调是运行时对象、不入 JSON，同 `Button::on_click` 的处置）；辅助 API `scroll_offset` / `max_scroll_offset` / `set_scroll_offset`（仅标绘制脏——可见窗口在 `on_paint` 现算，与 `LazyList` 需标布局脏不同）/ `set_item_builder`（JSON 重建后挂条目）/ `set_on_item_click`（`on_item_click` 事件，参数为索引）属本控件，`set_item_count` 在控件面被同名覆写一次以追加「清空已建条目」（转调属性面写件，值只有一份存储，§2.5）（`widget/lazy_row.h`） |
 | `Repeater` | `items`（信号驱动），按模板渲染每个元素 |
 | `ListView` | `items`（行数据）、`multi_select`（多选模式）；回调 `on_select` / `on_remove`（`widget/data_widgets.h`） |
 | `DataTable` | `columns`（列描述）、`row_count`（只读）、`selected_row`（-1 = 无）、`sort_column`（-1 = 无）；回调 `on_sort` / `on_select` |
