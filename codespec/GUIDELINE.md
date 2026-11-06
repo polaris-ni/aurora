@@ -1160,7 +1160,7 @@ auto main() -> int {
 
 ## 33 图表控件
 
-五图（`BarChart` / `LineChart` / `Sparkline` / `PieChart` / `ScatterChart`）均为「`XxxProps` 纯值属性 + `class Xxx : public LeafWidget, public XxxProps` + `defaults()`」形态；数据进序列化面，AI 可经 `aurora_api.json` schema + `from_json` 生成带真实数据的图表。
+五图（`BarChart` / `LineChart` / `Sparkline` / `PieChart` / `ScatterChart`）均为「`XxxProps` 纯值属性 + `class Xxx : public LeafWidget, public XxxProps` + `defaults()`」形态；数据进序列化面，AI 可经 `aurora_api.json` schema + `from_json` 生成带真实数据的图表。其中 `Sparkline` 已迁到属性单一声明形态（字段私有、只经 `set_<键>()` 写入、只经同名读件取值，契约见 [`specification/04-widget.md`](specification/04-widget.md) §2.5），写法与其余四图的聚合初始化器不同，见下面样例。
 
 ```cpp
 #include "aurora/aurora.h"
@@ -1199,7 +1199,7 @@ auto main() -> int {
                                  .points = {ChartPoint{.x = 1.0, .y = 2.0}, ChartPoint{.x = 3.0, .y = 4.0}}}},
     }};
 
-    Sparkline spark{SparklineProps{.values = {4.0, 6.0, 3.0, 8.0, 5.0}, .line_width = 2.0F}};
+    Sparkline spark{SparklineProps().set_values({4.0, 6.0, 3.0, 8.0, 5.0}).set_line_width(2.0F)};  // 已迁形态：链式装入
 
     Application app{Scene{Column{ColumnProps{.children = {Node{chart}, Node{donut}, Node{trend},
                                                               Node{pts}, Node{spark}}}}}};
