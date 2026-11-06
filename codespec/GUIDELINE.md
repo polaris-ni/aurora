@@ -1160,7 +1160,7 @@ auto main() -> int {
 
 ## 33 图表控件
 
-五图（`BarChart` / `LineChart` / `Sparkline` / `PieChart` / `ScatterChart`）均为「`XxxProps` 纯值属性 + `class Xxx : public LeafWidget, public XxxProps` + `defaults()`」形态；数据进序列化面，AI 可经 `aurora_api.json` schema + `from_json` 生成带真实数据的图表。其中 `Sparkline` 与 `LineChart` 已迁到属性单一声明形态（字段私有、只经 `set_<键>()` 写入、只经同名读件取值，契约见 [`specification/04-widget.md`](specification/04-widget.md) §2.5），写法与其余三图的聚合初始化器不同，见下面样例；**数组与结构体实参内部的指定初始化器不受影响**（`ChartSeries` / `ChartAxisSpec` / `ChartLegendSpec` 本身仍是聚合类型），而三张未迁的图仍按聚合初始化器写。
+五图（`BarChart` / `LineChart` / `Sparkline` / `PieChart` / `ScatterChart`）均为「`XxxProps` 纯值属性 + `class Xxx : public LeafWidget, public XxxProps` + `defaults()`」形态；数据进序列化面，AI 可经 `aurora_api.json` schema + `from_json` 生成带真实数据的图表。其中 `BarChart` / `Sparkline` / `LineChart` 已迁到属性单一声明形态（字段私有、只经 `set_<键>()` 写入、只经同名读件取值，契约见 [`specification/04-widget.md`](specification/04-widget.md) §2.5），写法与其余两图的聚合初始化器不同，见下面样例；**数组与结构体实参内部的指定初始化器不受影响**（`ChartSeries` / `ChartAxisSpec` / `ChartLegendSpec` 本身仍是聚合类型），而两张未迁的图仍按聚合初始化器写。
 
 ```cpp
 #include "aurora/aurora.h"
@@ -1168,14 +1168,13 @@ auto main() -> int {
 using namespace au;
 
 auto main() -> int {
-    BarChart chart{BarChartProps{
-        .series = {
-            ChartSeries{.name = "cpu", .values = {12.0, 18.0, 9.0, 24.0}, .color = Color{0x2D, 0x9B, 0xFD, 255}},
-            ChartSeries{.name = "mem", .values = {8.0, 10.0, 14.0, 12.0}},
-        },
-        .categories = {"Mon", "Tue", "Wed", "Thu"},
-        .legend = ChartLegendSpec{.visible = true, .position = LegendPosition::Top},
-    }};
+    BarChart chart{BarChartProps()  // 已迁形态：链式装入，一行一次整值表态
+                       .set_series({ChartSeries{.name = "cpu",
+                                                 .values = {12.0, 18.0, 9.0, 24.0},
+                                                 .color = Color{0x2D, 0x9B, 0xFD, 255}},  // 元素内仍是聚合写法
+                                      ChartSeries{.name = "mem", .values = {8.0, 10.0, 14.0, 12.0}}})
+                       .set_categories({"Mon", "Tue", "Wed", "Thu"})
+                       .set_legend(ChartLegendSpec{.visible = true, .position = LegendPosition::Top})};
     chart.set_stacked(true);  // 分组并排 / 堆叠切换（链式 setter）
     chart.on_point_tapped = [](int si, int pi) -> void {  // 回调旁挂，不进序列化面
         AURORA_LOG_INFO("chart", "tapped series ", si, " point ", pi);
