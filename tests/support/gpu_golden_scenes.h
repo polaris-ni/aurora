@@ -75,12 +75,13 @@ inline auto draw_sector(au::Painter &p) -> void {
 
 /// @brief 柱状图场景（基线 `chart_bar`）：两系列 + 类目轴 + Y 轴刻度 + 圆角条。
 [[nodiscard]] inline auto build_bar_chart() -> au::Node {
-    au::BarChartProps props{};
-    props.series = {au::ChartSeries{.name = "2024", .values = {12.0, 18.0, 9.0, 24.0, 15.0}},
-                    au::ChartSeries{.name = "2025", .values = {16.0, 14.0, 20.0, 18.0, 22.0}}};
-    props.categories = {"Mon", "Tue", "Wed", "Thu", "Fri"};
-    props.axis_y = au::ChartAxisSpec{.label = "sales", .tick_count = 5};
-    auto chart = std::make_shared<au::BarChart>(props);
+    au::BarChartProps props =
+        au::BarChartProps()
+            .set_series({au::ChartSeries{.name = "2024", .values = {12.0, 18.0, 9.0, 24.0, 15.0}},
+                         au::ChartSeries{.name = "2025", .values = {16.0, 14.0, 20.0, 18.0, 22.0}}})
+            .set_categories({"Mon", "Tue", "Wed", "Thu", "Fri"})
+            .set_axis_y(au::ChartAxisSpec{.label = "sales", .tick_count = 5});
+    auto chart = std::make_shared<au::BarChart>(std::move(props));
     chart->set_modifier(au::Modifier{}.width(320.0F).height(200.0F));
     return au::Node{au::Column{au::Node{chart}}};
 }
