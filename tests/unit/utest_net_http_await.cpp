@@ -669,6 +669,9 @@ AURORA_TEST_CASE(a_plain_write_then_read_hands_back_the_transport_counts) {
     AURORA_TEST_CHECK_EQ(read_count, std::size_t{3});
 }
 AURORA_TEST_CASE(a_completion_from_another_thread_resumes_exactly_once) {
+#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
+    AURORA_TEST_SKIP("WASM without pthreads has no real worker threads; cross-thread completion is untestable");
+#endif
     PosterQueue poster;
     std::shared_ptr<std::thread> worker;
     std::atomic<int> resumes{0};
@@ -686,6 +689,9 @@ AURORA_TEST_CASE(a_completion_from_another_thread_resumes_exactly_once) {
 }
 
 AURORA_TEST_CASE(completion_racing_with_arm_resumes_exactly_once) {
+#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
+    AURORA_TEST_SKIP("WASM without pthreads has no real worker threads; cross-thread completion is untestable");
+#endif
     const int rounds = 64;
     for (int round = 0; round < rounds; ++round) {
         PosterQueue poster;

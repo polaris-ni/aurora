@@ -114,8 +114,8 @@ class CallbackAwaiter {
                 aurora::detail::post_to_main([to_post]() -> void { to_post.resume(); });
             }
         });
-        // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks) 同 await_read_within：分析器把
-        // std::function 的 _Rep 分配当泄漏点，追不到 awaiter 随协程帧销毁的那次释放
+        // 分析器把 std::function 的 _Rep 分配当泄漏点，追不到 awaiter 随协程帧销毁的那次释放
+        // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
         std::scoped_lock guard(completion->mutex);
         completion->armed = true;  // 发起器已返回：此后抵达的回调一律经投递器恢复
         return !completion->result.has_value();
