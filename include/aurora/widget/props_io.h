@@ -1,7 +1,9 @@
 #pragma once
 
+#include <cmath>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #include "aurora/core/color.h"
 #include "aurora/core/enums.h"
@@ -603,6 +605,42 @@ using Json = json::Value;
         }
     }
     return OverflowStrategy::Visible;
+}
+
+// ---------- 共享容器 <-> JSON ----------
+//
+// 本对函数原居 `widget/chart_common.h`：它只认「数值数组 ⇔ `std::vector<double>`」，不含任何图表
+// 语义，而属性单一声明面要求裸值类型的编解码登记（`PropCodec<std::vector<double>>`）与转换器同层可见
+// —— 机制层头（`widget/props.h`）不该反向包含某控件域的头，故转换器随键名一起落到本头。
+// 图表侧（`ChartSeries::values`、`Sparkline::values`）仍经同一对函数读写，实现只有一份。
+
+/// @brief `vector<double>` → JSON 数组（非数值元素跳过）。
+/// @param v 数值序列。
+/// @return JSON 数组；非有限值按 0.0 写出（保证 JSON 可序列化）。
+[[nodiscard]] inline auto double_vector_to_json(const std::vector<double> &v) -> Json {
+    Json a = Json::array();
+    for (const double x : v) {
+        a.push_back(std::isfinite(x) ? x : 0.0);
+    }
+    return a;
+}
+
+/// @brief JSON 数组 → `vector<double>`（非数组 / 非数值元素跳过，绝不抛异常）。
+/// @param j 待解析的 JSON 值。
+/// @return 数值序列（非数组时为空）；非有限数值按 0.0 收。
+[[nodiscard]] inline auto json_to_double_vector(const Json &j) -> std::vector<double> {
+    std::vector<double> out;
+    if (!j.is_array()) {
+        return out;
+    }
+    out.reserve(j.size());
+    for (const auto &item : j) {
+        if (item.is_number()) {
+            const auto v = item.as_or<double>(0.0);
+            out.push_back(std::isfinite(v) ? v : 0.0);
+        }
+    }
+    return out;
 }
 
 }  // namespace aurora

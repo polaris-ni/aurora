@@ -693,6 +693,34 @@ struct PropCodec<Json> {
     [[nodiscard]] static auto from_json(const Json &j) -> Json { return j; }
 };
 
+/// @brief 数值序列属性：JSON 数字数组（图表族数据行的裸值形态）。
+///
+/// 转换器取 `props_io.h` 里那份既有的 `double_vector_to_json` / `json_to_double_vector`，图表侧
+/// （`ChartSeries::values` 与 `Sparkline::values`）与本登记位共用同一份实现，不另写第二份。
+/// 本档**刻意不登记 `validate`**：非数组退空序列、非数值元素逐项跳过是迁移前既有的宽容口径，收紧
+/// 它属于与本口径无关的行为变更；于是这类行走 `from_json` 通路 —— 照常表态、不产生降级上报
+/// （口径边界见「非法值一律不写入只约束已登记校验的类型」那条落码事实）。
+template <>
+struct PropCodec<std::vector<double>> {
+    /// @brief schema 的 C++ 类型名。
+    /// @return `vector<double>`。
+    [[nodiscard]] static constexpr auto type_text() -> std::string_view { return "vector<double>"; }
+
+    /// @brief schema 的 JSON 类型名。
+    /// @return `array`。
+    [[nodiscard]] static constexpr auto json_text() -> std::string_view { return "array"; }
+
+    /// @brief 值 → JSON。
+    /// @param v 数值序列。
+    /// @return 数字数组；非有限值按 0.0 写出。
+    [[nodiscard]] static auto to_json(const std::vector<double> &v) -> Json { return double_vector_to_json(v); }
+
+    /// @brief JSON → 值。
+    /// @param j JSON 值。
+    /// @return 数值序列（非数组为空，非数值元素跳过）。
+    [[nodiscard]] static auto from_json(const Json &j) -> std::vector<double> { return json_to_double_vector(j); }
+};
+
 /// @brief 颜色属性：JSON `[r,g,b,a]`。
 template <>
 struct PropCodec<Color> {

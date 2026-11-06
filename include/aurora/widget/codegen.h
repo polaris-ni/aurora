@@ -88,7 +88,7 @@ namespace detail {
 /// @param type 序列化 type 名。
 /// @return 该类型的属性是否只能通过 `set_<键名>()` 链式写件装入。
 [[nodiscard]] constexpr auto props_chain_writers(std::string_view type) noexcept -> bool {
-    constexpr std::array<std::string_view, 2> k_chain = {"Button", "Divider"};
+    constexpr std::array<std::string_view, 3> k_chain = {"Button", "Divider", "Sparkline"};
     return std::ranges::find(k_chain, type) != k_chain.end();
 }
 
@@ -959,8 +959,9 @@ struct PropEmit {
         return "au::" + cls + emit_child_list(kids, indent);
     }
     std::string body = props_str;  // 兜底形态的 Props 成员片段累加器（先标量属性后 .children）
-    // 链式形态的类型今天全是叶子（`props_chain_writers` 里的 `Button`、`Divider` 都无子节点槽），故这条兜底
-    // 分支仍按聚合形态发射；容器迁移时这条分支要改走 `set_children(...)`，与 `props_child_slot` 一并处理。
+    // 链式形态的类型今天全是叶子（`props_chain_writers` 里的 `Button`、`Divider`、`Sparkline` 都无子节点
+    // 槽），故这条兜底分支仍按聚合形态发射；容器迁移时这条分支要改走 `set_children(...)`，与
+    // `props_child_slot` 一并处理。
     if (!body.empty()) {
         body += ", ";
     }

@@ -343,35 +343,10 @@ static_assert(ThemeExtension<ChartPalette>, "ChartPalette must satisfy ThemeExte
 }
 
 // ---------- JSON 编解码（数据进序列化面）----------
-
-/// @brief `vector<double>` → JSON 数组（非数值元素跳过）。
-/// @param v 数值序列。
-/// @return JSON 数组；非有限值按 0.0 写出（保证 JSON 可序列化）。
-[[nodiscard]] inline auto double_vector_to_json(const std::vector<double> &v) -> Json {
-    Json a = Json::array();
-    for (const double x : v) {
-        a.push_back(std::isfinite(x) ? x : 0.0);
-    }
-    return a;
-}
-
-/// @brief JSON 数组 → `vector<double>`（非数组 / 非数值元素跳过，绝不抛异常）。
-/// @param j 待解析的 JSON 值。
-/// @return 数值序列（非数组时为空）；非有限数值按 0.0 收。
-[[nodiscard]] inline auto json_to_double_vector(const Json &j) -> std::vector<double> {
-    std::vector<double> out;
-    if (!j.is_array()) {
-        return out;
-    }
-    out.reserve(j.size());
-    for (const auto &item : j) {
-        if (item.is_number()) {
-            const auto v = item.as_or<double>(0.0);
-            out.push_back(std::isfinite(v) ? v : 0.0);
-        }
-    }
-    return out;
-}
+//
+// `vector<double>` ↔ JSON 数组那一对（`double_vector_to_json` / `json_to_double_vector`）已落到
+// `widget/props_io.h`：它没有图表语义，而属性编解码登记要与转换器同层可见，机制层头不该反向包含
+// 本控件域头。本头经 `props_io.h` 拿到那两个名字，下面的调用点照旧。
 
 /// @brief 字符串数组 ↔ JSON（类目标签）。
 /// @param v 类目标签序列。

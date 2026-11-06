@@ -23,7 +23,8 @@ auto main() -> int {
     };
 
     // 迷你趋势线：无轴 / 无图例，用于卡片内的缩览
-    au::Sparkline spark{au::SparklineProps{.values = {4.0, 6.0, 3.0, 8.0, 5.0, 9.0, 7.0, 11.0}, .line_width = 2.0F}};
+    au::Sparkline spark{
+        au::SparklineProps().set_values({4.0, 6.0, 3.0, 8.0, 5.0, 9.0, 7.0, 11.0}).set_line_width(2.0F)};
     spark.set_color(pal::AURORA_PRIMARY);
     spark.set_modifier(au::Modifier{}.width(200.0F).height(40.0F));
 
