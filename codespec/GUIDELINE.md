@@ -1160,7 +1160,7 @@ auto main() -> int {
 
 ## 33 图表控件
 
-五图（`BarChart` / `LineChart` / `Sparkline` / `PieChart` / `ScatterChart`）均为「`XxxProps` 纯值属性 + `class Xxx : public LeafWidget, public XxxProps` + `defaults()`」形态；数据进序列化面，AI 可经 `aurora_api.json` schema + `from_json` 生成带真实数据的图表。其中 `BarChart` / `Sparkline` / `LineChart` 已迁到属性单一声明形态（字段私有、只经 `set_<键>()` 写入、只经同名读件取值，契约见 [`specification/04-widget.md`](specification/04-widget.md) §2.5），写法与其余两图的聚合初始化器不同，见下面样例；**数组与结构体实参内部的指定初始化器不受影响**（`ChartSeries` / `ChartAxisSpec` / `ChartLegendSpec` 本身仍是聚合类型），而两张未迁的图仍按聚合初始化器写。
+五图（`BarChart` / `LineChart` / `Sparkline` / `PieChart` / `ScatterChart`）均为「`XxxProps` 纯值属性 + `class Xxx : public LeafWidget, public XxxProps` + `defaults()`」形态；数据进序列化面，AI 可经 `aurora_api.json` schema + `from_json` 生成带真实数据的图表。其中 `BarChart` / `LineChart` / `PieChart` / `Sparkline` 已迁到属性单一声明形态（字段私有、只经 `set_<键>()` 写入、只经同名读件取值，契约见 [`specification/04-widget.md`](specification/04-widget.md) §2.5），写法与余下那图不同，见下面样例；**数组与结构体实参内部的指定初始化器不受影响**（`PieSection` / `ChartSeries` / `ChartAxisSpec` / `ChartLegendSpec` 本身仍是聚合类型），而未迁的 `ScatterChart` 仍按聚合初始化器写。
 
 ```cpp
 #include "aurora/aurora.h"
@@ -1180,13 +1180,12 @@ auto main() -> int {
         AURORA_LOG_INFO("chart", "tapped series ", si, " point ", pi);
     };
 
-    PieChart donut{PieChartProps{
-        .sections = {PieSection{.name = "mobile", .value = 45.0},
-                     PieSection{.name = "desktop", .value = 30.0},
-                     PieSection{.name = "tablet", .value = 15.0}},
-        .center_space_ratio = 0.45F,  // > 0 ⇒ 环形
-        .show_percentage_labels = true,
-    }};
+    PieChart donut{PieChartProps()  // 已迁形态：链式装入，扇区数组按整值表态
+                       .set_sections({PieSection{.name = "mobile", .value = 45.0},
+                                      PieSection{.name = "desktop", .value = 30.0},
+                                      PieSection{.name = "tablet", .value = 15.0}})  // 元素内仍是聚合写法
+                       .set_center_space_ratio(0.45F)  // > 0 ⇒ 环形
+                       .set_show_percentage_labels(true)};
 
     LineChart trend{LineChartProps()
         .set_series({ChartSeries{.name = "latency", .values = {4.0, 6.0, 3.0, 8.0, 5.0}}})  // 元素内仍是聚合写法
