@@ -1160,7 +1160,7 @@ auto main() -> int {
 
 ## 33 图表控件
 
-五图（`BarChart` / `LineChart` / `Sparkline` / `PieChart` / `ScatterChart`）均为「`XxxProps` 纯值属性 + `class Xxx : public LeafWidget, public XxxProps` + `defaults()`」形态；数据进序列化面，AI 可经 `aurora_api.json` schema + `from_json` 生成带真实数据的图表。其中 `BarChart` / `LineChart` / `PieChart` / `Sparkline` 已迁到属性单一声明形态（字段私有、只经 `set_<键>()` 写入、只经同名读件取值，契约见 [`specification/04-widget.md`](specification/04-widget.md) §2.5），写法与余下那图不同，见下面样例；**数组与结构体实参内部的指定初始化器不受影响**（`PieSection` / `ChartSeries` / `ChartAxisSpec` / `ChartLegendSpec` 本身仍是聚合类型），而未迁的 `ScatterChart` 仍按聚合初始化器写。
+五图（`BarChart` / `LineChart` / `Sparkline` / `PieChart` / `ScatterChart`）均为「`XxxProps` 属性 + `class Xxx : public LeafWidget, public XxxProps` + `defaults()`」形态；数据进序列化面，AI 可经 `aurora_api.json` schema + `from_json` 生成带真实数据的图表。五图的 `XxxProps` 现在**全部**迁到属性单一声明形态（字段私有、只经 `set_<键>()` 写入、只经同名读件取值，契约见 [`specification/04-widget.md`](specification/04-widget.md) §2.5），写法见下面样例；**数组与结构体实参内部的指定初始化器不受影响**（`PieSection` / `ChartSeries` / `ChartAxisSpec` / `ChartLegendSpec` / `ScatterSeries` / `ChartPoint` 本身仍是聚合类型）。
 
 ```cpp
 #include "aurora/aurora.h"
@@ -1192,10 +1192,10 @@ auto main() -> int {
         .set_show_dots(true)
         .set_axis_x(ChartAxisSpec{.tick_count = 4})};  // 已迁形态：链式装入，结构化行整值表态
 
-    ScatterChart pts{ScatterChartProps{
-        .series = {ScatterSeries{.name = "samples",
-                                 .points = {ChartPoint{.x = 1.0, .y = 2.0}, ChartPoint{.x = 3.0, .y = 4.0}}}},
-    }};
+    ScatterChart pts{ScatterChartProps()  // 已迁形态：链式装入，散点数组按整值表态
+                        .set_series({ScatterSeries{.name = "samples",
+                                                   .points = {ChartPoint{.x = 1.0, .y = 2.0},  // 元素内仍是聚合写法
+                                                              ChartPoint{.x = 3.0, .y = 4.0}}}})};
 
     Sparkline spark{SparklineProps().set_values({4.0, 6.0, 3.0, 8.0, 5.0}).set_line_width(2.0F)};  // 已迁形态：链式装入
 
