@@ -171,7 +171,7 @@ auto info = au::Button::describe_static();
 
 ### 2.5 双模 API 与 Props 约定
 
-**部分控件**（布局 / 文本 / 图片 / 滚动 / 导航 / 图表 / 下拉刷新类）采用**继承式双模 API**：`class Xxx : public XxxProps`，属性声明只有 `XxxProps` 这一处，控件不再用私有 `m_*` 重复声明同一属性；已迁形态把 `XxxProps` 的字段收为私有、只留读件与链式写件（见下句），未迁形态下这些字段仍是控件自身的公有字段。采用此模式的控件（共 16 个）：`BarChart` / `BottomNavBar` / `Button` / `Column` / `Divider` / `Grid` / `ImageView` / `LazyRow` / `LineChart` / `PieChart` / `PullToRefresh` / `Row` / `ScatterChart` / `Scroll` / `Sparkline` / `Text`（见各自头声明）。**迁移期两种形态并存**：`Button` / `Divider` / `Sparkline` / `LazyRow` 四型已改为「私有字段 + 权威表 + 链式写件」——`ButtonProps` / `DividerProps` / `SparklineProps` / `LazyRowProps` 没有任何可直写的公有成员，属性只经 `set_<键>()` 装入，生效值只经读件读取（无参 `x()` 或带上下文 `x(const BuildContext &)`，逐行由其回落点决定，见 §4.1）；其余 12 类仍是「序列化键 == 公有同名成员」的聚合。例外——`Checkbox` / `Switch` / `Slider` / `ProgressIndicator` / `Dropdown` / `RadioGroup` / `SpinBox` / `SegmentedControl` / `Chip` / `TextInput` 等仍使用私有 `*_` 成员 + setter，未采用双模。
+**部分控件**（布局 / 文本 / 图片 / 滚动 / 导航 / 图表 / 下拉刷新类）采用**继承式双模 API**：`class Xxx : public XxxProps`，属性声明只有 `XxxProps` 这一处，控件不再用私有 `m_*` 重复声明同一属性；已迁形态把 `XxxProps` 的字段收为私有、只留读件与链式写件（见下句），未迁形态下这些字段仍是控件自身的公有字段。采用此模式的控件（共 16 个）：`BarChart` / `BottomNavBar` / `Button` / `Column` / `Divider` / `Grid` / `ImageView` / `LazyRow` / `LineChart` / `PieChart` / `PullToRefresh` / `Row` / `ScatterChart` / `Scroll` / `Sparkline` / `Text`（见各自头声明）。**迁移期两种形态并存**：`Button` / `Divider` / `Sparkline` / `LazyRow` / `LineChart` 五型已改为「私有字段 + 权威表 + 链式写件」——`ButtonProps` / `DividerProps` / `SparklineProps` / `LazyRowProps` / `LineChartProps` 没有任何可直写的公有成员，属性只经 `set_<键>()` 装入，生效值只经读件读取（无参 `x()` 或带上下文 `x(const BuildContext &)`，逐行由其回落点决定，见 §4.1）；其余 11 类仍是「序列化键 == 公有同名成员」的聚合。例外——`Checkbox` / `Switch` / `Slider` / `ProgressIndicator` / `Dropdown` / `RadioGroup` / `SpinBox` / `SegmentedControl` / `Chip` / `TextInput` 等仍使用私有 `*_` 成员 + setter，未采用双模。
 
 ```cpp
 // 形态一：*Props 具名聚合（推荐，可分块生成）
@@ -188,7 +188,7 @@ au::Text("Welcome").font_size(24).bold();
 
 **关键约束：**
 
-- **控件类不是聚合类型**，不能用 `au::Button{ .label = ... }` 这类指定初始化器构造控件（编译失败）。指定初始化器**仅适用于尚未迁移的 `*Props` 聚合结构**与 `Theme` 等纯数据聚合，其中字段顺序无关，遗漏字段回退默认值；已迁到链式形态的 `Button` / `Divider` / `Sparkline` / `LazyRow` 不在此列（`au::ButtonProps{ .label = ... }`、`au::SparklineProps{ .values = {...} }` 编译红，须写 `au::ButtonProps().set_label(...)`、`au::SparklineProps().set_values({...})`）。
+- **控件类不是聚合类型**，不能用 `au::Button{ .label = ... }` 这类指定初始化器构造控件（编译失败）。指定初始化器**仅适用于尚未迁移的 `*Props` 聚合结构**与 `Theme` 等纯数据聚合，其中字段顺序无关，遗漏字段回退默认值；已迁到链式形态的 `Button` / `Divider` / `Sparkline` / `LazyRow` / `LineChart` 不在此列（`au::ButtonProps{ .label = ... }`、`au::SparklineProps{ .values = {...} }`、`au::LineChartProps{ .series = {...} }` 编译红，须写 `au::ButtonProps().set_label(...)`、`au::SparklineProps().set_values({...})`、`au::LineChartProps().set_series({...})`）。但**数组与结构体实参内部的指定初始化器仍可用**（`au::LineChartProps().set_series({{ .name = "A", .values = {1, 3, 2} }})`）——那是 `ChartSeries` 这类未迁聚合的写法，链式形态只约束 `*Props` 本体的字段。
 - 初始化列表形式 `au::Column{ au::Text("A"), au::Text("B") }` 可用——`Column` / `Row` 接受 `std::initializer_list<Node>`。
 - 链式 setter 返回引用；作为子节点放入 `children` 时必须用 `std::move` 包裹（`Widget` 拷贝构造被删除，`Node` 仅移动派生对象）。
 - `Widget::defaults()` 不是虚成员；仅 `Button` 提供静态 `defaults()`（如 `au::Button::defaults() -> ButtonProps`，见 `button.h`），返回该控件的默认 `Props`；其余控件的默认属性来源待补。
@@ -437,7 +437,7 @@ au::Text("Welcome").font_size(24).bold();
 | 控件 | 说明 |
 |:---|:---|
 | `BarChart` | 柱状图（`widget/bar_chart.h`）。`series`（`ChartSeries{name, values, color?}` 数组，多系列分组并排）、`categories`（类目标签，缺省序号）、`stacked`、`bar_width_ratio`、`bar_corner_radius`、`show_crosshair`、`axis_x`（类目轴）/ `axis_y`（数值轴）、`legend`、`padding`；回调 `on_point_tapped(series_idx, point_idx)` |
-| `LineChart` | 折线图（`widget/line_chart.h`）。`series`（等距 x = 索引）、`show_dots`、`line_width`、`axis_x` / `axis_y`（双 `LinearScale`）、`legend`、`padding`；`show_crosshair` 控制十字准线；回调 `on_point_tapped(series_idx, point_idx)` |
+| `LineChart` | 折线图（`widget/line_chart.h`）。`series`（等距 x = 索引）、`show_dots`、`line_width`、`axis_x` / `axis_y`（双 `LinearScale`）、`legend`、`padding`；`show_crosshair` 控制十字准线；回调 `on_point_tapped(series_idx, point_idx)`。十枚属性（另有 `categories` / `dot_radius`）已迁到属性单一声明形态（§2.5）：字段私有，写入 `set_series({...})` / `set_axis_x(ChartAxisSpec{...})` 一类链式写件，取值走无参读件（十行的回落点全是库内常量——轴与网格的配色取自继承主题、不属属性面，故本型没有 `x(ctx)` 读件），撤表态走 `clear(LineChartProps::legend_row())`；`LineChart::set_series` 是控件侧的同名覆写（写入后重播 grow-in 入场动画），值仍由同一行给出 |
 | `Sparkline` | 迷你走势图（`widget/sparkline.h`），最薄：**无轴 / 无网格 / 无图例 / 无交互**。六枚属性 `values`（单系列）/ `color`（缺省取内置色板首色）/ `line_width` / `show_end_dot` / `dot_radius` / `padding` 已迁到属性单一声明形态（§2.5）：字段私有，写入 `set_values({...})` 一类链式写件，取值走无参读件 `values()` / `color()` / …（六行的回落点都是库内常量提供者，故本型没有 `x(ctx)` 读件），撤表态走 `clear(SparklineProps::values_row())` |
 | `PieChart` | 饼图 / 环形图（`widget/pie_chart.h`）。`sections`（`PieSection{name, value, color?}` 数组）、`center_space_ratio`（> 0 即环形）、`start_angle`（度，12 点起）、`show_percentage_labels`、`section_gap`、`legend`、`padding`；命中按极坐标（半径 + 角度）判扇区；回调 `on_section_tapped(section_idx)` |
 | `ScatterChart` | 散点图（`widget/scatter_chart.h`）。`series`（`ScatterSeries{name, points: [{x,y}], dot_radius, color?}`，显式 `ChartPoint`）、`axis_x` / `axis_y`（双 `LinearScale`）、`legend`、`padding`；命中按最近点欧氏距离（半径 = `dot_radius + 4dp`）；回调 `on_point_tapped(series_idx, point_idx)` |
@@ -446,12 +446,12 @@ au::Text("Welcome").font_size(24).bold();
 
 四条族级契约：
 
-1. **数据与视觉配置都是纯值属性**，整包进序列化面（`to_json` / `from_json` / `diff` / `apply_patch`）——AI 可经 schema + `from_json` 生成带真实数据的图表；交互回调（如 `on_point_tapped`）旁挂、**不进序列化面**。已迁到属性单一声明形态的 `Sparkline` 口径为「只写必填行与已表态行」（§2.5 / §4.1），即未表态的属性键不落盘，其余四图仍按全量键输出。
+1. **数据与视觉配置都是纯值属性**，整包进序列化面（`to_json` / `from_json` / `diff` / `apply_patch`）——AI 可经 schema + `from_json` 生成带真实数据的图表；交互回调（如 `on_point_tapped`）旁挂、**不进序列化面**。已迁到属性单一声明形态的 `Sparkline` / `LineChart` 口径为「只写必填行与已表态行」（§2.5 / §4.1），即未表态的属性键不落盘，其余三图仍按全量键输出。
 2. **轴域与命中反查同源**：渲染、刻度生成、hover 命中都消费同一份 `LinearScale` / `BandScale`，不得各算一遍。
 3. **绘制不得越出控件 `bounds`**：控件自身的绘制越界不会被擦除（残影），脏区按 `Widget::dirty_bounds()`（= `paint_bounds_` ∪ 盒外装饰）标记。轴留白与图例带在控件内部以 `padding` 预留，悬浮值框按可用区夹取 / 翻转。唯一被认可的盒外绘制是基类统一焦点环，其外扩已由 `dirty_bounds()` 承担（见 [`05-event-navigation.md`](05-event-navigation.md) §4.4）。
 4. **取色与取 Locale 一律带回退**：系列色 = 显式 `color` > 主题图表色板 `ChartPalette`（经 `ThemeExtension<T>` 接入，应用可在根主题播种 `Theme::light().with_extension(ChartPalette::light())`）> 内置 8 色板（`chart_palette(index % 8)`，未注册 `ChartPalette` 时回落，观感同值）；网格 / 标签色取自 `inherit_theme(ctx)`；刻度文本经 `format_number(v, locale, digits)`，Locale 用 `ctx.environment<Locale>()` 取值、**未注入回退 `Locale{}`**（`render_to_png` 传 `constexpr BuildContext`，`env_of<Locale>` 会断言失败）。
 
-健壮性降级：空数据只画轴；`range == 0` 时域退化为 `[v, v+1]`（全 0 即 `[0,1]`）；NaN / ±inf 数据点跳过；点数超限时截断。反序列化对畸形数组元素逐项跳过并 `Diagnostics::degraded`，绝不抛异常；例外是已迁形态的数组值行——`Sparkline` 的 `values` 经 `PropCodec<std::vector<double>>` 的宽容通路（该 codec 未登记 `validate`），坏元素与非数组整值都只退回应得值、该行照常表态且**不上报**，与迁移前逐字相同；上报只发生在登记了 `validate` 的行上（数值越界、颜色 / 留白 / 开关形态不符）。
+健壮性降级：空数据只画轴；`range == 0` 时域退化为 `[v, v+1]`（全 0 即 `[0,1]`）；NaN / ±inf 数据点跳过；点数超限时截断。反序列化对畸形数组元素逐项跳过并 `Diagnostics::degraded`，绝不抛异常；例外是已迁形态的数组值行——`Sparkline` 的 `values` 经 `PropCodec<std::vector<double>>` 的宽容通路（该 codec 未登记 `validate`），坏元素与非数组整值都只退回应得值、该行照常表态且**不上报**，与迁移前逐字相同；`LineChart` 的五枚结构化行（`series` / `categories` / `axis_x` / `axis_y` / `legend`）同走这条通路，其四枚 codec（`std::vector<ChartSeries>` / `std::vector<std::string>` / `ChartAxisSpec` / `ChartLegendSpec`）也一律未登记 `validate`，畸形字段与缺字段逐项回退各字段默认、照常表态且不上报。会上报的是登记了 `validate` 的行（`Sparkline` 与 `LineChart` 的 `line_width` / `dot_radius` 越界——负值不再被 `std::max` 静默烘成 `0.0`，而是不写入、该行退回未表态取回落点，颜色 / 留白 / 开关形态不符同此）。容器行的「同值写入短路」要求元素可判等，故 `ChartSeries` / `ChartAxisSpec` / `ChartLegendSpec` 各带一枚 `= default` 的逐字段 `operator==`（`std::vector<T>::operator==` 声明了但无约束，`T` 不可判等时红在实例化那一点）。
 
 ---
 
