@@ -1,7 +1,7 @@
 /// 测试类型: integration
 /// 目标单元: include/aurora/core/enums.h
 /// 测试说明: 守护工具链共享枚举登记表 tools/include/known_enums.h——编译期锚点引用真实枚举成员、
-///           登记表结构与历史错值不复发、库自描述的每个非基础属性类型都有登记键
+///           登记表结构与历史错值不复发、库自描述的每个可枚举属性类型都有登记键
 /// 覆盖说明: 登记表被 gen_api / aurora_mcp / aurora_cli / aurora_lsp 四端消费，漂移即补全失效
 
 #include <algorithm>
@@ -63,13 +63,25 @@ namespace {
            static_cast<int>(au::ColorScheme::Unspecified) + static_cast<int>(au::ColorScheme::Dark);
 }
 
-/// @brief 属性类型是否属于「不需要枚举登记」的基础 / 容器类型。
-auto is_primitive_type(const std::string &t) -> bool {
-    static const std::vector<std::string> BASE = {"float",      "int",   "bool",   "string",
-                                                  "double",     "Color", "Length", "LocalizedString",
-                                                  "EdgeInsets", "Json",  "any",    "std::string"};
-    for (const auto &b : BASE) {
+/// @brief 属性类型是否属于「不参与枚举登记」的一类：标量 / 容器 / 值对象结构体。
+/// @note 登记表 `tools/include/known_enums.h` 的键必须能列出成员名（工具链据此做补全与校验），
+///       值对象只有字段而非成员名，进表即让 LSP / MCP 建议出编译不过的取值，故按类别豁免。
+///       新增裸结构体属性会让覆盖率用例转红，由作者显式把类型名补进 VALUE 一档 ——
+///       这是刻意的 fail-safe（漏登记会响），不是豁免通道。
+auto is_non_enumerable_type(const std::string &t) -> bool {
+    // 标量与以标量 / 字符串承载的类型；`Json` 是「值原样透传」属性的历史写法。
+    static const std::vector<std::string> SCALAR = {"float",  "int",  "bool", "string",
+                                                    "double", "Json", "any",  "std::string"};
+    // 值对象结构体：有字段、无成员名，序列化面自成一体。
+    static const std::vector<std::string> VALUE = {"Color",      "Length",        "LocalizedString",
+                                                   "EdgeInsets", "ChartAxisSpec", "ChartLegendSpec"};
+    for (const auto &b : SCALAR) {
         if (t == b) {
+            return true;
+        }
+    }
+    for (const auto &v : VALUE) {
+        if (t == v) {
             return true;
         }
     }
@@ -173,7 +185,7 @@ AURORA_TEST_CASE(known_enums_cover_all_enum_typed_props) {
                 continue;
             }
             const auto t = descriptor.at("type")->as_or<std::string>("");
-            if (t.empty() || is_primitive_type(t)) {
+            if (t.empty() || is_non_enumerable_type(t)) {
                 continue;
             }
             ++checked;

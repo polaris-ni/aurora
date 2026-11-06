@@ -7,14 +7,12 @@
 auto main() -> int {
     const auto last_tap = std::make_shared<au::State<au::LocalizedString>>(au::LocalizedString{"(no tap yet)"});
 
-    au::LineChart chart{au::LineChartProps{
-        .series =
-            {
-                au::ChartSeries{.name = "cpu", .values = {12.0, 18.0, 9.0, 24.0, 15.0, 20.0}},
-                au::ChartSeries{.name = "mem", .values = {8.0, 10.0, 14.0, 12.0, 18.0, 16.0}},
-            },
-        .categories = {"Mon", "Tue", "Wed", "Thu", "Fri", "Sat"},
-    }};
+    au::LineChart chart{au::LineChartProps()
+                            .set_series({
+                                au::ChartSeries{.name = "cpu", .values = {12.0, 18.0, 9.0, 24.0, 15.0, 20.0}},
+                                au::ChartSeries{.name = "mem", .values = {8.0, 10.0, 14.0, 12.0, 18.0, 16.0}},
+                            })
+                            .set_categories({"Mon", "Tue", "Wed", "Thu", "Fri", "Sat"})};
     chart.set_axis_y(au::ChartAxisSpec{.label = "usage (%)", .tick_count = 5});
     chart.set_modifier(au::Modifier{}.height(220.0F));
     chart.on_point_tapped = [last_tap](int series_idx, int point_idx) -> void {

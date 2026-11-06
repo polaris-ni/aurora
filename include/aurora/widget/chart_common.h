@@ -6,6 +6,7 @@
 #include <numbers>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -17,6 +18,7 @@
 #include "aurora/render/painter.h"
 #include "aurora/state/state.h"
 #include "aurora/theming/theme.h"
+#include "aurora/widget/props.h"
 #include "aurora/widget/props_io.h"
 
 /// @brief 图表公共纯值数据层（契约见 specification/04-widget.md §3.8）。
@@ -44,6 +46,15 @@ struct ChartSeries {
     std::string name;  ///< 系列名（图例与 hover 值框的标签；可为空串）。
     std::vector<double> values;  ///< 等距采样的数值序列（第 i 项对应 x = i）。
     std::optional<Color> color;  ///< 空 = 按索引取色板
+
+    /// @brief 逐字段相等比较（`name` / `values` / `color` 三项全等）。
+    ///
+    /// 容器行的等值短路要求元素可判等：`std::vector<T>::operator==` 只声明不约束，概念检查恒过、
+    /// 实例化才失败，故补齐比较运算是「结构体数组进属性表」这条形态的必配项。`= default` 逐成员比较，
+    /// 不改变聚合性，指定初始化器照常合法（与 `ChartPalette` 同一形态）。
+    /// @param other 比较对象。
+    /// @return 逐字段全等时为 true。
+    [[nodiscard]] auto operator==(const ChartSeries &other) const -> bool = default;
 };
 
 /// @brief 散点系列（Scatter 专用）：显式 `ChartPoint` 坐标。
@@ -72,6 +83,14 @@ struct ChartAxisSpec {
     std::optional<double> max;  ///< 域上界；空 = 取数据域并 nice 化
     bool show_grid_lines = true;  ///< 网格线
     bool include_zero = true;  ///< 域是否必须含 0（Bar 的零基线依赖它）
+
+    /// @brief 逐字段相等比较（七项全等）。
+    ///
+    /// 与 `ChartSeries` 同因：整只规格作为一行写入时，等值短路要先能判等。`= default` 逐成员比较，
+    /// 不改变聚合性。
+    /// @param other 比较对象。
+    /// @return 逐字段全等时为 true。
+    [[nodiscard]] auto operator==(const ChartAxisSpec &other) const -> bool = default;
 };
 
 // 公共 API 枚举（specification/04-widget.md 记录为数据层类型，且随 JSON 按名序列化）：
@@ -88,6 +107,14 @@ enum class LegendPosition {
 struct ChartLegendSpec {
     bool visible = true;  ///< 是否绘制图例。
     LegendPosition position = LegendPosition::Top;  ///< 图例摆放位置（默认顶部）。
+
+    /// @brief 逐字段相等比较（`visible` 与 `position` 全等）。
+    ///
+    /// 与 `ChartSeries` 同因：整只规格作为一行写入时，等值短路要先能判等。`= default` 逐成员比较，
+    /// 不改变聚合性。
+    /// @param other 比较对象。
+    /// @return 逐字段全等时为 true。
+    [[nodiscard]] auto operator==(const ChartLegendSpec &other) const -> bool = default;
 };
 
 // ---------- 比例尺（d3-scale 式纯值化）----------
@@ -347,6 +374,12 @@ static_assert(ThemeExtension<ChartPalette>, "ChartPalette must satisfy ThemeExte
 // `vector<double>` ↔ JSON 数组那一对（`double_vector_to_json` / `json_to_double_vector`）已落到
 // `widget/props_io.h`：它没有图表语义，而属性编解码登记要与转换器同层可见，机制层头不该反向包含
 // 本控件域头。本头经 `props_io.h` 拿到那两个名字，下面的调用点照旧。
+//
+// 反过来，本头里的四类图表裸值（`vector<string>` / `vector<ChartSeries>` / `ChartAxisSpec` /
+// `ChartLegendSpec`）的 `PropCodec` 登记就贴在各自那对转换器后面 —— 同一个理由的两侧：登记体只是
+// 转发本头的转换器，转换器挪不动，登记位就得跟着挪不动。登记只补「类型名 + JSON 类型 + 双向转换」
+// 三件，不补 `validate`：迁移前这几条通路本就是「字段缺失 / 类型不符逐项回退默认、绝不抛异常」的
+// 宽容口径（逐条见各转换器注释），收紧它属与本形态无关的行为变更。
 
 /// @brief 字符串数组 ↔ JSON（类目标签）。
 /// @param v 类目标签序列。
@@ -375,6 +408,31 @@ static_assert(ThemeExtension<ChartPalette>, "ChartPalette must satisfy ThemeExte
     }
     return out;
 }
+
+/// @brief 字符串数组属性：JSON 字符串数组（图表类目标签行的裸值形态）。
+///
+/// 本档**刻意不登记 `validate`**：非数组退空序列、非字符串元素逐项跳过是迁移前既有的宽容口径，
+/// 于是它走 `from_json` 通路 —— 照常表态、不产生降级上报。
+template <>
+struct PropCodec<std::vector<std::string>> {
+    /// @brief schema 的 C++ 类型名。
+    /// @return `vector<string>`。
+    [[nodiscard]] static constexpr auto type_text() -> std::string_view { return "vector<string>"; }
+
+    /// @brief schema 的 JSON 类型名。
+    /// @return `array`。
+    [[nodiscard]] static constexpr auto json_text() -> std::string_view { return "array"; }
+
+    /// @brief 值 → JSON。
+    /// @param v 类目标签序列。
+    /// @return 与 v 等长的 JSON 字符串数组。
+    [[nodiscard]] static auto to_json(const std::vector<std::string> &v) -> Json { return string_vector_to_json(v); }
+
+    /// @brief JSON → 值。
+    /// @param j JSON 值。
+    /// @return 字符串序列（非数组为空，非字符串元素跳过）。
+    [[nodiscard]] static auto from_json(const Json &j) -> std::vector<std::string> { return json_to_string_vector(j); }
+};
 
 /// @brief 单个系列 → JSON 对象（`color` 未设置时不输出，保留「按索引取色板」语义）。
 /// @param s 待序列化的系列。
@@ -436,6 +494,36 @@ static_assert(ThemeExtension<ChartPalette>, "ChartPalette must satisfy ThemeExte
     }
     return out;
 }
+
+/// @brief 系列数组属性：JSON 对象数组（Line / Bar 数据行的裸值形态）。
+///
+/// 本档**刻意不登记 `validate`**：非数组退空序列、非对象元素逐项跳过是迁移前既有的宽容口径；
+/// 单个系列内部的字段缺失 / 类型不符也逐项回退默认（见 `json_to_chart_series`），故畸形元素
+/// 不撤销整行表态。
+template <>
+struct PropCodec<std::vector<ChartSeries>> {
+    /// @brief schema 的 C++ 类型名。
+    /// @return `vector<ChartSeries>`。
+    [[nodiscard]] static constexpr auto type_text() -> std::string_view { return "vector<ChartSeries>"; }
+
+    /// @brief schema 的 JSON 类型名。
+    /// @return `array`。
+    [[nodiscard]] static constexpr auto json_text() -> std::string_view { return "array"; }
+
+    /// @brief 值 → JSON。
+    /// @param v 系列序列。
+    /// @return 与 v 等长的 JSON 对象数组。
+    [[nodiscard]] static auto to_json(const std::vector<ChartSeries> &v) -> Json {
+        return chart_series_vector_to_json(v);
+    }
+
+    /// @brief JSON → 值。
+    /// @param j JSON 值。
+    /// @return 系列序列（非数组为空，非对象元素跳过）。
+    [[nodiscard]] static auto from_json(const Json &j) -> std::vector<ChartSeries> {
+        return json_to_chart_series_vector(j);
+    }
+};
 
 /// @brief 散点系列 → JSON 对象（点列为 `[x, y]` 数组对；非有限坐标按 0.0 写出）。
 /// @param s 待序列化的散点系列。
@@ -664,6 +752,34 @@ static_assert(ThemeExtension<ChartPalette>, "ChartPalette must satisfy ThemeExte
     return a;
 }
 
+/// @brief 轴规格属性：JSON 嵌套对象。
+///
+/// schema 的 C++ 类型名由本登记的 `type_text()` 给出 —— 迁移前轴行的 `type` 手写成了 `"Json"`，
+/// 那是「描述符手写期」留下的粗化，不是契约；登记后轴行与其余结构化行同走「类型名由类型派生」。
+///
+/// 本档**刻意不登记 `validate`**：字段缺失 / 类型不符逐项回退默认、`tick_count` 最小夹到 2、非对象
+/// 退默认构造，都是迁移前既有的宽容口径；收紧它属与本形态无关的行为变更。
+template <>
+struct PropCodec<ChartAxisSpec> {
+    /// @brief schema 的 C++ 类型名。
+    /// @return `ChartAxisSpec`。
+    [[nodiscard]] static constexpr auto type_text() -> std::string_view { return "ChartAxisSpec"; }
+
+    /// @brief schema 的 JSON 类型名。
+    /// @return `object`。
+    [[nodiscard]] static constexpr auto json_text() -> std::string_view { return "object"; }
+
+    /// @brief 值 → JSON（空 `label` 与未设置的 `min`/`max` 不输出）。
+    /// @param v 轴规格。
+    /// @return 轴规格的 JSON 对象。
+    [[nodiscard]] static auto to_json(const ChartAxisSpec &v) -> Json { return chart_axis_spec_to_json(v); }
+
+    /// @brief JSON → 值。
+    /// @param j JSON 值。
+    /// @return 解析出的轴规格（非对象时返回默认构造）。
+    [[nodiscard]] static auto from_json(const Json &j) -> ChartAxisSpec { return json_to_chart_axis_spec(j); }
+};
+
 /// @brief 图例规格 → JSON。
 /// @param l 待序列化的图例规格。
 /// @return 含 `visible` 与 `position`（按名序列化）的 JSON 对象。
@@ -690,6 +806,31 @@ static_assert(ThemeExtension<ChartPalette>, "ChartPalette must satisfy ThemeExte
     }
     return l;
 }
+
+/// @brief 图例规格属性：JSON 嵌套对象（`position` 按枚举名序列化）。
+///
+/// 本档**刻意不登记 `validate`**：`position` 未知值回退 `Top`、字段缺失回退默认构造都是迁移前既有
+/// 的宽容口径（见 `json_to_chart_legend_spec` / `json_to_legend_position`）。
+template <>
+struct PropCodec<ChartLegendSpec> {
+    /// @brief schema 的 C++ 类型名。
+    /// @return `ChartLegendSpec`。
+    [[nodiscard]] static constexpr auto type_text() -> std::string_view { return "ChartLegendSpec"; }
+
+    /// @brief schema 的 JSON 类型名。
+    /// @return `object`。
+    [[nodiscard]] static constexpr auto json_text() -> std::string_view { return "object"; }
+
+    /// @brief 值 → JSON。
+    /// @param v 图例规格。
+    /// @return 含 `visible` 与 `position` 的 JSON 对象。
+    [[nodiscard]] static auto to_json(const ChartLegendSpec &v) -> Json { return chart_legend_spec_to_json(v); }
+
+    /// @brief JSON → 值。
+    /// @param j JSON 值。
+    /// @return 解析出的图例规格（非对象时返回默认构造：可见、顶部）。
+    [[nodiscard]] static auto from_json(const Json &j) -> ChartLegendSpec { return json_to_chart_legend_spec(j); }
+};
 
 // ---------- grow-in 动画载荷 ----------
 
