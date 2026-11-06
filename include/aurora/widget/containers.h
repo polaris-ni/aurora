@@ -146,8 +146,10 @@ class Column : public Container, public ColumnProps {
             flex.main_axis_size = json_to_main_axis_size(*props.at("main_axis_size"));
         }
         if (props.contains("gap")) {
-            static const PropDescriptor D_GAP{.name = "gap", .json_type = "number", .min_value = "0"};
-            gap = validate_or_default<float>(*props.at("gap"), D_GAP, 0.0F);
+            // 校验用的描述符就地构造、不留函数局部静态：静态量在 emscripten 线程模型下是动态初始化
+            // （bugprone-dynamic-static-initializers），而本路径只在反序列化时走一次，省下这枚静态。
+            gap = validate_or_default<float>(
+                *props.at("gap"), PropDescriptor{.name = "gap", .json_type = "number", .min_value = "0"}, 0.0F);
         }
     }
 
@@ -355,8 +357,10 @@ class Row : public Container, public RowProps {
             flex.main_axis_size = json_to_main_axis_size(*props.at("main_axis_size"));
         }
         if (props.contains("gap")) {
-            static const PropDescriptor D_GAP{.name = "gap", .json_type = "number", .min_value = "0"};
-            gap = validate_or_default<float>(*props.at("gap"), D_GAP, 0.0F);
+            // 校验用的描述符就地构造、不留函数局部静态：静态量在 emscripten 线程模型下是动态初始化
+            // （bugprone-dynamic-static-initializers），而本路径只在反序列化时走一次，省下这枚静态。
+            gap = validate_or_default<float>(
+                *props.at("gap"), PropDescriptor{.name = "gap", .json_type = "number", .min_value = "0"}, 0.0F);
         }
     }
 

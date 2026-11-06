@@ -174,7 +174,7 @@ auto main(int argc, char *argv[]) -> int {
             .set_step(1.0);
         aurora::Node input_node{aurora::TextInput{aurora::TextInputProps{.value = "abc", .placeholder = "Type here"}}};
         aurora::Node root{aurora::Column{
-            aurora::Button{aurora::ButtonProps{.label = aurora::LocalizedString{AURORA_BUTTON_NAME}}},
+            aurora::Button{aurora::ButtonProps().set_label(aurora::LocalizedString{AURORA_BUTTON_NAME})},
             aurora::Row{aurora::Text{aurora::TextProps{.content = aurora::LocalizedString{AURORA_CHECKBOX_LABEL}}},
                         aurora::Checkbox{checked}},
             aurora::Row{aurora::Text{aurora::TextProps{.content = aurora::LocalizedString{AURORA_SLIDER_LABEL}}},
