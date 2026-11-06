@@ -2250,7 +2250,7 @@
           "name": "center_space_ratio",
           "type": "float",
           "default": 0.0,
-          "note": "Inner / outer radius ratio; > 0 makes a donut, clamped to [0,0.95]",
+          "note": "Inner / outer radius ratio; > 0 makes a donut",
           "minimum": "0",
           "maximum": "0.95"
         },
@@ -2270,12 +2270,12 @@
           "name": "section_gap",
           "type": "float",
           "default": 2.0,
-          "note": "Gap between sectors (dp)",
+          "note": "Gap between sectors (dp), yielded half on each side after the angle conversion",
           "minimum": "0"
         },
         {
           "name": "legend",
-          "type": "Json",
+          "type": "ChartLegendSpec",
           "default": {
             "visible": true,
             "position": "Top"
@@ -2291,7 +2291,7 @@
             "right": 8.0,
             "bottom": 8.0
           },
-          "note": "In-chart padding (dp)"
+          "note": "In-chart padding (dp), reserved for the plot area and the legend band"
         },
         {
           "name": "width",
@@ -2319,7 +2319,7 @@
       ],
       "children_policy": "none",
       "examples": [
-        "au::PieChart(au::PieChartProps{ .sections = {{ .name = \"A\", .value = 3 }, { .name = \"B\", .value = 1 }} })"
+        "au::PieChart(au::PieChartProps().set_sections({{ .name = \"A\", .value = 3 }, { .name = \"B\", .value = 1 }}))"
       ],
       "invariants": [
         "0 <= center_space_ratio <= 0.95"

@@ -70,6 +70,14 @@ struct PieSection {
     std::string name;  ///< 扇区名（图例标签；可为空串）。
     double value = 0.0;  ///< 原始数值；仅有限且 > 0 的项参与占比计算（见 pie_section_ratios）。
     std::optional<Color> color;  ///< 空 = 按索引取色板。
+
+    /// @brief 逐字段相等比较（`name` / `value` / `color` 三项全等）。
+    ///
+    /// 与 `ChartSeries` 同因：容器行的等值短路要求元素可判等，`std::vector<T>::operator==` 只声明不约束、
+    /// 实例化才失败，故补齐比较运算是「结构体数组进属性表」的必配项。`= default` 逐成员比较，不改变聚合性。
+    /// @param other 比较对象。
+    /// @return 逐字段全等时为 true。
+    [[nodiscard]] auto operator==(const PieSection &other) const -> bool = default;
 };
 
 // ---------- 轴与图例 ---------
@@ -375,8 +383,8 @@ static_assert(ThemeExtension<ChartPalette>, "ChartPalette must satisfy ThemeExte
 // `widget/props_io.h`：它没有图表语义，而属性编解码登记要与转换器同层可见，机制层头不该反向包含
 // 本控件域头。本头经 `props_io.h` 拿到那两个名字，下面的调用点照旧。
 //
-// 反过来，本头里的四类图表裸值（`vector<string>` / `vector<ChartSeries>` / `ChartAxisSpec` /
-// `ChartLegendSpec`）的 `PropCodec` 登记就贴在各自那对转换器后面 —— 同一个理由的两侧：登记体只是
+// 反过来，本头里的五类图表裸值（`vector<string>` / `vector<ChartSeries>` / `vector<PieSection>` /
+// `ChartAxisSpec` / `ChartLegendSpec`）的 `PropCodec` 登记就贴在各自那对转换器后面 —— 同一个理由的两侧：登记体只是
 // 转发本头的转换器，转换器挪不动，登记位就得跟着挪不动。登记只补「类型名 + JSON 类型 + 双向转换」
 // 三件，不补 `validate`：迁移前这几条通路本就是「字段缺失 / 类型不符逐项回退默认、绝不抛异常」的
 // 宽容口径（逐条见各转换器注释），收紧它属与本形态无关的行为变更。
@@ -665,6 +673,36 @@ struct PropCodec<std::vector<ChartSeries>> {
     }
     return out;
 }
+
+/// @brief 扇区数组属性：JSON 对象数组（Pie 数据行的裸值形态）。
+///
+/// 本档**刻意不登记 `validate`**：非数组退空序列、非对象元素逐项跳过是迁移前既有的宽容口径；单个扇区
+/// 内部的字段缺失 / 类型不符也逐项回退默认（见 `json_to_pie_section`），故畸形元素不撤销整行表态。
+/// 等值短路一侧要求元素可判等，`PieSection::operator==` 与本登记同批补齐。
+template <>
+struct PropCodec<std::vector<PieSection>> {
+    /// @brief schema 的 C++ 类型名。
+    /// @return `vector<PieSection>`。
+    [[nodiscard]] static constexpr auto type_text() -> std::string_view { return "vector<PieSection>"; }
+
+    /// @brief schema 的 JSON 类型名。
+    /// @return `array`。
+    [[nodiscard]] static constexpr auto json_text() -> std::string_view { return "array"; }
+
+    /// @brief 值 → JSON。
+    /// @param v 扇区序列。
+    /// @return 与 v 等长的 JSON 对象数组。
+    [[nodiscard]] static auto to_json(const std::vector<PieSection> &v) -> Json {
+        return pie_section_vector_to_json(v);
+    }
+
+    /// @brief JSON → 值。
+    /// @param j JSON 值。
+    /// @return 扇区序列（非数组为空，非对象元素跳过）。
+    [[nodiscard]] static auto from_json(const Json &j) -> std::vector<PieSection> {
+        return json_to_pie_section_vector(j);
+    }
+};
 
 // ---------- 枚举编解码 ----------
 
