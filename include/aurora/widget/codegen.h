@@ -88,7 +88,7 @@ namespace detail {
 /// @param type 序列化 type 名。
 /// @return 该类型的属性是否只能通过 `set_<键名>()` 链式写件装入。
 [[nodiscard]] constexpr auto props_chain_writers(std::string_view type) noexcept -> bool {
-    constexpr std::array<std::string_view, 3> k_chain = {"Button", "Divider", "Sparkline"};
+    constexpr std::array<std::string_view, 4> k_chain = {"Button", "Divider", "LazyRow", "Sparkline"};
     return std::ranges::find(k_chain, type) != k_chain.end();
 }
 
@@ -351,11 +351,13 @@ struct PropTarget {
 ///
 /// 两条合法路径：① `*Props` 聚合的顶层可设计成员（`.key = 值`）；② 链式形态类型由词根推出的
 /// `set_<key>(值)` 调用——它不是设计符，而是挂在 `TProps()` 之后的成员调用。
+/// ②同样受 `no_write_path` 约束：链式形态下词根规则会为**任何**键名推出 `set_<key>`，包括运行时键
+/// （`LazyRow.offset` 只有 `set_scroll_offset()`，没有 `set_offset()`），故发射前先问那一枚键有没有写入通道。
 /// @param type 序列化 type 名。
 /// @param key 快照属性键名。
 /// @return 该键是否可在构造期装入（表达式风格不丢这条属性）。
 [[nodiscard]] inline auto expressible(const std::string &type, const std::string &key) -> bool {
-    return designatable(type, key) || props_chain_writers(type);
+    return designatable(type, key) || (props_chain_writers(type) && !no_write_path(type, key));
 }
 
 /// @brief 该键能否以构造后语句写入。
