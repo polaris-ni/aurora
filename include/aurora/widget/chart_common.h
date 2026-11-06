@@ -39,6 +39,15 @@ namespace aurora {
 struct ChartPoint {
     double x = 0.0;  ///< 横坐标（数据域单位，非像素）。
     double y = 0.0;  ///< 纵坐标（数据域单位，非像素）。
+
+    /// @brief 逐字段相等比较（`x` / `y` 两项全等）。
+    ///
+    /// 与 `ChartSeries` 同因：散点数组行的等值短路要经 `std::vector<ScatterSeries>::operator==`，
+    /// 而它逐元素比较 `ScatterSeries`、后者又逐元素比较本类型，故判等必须从最内层起逐层补齐。
+    /// `= default` 逐成员比较，不改变聚合性，指定初始化器照常合法。
+    /// @param other 比较对象。
+    /// @return 两坐标全等时为 true（`double` 按 `==` 比较，故两侧的 NaN 不相等）。
+    [[nodiscard]] auto operator==(const ChartPoint &other) const -> bool = default;
 };
 
 /// @brief 数据系列（Line / Bar 共用）：`values` 等距，`name` 进图例与值框。
@@ -63,6 +72,14 @@ struct ScatterSeries {
     std::vector<ChartPoint> points;  ///< 显式坐标点序列（x/y 均为数据域单位）。
     std::optional<Color> color;  ///< 空 = 按索引取色板。
     float dot_radius = 4.0F;  ///< 散点半径（dp），默认 4.0。
+
+    /// @brief 逐字段相等比较（`name` / `points` / `color` / `dot_radius` 四项全等）。
+    ///
+    /// 与 `ChartSeries` 同因：散点数组行的等值短路要求元素可判等。本类型的比较又依赖
+    /// `ChartPoint::operator==`，两者须同批补齐才能实例化 `std::vector<ScatterSeries>::operator==`。
+    /// @param other 比较对象。
+    /// @return 逐字段全等时为 true。
+    [[nodiscard]] auto operator==(const ScatterSeries &other) const -> bool = default;
 };
 
 /// @brief 扇区（Pie 专用）：归一化占比 = value / Σvalue。
@@ -611,6 +628,39 @@ struct PropCodec<std::vector<ChartSeries>> {
     }
     return out;
 }
+
+/// @brief 散点系列数组属性：JSON 对象数组（Scatter 数据行的裸值形态）。
+///
+/// 本档**刻意不登记 `validate`**：非数组退空序列、非对象元素逐项跳过是迁移前既有的宽容口径；单个系列
+/// 内部的字段缺失 / 类型不符也逐项回退默认，`points` 里长度不足 2 或非数值的数组项直接不收录
+/// （见 `json_to_scatter_series`），故畸形输入既不撤销整行表态、也不产生降级上报。
+/// 等值短路一侧要求元素可判等，`ScatterSeries::operator==` 与其内的 `ChartPoint::operator==` 与本登记
+/// 同批补齐。点坐标是**由系列转换器内联**编解码的（`[[x, y], ...]` 形态），故本头不为 `ChartPoint`
+/// 单列一档 —— 它从不作为一行出现。
+template <>
+struct PropCodec<std::vector<ScatterSeries>> {
+    /// @brief schema 的 C++ 类型名。
+    /// @return `vector<ScatterSeries>`。
+    [[nodiscard]] static constexpr auto type_text() -> std::string_view { return "vector<ScatterSeries>"; }
+
+    /// @brief schema 的 JSON 类型名。
+    /// @return `array`。
+    [[nodiscard]] static constexpr auto json_text() -> std::string_view { return "array"; }
+
+    /// @brief 值 → JSON。
+    /// @param v 散点系列序列。
+    /// @return 与 v 等长的 JSON 对象数组。
+    [[nodiscard]] static auto to_json(const std::vector<ScatterSeries> &v) -> Json {
+        return scatter_series_vector_to_json(v);
+    }
+
+    /// @brief JSON → 值。
+    /// @param j JSON 值。
+    /// @return 散点系列序列（非数组为空，非对象元素跳过）。
+    [[nodiscard]] static auto from_json(const Json &j) -> std::vector<ScatterSeries> {
+        return json_to_scatter_series_vector(j);
+    }
+};
 
 /// @brief 扇区 → JSON 对象（非有限 `value` 按 0.0 写出；`color` 未设置时不输出）。
 /// @param s 待序列化的扇区。

@@ -88,8 +88,8 @@ namespace detail {
 /// @param type 序列化 type 名。
 /// @return 该类型的属性是否只能通过 `set_<键名>()` 链式写件装入。
 [[nodiscard]] constexpr auto props_chain_writers(std::string_view type) noexcept -> bool {
-    constexpr std::array<std::string_view, 7> k_chain = {"BarChart",  "Button",   "Divider",  "LazyRow",
-                                                         "LineChart", "PieChart", "Sparkline"};
+    constexpr std::array<std::string_view, 8> k_chain = {"BarChart",  "Button",   "Divider",      "LazyRow",
+                                                         "LineChart", "PieChart", "ScatterChart", "Sparkline"};
     return std::ranges::find(k_chain, type) != k_chain.end();
 }
 

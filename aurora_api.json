@@ -2952,7 +2952,7 @@
         },
         {
           "name": "axis_x",
-          "type": "Json",
+          "type": "ChartAxisSpec",
           "default": {
             "visible": true,
             "tick_count": 5,
@@ -2963,7 +2963,7 @@
         },
         {
           "name": "axis_y",
-          "type": "Json",
+          "type": "ChartAxisSpec",
           "default": {
             "visible": true,
             "tick_count": 5,
@@ -2974,7 +2974,7 @@
         },
         {
           "name": "legend",
-          "type": "Json",
+          "type": "ChartLegendSpec",
           "default": {
             "visible": true,
             "position": "Top"
@@ -3018,7 +3018,7 @@
       ],
       "children_policy": "none",
       "examples": [
-        "au::ScatterChart(au::ScatterChartProps{ .series = {{ .name = \"A\", .points = {{1, 2}, {3, 4}} }} })"
+        "au::ScatterChart(au::ScatterChartProps().set_series({{ .name = \"A\", .points = {{1, 2}, {3, 4}} }}))"
       ],
       "invariants": [
         "dot_radius >= 0"
