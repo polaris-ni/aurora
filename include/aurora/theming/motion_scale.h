@@ -6,6 +6,13 @@
 
 #include "aurora/core/duration.h"
 
+// Windows SDK 的 rpcndr.h 把 small 定义为 char（经 ole2/oleauto 等头随 windows.h 带入）；
+// 本头的时长字段以 small 命名，宏在生效时会把字段声明改写成 `Duration char{...}`、把成员指针
+// 登记改写为 `&MotionScale::char`。与 shape_scale / spacing_scale 同法撤掉该 SDK 遗留宏。
+#ifdef small
+#undef small
+#endif
+
 namespace aurora {
 
 /// @brief 动效令牌：时长档 6 格，每格一枚 `Duration`（强类型、snake_case、不分明暗）。
