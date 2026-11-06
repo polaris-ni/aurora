@@ -255,6 +255,17 @@ if (MINGW)
             -Wl,-Bstatic -lwinpthread -Wl,-Bdynamic)
 endif ()
 
+# 生成物顺序边（与上方 add_dependencies(aurora generate_error_codes) 同口径）：
+# generate_error_codes 会 copy_if_different 把暂存区产物落回源码树的 error_codes.gen.h。
+# 链接 aurora 的工具经 cmake_object_order_depends_target_aurora 间接带上该边，但下面两个
+# 独立生成器只链接 aurora_json，object 链里没有 generate_error_codes；它们的 TU 仍经
+# core/json.h -> core/result.h -> core/error_codes.h 传递包含 error_codes.gen.h。全量
+# --parallel 下编译与覆写撞在同一窗口时，会读到正在改写的引导副本（CI 实测 file not found）。
+# 显式补边把编译排到生成之后，与调度、clang-format 是否可探测无关。
+# ⚠️ gen_error_codes / aurora_json 是生成链的前置，补了会成 build.ninja 依赖环，禁止列入。
+add_dependencies(gen_debug_api generate_error_codes)
+add_dependencies(gen_i18n generate_error_codes)
+
 # MCP Server：stdio JSON-RPC 2.0，供 AI Agent 直接调用。
 aurora_add_tool(aurora_mcp tools/servers/aurora_mcp.cpp)
 
