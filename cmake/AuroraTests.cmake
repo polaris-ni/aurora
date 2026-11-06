@@ -214,6 +214,21 @@ if (AURORA_BUILD_TESTS)
         add_test(NAME check_declared_gates
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_declared_gates.py" "${CMAKE_BINARY_DIR}"
                 WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
+        # 版本台账守护：third_party/ 全是整树 vendored、无包管理清单，包管理器与
+        # dependabot 的 C++ ecosystem 都看不到它们，版本只能靠机器可读清单表达。
+        # 以 codespec/third_party_versions.json 为唯一真值源，逐条按声明的正则从
+        # vendored 源码解析版本并比对；清单为空、缺字段、正则 0 命中、版本漂移、
+        # 覆盖不全（新增库漏登）、libjpeg-turbo 的 CMake 镜像不一致一律硬失败。
+        add_test(NAME check_third_party_versions
+                COMMAND ${PYTHON3_EXE} "${_check_dir}/check_third_party_versions.py" --root "${AURORA_SOURCE_DIR}"
+                WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
+        # workflow YAML 守护：ci.yml 只在注释里写「env 折叠标量内禁 # 注释行」这条纪律，
+        # 无任何强制（release.yml 的 run: | 里 # 是合法 shell 注释，不能一刀切）。此门禁把
+        # 危险组合钉死：只查 env: 下折叠标量的 # 行，另做不依赖 PyYAML 的结构自检（顶层键、
+        # tab 缩进、重复键、零命中守卫）；PyYAML 可用时追加 safe_load 解析。
+        add_test(NAME check_workflow_yaml
+                COMMAND ${PYTHON3_EXE} "${_check_dir}/check_workflow_yaml.py" --root "${AURORA_SOURCE_DIR}"
+                WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
     endif ()
 
     # ---- 空源集 guard ----

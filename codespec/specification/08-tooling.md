@@ -1105,6 +1105,15 @@ Emscripten 下强制不纳入）；install-consumer 作业只验证 `find_packag
   经窗口过程上抛后**派发落空**（进程内模拟注入 `Inspector::simulate_*` 不经该通道，故既有测试
   全部无感）。渲染仍走 `Session::present_root` 原路径，既有用例行为零变更。
 
+### 8.3 供应链台账的两枚静态门禁
+
+`third_party/` 全部以整树源码 vendored，仓库无包管理清单，包管理器与依赖更新机器人的 C++ 生态都看不到这些依赖。版本事实因此必须由仓库自己表达并自我核对。
+
+- **版本唯一真值源**是 `codespec/third_party_versions.json`，覆盖 `third_party/` 全部顶层项，每条记录名称、版本、权威源文件、解析正则、上游仓库、许可与 `version_kind`。无标准发布号的两项（`wgpu-native` 以 `Cargo.lock` 的 wgpu-core 版本、`webview2` 以 SDK 内嵌目标浏览器版本）标为 `proxy` 并写明原因，不与上游发布号比较；三段宏拼接的版本（FreeType、GLFW）用 `compose` 规则表达；跟固定版本线的库（mbedTLS 3.6 LTS、Wuffs 0.3、libwebp 1）用 `version_line` 限定上游比对范围。根目录许可台账只承担用途与许可全文索引，版本号改以清单为准。
+- **`check_third_party_versions`**（实现 `tools/check/check_third_party_versions.py`）逐条以声明正则从 vendored 源码解析版本并比对，另交叉核对 `cmake/AuroraImageCodecs.cmake` 的 libjpeg-turbo 镜像。硬失败项：清单缺失 / 无法解析 / 零条目、字段为空、名字重复、源文件不存在、正则 0 命中或多命中、版本漂移、以及**覆盖守卫**——清单与 `third_party/` 顶层项须双向齐备，新增库漏登即红灯。诊断全 ASCII。升级依赖的正确顺序是「先换源码 → 改清单 → 跑门禁」，清单不是可随手抄改的文档。
+- **`check_workflow_yaml`**（实现 `tools/check/check_workflow_yaml.py`）把 `.github/workflows/ci.yml` 里只写在注释中的折叠标量纪律变成强制判据：只检查 `env:` 下折叠（`>` / `>-`）标量的 `#` 行与含 `#` 的值，因为这些值会经 `${{ env.* }}` 折成单行 shell 命令；`run: |` 字面块内的 `#` 是传给 bash 的合法 shell 注释，不受影响。另做不依赖第三方解析库的结构自检（顶层键、`jobs:` 存在、tab 缩进、重复键、零命中守卫），PyYAML 可用时追加 `safe_load` 全解析。两枚门禁都在 `cmake/AuroraTests.cmake` 的静态门禁段注册，并列入 `tools/check/declared_gates.txt` 受 `check_declared_gates` 守护。
+- **用途边界**：`tools/sca/generate_sbom.py` 把清单转成 CycloneDX 物料清单（确定性字节、proxy 以属性保留）；`tools/sca/report_upstream.py` 按周向上游发布接口出「当前 / 上游最新 / 状态」表格，供人工复核，过滤预发布、按版本线限定、把不可读显式标为 `unavailable` 而非「无漏洞」。上游报告是人工复核输入，**不是自动漏洞裁决**：OSV 对这些 C++ 库按包名 + 版本查询连已知含漏洞的旧版本都返回零命中（库内以 Git 提交范围记录，无包版本映射）。周期性编排见 `.github/workflows/sca.yml`，它不修改 `ci.yml` 的全量矩阵。
+
 ---
 
 ## 9 日志通道

@@ -1,0 +1,121 @@
+{
+  "schema": "aurora-third-party-versions/1",
+  "note": "Single machine-readable source of truth for vendored dependency versions. Each entry is verified against the vendored source by tools/check/check_third_party_versions.py; upstream metadata feeds the weekly version-lag report in .github/workflows/sca.yml. Keep this file ASCII-only.",
+  "dependencies": [
+    {
+      "name": "mbedtls",
+      "version": "3.6.7",
+      "source": "third_party/mbedtls/include/mbedtls/build_info.h",
+      "pattern": "MBEDTLS_VERSION_STRING\\s+\"([0-9.]+)\"",
+      "upstream": "Mbed-TLS/mbedtls",
+      "version_kind": "release",
+      "license": "Apache-2.0",
+      "note": "3.6 LTS line. The GitHub archive does not include the framework/ submodule.",
+      "version_line": "3.6"
+    },
+    {
+      "name": "sqlite",
+      "version": "3.54.1",
+      "source": "third_party/sqlite/sqlite3.h",
+      "pattern": "SQLITE_VERSION\\s+\"([0-9.]+)\"",
+      "upstream": "sqlite/sqlite",
+      "version_kind": "release",
+      "license": "Public-Domain",
+      "note": "Single-file amalgamation; sqlite3.c carries the same version string."
+    },
+    {
+      "name": "freetype",
+      "version": "2.15.0",
+      "source": "third_party/freetype/include/freetype/freetype.h",
+      "pattern": "FREETYPE_(MAJOR|MINOR|PATCH)\\s+([0-9]+)",
+      "compose": "major.minor.patch",
+      "upstream": "freetype/freetype",
+      "version_kind": "release",
+      "license": "FTL",
+      "note": "Version is composed from three macros; no single string macro exists."
+    },
+    {
+      "name": "harfbuzz",
+      "version": "15.1.0",
+      "source": "third_party/harfbuzz/src/hb-version.h",
+      "pattern": "HB_VERSION_STRING\\s+\"([0-9.]+)\"",
+      "upstream": "harfbuzz/harfbuzz",
+      "version_kind": "release",
+      "license": "MIT",
+      "note": "hb-version.h.in uses an @HB_VERSION@ placeholder and is not parseable before configure."
+    },
+    {
+      "name": "libjpeg-turbo",
+      "version": "3.2.1",
+      "source": "third_party/libjpeg-turbo/CMakeLists.txt",
+      "pattern": "set\\(VERSION\\s+([0-9.]+)\\)",
+      "upstream": "libjpeg-turbo/libjpeg-turbo",
+      "version_kind": "release",
+      "license": "BSD-3-Clause",
+      "note": "cmake/AuroraImageCodecs.cmake mirrors VERSION and LIBJPEG_TURBO_VERSION_NUMBER; the gate also cross-checks that mirror."
+    },
+    {
+      "name": "libwebp",
+      "version": "1.6.0",
+      "source": "third_party/libwebp/configure.ac",
+      "pattern": "AC_INIT\\(\\[libwebp\\],\\s*\\[([0-9.]+)\\]",
+      "upstream": "webmproject/libwebp",
+      "version_kind": "release",
+      "license": "BSD-3-Clause",
+      "note": "CMakeLists.txt reverse-parses this same AC_INIT line.",
+      "version_line": "1"
+    },
+    {
+      "name": "glfw",
+      "version": "3.5.1",
+      "source": "third_party/glfw/include/GLFW/glfw3.h",
+      "pattern": "GLFW_VERSION_(MAJOR|MINOR|REVISION)\\s+([0-9]+)",
+      "compose": "major.minor.revision",
+      "upstream": "glfw/glfw",
+      "version_kind": "release",
+      "license": "Zlib",
+      "note": "docs/html/* are generated copies; the public header is authoritative."
+    },
+    {
+      "name": "wgpu-native",
+      "version": "29.0.3",
+      "source": "third_party/wgpu-native/Cargo.lock",
+      "pattern": "name = \"wgpu-core\"\\nversion = \"([0-9.]+)\"",
+      "upstream": "gfx-rs/wgpu-native",
+      "version_kind": "proxy",
+      "license": "MIT OR Apache-2.0",
+      "note": "wgpu-native itself ships only 0.0.0 placeholders (Cargo.toml, meson.build) and an Unreleased changelog. The wgpu-core version from Cargo.lock is the only stable proxy; Cargo.toml declares 29.0.1, so the lock file wins."
+    },
+    {
+      "name": "wuffs",
+      "version": "0.3.5",
+      "source": "third_party/wuffs/release/c/wuffs-v0.3.c",
+      "pattern": "WUFFS_VERSION_STRING\\s+\"([0-9.]+)",
+      "upstream": "google/wuffs",
+      "version_kind": "release",
+      "license": "Apache-2.0",
+      "note": "Full string carries build metadata (0.3.5+3404.20260711); the numeric release prefix is the comparable version. cmake/AuroraCompression.cmake compiles this exact file.",
+      "version_line": "0.3"
+    },
+    {
+      "name": "stb_image",
+      "version": "2.30",
+      "source": "third_party/stb_image.h",
+      "pattern": "stb_image\\s*-\\s*v([0-9.]+)",
+      "upstream": "nothings/stb",
+      "version_kind": "release",
+      "license": "MIT OR Public-Domain",
+      "note": "STBI_VERSION is a constant API level (1), not the release version; the file-header banner is authoritative."
+    },
+    {
+      "name": "webview2",
+      "version": "154.0.4258.31",
+      "source": "third_party/webview2/WebView2EnvironmentOptions.h",
+      "pattern": "CORE_WEBVIEW_TARGET_PRODUCT_VERSION\\s+L\"([0-9.]+)\"",
+      "upstream": "MicrosoftEdge/WebView2",
+      "version_kind": "proxy",
+      "license": "MS-WebView2-SDK",
+      "note": "The vendored tree holds only headers, with no NuGet package manifest. This macro is the SDK-embedded target browser version, the only stable numeric identifier; it is NOT the SDK package version and must not be compared against SDK releases."
+    }
+  ]
+}

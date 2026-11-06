@@ -1,0 +1,27 @@
+version: 2
+updates:
+  # The repository vendors every C++ dependency as a whole source tree under
+  # third_party/ (no .gitmodules, no vcpkg/conan/Cargo/NuGet manifest), so no
+  # dependabot package ecosystem can see them. Registering "cargo", "npm" or
+  # "pip" here would be inert: third_party/wgpu-native/Cargo.toml declares
+  # 0.0.0 and is not a manifest this repository builds from. Vendored versions
+  # are tracked by codespec/third_party_versions.json and verified against the
+  # sources by the check_third_party_versions gate; upstream version lag is
+  # reported by .github/workflows/sca.yml.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "03:17"
+    groups:
+      actions-minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "chore(deps)"

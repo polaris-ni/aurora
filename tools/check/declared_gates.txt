@@ -21,3 +21,5 @@ check_doc_comments
 check_nolint_layout
 check_agents_size
 check_change_proposals
+check_third_party_versions
+check_workflow_yaml

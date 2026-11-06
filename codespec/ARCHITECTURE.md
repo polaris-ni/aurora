@@ -611,6 +611,8 @@ CI 配置位于 `.github/workflows/`：
 
 **真机验收探针不进 CTest**（`AURORA_BUILD_VERIFY_TOOLS` 默认 OFF、`EXCLUDE_FROM_ALL`，聚合目标 `aurora_verify`）：`--target aurora_verify_win32_dpi` 在 100% DPI 环境下判据恒真并记 SKIP，其自动段注入 `WM_DPICHANGED` 造变化故任何 DPI 环境均可跑，人工段做真跨屏拖动、未做记 PENDING MANUAL；`--target aurora_verify_glfw_dpi` 同构，Wayland 验证需 Linux 合成器环境。契约与判据见 [`specification/08-tooling.md`](specification/08-tooling.md) §8.2。
 
+**供应链审计不进全量 CI 矩阵**：`.github/workflows/sca.yml` 独立按周 / 手动触发，并在依赖清单或相关脚本变更时随 PR 触发，跑两枚静态门禁、生成 CycloneDX 物料清单与上游版本滞后报告。它**不修改 `ci.yml`**，不改全量四类出口；上游报告是人工复核输入而非自动漏洞裁决（OSV 对 vendored C++ 无包版本映射）。新增扫描面须沿用「独立工作流 + 本地门禁」这条编排约束，不得反向削弱全量矩阵。版本真值源见 `codespec/third_party_versions.json`。
+
 ### 14.6 按改动类型的门禁矩阵
 
 `ctest --preset ninja-test` 已含全部 `check_*`；`check_gen_api_merge` / `check_api_schema_sync` 须先构建生成器。门禁脚本实现见 `tools/check/`，注册见 `cmake/AuroraTests.cmake`。下表是完整矩阵，仓库根目录 `AGENTS.md` §3.1 只保留高频四类并指向本表。
@@ -628,6 +630,8 @@ CI 配置位于 `.github/workflows/`：
 | 字符串字面量 | `check_no_cjk_literals` | `CODING_STANDARDS.md` §14 |
 | i18n 词表数据（`codespec/i18n_builtin.json`、`gen_i18n` 及其 fixture、`AUM1` 布局） | `check_i18n_gen_golden`（先 `--target gen_i18n`；确定性 / 参数序无关 / golden 逐字节 / 内置同源锁 / 错误类不落盘 / warn-only / 非空转七条腿）+ `itest_i18n_pipeline` | `specification/08-tooling.md`（CLI 与校验）、`specification/07-environment-modifier.md` §6（值模型与 bin 布局） |
 | NOLINT 豁免排版 | `check_nolint_layout` | `CODING_STANDARDS.md` §5.2 |
+| `third_party/` vendored 依赖升级 / `codespec/third_party_versions.json` | `check_third_party_versions`（清单为版本唯一真值源：逐条以声明正则从源码解析版本并比对；清单为空、缺字段、名字重复、源文件缺失、正则 0 命中或多命中、版本漂移、覆盖不全、libjpeg-turbo CMake 镜像不一致均硬失败；输出全 ASCII） | `specification/08-tooling.md`、`THIRD_PARTY_LICENSES.md`、本文件 §14.6 |
+| `.github/workflows/` 的 `env:` 折叠标量 | `check_workflow_yaml`（只查 `env:` 下折叠标量的 `#` 行与含 `#` 的值——字面块 `run: \|` 内的 `#` 是合法 shell 注释不受影响；另做不依赖第三方解析库的结构自检：顶层键 / tab 缩进 / 重复键 / 零命中守卫，PyYAML 可用时追加 `safe_load`） | `specification/08-tooling.md`、`CODING_STANDARDS.md` §10.5 |
 | 测试文件 | `registry_integrity`、`check_test_temp_hygiene`、`framework_selftest` | `CODING_STANDARDS.md` §3 |
 | 在文档 / CI 里声明为「现役一票否决」的 CTest 名 | `check_declared_gates`（以 `tools/check/declared_gates.txt` 的显式审定清单核对本构建 `CTestTestfile.cmake` 的 `add_test()` 集合；清单为空 / 解析不到注册名 / 声明名未注册 / 名字同时进豁免表均硬失败，分片名 `<stem>_s<N>` 亦算命中）；`utest_simd_parity` 另跑逐位比对 | `specification/08-tooling.md` §7.4.3、`BUILD_OPTIONS.md` §4.2、`CODING_STANDARDS.md` §6.8；新增声明时同步清单与豁免表 |
 | `codespec/` 文档与交叉引用 | `check_codespec_xref`、`check_code_doc_sync` | 本文件 §14 / §15 |

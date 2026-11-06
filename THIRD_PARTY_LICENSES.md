@@ -2,6 +2,8 @@
 
 Aurora 在 `third_party/` 下以**仓库内源码**形式 vendored 以下第三方组件，并在 CMake 中经 `add_subdirectory` 编入静态库 `aurora`，使用源码构建，断网可构建、版本确定。下文逐条列出组件、用途、版本与许可全文索引。
 
+> **版本真值源**：`codespec/third_party_versions.json` 是机器可读的单一版本真值源，覆盖 `third_party/` 全部顶层项；`tools/check/check_third_party_versions.py` 在每次静态门禁中把它与 vendored 源码逐条核对（版本漂移、漏登、正则空命中均硬失败）。本台账只承担用途与许可全文索引，版本号须与清单一致，升级依赖时先改清单。上游版本滞后由 `.github/workflows/sca.yml` 每周出报告供人工复核。
+
 > 集成方式（CMake 顺序）：先 `freetype` 后 `harfbuzz`（`HB_HAVE_FREETYPE` 自动开启），二者 `target_link_libraries(aurora PUBLIC freetype harfbuzz)`。
 > FreeType 关闭内置 bzip2/png/HarfBuzz 模块（`FT_DISABLE_BZIP2=ON`、`FT_DISABLE_PNG=ON`、`FT_DISABLE_HARFBUZZ=ON`），shaping 由 aurora 直链 `harfbuzz`；保留 zlib（gzip）解压。
 
@@ -124,7 +126,7 @@ PROVIDE MAINTENANCE, SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
 
 ## 4. stb_image — 图像加载
 
-- **版本**：单头文件（vendored）
+- **版本**：2.30（`third_party/stb_image.h` 文件头 `stb_image - v2.30`；`STBI_VERSION` 恒为 1，是 API 级别而非发布版本）
 - **来源**：`third_party/stb_image.h`（由 `stb` 项目 vendored）
 - **用途**：PNG/JPG 等图像解码（例如 HeadlessSurface 输出、示例图像加载）
 - **许可**：Public Domain / MIT（见文件头注释）
@@ -239,7 +241,7 @@ This means that users may choose which of these licenses they take the code unde
 
 ## 10. libjpeg-turbo — JPEG 编解码（可选依赖）
 
-- **版本**：3.2.1（`cmake/AuroraImageCodecs.cmake`：`VERSION "3.2.1"` / `LIBJPEG_TURBO_VERSION_NUMBER "3020001"`；`JPEG_LIB_VERSION=80` 对应 libjpeg v8 ABI）
+- **版本**：3.2.1（`third_party/libjpeg-turbo/CMakeLists.txt`：`set(VERSION 3.2.1)`；`cmake/AuroraImageCodecs.cmake` 的 `VERSION "3.2.1"` / `LIBJPEG_TURBO_VERSION_NUMBER "3020001"` 是生成 `jconfig.h` 的镜像副本，由 `check_third_party_versions` 交叉核对，`JPEG_LIB_VERSION=80` 对应 libjpeg v8 ABI）
 - **来源**：vendored 于 `third_party/libjpeg-turbo/`（其 CMakeLists 显式禁止 `add_subdirectory`，故由本仓直编指定 `.c` 源 + `configure_file` 生成 `jconfig.h` / `jconfigint.h`）
 - **用途**：`AURORA_ENABLE_IMAGE_JPEG=ON` 时经 `jpeg_turbo_codec.cpp` 以 `<jpeglib.h>` 接口编解码 JPEG（仅取 libjpeg API 库，turbojpeg / cjpeg / djpeg 工具与示例有意不编）
 - **集成方式**：独立静态源编入 `aurora`，`AURORA_ENABLE_IMAGE_JPEG` 默认 OFF，关闭时链接产物完全不含该组件
@@ -307,8 +309,35 @@ Full text: https://www.unicode.org/license.txt
 
 ---
 
+## 13. libwebp — WebP 编解码（可选依赖）
+
+- **版本**：1.6.0（`third_party/libwebp/configure.ac`：`AC_INIT([libwebp], [1.6.0]`；其 CMakeLists 亦从该行反解版本）
+- **来源**：vendored 于 `third_party/libwebp/`
+- **用途**：`AURORA_ENABLE_IMAGE_WEBP=ON` 时提供 WebP 图像解码
+- **许可**：BSD 3-Clause（全文见 `third_party/libwebp/COPYING`）
+
+---
+
+## 14. Wuffs — 无损解码标准库（可选依赖）
+
+- **版本**：0.3.5（`third_party/wuffs/release/c/wuffs-v0.3.c`：`WUFFS_VERSION_STRING "0.3.5+3404.20260711"`，`+` 后为构建元数据，不参与版本比对）
+- **来源**：vendored 于 `third_party/wuffs/`；`cmake/AuroraCompression.cmake` 编译的是 `release/c/wuffs-v0.3.c` 单文件
+- **许可**：Apache-2.0（全文见 `third_party/wuffs/LICENSE`）
+
+---
+
+## 15. WebView2 SDK — Windows WebView 头（可选依赖）
+
+- **版本**：代理值 `154.0.4258.31`（`third_party/webview2/WebView2EnvironmentOptions.h`：`CORE_WEBVIEW_TARGET_PRODUCT_VERSION`）。该目录只含 4 个头文件，无 NuGet 包清单，此宏是 SDK 内嵌的目标浏览器版本、**不是 SDK 包版本**，故在版本清单中标为 proxy，不参与上游发布比对
+- **来源**：vendored 于 `third_party/webview2/`（`WebView2.h`、`WebView2EnvironmentOptions.h`、`LICENSE.txt`、`NOTICE.txt`）
+- **用途**：`AURORA_ENABLE_WEBVIEW=ON` 时的 Win32 WebView 桥；运行时 `WebView2Loader.dll` 须置于 exe 同目录
+- **许可**：见目录内 `LICENSE.txt` / `NOTICE.txt`
+
+---
+
 ## 合规说明
 
 - 上述组件均以源码形式 vendored 于仓库内，版本锁定、可审计；除 wgpu-native 的 Rust 依赖树（首次构建需 cargo 在线拉取，见第 7 节）外均可无网络构建。第 11 节 Unicode UCD 与第 12 节 CLDR Plural Rules 是**同类例外**：源数据文件不入库，入库的是按其许可导出的判定表，版本与导出来源就写在各节内，可审计口径不变。
-- FreeType（FTL）与 HarfBuzz（Old MIT）、zlib（zlib）、stb_image（Public Domain/MIT）、Noto Sans（OFL）、GLFW（zlib/libpng，仅 `AURORA_BACKEND_GLFW=ON` 时编入）、wgpu-native（MIT OR Apache-2.0，仅 `AURORA_BACKEND_GPU_WGPU=ON` 时编入）、SQLite（Public Domain，仅 `AURORA_ENABLE_STORAGE_SQLITE=ON` 时编入）、mbedTLS（Apache-2.0 OR GPL-2.0-or-later 双许可，仅 `AURORA_ENABLE_NET_TLS_MBEDTLS=ON` 时编入）、libjpeg-turbo（IJG License + Modified BSD 3-Clause 双 BSD 风格许可，仅 `AURORA_ENABLE_IMAGE_JPEG=ON` 时编入）、Unicode UCD（Unicode License v3，导出区间表随库交付）、CLDR Plural Rules（Unicode License v3，导出判定表随库交付）均为自由/宽松/公版许可，兼容 Aurora 的静态库分发模式。
+- FreeType（FTL）与 HarfBuzz（Old MIT）、zlib（zlib）、stb_image（Public Domain/MIT 2.30）、Noto Sans（OFL）、GLFW（zlib/libpng，仅 `AURORA_BACKEND_GLFW=ON` 时编入）、wgpu-native（MIT OR Apache-2.0，仅 `AURORA_BACKEND_GPU_WGPU=ON` 时编入）、SQLite（Public Domain，仅 `AURORA_ENABLE_STORAGE_SQLITE=ON` 时编入）、mbedTLS（Apache-2.0 OR GPL-2.0-or-later 双许可，仅 `AURORA_ENABLE_NET_TLS_MBEDTLS=ON` 时编入）、libjpeg-turbo（IJG License + Modified BSD 3-Clause 双 BSD 风格许可，仅 `AURORA_ENABLE_IMAGE_JPEG=ON` 时编入）、libwebp（BSD 3-Clause，仅 `AURORA_ENABLE_IMAGE_WEBP=ON` 时编入）、Wuffs（Apache-2.0）、WebView2 SDK（仅 `AURORA_ENABLE_WEBVIEW=ON` 时的 Win32 头，许可见目录内 `LICENSE.txt`）、Unicode UCD（Unicode License v3，导出区间表随库交付）、CLDR Plural Rules（Unicode License v3，导出判定表随库交付）均为自由/宽松/公版许可，兼容 Aurora 的静态库分发模式。
+- 版本清单中 `wgpu-native` 与 `webview2` 标为 proxy：前者上游仅有 `0.0.0` 占位与 `Unreleased` 变更日志，以 `Cargo.lock` 的 `wgpu-core 29.0.3` 作代理；后者无包清单，以 SDK 内嵌目标浏览器版本作代理。二者不可与上游发布号直接比较，由人工复核。
 - 许可全文以各组件目录内原始 `LICENSE.TXT` / `COPYING` / 头注释为权威来源；本文件仅作索引与归档。
