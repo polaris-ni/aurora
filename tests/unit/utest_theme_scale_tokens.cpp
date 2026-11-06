@@ -125,19 +125,10 @@ AURORA_TEST_CASE(control_metrics_anchor_current_control_constants) {
     AURORA_TEST_CHECK_EQ(c.icon_default_size, 24.0F);
     AURORA_TEST_CHECK_EQ(c.content_padding, 8.0F);
     AURORA_TEST_CHECK(c == ControlMetrics{});
-    check_token_table<ControlMetrics>("theme.controls.",
-                                      {"control_height",
-                                       "control_height_small",
-                                       "min_touch_target",
-                                       "menu_item_height",
-                                       "focus_ring_width",
-                                       "focus_ring_inset",
-                                       "indicator_size",
-                                       "scrollbar_thickness",
-                                       "separator_thickness",
-                                       "border_thickness",
-                                       "icon_default_size",
-                                       "content_padding"});
+    check_token_table<ControlMetrics>(
+        "theme.controls.", {"control_height", "control_height_small", "min_touch_target", "menu_item_height",
+                            "focus_ring_width", "focus_ring_inset", "indicator_size", "scrollbar_thickness",
+                            "separator_thickness", "border_thickness", "icon_default_size", "content_padding"});
 }
 
 AURORA_TEST_CASE(motion_tiers_anchor_library_default_duration_and_none_is_reduce_motion) {
