@@ -1015,7 +1015,7 @@ child.width(au::percent(0.5));
 // 规则 3：布局方程可求解、可验证
 // 父容器宽度 = Σ(子宽度) + Σ(间距) + padding_left + padding_right
 // 方程无解（子总宽 > 父宽）时有明确的溢出策略：Scroll 包裹，或依赖约束 clamp
-au::Scroll(au::ScrollProps{ .child = au::Row({ /* ... */ }) });
+au::Scroll(au::Node{ au::Row({ /* ... */ }) });
 
 // 规则 4：布局结果可查询
 auto snap = au::render_to_logical_snapshot(root, 800, 600);

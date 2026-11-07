@@ -732,7 +732,7 @@ auto *vol   = slider(root, 0.5);                             // Slider*；也可
 auto *box   = vbox(root);   // Column*；hbox → Row*，stack → Stack*，grid → Grid*，scroll → Scroll*
 ```
 
-工厂返回的裸指针生命周期由父树 `shared_ptr` 持有，**父树销毁后即失效**，勿长期持有。容器类工厂第二参数为既有 `XxxProps`（默认 `{}`）；`label` / `button` 首参为主文案，覆盖对应 Props 字段。
+工厂返回的裸指针生命周期由父树 `shared_ptr` 持有，**父树销毁后即失效**，勿长期持有。容器类工厂第二参数为既有 `XxxProps`（默认 `{}`）；`label` / `button` 首参为主文案，覆盖对应 Props 字段；`scroll` 例外——内容节点占第二参数，属性块后移一位（`scroll(parent, Node, ScrollProps = {})`）。
 
 ### 23.2 Scroll
 
@@ -742,16 +742,16 @@ auto *box   = vbox(root);   // Column*；hbox → Row*，stack → Stack*，grid
 au::Column list({
     au::Text("行 1"), au::Text("行 2"), /* …长列表… */ });
 
-// 方式 1：配置块构造（可设 step / overscan）
-au::Scroll scroll{ au::ScrollProps{ .child = std::move(list), .step = 16.0F } };
+// 方式 1：内容 + 属性块构造（内容走构造首参，属性经链式写件表态）
+au::Scroll scroll{ au::Node{std::move(list)}, au::ScrollProps().set_step(16.0F) };
 
 // 方式 2：便捷构造（取首项为唯一子节点）
 au::Node n = au::Scroll{ au::Column{ au::Text("A"), au::Text("B") } };
 ```
 
-- `ScrollProps` 字段：`.child`（唯一子节点 `Node`）、`.step`（每单位滚轮增量的滚动像素，默认 16）、`.overscan`（视口上下各留 overscan 屏缓冲，默认 1；缓冲内存不随内容量增长）。
-- 继承式双模：`.step` 可直接赋值（`scroll.step = 16`），或 `Scroll{ ScrollProps{...} }` 配置块构造。
-- 工厂层等价：`au::ui::scroll(parent, ...)`。
+- `ScrollProps` 属性面六行（已迁到属性单一声明形态，见 [`specification/04-widget.md`](specification/04-widget.md) §2.5）：`step`（每单位滚轮增量的滚动像素，默认 16）、`overscan`（视口上下各留 overscan 屏缓冲，默认 1；缓冲内存不随内容量增长）、`restore_key`（空 = 不参与位置保存）、吸附三件套 `snap_extent` / `snap_paging` / `snap_alignment`。取值走无参读件（`scroll.step()`），写入走链式写件（`ScrollProps().set_step(24.0F)`），撤表态走 `clear(ScrollProps::step_row())`；六行里只有 `overscan` 是绘制档（它决定离屏缓冲的逻辑高度）。
+- 内容子节点不入属性表：只能随构造移入（`Scroll{ Column{...} }` 或 `Scroll(Node, ScrollProps)`），构造后换内容走容器自身的 `set_child`。
+- 工厂层等价：`au::ui::scroll(parent, child, props)`。
 
 > 凡靠自身偏移平移内容的容器（`Scroll` / `LazyList` / `GridView`），**偏移变化必须 `mark_needs_paint()`** 把视口标脏，否则只有自驱动动画控件会跟随滚动。
 
@@ -1549,10 +1549,8 @@ class Divider : public au::LeafWidget {
 using namespace au;
 
 // 整页：周期取视口高，配 Start / Center / End 对齐方位
-au::Scroll pager{au::ScrollProps{
-    .child = au::Node{build_pages()},
-    .snap = ScrollSnap::page(ScrollSnapAlignment::Start),
-}};
+au::Scroll pager{au::Node{build_pages()},
+                 au::ScrollProps().set_snap_paging(true).set_snap_alignment(ScrollSnapAlignment::Start)};
 
 // 条目吸附：按固定周期（= 行高 / 格高）收位，居中展示
 auto list = std::make_shared<LazyList>(200, [](int i) -> Node { return Node{Text(std::to_string(i))}; },
@@ -1565,7 +1563,7 @@ list->set_snap(ScrollSnap{.extent = 48.0F, .alignment = ScrollSnapAlignment::Cen
 ### 38.2 下拉刷新
 
 ```cpp
-auto scroll = std::make_shared<Scroll>(ScrollProps{.child = Node{build_feed()}});
+auto scroll = std::make_shared<Scroll>(Node{build_feed()});
 auto pull = std::make_shared<PullToRefresh>(
     Node{std::move(scroll)},
     PullToRefreshProps().set_threshold(64.0F).set_max_pull(128.0F));  // 子树是构造首参，属性链式
@@ -1585,12 +1583,12 @@ pull->on_refresh([weak_pull]() -> void {
 ### 38.3 吸顶分组头部
 
 ```cpp
-au::Scroll grouped{au::ScrollProps{.child = au::Node{au::Column{
+au::Scroll grouped{au::Node{au::Column{
     au::Node{au::StickyHeader{au::Node{au::Text{"今天"}}}},
     au::Node{message_row(1)},  // ...
     au::Node{au::StickyHeader{au::Node{au::Text{"昨天"}}}},
     au::Node{message_row(2)},  // ...
-}}}};
+}}};
 ```
 
 `StickyHeader` 正常参与布局（占自身高度、随内容滚），滚过视口顶部后由宿主按 pin 位压顶重绘；下一条头部逼近时把本条**顶出**（CSS `position: sticky` 同语义）。宿主为 `Scroll`（多个头部依次堆叠）或 `LazyList`（粘性项作为普通行实例化）。
@@ -1598,7 +1596,7 @@ au::Scroll grouped{au::ScrollProps{.child = au::Node{au::Column{
 ### 38.4 滚动驱动动画与嵌套滚动
 
 ```cpp
-auto scroll = std::make_shared<Scroll>(ScrollProps{.child = Node{build_hero()}});
+auto scroll = std::make_shared<Scroll>(Node{build_hero()});
 
 // 偏移信号：任何滚动通道（滚轮 / 拖拽 / 收位滑动帧 / 程序化）落位即发布
 au::State<float> fade{1.0F};
