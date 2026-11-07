@@ -88,9 +88,9 @@ namespace detail {
 /// @param type 序列化 type 名。
 /// @return 该类型的属性是否只能通过 `set_<键名>()` 链式写件装入。
 [[nodiscard]] constexpr auto props_chain_writers(std::string_view type) noexcept -> bool {
-    constexpr std::array<std::string_view, 12> k_chain = {"BarChart", "BottomNavBar", "Button",       "Column",
-                                                          "Divider",  "Grid",         "LazyRow",      "LineChart",
-                                                          "PieChart", "Row",          "ScatterChart", "Sparkline"};
+    constexpr std::array<std::string_view, 13> k_chain = {
+        "BarChart", "BottomNavBar", "Button",   "Column", "Divider",      "Grid",     "Image",
+        "LazyRow",  "LineChart",    "PieChart", "Row",    "ScatterChart", "Sparkline"};
     return std::ranges::find(k_chain, type) != k_chain.end();
 }
 
@@ -319,7 +319,8 @@ struct PropTarget {
 /// @note 逐项由全量类型体检（73 类型 × 3 风格的产物编译矩阵）暴露后登记，非凭空猜测。
 ///       `Scroll.offset`/`LazyRow.offset` 是**运行态**（滚动位置由交互产生，构造期无内容高度可夹取，
 ///       控件也没有同名成员）；`Image.image_width`/`image_height` 是解码结果的派生值
-///       （`ImageViewProps` 只有 `bitmap`/`source` 两个成员）。硬发赋值只会产出编译不过的语句。
+///       （它们由位图尺寸现算，属性表上没有对应行，链式形态也就没有 `set_` 写件）。硬发赋值或
+///       臆造写件只会产出编译不过的语句。
 /// @param type 序列化 type 名。
 /// @param key 快照属性键名。
 /// @return 键是否属已确认无写入通道的集合（运行态/派生值，静默省略）。

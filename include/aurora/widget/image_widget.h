@@ -13,6 +13,7 @@
 #include "aurora/render/image_cache.h"
 #include "aurora/render/painter.h"
 #include "aurora/state/async.h"
+#include "aurora/widget/props.h"
 #include "aurora/widget/props_io.h"
 #include "aurora/widget/widget.h"
 
@@ -46,10 +47,57 @@ inline auto default_image_fetcher() -> ImageFetcher & {
 /// @param f 新的默认 fetcher（URL → 字节流 `Task`），移动进单例；空 `std::function` 表示撤销注入。
 inline auto set_default_image_fetcher(ImageFetcher f) -> void { default_image_fetcher() = std::move(f); }
 
-/// @brief ImageView 属性（聚合）：位图图片。
-struct ImageViewProps {
-    Image bitmap{};  ///< 已解码图像（可空）
-    std::optional<std::string> source = std::nullopt;  ///< 源文件路径（用于序列化/占位）
+/// @brief `ImageView` 的属性权威表：只有源文件路径一行。
+///
+/// 已解码位图不进表：它是运行期载荷（解码结果 / 异步回填），不是可声明的属性意图，与
+/// `LazyRow::item_builder` 同类处置——出表落控件面公有槽位，属性对象不持有第二份所有权。
+/// `image_width` / `image_height` 两枚也不是表行：它们由位图派生、不可写入，故在
+/// `describe_static` 里按「派生只读键」追加在表行之后，schema 的键与序保持不变。
+///
+/// 本行的唯一消费点是序列化 / 反序列化（不参与布局与绘制），故不标任何脏档。
+///
+/// @note Thread: main-thread only
+/// @note Side-effects: 未挂载时是纯 DTO
+class ImageViewProps : public AbstractProps<ImageViewProps> {
+  public:
+    // ---- 权威表：参数顺序即 schema 顺序 ----
+
+    /// @brief 可空值件：源文件路径（用于序列化 / 占位）；空串即无源。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto source_row() {
+        return prop_row<&ImageViewProps::source_>("source")
+            .shows("nullopt")
+            .fallback(&ImageViewProps::source_default)
+            .note("Source file path");
+    }
+
+    /// @brief 权威表本体：本控件全部属性行的元组。
+    /// @return 按声明顺序排列的行元组。
+    [[nodiscard]] static constexpr auto rows() { return make_prop_rows(source_row()); }
+
+    // ---- 读面：常量档 ⇒ 无参读件 ----
+
+    /// @brief 当前生效的源文件路径。
+    /// @return 生效路径；未表态时为空串（默认值显示串记作 `nullopt`，即无源）。
+    [[nodiscard]] auto source() const -> std::string { return stated(source_row()); }
+
+    // ---- 写面 ----
+
+    /// @brief 装入源文件路径。
+    /// @param value 新路径；空串与未表态在生效值上同义，但只有写入才落盘。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_source(const std::string &value) -> ImageViewProps & { return assign(source_row(), value); }
+
+    // ---- 回落点提供者 ----
+
+    /// @brief 源路径回落基线。
+    /// @return 空串（无源）。
+    [[nodiscard]] static auto source_default() -> std::string { return {}; }
+
+  private:
+    std::optional<std::string> source_;  ///< 源文件路径表态位
+
+    friend class AbstractProps<ImageViewProps>;
 };
 
 /// @brief 图像 widget（specification/04-widget.md §3.6）。
@@ -59,10 +107,9 @@ struct ImageViewProps {
 ///
 /// 命名为 `ImageView` 以区别于 `core::Image`（解码后的像素数据结构）。
 ///
-/// 采用**继承式双模 API**（specification/04-widget.md §2.5）：`ImageViewProps` 字段即本控件公有字段，
-/// `bitmap`/`source` 可直接访问或以配置块构造
-/// `au::ImageView{ au::ImageViewProps{ .bitmap = img, .source = "..." } }`。
-/// 渲染宽高 `width()`/`height()` 等 widget 级属性沿用基类（不进 Props）。
+/// 属性面走 `ImageViewProps` 的权威表（`source` 一行，链式写件 `set_source`），已解码位图
+/// 作控件面公有槽位 `bitmap`（运行期载荷，不进表、不序列化）；渲染宽高 `width()`/`height()`
+/// 等 widget 级属性沿用基类（不进 Props）。
 ///
 /// 用法：
 /// @code
@@ -79,14 +126,41 @@ class ImageView : public Widget, public ImageViewProps {
     ///        才可聚焦（覆写基类 public virtual；分级默认见 specification/05 §4.2）。
     /// @return 转发 `has_input_semantics()`：挂了输入语义为 true，纯展示为 false。
     [[nodiscard]] auto wants_focus() const -> bool override { return has_input_semantics(); }
-    ImageView() = default;
-    /// @brief 以已解码位图构造（其余字段取默认）。
+    /// @brief 默认构造：无图、源未表态（生效值即回落点），并接线宿主。
+    ImageView() { bind(*this); }
+    /// @brief 以已解码位图构造（源未表态），并接线宿主。
     /// @param bmp 待显示的图像，移动进 `bitmap`；空图像时绘制占位框。
-    explicit ImageView(Image bmp) : ImageViewProps{.bitmap = std::move(bmp)} {}
+    explicit ImageView(Image bmp) : bitmap(std::move(bmp)) { bind(*this); }
 
-    /// @brief 配置块构造：整份属性直接作为本控件字段（继承式双模 API）。
-    /// @param props 图像属性（`bitmap` / `source`），移动进基类子对象。
-    ImageView(ImageViewProps props) : ImageViewProps(std::move(props)) {}
+    /// @brief 配置块构造：整份属性接管后接线宿主（specification/04-widget.md §2.5）。
+    /// @param props 图像属性（`source` 一行），移动进基类子对象。
+    ImageView(ImageViewProps props) : ImageViewProps(std::move(props)) { bind(*this); }
+
+    /// @brief 已解码位图：运行期载荷，不在属性表内（`Image{}` 时绘制占位框）。
+    /// @note 直接替换本成员不标脏；需要标脏请走 `set_bitmap`。
+    Image bitmap{};
+
+    /// @brief 运行时可查询的默认属性值（属性表的单一事实来源，需求 SPEC.API.SENSIBLE-DEFAULTS.001）。
+    /// @return 一份缺省构造的 `ImageViewProps`：源未表态，生效值即该行回落点。
+    [[nodiscard]] static auto defaults() -> ImageViewProps { return {}; }
+
+    /// @brief 替换位图（链式）：布局档标脏（连带 Display List 失效），返回控件引用。
+    /// @param bmp 新图像，移动接管。
+    /// @return ImageView 引用（链式调用）。
+    auto set_bitmap(Image bmp) -> ImageView & {
+        bitmap = std::move(bmp);
+        mark_needs_layout();
+        return *this;
+    }
+
+    /// @brief 设置源文件路径（链式）；转调 `ImageViewProps::set_source`，返回控件引用。
+    /// @param value 源文件路径（序列化 / 占位用途，不触发重新解码）。
+    /// @return ImageView 引用（链式调用）。
+    /// NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method) 同名控件面写件（返回控件引用）
+    auto set_source(const std::string &value) -> ImageView & {
+        ImageViewProps::set_source(value);
+        return *this;
+    }
 
     /// @brief 便捷工厂：从文件解码（失败返回空图像，不抛异常）。
     /// @param path 图片文件路径，交给 `Image::load` 按扩展名选解码器。
@@ -134,86 +208,54 @@ class ImageView : public Widget, public ImageViewProps {
     /// @return 字面量 `"Image"`。
     [[nodiscard]] auto type_name() const -> const char * override { return "Image"; }
 
-    /// @brief 运行时自描述（规格附录 B）。
-    /// @return 名为 "Image" 的描述表：含 source/image_width/image_height 与 widget 级 width/height/show，
+    /// @brief 运行时自描述（规格附录 B）：属性项按权威表发射，控件只补自己的事实。
+    /// @return 名为 "Image" 的描述表：`source` 一行 + 两枚派生只读键（`image_width` / `image_height`），
     ///         子节点策略 "none"。
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
-        return WidgetDescriptor{
-            .name = "Image",
-            .properties =
-                {
-                    {.name = "source",
-                     .type = "string",
-                     .default_value = "nullopt",
-                     .required = false,
-                     .note = "Source file path",
-                     .json_type = "string"},
-                    {.name = "image_width",
-                     .type = "int",
-                     .default_value = "0",
-                     .required = false,
-                     .note = "Image width (px)",
-                     .json_type = "integer",
-                     .enum_values = {},
-                     .min_value = "0"},
-                    {.name = "image_height",
-                     .type = "int",
-                     .default_value = "0",
-                     .required = false,
-                     .note = "Image height (px)",
-                     .json_type = "integer",
-                     .enum_values = {},
-                     .min_value = "0"},
-                    {.name = "width",
-                     .type = "Length",
-                     .default_value = "auto",
-                     .required = false,
-                     .note = "",
-                     .json_type = "array"},
-                    {.name = "height",
-                     .type = "Length",
-                     .default_value = "auto",
-                     .required = false,
-                     .note = "",
-                     .json_type = "array"},
-                    {.name = "show",
-                     .type = "bool",
-                     .default_value = "true",
-                     .required = false,
-                     .note = "",
-                     .json_type = "boolean"},
-                },
-            .events = {},
-            .children_policy = "none",
-            .examples = {"au::ImageView::from_file(\"logo.png\")"},
-        };
+        auto descriptor = props_descriptor("Image");
+        // 派生只读键：由位图尺寸现算、不可写入，故不进权威表（表行必须在私有字段上有一枚表态位），
+        // 只作为描述符条目追加在表行之后，保持 schema 的键与序不变。
+        descriptor.properties.push_back(PropDescriptor{.name = "image_width",
+                                                       .type = "int",
+                                                       .default_value = "0",
+                                                       .required = false,
+                                                       .note = "Image width (px)",
+                                                       .json_type = "integer",
+                                                       .min_value = "0"});
+        descriptor.properties.push_back(PropDescriptor{.name = "image_height",
+                                                       .type = "int",
+                                                       .default_value = "0",
+                                                       .required = false,
+                                                       .note = "Image height (px)",
+                                                       .json_type = "integer",
+                                                       .min_value = "0"});
+        descriptor.children_policy = "none";
+        descriptor.examples = {"au::ImageView::from_file(\"logo.png\")"};
+        return descriptor;
     }
     /// @brief 实例级自描述：图像视图无实例差异，直接转发 `describe_static()`。
     /// @return 与 `describe_static()` 相同的静态描述表。
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
-    /// @brief 登记需订阅的信号视图：`ImageViewProps` 皆为普通值字段，无响应式属性可登记。
-    auto collect_signals(StateSink & /*out*/) -> void override {}
+    /// @brief 收集本控件的可订阅信号视图：`source` 是普通值行，无响应式来源。
+    /// @param out 输出参数，收集响应式来源；本控件恒不写入。
+    auto collect_signals(StateSink &out) -> void override { collect_prop_sources(out); }
 
     /// @brief 序列化自有属性到 `props`（先由基类写通用属性）。
-    /// @param props 输出目标 JSON 对象：写入 `source`（仅当有值）与取自 `bitmap` 的
-    ///        `image_width` / `image_height`。
+    /// @param props 输出目标 JSON 对象：表态的 `source` 一行，加两枚由 `bitmap` 现算的派生只读键。
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
-        if (source.has_value()) {
-            props.set("source", *source);
-        }
+        props_serialize(props);
         props.set("image_width", bitmap.width);
         props.set("image_height", bitmap.height);
     }
 
-    /// @brief 从 JSON 重建自有属性（键缺失或非字符串则保留现值）。
-    /// @param props 序列化属性对象，本类只读 `source` 键。
+    /// @brief 从 JSON 重建自有属性（键缺失则保留现值）。
+    /// @note 非法值一律不写入：`source` 非字符串时撤表态（生效值退回该行回落点）并经 Diagnostics 上报。
+    /// @param props 读取来源 JSON 对象；派生只读键不参与重建。
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
-        if (props.contains("source") && props.at("source")->is_string()) {
-            source = props.at("source")->as_or<std::string>("");
-        }
+        props_deserialize(props);
     }
 
   protected:
