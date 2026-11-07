@@ -271,7 +271,7 @@ au::Node clock = au::Timer(1s, [](au::ReadOnlyState<int> tick) {
     auto label = au::computed([tick]() -> au::LocalizedString {
         return au::LocalizedString{ "tick: " + std::to_string(tick.get()) };
     });
-    return au::Text{ au::TextProps{ .content = label } };
+    return au::Text(au::TextProps().set_content(label));
 });
 
 // 自动显现：2s 后 on_tick 置位 shown
@@ -285,14 +285,14 @@ au::Node reveal = au::Timer(2s,
 - `set_timeout(d, cb)` 一次性；`set_interval(period, cb)` 周期；返回值 `TimerHandle` 可 `cancel()`、`active()` 查询。
 - `Timer` 挂载时向 `Scheduler::current()` 注册，析构自动取消；无运行中 App 时降级（记 `Diagnostics::warn`）不崩溃。
 
-> **`au::LocalizedString`**：`au::LocalizedString{ "revealed!" }` 由 `const char*` 构造，持有字面文本，未启用本地化时直接显示（查表失败也回退为 `text`）。需按 `Locale` 查 `MessageCatalog` 解析时用 `au::LocalizedString::tr(id)`——`id` 是构建期 `gen_i18n` 生成头里的 `constexpr au::MessageId` 常量（用法见 `codespec/specification/07-environment-modifier.md` §6.3），控件层（如 `Button::label`）统一吃 `LocalizedString`，故 `.content = "Hi"` 可隐式转换。最小配方三行：
+> **`au::LocalizedString`**：`au::LocalizedString{ "revealed!" }` 由 `const char*` 构造，持有字面文本，未启用本地化时直接显示（查表失败也回退为 `text`）。需按 `Locale` 查 `MessageCatalog` 解析时用 `au::LocalizedString::tr(id)`——`id` 是构建期 `gen_i18n` 生成头里的 `constexpr au::MessageId` 常量（用法见 `codespec/specification/07-environment-modifier.md` §6.3），控件层（如 `Button` 的 `label`）统一吃 `LocalizedString`，`TextProps::set_content` 另收 `const char*` 与 `std::string` 并隐式转 `LocalizedString`。最小配方三行：
 >
 > ```cpp
 > // 构建期：aurora_i18n_generate(TARGET myapp NAMESPACE myapp::msg BASE messages_en.json
 > //         LOCALES messages_zh-Hans-CN.json OUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/i18n)
 > (void)au::default_catalog().load_binary(std::span<const std::byte>{read_whole_file("messages_en.bin")});
 > au::default_catalog().set_default_locale(au::Locale{.language = "en"});
-> au::Text{au::TextProps{.content = myapp::msg::demo::greeting(3, "Ada")}};   // 具名强类型生成 API
+> au::Text(au::TextProps().set_content(myapp::msg::demo::greeting(3, "Ada")));   // 具名强类型生成 API
 > ```
 >
 > 切语言有两条通道：子树 `au::LocaleProvider{locale, child}`（`locale` 为宿主持有的 `au::State<au::Locale>` 句柄；响应式，换值即整子树重解析），或窗口级默认 `window.set_locale(loc)`（自下一帧起根注入）。两者换值都会向下清子树缓存，整屏文案同帧重解析；子树 Provider 优先于窗口级。
@@ -501,9 +501,9 @@ au::Switch sw{ dark_mode,
     [&prefs](bool v) { prefs.set("dark_mode", v); prefs.flush(); } };
 
 // 3) 只读展示：watch 返回 ReadOnlyState<T>，存储写入自动推送；控件不能经它写回
-au::Text hint{ au::TextProps{ .content = au::computed([persisted = prefs.watch<bool>("dark_mode", false)]() {
+au::Text hint{ au::TextProps().set_content(au::computed([persisted = prefs.watch<bool>("dark_mode", false)]() {
     return au::LocalizedString{ "persisted = " + std::string{ persisted.get() ? "true" : "false" } };
-}) } };
+})) };
 
 // 4) 读取：类型不匹配或缺失回退默认值
 int volume = prefs.get("volume", 5);
@@ -1108,7 +1108,7 @@ auto main() -> int {
     });
     auto root = Column({
         Text{"Main window"},
-        Text{TextProps{.content = ping_label}},
+        Text{TextProps().set_content(ping_label)},
         Button{ButtonProps().set_label("Broadcast")},
     });
 
@@ -1136,7 +1136,7 @@ auto main() -> int {
     if (auto aux = create_native_window(aux_opts)) {
         Node aux_root = Column({
             Text{"Auxiliary window"},
-            Text{TextProps{.content = ping_label}},
+            Text{TextProps().set_content(ping_label)},
         });
         (void)app.open_window(std::move(aux.value()), Scene{std::move(aux_root)}, aux_opts);
     }
@@ -1367,7 +1367,7 @@ au::State<bool> agreed{false};
 
 au::Scene build_ui() {
     return au::Column{
-        au::Text{au::TextProps{ .content = "订单总额" }},
+        au::Text(au::TextProps().set_content("订单总额")),
         au::Button{au::ButtonProps().set_label("提交")},
         au::TextInput{au::TextInputProps{ .value = "abc", .placeholder = "请输入" }},
         au::Slider{volume},
@@ -1442,7 +1442,7 @@ class IconButton : public au::LeafWidget {
 压制显式声明与控件自带文案（与 ARIA 一致）：
 
 ```cpp
-auto caption = std::make_shared<au::Text>(au::TextProps{.content = au::LocalizedString{"季度汇总"}});
+auto caption = std::make_shared<au::Text>(au::TextProps().set_content(au::LocalizedString{"季度汇总"}));
 caption->set_stable_key("sum-caption");            // 对标 HTML `id`：宿主命名、跨重建不变
 
 au::State<bool> checked{false};
@@ -2221,7 +2221,7 @@ auto line = au::computed([quote]() -> au::LocalizedString {
 aurora::Button reload{aurora::ButtonProps().set_label(au::LocalizedString{"reload"})};
 reload.on_click = [quote]() mutable -> void { quote.reload(); };  // 掐在途连接 + 重发
 
-// widget 直接读派生值：au::Text{au::TextProps{.content = line}}
+// widget 直接读派生值：au::Text(au::TextProps().set_content(line))
 ```
 
 要点：

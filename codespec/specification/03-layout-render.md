@@ -1000,7 +1000,7 @@ AURORA_TEST_CHECK(std::abs(snap["box"]["w"].get<float>() - 100.0F) < 0.001f);
 
 ```cpp
 // 规则 1：盒模型完全显式，无隐式行为
-auto hi = au::Text(au::TextProps{ .content = "Hi" });
+auto hi = au::Text(au::TextProps().set_content("Hi"));
 hi.modifier = au::Modifier{}
     .padding(8)                   // 内边距，永远加在内容尺寸之外
     .border(1, au::colors::AURORA_GRAY)  // 边框（命名空间级色常量为 AURORA_ + 全大写，见 core/color.h）

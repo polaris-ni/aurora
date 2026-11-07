@@ -307,11 +307,11 @@ margin 在 Maximized / FullScreen / tiled 态塌缩为 0（贴边无可拖缝隙
 | `PluralCategory` / `plural_category` / `PluralOperands` | CLDR 表驱动的复数与序数判定（见 §6.1） |
 | `CivilDate` / `DateStyle` / `format_number` / `format_currency` / `format_date` | 本地化格式化（见 §6.1） |
 
-所有文本属性类型为 `ReadOnlyState<LocalizedString>`，因此 `.content = "Hi"`（`LocalizedString` 与只读句柄均隐式转换）与 `.content = au::LocalizedString::tr(id)` 等价。
+所有文本属性类型为 `LocalizedString`，`TextProps::set_content` 同时收 `const char*`、`std::string`、`LocalizedString` 与 `ReadOnlyState<LocalizedString>` 四种实参，彼此等价。
 
 ```cpp
-au::Text(au::TextProps{.content = demo::msg::demo::greeting(3, "Ada")});   // 生成头给出的具名形参构造函数
-au::Text(au::TextProps{.content = au::LocalizedString{"a plain literal"}}); // 不经词表
+au::Text(au::TextProps().set_content(demo::msg::demo::greeting(3, "Ada")));   // 生成头给出的具名形参构造函数
+au::Text(au::TextProps().set_content(au::LocalizedString{"a plain literal"})); // 不经词表
 ```
 
 **模板语法 = ICU MF1 子集**，运行期解析器与构建期校验器**同源**（`src/aurora/i18n/detail/message_engine.h`

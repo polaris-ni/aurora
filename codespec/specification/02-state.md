@@ -323,7 +323,7 @@ auto message = au::computed([snapshot]() -> au::LocalizedString {
     }
     return au::LocalizedString{"Loading"};
 });
-au::Text status{au::TextProps{.content = message}};
+au::Text status(au::TextProps().set_content(message));
 request.reload();  // 前序请求自动取消；旧结果不会盖住新状态
 ```
 
@@ -357,7 +357,7 @@ au::State<int> count{0};
 auto label = au::computed([count]() -> au::LocalizedString {
     return au::LocalizedString{std::to_string(count.get())};
 });
-au::Text text{au::TextProps{.content = label}};   // 派生直通展示属性，无需中转 State
+au::Text text(au::TextProps().set_content(label));   // 派生直通展示属性，无需中转 State
 auto increment = [count] { count.update([](const int &old) { return old + 1; }); };
 ```
 

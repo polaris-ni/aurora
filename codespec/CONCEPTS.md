@@ -279,6 +279,6 @@ auto label = au::computed([snapshot]() -> au::LocalizedString {
     if (current.value) return au::LocalizedString{*current.value};
     return au::LocalizedString{"Loading"};
 });
-au::Text status{au::TextProps{.content = label}};
+au::Text status(au::TextProps().set_content(label));
 request.reload();   // 前序请求自动取消；迟到结果不覆盖新状态
 ```

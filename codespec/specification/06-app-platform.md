@@ -707,7 +707,7 @@ au::Timer(1s, [](au::ReadOnlyState<int> tick) {
     auto label = au::computed([tick]() -> au::LocalizedString {
         return au::LocalizedString{ "tick: " + std::to_string(tick.get()) };
     });
-    return au::Text{ au::TextProps{ .content = label } };
+    return au::Text(au::TextProps().set_content(label));
 });
 ```
 
