@@ -384,7 +384,8 @@ AURORA_TEST_CASE(codegen_skips_props_without_write_path) {
         to_code(make_node("Scroll", testing::json_obj({{"offset", 240.0F}, {"step", 24.0F}})), CodeStyle::StepByStep);
     AURORA_TEST_CHECK_MSG(step.find("offset") == std::string::npos,
                           "codegen: Scroll offset has no write path, skipped");
-    AURORA_TEST_CHECK_MSG(step.find("__w0.step = 24.0f;") != std::string::npos, "codegen: sibling prop still emitted");
+    AURORA_TEST_CHECK_MSG(step.find("__w0.set_step(24.0f);") != std::string::npos,
+                          "codegen: sibling prop still emitted via chain writer");
 }
 
 AURORA_TEST_CASE(codegen_step_show_uses_setter_for_shadowed_and_plain_types) {

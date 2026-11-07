@@ -979,6 +979,10 @@ struct PropCodec<ScrollSnapAlignment>
     /// @brief schema 的 C++ 类型名。
     /// @return `ScrollSnapAlignment`。
     [[nodiscard]] static constexpr auto type_text() -> std::string_view { return "ScrollSnapAlignment"; }
+
+    /// @brief 合法值表（发射 schema 的 `enum` 字段；拼写沿用枚举成员名）。
+    /// @return `{"Start", "Center", "End"}`。
+    [[nodiscard]] static auto enum_names() -> std::vector<std::string_view> { return {"Start", "Center", "End"}; }
 };
 
 /// @brief 堆叠适配属性。

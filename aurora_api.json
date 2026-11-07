@@ -3039,6 +3039,12 @@
           "note": "Wheel scroll delta (px)"
         },
         {
+          "name": "overscan",
+          "type": "float",
+          "default": 1.0,
+          "note": "Off-screen buffer padding in viewport heights above and below (1.0 = 3 viewport-heights total)"
+        },
+        {
           "name": "restore_key",
           "type": "string",
           "default": "",

@@ -87,8 +87,7 @@ AURORA_TEST_CASE(scroll_offscreen_buffer_paints_offscreen_children) {
     const auto s1 = std::make_shared<PaintCounter>();
     const auto s2 = std::make_shared<PaintCounter>();
     const auto s3 = std::make_shared<PaintCounter>();
-    au::Node root_scroll{au::Scroll{
-        au::ScrollProps{.child = au::Node{au::Column{au::Node{s0}, au::Node{s1}, au::Node{s2}, au::Node{s3}}}}}};
+    au::Node root_scroll{au::Scroll{au::Node{au::Column{au::Node{s0}, au::Node{s1}, au::Node{s2}, au::Node{s3}}}}};
     au::Window win_scroll = make_window(100, 100);
     AURORA_TEST_CHECK(win_scroll.present_root(root_scroll).ok());
     AURORA_TEST_CHECK_MSG(s0->paint_calls > 0, "Scroll: in-view child is painted");

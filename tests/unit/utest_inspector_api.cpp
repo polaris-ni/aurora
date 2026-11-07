@@ -367,7 +367,7 @@ AURORA_TEST_CASE(simulate_text_input_writes_into_target) {
 
 AURORA_TEST_CASE(simulate_scroll_moves_offset_and_clamps) {
     // 以滚动容器为目标派发滚轮事件：delta_y 为负使偏移增大 |delta|×step，且钳制在可滚范围内。
-    Scroll sc{ScrollProps{.child = box(300.0F, 800.0F), .step = 10.0F}};
+    Scroll sc{box(300.0F, 800.0F), ScrollProps().set_step(10.0F)};
     LayoutEngine::layout(sc, bounded(300.0F, 200.0F));
     AURORA_TEST_CHECK_NEAR(sc.offset_y(), 0.0F, 1e-4F);
 

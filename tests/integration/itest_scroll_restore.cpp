@@ -133,7 +133,7 @@ AURORA_TEST_CASE(all_scroll_controls_restore_their_key) {
     storage.write("k.grid", 96.0F);
 
     Scroll scroll;
-    scroll.restore_key = "k.scroll";
+    scroll.set_restore_key("k.scroll");
     scroll.add(Node{std::make_shared<FixedBox>(100.0F, 400.0F)});
     LayoutEngine::layout(scroll, bounded(100.0F, 100.0F));
     AURORA_TEST_CHECK_NEAR(scroll.offset_y(), 100.0F, 1e-4F);

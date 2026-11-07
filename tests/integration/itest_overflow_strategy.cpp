@@ -216,7 +216,7 @@ AURORA_TEST_CASE(scroll_dispatch_nearest_scrollable_ancestor_wins) {
     //       └─ 撑高用 Text(100x30)（y∈[140,170]，超出视口供外层滚动）
     auto inner_txt = std::make_shared<Text>("inner");
     inner_txt->set_modifier(Modifier{}.size(100.0F, 300.0F));
-    auto inner = std::make_shared<Scroll>(ScrollProps{.child = Node{std::move(inner_txt)}});
+    auto inner = std::make_shared<Scroll>(Node{std::move(inner_txt)});
     inner->set_modifier(Modifier{}.size(100.0F, 100.0F));
 
     auto btn_txt = std::make_shared<Text>("btn");

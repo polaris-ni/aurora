@@ -495,7 +495,7 @@ AURORA_TEST_CASE(scroll_and_lazy_list_agree_on_clipped_extra_hit_box) {
         const std::shared_ptr<Dropdown> dd = make_dropdown(log);
         auto content = std::make_shared<Column>(
             std::vector<Node>{Node{Button(ButtonProps().set_label("top"))}, Node{dd}}, ColumnProps().set_gap(400.0F));
-        auto scroller = std::make_shared<Scroll>(ScrollProps{.child = Node{content}});
+        auto scroller = std::make_shared<Scroll>(Node{content});
         LayoutEngine::layout(*scroller, host_constraints());
         dd->set_open(true);
         scroller->scroll_by(9999.0F);

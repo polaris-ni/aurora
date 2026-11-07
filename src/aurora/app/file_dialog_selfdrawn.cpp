@@ -334,7 +334,7 @@ FilePickerView::FilePickerView(PickerMode mode, const file_dialog::Options &opts
 
     list_ = std::make_shared<ListView>(std::vector<std::string>{}, mode == PickerMode::OpenFile);
     list_->set_on_select([this](int row) -> void { on_row_selected(row); });
-    auto list_scroll = std::make_shared<Scroll>(ScrollProps{.child = Node{list_}});
+    auto list_scroll = std::make_shared<Scroll>(Node{list_});
     list_scroll->height(Length::fixed(AURORA_PICKER_LIST_HEIGHT));
 
     auto up_button = std::make_shared<Button>(ButtonProps().set_label("Up"));

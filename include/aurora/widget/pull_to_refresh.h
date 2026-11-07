@@ -339,7 +339,7 @@ class PullToRefresh : public SingleChild, public PullToRefreshProps {
             return;
         }
         // 滚轮余量以「单位」计（全库约定 offset -= delta × step），换算成 dp 再进橡皮筋，
-        // 否则滚轮通道要几百个单位才够阈值。缺省 step=16dp（ScrollProps::step 同值）。
+        // 否则滚轮通道要几百个单位才够阈值。缺省 step=16dp（`ScrollProps::step_default()` 同值）。
         const float grown = rubber(e.delta_y * 16.0F);
         if (grown <= 0.0F) {
             return;

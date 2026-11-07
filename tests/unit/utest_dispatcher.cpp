@@ -401,7 +401,7 @@ auto make_nested_scroll_tree() -> NestedScrollTree {
     auto content = std::make_shared<TestBox>();
     content->box_width = 300.0F;
     content->box_height = 800.0F;
-    auto inner = std::make_shared<Scroll>(ScrollProps{.child = Node{content}, .step = 1.0F});
+    auto inner = std::make_shared<Scroll>(Node{content}, ScrollProps().set_step(1.0F));
     auto outer = std::make_shared<PullToRefresh>(Node{inner});
     LayoutEngine::layout(*outer, Constraints{.min = Size{}, .max = Size{.width = 300.0F, .height = 300.0F}});
     return NestedScrollTree{.outer = outer, .inner = inner};
@@ -1741,7 +1741,7 @@ AURORA_TEST_CASE(synthesized_pointer_and_scroll_events_carry_no_modifiers) {
     auto content = std::make_shared<TestBox>();
     content->box_width = 300.0F;
     content->box_height = 800.0F;
-    auto real_scroll = std::make_shared<Scroll>(ScrollProps{.child = Node{content}, .step = 1.0F});
+    auto real_scroll = std::make_shared<Scroll>(Node{content}, ScrollProps().set_step(1.0F));
     LayoutEngine::layout(*real_scroll, Constraints{.min = Size{}, .max = Size{.width = 300.0F, .height = 300.0F}});
     // delta_y 为正 = 向上滚动（offset 减小），初始已在顶部故向上滚不动；向下滚才出可滚区间。
     AURORA_TEST_CHECK_FALSE(real_scroll->scroll_by(60.0F));  // 已在顶部：向上滚不动

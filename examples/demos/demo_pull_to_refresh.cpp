@@ -30,7 +30,7 @@ auto main() -> int {
             au::Modifier{}.padding(6.0F).background(pal::AURORA_SURFACE).border(1.0F, pal::AURORA_BORDER));
         rows.emplace_back(std::move(line));
     }
-    au::Scroll scroll{au::ScrollProps{.child = au::Node{au::Column(std::move(rows))}}};
+    au::Scroll scroll{au::Node{au::Column(std::move(rows))}};
     scroll.set_modifier(au::Modifier{}.size(340.0F, 240.0F));
 
     auto pull = std::make_shared<au::PullToRefresh>(au::Node{std::move(scroll)});

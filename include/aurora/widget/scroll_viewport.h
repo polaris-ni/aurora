@@ -102,7 +102,7 @@ struct ScrollViewport {
     float offset_y = 0.0F;  ///< 当前滚动偏移（内容坐标，0 = 顶部）
     float content_h = 0.0F;  ///< 内容自然高度
     float viewport_h = 0.0F;  ///< 视口高度
-    float step = 16.0F;  ///< 每单位滚轮增量的滚动像素（与 ScrollProps::step 默认一致）
+    float step = 16.0F;  ///< 每单位滚轮增量的滚动像素（与 `ScrollProps::step_default()` 一致）
 
     /// @brief 最大可滚动偏移：内容超出视口的部分，不足时为 0（不可滚）。
     /// @return max(0, content_h - viewport_h)。

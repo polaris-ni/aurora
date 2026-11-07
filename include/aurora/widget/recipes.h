@@ -83,7 +83,7 @@ inline auto menu_bar(std::vector<Node> items) -> Node {
 /// @return 包裹好滚动容器的列表视图节点。
 inline auto list_view(std::vector<Node> items) -> Node {
     Column col{std::move(items)};
-    Scroll scroll{ScrollProps{.child = std::move(col), .step = 16.0F}};
+    Scroll scroll{Node{std::move(col)}, ScrollProps().set_step(16.0F)};
     return scroll;
 }
 

@@ -378,7 +378,7 @@ AURORA_TEST_CASE(focus_ring_band_inside_scroll_repainted) {
     // 内容高于视口才成其为滚动容器；按钮放第二行，视口 offset=0 时其环带完整可见。
     au::Node content{au::Column{au::Node{au::Text("first row")}, au::Node{btn}, au::Node{au::Text("row 3")},
                                 au::Node{au::Text("row 4")}, au::Node{au::Text("row 5")}, au::Node{au::Text("row 6")}}};
-    const auto scroller = std::make_shared<au::Scroll>(au::ScrollProps{.child = std::move(content)});
+    const auto scroller = std::make_shared<au::Scroll>(std::move(content));
     scroller->set_modifier(au::Modifier{}.size(static_cast<float>(w), 100.0F));  // 视口高 100 < 内容高
     au::Node root{au::Column{au::Node{au::Text("header")}, au::Node{scroller}}};
 

@@ -146,7 +146,7 @@ struct FlowScene {
         .set_inactive_color(AURORA_SLIDER_OFF)
         .set_thumb_color(AURORA_KNOB);
     slider->set_modifier(au::Modifier{}.size(240.0F, 24.0F));
-    auto scroller = std::make_shared<au::Scroll>(au::ScrollProps{.child = build_scroll_content()});
+    auto scroller = std::make_shared<au::Scroll>(build_scroll_content());
 
     auto clicks = std::make_shared<int>(0);
     btn->on_click = [sw, clicks] {
@@ -198,7 +198,7 @@ struct GlideScene {
 /// @brief 构建用例 3 场景：320×176（行 A 36 + 行 C 140）。
 [[nodiscard]] auto build_glide_scene() -> GlideScene {
     const auto btn = std::make_shared<au::Button>("jump");
-    auto scroller = std::make_shared<au::Scroll>(au::ScrollProps{.child = build_scroll_content()});
+    auto scroller = std::make_shared<au::Scroll>(build_scroll_content());
     btn->on_click = [scroller] {
         (void)scroller->scroll_to(10000.0F, true);  // 目标越界：内部夹取到内容底部
     };

@@ -90,7 +90,7 @@ auto build_scroll_tree() -> aurora::Node {
         items.emplace_back(std::move(chip));
     }
     auto col = std::make_shared<aurora::Column>(std::move(items));
-    return aurora::Node{std::make_shared<aurora::Scroll>(aurora::ScrollProps{.child = aurora::Node{std::move(col)}})};
+    return aurora::Node{std::make_shared<aurora::Scroll>(aurora::Node{std::move(col)})};
 }
 
 }  // namespace

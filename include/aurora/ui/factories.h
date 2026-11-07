@@ -147,10 +147,11 @@ inline auto grid(Container &parent, GridProps props = {}) -> Grid * {
 
 /// @brief 滚动容器（`Scroll`）。
 /// @param parent 目标父容器
+/// @param child 被滚动的内容节点（`Scroll` 只接受一个子节点）
 /// @param props 滚动属性块（默认构造）
 /// @return 指向新建 `Scroll` 的裸指针，生命周期由 parent 子树持有
-inline auto scroll(Container &parent, ScrollProps props = {}) -> Scroll * {
-    return detail::make_add<Scroll>(parent, std::move(props));
+inline auto scroll(Container &parent, Node child, ScrollProps props = {}) -> Scroll * {
+    return detail::make_add<Scroll>(parent, std::move(child), std::move(props));
 }
 
 /// @brief 横向虚拟列表（`LazyRow`）。`builder` 在可见窗口内惰性构造子项。

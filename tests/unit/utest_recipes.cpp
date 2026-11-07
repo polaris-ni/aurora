@@ -114,9 +114,9 @@ AURORA_TEST_CASE(list_view_wraps_column_in_scroll) {
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-static-cast-downcast)
     auto &scroll = static_cast<Scroll &>(list.widget());
     AURORA_TEST_REQUIRE_EQ(scroll.child_count(), 1U);  // Scroll 包裹 Column
-    AURORA_TEST_CHECK_NEAR(scroll.step, 16.0F, 1e-3F);  // 配方约定的滚轮步长
+    AURORA_TEST_CHECK_NEAR(scroll.step(), 16.0F, 1e-3F);  // 配方约定的滚轮步长
 
-    // ScrollProps::child 成员与 Container::child(i) 同名，取容器访问须限定基类；内层为 Column。
+    // Scroll 只持有一个内容子节点；取它走容器访问器（Scroll 自身不再暴露同名属性成员）。
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-static-cast-downcast)
     auto &inner = static_cast<Column &>(scroll.Container::child(0).widget());
     AURORA_TEST_CHECK_EQ(inner.child_count(), 3U);

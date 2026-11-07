@@ -525,7 +525,7 @@ template <typename T>
     }
     auto body = au::Column(std::move(scrollable), au::ColumnProps().set_gap(12.0F));
     kids.emplace_back(std::move(caption));
-    auto scroller = au::Scroll{au::ScrollProps{.child = std::move(body)}};
+    auto scroller = au::Scroll{au::Node{std::move(body)}};
     scroller.set_modifier(au::Modifier{}.height(AURORA_GRID_VIEWPORT_HEIGHT));
     kids.emplace_back(std::move(scroller));
 

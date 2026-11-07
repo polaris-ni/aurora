@@ -465,7 +465,7 @@ class AppCellLeaf : public au::LeafWidget {
         rows.emplace_back(std::make_shared<Row>(std::move(cells)));
     }
     auto col = std::make_shared<Column>(std::move(rows));
-    return Node{std::make_shared<Scroll>(ScrollProps{.child = Node{std::move(col)}})};
+    return Node{std::make_shared<Scroll>(Node{std::move(col)})};
 }
 
 /// @brief app 场景的 Section 头（色条 + 标题）。
@@ -656,7 +656,7 @@ class AppCellLeaf : public au::LeafWidget {
     }
 
     auto body_col = std::make_shared<Column>(std::move(body));
-    auto scroll = std::make_shared<Scroll>(ScrollProps{.child = Node{std::move(body_col)}});
+    auto scroll = std::make_shared<Scroll>(Node{std::move(body_col)});
     scroll->set_modifier(au::Modifier{}.expand());
 
     // ---- 底部导航 ----

@@ -35,7 +35,7 @@ auto main() -> int {
         }
     }
 
-    au::Scroll scroll{au::ScrollProps{.child = au::Node{au::Column(std::move(kids))}}};
+    au::Scroll scroll{au::Node{au::Column(std::move(kids))}};
     scroll.set_modifier(au::Modifier{}.size(340.0F, 260.0F).border(1.0F, pal::AURORA_BORDER));
 
     au::Node root = au::Column{
