@@ -104,10 +104,9 @@ auto scenarios() -> std::vector<Scenario> {
         {.name = "grid_2x2",
          .build = []() -> Node {
              GridProps props;
-             props.columns = 2;
-             props.gap = 8.0F;
-             props.children = {box(60.0F, 40.0F), box(60.0F, 40.0F), box(60.0F, 40.0F), box(60.0F, 40.0F)};
-             return Node{std::make_shared<Grid>(std::move(props))};
+             props.set_columns(2).set_gap(8.0F);
+             std::vector<Node> cells{box(60.0F, 40.0F), box(60.0F, 40.0F), box(60.0F, 40.0F), box(60.0F, 40.0F)};
+             return Node{std::make_shared<Grid>(std::move(cells), std::move(props))};
          }},
         {.name = "nested_column_row",
          .build = []() -> Node {

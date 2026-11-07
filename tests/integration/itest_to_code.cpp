@@ -55,15 +55,17 @@ AURORA_TEST_CASE(codegen_fluent_emits_column_and_button) {
 }
 
 AURORA_TEST_CASE(codegen_fluent_grid_puts_column_count_in_props) {
-    // `au::Grid{a, b, 2}` 不是合法构造（无匹配 ctor），列数只能作 Props 成员发射。
+    // `au::Grid{a, b, 2}` 不是合法构造（无匹配 ctor）：子节点作构造首参，列数只能经 Props 链式写件发射。
     au::Json node =
         make_node("Grid", testing::json_obj({{"columns", 2}}), testing::json_arr({make_button("A"), make_button("B")}));
 
     const std::string code = to_code(node);
-    AURORA_TEST_CHECK_MSG(code.find("au::Grid(au::GridProps{") != std::string::npos,
-                          "codegen: grid with props uses GridProps form");
-    AURORA_TEST_CHECK_MSG(code.find(".children = {") != std::string::npos, "codegen: grid children slot first");
-    AURORA_TEST_CHECK_MSG(code.find(".columns = 2") != std::string::npos, "codegen: grid emits .columns = 2");
+    AURORA_TEST_CHECK_MSG(code.find("au::Grid(") != std::string::npos,
+                          "codegen: grid uses the kids-first constructor form");
+    AURORA_TEST_CHECK_MSG(code.find("au::GridProps().set_columns(2)") != std::string::npos,
+                          "codegen: grid emits .set_columns(2)");
+    AURORA_TEST_CHECK_MSG(code.find(".children = {") == std::string::npos,
+                          "codegen: grid children are not a Props member");
     AURORA_TEST_CHECK_MSG(code.find("au::Grid{") == std::string::npos,
                           "codegen: grid never uses the positional column-count ctor");
 }
@@ -120,7 +122,7 @@ AURORA_TEST_CASE(codegen_scalar_props_string_bool_float_int) {
                           "emit_props: fractional float keeps f suffix");
 
     const std::string int_code = to_code(make_node("Grid", testing::json_obj({{"columns", 3}})));
-    AURORA_TEST_CHECK_MSG(int_code.find(".columns = 3") != std::string::npos, "emit_props: int prop");
+    AURORA_TEST_CHECK_MSG(int_code.find(".set_columns(3)") != std::string::npos, "emit_props: int prop");
 }
 
 AURORA_TEST_CASE(codegen_length_forms_px_percent_legacy_auto_fill) {

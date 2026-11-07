@@ -1359,7 +1359,8 @@
       "events": [],
       "children_policy": "multiple",
       "examples": [
-        "au::Grid({ au::Text(\"A\"), au::Text(\"B\") }, 2)"
+        "au::Grid{ au::Text(\"A\"), au::Text(\"B\") }",
+        "au::Grid({ au::Text(\"A\"), au::Text(\"B\") }, au::GridProps().set_columns(2))"
       ],
       "invariants": [
         "columns >= 1",

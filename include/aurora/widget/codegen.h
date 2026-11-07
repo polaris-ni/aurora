@@ -88,9 +88,9 @@ namespace detail {
 /// @param type 序列化 type 名。
 /// @return 该类型的属性是否只能通过 `set_<键名>()` 链式写件装入。
 [[nodiscard]] constexpr auto props_chain_writers(std::string_view type) noexcept -> bool {
-    constexpr std::array<std::string_view, 11> k_chain = {"BarChart", "BottomNavBar", "Button",    "Column",
-                                                          "Divider",  "LazyRow",      "LineChart", "PieChart",
-                                                          "Row",      "ScatterChart", "Sparkline"};
+    constexpr std::array<std::string_view, 12> k_chain = {"BarChart", "BottomNavBar", "Button",       "Column",
+                                                          "Divider",  "Grid",         "LazyRow",      "LineChart",
+                                                          "PieChart", "Row",          "ScatterChart", "Sparkline"};
     return std::ranges::find(k_chain, type) != k_chain.end();
 }
 
@@ -859,17 +859,15 @@ struct PropEmit {
     return "au::" + cls + "(au::" + pr + "{" + body + "})";
 }
 
-/// @brief 子节点在其 `*Props` 聚合里的成员名：`Grid` 为 `children`、`Scroll`/`PullToRefresh` 为
-///        `child`；其余类型返回空串（无此成员，调用方改走初始化列表或首参形态）。
-/// @note 子节点只能在**构造期**交出去：`Grid(GridProps)` 把 `props.children` 搬进
-///       `Container::children_`，构造后再给继承来的 `children` 成员赋值是静默 no-op（树看着对、画不出来）。
-///       已迁移的聚合容器（`Column`/`Row`）没有 Props 子槽，改由 `kids_first_ctor` 走首参形态。
+/// @brief 子节点在其 `*Props` 聚合里的成员名：`Scroll`/`PullToRefresh` 为 `child`；其余类型返回空串
+///        （无此成员，调用方改走初始化列表或首参形态）。
+/// @note 子节点只能在**构造期**交出去：`Scroll(ScrollProps)`/`PullToRefresh(PullToRefreshProps)` 把
+///       `props.child` 搬进 `child_`，构造后再给继承来的 `child` 成员赋值是静默 no-op（树看着对、
+///       画不出来）。已迁移的聚合容器（`Column`/`Row`/`Grid`）没有 Props 子槽，改由
+///       `kids_first_ctor` 走首参形态。
 /// @param type 序列化 type 名。
-/// @return 子节点成员名（children/child）；其余类型返回空串（无此成员，调用方改走初始化列表形）。
+/// @return 子节点成员名（child）；其余类型返回空串（无此成员，调用方改走初始化列表形）。
 [[nodiscard]] constexpr auto props_child_slot(std::string_view type) noexcept -> std::string_view {
-    if (type == "Grid") {
-        return "children";
-    }
     if (type == "Scroll" || type == "PullToRefresh") {
         return "child";
     }
@@ -885,7 +883,7 @@ struct PropEmit {
 /// @param type 序列化 type 名。
 /// @return 该类型是否以子节点列表为首参构造。
 [[nodiscard]] constexpr auto kids_first_ctor(std::string_view type) noexcept -> bool {
-    return type == "Column" || type == "Row";
+    return type == "Column" || type == "Row" || type == "Grid";
 }
 
 /// @brief 该类型能否在构造期交出子节点：不能则告警并返回空列表。
@@ -939,7 +937,8 @@ struct PropEmit {
 /// 6. 非扁平容器兜底 → `au::T(au::TProps{ 属性, .children = { 子项 } })`。
 ///
 /// @param type          序列化 type 名。
-/// @param props_str     emit_props 的标量属性串（形如 `.gap = 8.0f, .columns = 2`）。
+/// @param props_str     emit_props 的标量属性串（链式形态形如 `.set_gap(8.0f).set_columns(2)`，
+///                      未迁移的聚合形态形如 `.gap = 8.0f, .flex = {...}`）。
 /// @param kids_all      已递归生成的子节点表达式（bespoke 构造类型可能被告警丢弃）。
 /// @param indent        缩进层级（一级 4 空格）。
 /// @param unified_props DesignatedInit 的「容器也一律走 Props 形」开关。
@@ -976,7 +975,7 @@ struct PropEmit {
         return "au::" + cls + emit_child_list(kids, indent);
     }
     std::string body = props_str;  // 兜底形态的 Props 成员片段累加器（先标量属性后 .children）
-    // 链式聚合容器（`Column`/`Row`）已在 `kids_first_ctor` 分支按首参发射；走到这里的只剩尚未迁移、
+    // 链式聚合容器（`Column`/`Row`/`Grid`）已在 `kids_first_ctor` 分支按首参发射；走到这里的只剩尚未迁移、
     // `*Props` 里仍带 `.children` 成员的聚合容器。
     if (!body.empty()) {
         body += ", ";

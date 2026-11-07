@@ -85,7 +85,7 @@ AURORA_TEST_CASE(stack_grid_scroll_forward_props) {
     aurora::Column root;
     aurora::Stack *s = ui::stack(root, aurora::Alignment::Center);
     AURORA_TEST_REQUIRE_NOT_NULL(s);
-    aurora::Grid *g = ui::grid(root, aurora::GridProps{.columns = 2});
+    aurora::Grid *g = ui::grid(root, aurora::GridProps().set_columns(2));
     AURORA_TEST_REQUIRE_NOT_NULL(g);
     aurora::Scroll *sc = ui::scroll(
         root, aurora::ScrollProps{.child = aurora::Node(std::make_shared<aurora::Text>("page")), .step = 32.0F});

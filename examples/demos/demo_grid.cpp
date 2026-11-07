@@ -16,7 +16,7 @@ auto main() -> int {
         GradientTitle{"Grid widget"},
         gap(12),
         au::Text{au::LocalizedString{"3-column grid"}},
-        au::Grid{au::GridProps{.children = std::move(cells), .columns = 3}},
+        au::Grid(std::move(cells), au::GridProps().set_columns(3)),
     };
     return run_demo(Card{std::move(root)}, "Grid · Aurora Demo", 520.0F, 420.0F);
 }
