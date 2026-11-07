@@ -1567,7 +1567,8 @@ list->set_snap(ScrollSnap{.extent = 48.0F, .alignment = ScrollSnapAlignment::Cen
 ```cpp
 auto scroll = std::make_shared<Scroll>(ScrollProps{.child = Node{build_feed()}});
 auto pull = std::make_shared<PullToRefresh>(
-    PullToRefreshProps{.child = Node{std::move(scroll)}, .threshold = 64.0F, .max_pull = 128.0F});
+    Node{std::move(scroll)},
+    PullToRefreshProps().set_threshold(64.0F).set_max_pull(128.0F));  // 子树是构造首参，属性链式
 
 std::weak_ptr<PullToRefresh> weak_pull = pull;   // 回调可能晚于控件析构
 pull->on_refresh([weak_pull]() -> void {
