@@ -208,12 +208,12 @@ origin.main = container_main - (origin.main + size.main)
 
 ### 4.1 参数
 
-```cpp
-struct GridProps {
-    int   columns;  // 列数（默认 1）
-    float gap;      // 单元格间距（默认 4px）
-};
+```text
+columns: int   = 1     // columns_row()，常量档，下界 1
+gap:     float = 4.0   // gap_row()，常量档，下界 0（px）
 ```
+
+两枚参数即 `widget/grid.h` 里 `GridProps` 权威表的两行（属性单一声明形态，见 `04-widget.md` §2.5）；布局入口按 `max(1, columns)` 保底，负间距由反序列化通道按描述不变量拒写。
 
 ### 4.2 算法
 
