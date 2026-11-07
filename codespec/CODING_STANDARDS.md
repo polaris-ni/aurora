@@ -21,7 +21,7 @@
 
 - **名序一致**：属性 / 参数名序与 React / Flutter 对齐（回调用 `on_xxx` 如 `on_click`，非 `click_handler`；子节点用 `children`；尺寸用 `width` / `height`）。避免自创词序。
 - **默认参数友好**：高频构造提供默认参数 / 便捷工厂（如 `au::colors::AURORA_BLUE`、`dp(16)`），降低记忆负担。
-- **顺序容错**：多参数构造优先用 `XxxProps{...}` 具名聚合（如 `ColumnProps{ .children = ... }`），避免位置参数顺序错误。
+- **顺序容错**：多参数构造优先用具名写法而非位置参数，具体形态按目标类型选——属性对象仍是聚合的类型用 `XxxProps{...}` 指定初始化器；已迁到链式形态的 `*Props`（§11.1）用 `XxxProps().set_x(...)` 链式写件，子节点是构造首参的容器写 `Column({ 子项 }, ColumnProps()...)`。两者的共同点是「每个实参都带名字」，避免位置参数顺序错误。
 - **强类型几何**：`Length` / `Color` / `Size` / `Point` 为强类型；禁止 `Length(int)` 隐式转换（裸整数编译失败）。已采纳用户字面量 `au::literals`（`100_dp`、`16_ms`、`0xRRGGBB_rgb`），`px(100)` 与 `100_dp` 互补；**禁止头文件全局 `using`**，字面量只在 TU 内按需引入（示例代码用 `using namespace au::literals;`，测试代码按 §3.1 用 using 声明 / 命名空间别名引入，不得用 using-directive）。
 - **所有权清晰**：资源所有权用 `unique_ptr` / `shared_ptr` 明确；跨边界传递用 `std::move`。状态句柄（`State<T>` / `ReadOnlyState<T>`）按值传递与捕获——复制即共享同一来源，`get()` 返回借用，不得跨写入、来源重绑或最后持有者释放保存。
 - **成员变量命名**：`struct` 成员与类 `public` 成员用**裸名**（无前缀、无后缀，如 `Color::r`、`DragData::mime_type`）；类的 `protected` / `private` 非静态成员统一**尾部下划线**后缀（如 `children_`、`value_`、`on_close_`）；**全仓禁止 `m_` 前缀**。`static` 常量按下一条「常量命名」走 `AURORA_` 前缀 + `UPPER_CASE`（如 `AURORA_NO_SEL`）；`static` 可变成员、`static` `protected`/`private` 成员规则与普通成员一致（尾部下划线）。
@@ -599,11 +599,11 @@ btn3.set_on_click(fn);
 
 **关键约束：**
 
-- **控件类不是聚合类型**，不能用 `au::Button{ .label = ... }` 这类指定初始化器构造控件（编译失败）。合法写法只有三种：① `*Props` 聚合；② 初始化列表 `au::Column{ au::Text("A"), au::Text("B") }`（`Column` / `Row` 接受 `std::initializer_list<Node>`）；③ 对已构造对象直接成员赋值。
+- **控件类不是聚合类型**，不能用 `au::Button{ .label = ... }` 这类指定初始化器构造控件（编译失败）。合法写法只有三种：① 属性对象——未迁类型写 `*Props{...}` 聚合、已迁类型写 `XxxProps().set_x(...)` 链式；② 初始化列表 `au::Column{ au::Text("A"), au::Text("B") }`（`Column` / `Row` 接受 `std::initializer_list<Node>`），要同时给属性时写 `au::Column({ ... }, au::ColumnProps().set_gap(8.0F))`（子节点是构造首参、不入属性表）；③ 对已构造对象调链式 setter。
 - 指定初始化器**仅适用于 `*Props` 聚合结构**与 `Theme` 等纯数据聚合；其中字段顺序无关，遗漏字段回退默认值。
 - 链式 setter 返回引用；作为子节点放入 `children` 时必须用 `std::move` 包裹（`Widget` 拷贝构造被删除，`Node` 仅移动派生对象）。
-- 嵌套声明推荐 `au::Column(au::ColumnProps{ .children = { ... } })` 的树形结构。
-- **迁移期两种形态并存**：`Button` 的 `ButtonProps` 已无公有字段，形态二写作链式装入 `au::Button(au::ButtonProps().set_label("OK"))`、形态三的逐行赋值改走 `set_*()` 写件（`btn.set_label(...)`），直写成员名不再合法；其余采用继承式双模的控件仍是公有字段聚合，两种写法各自照旧。
+- 嵌套声明推荐 `au::Column({ 子项... }, au::ColumnProps().set_gap(8.0F))` 的树形结构（子节点是构造首参；属性表内没有 `children` 槽）。
+- **迁移期两种形态并存**：`BarChart` / `BottomNavBar` / `Button` / `Column` / `Divider` / `LazyRow` / `LineChart` / `PieChart` / `Row` / `ScatterChart` / `Sparkline` 的 `*Props` 已无公有字段，形态二写作链式装入 `au::Button(au::ButtonProps().set_label("OK"))`、形态三的逐行赋值改走 `set_*()` 写件（`btn.set_label(...)`），直写成员名不再合法；其余采用继承式双模的控件仍是公有字段聚合，两种写法各自照旧。
 - 控件可用 `au::` 或 `aurora::` 前缀；推荐 `namespace au = aurora;`。
 
 **验收标准：** 同一界面用三种形态各写一遍，编译产物与运行时行为一致；AI 只需记住「属性名 + `*Props`」即可生成整棵嵌套树，无需记忆顺序位置参数。

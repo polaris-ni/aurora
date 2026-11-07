@@ -62,17 +62,17 @@ int main() {
 ## 3 布局：纵向 / 横向排列
 
 ```cpp
-au::Node root = au::Node{ au::Column(au::ColumnProps{ .children = {
+au::Node root = au::Node{ au::Column({
     au::Node{ au::Text("标题").font_size(24) },
     au::Node{ au::Text("副标题") },
     au::Node{ au::Button(au::ButtonProps().set_label("点我")) },
-}}) };
+}) };
 
-au::Node row = au::Node{ au::Row(au::RowProps{ .children = {
+au::Node row = au::Node{ au::Row({
     au::Node{ au::Text("左") },
     au::Node{ au::Spacer() },          // 吸收剩余空间，把两侧推开
     au::Node{ au::Text("右") },
-}}) };
+}) };
 ```
 
 > 对齐语义：主轴对齐（`Center` / `SpaceBetween` 等）只有在父约束强制容器更大时才可见。若想让 `SpaceBetween` 生效，给父容器一个固定尺寸或 `Expand`（见 §9）。
@@ -432,7 +432,7 @@ au::serialization::apply_patch(a_json, patch);             // a 变为 b
 
 ```cpp
 std::string code = au::serialization::to_code(root.widget());
-// 输出等效的 au::Column(au::ColumnProps{...}) 源码，可反贴回项目
+// 输出等效的 au::Column({...}, au::ColumnProps().set_gap(...)) 源码，可反贴回项目
 
 // 指定风格
 std::string step = au::serialization::to_code(j, au::serialization::CodeStyle::StepByStep);
@@ -653,10 +653,10 @@ using namespace au;
 
 // 1) 构建目标 UI 树
 auto target_tree = []() -> au::Node {
-    return au::Node{ au::Column(au::ColumnProps{ .children = {
+    return au::Node{ au::Column({
         au::Node{ au::Text("Hello") },
         au::Node{ au::Button(au::ButtonProps().set_label("Click")) },
-    } }) };
+    }) };
 };
 
 // 2) 创建 InspectorPanel（接受目标树获取函数 + 左侧占比）
@@ -739,8 +739,8 @@ auto *box   = vbox(root);   // Column*；hbox → Row*，stack → Stack*，grid
 单子垂直滚动容器：固定视口裁切内容、滚轮增量滚动；内容量再大也只缓冲「视口 ×(1 + 2 × overscan)」的有界离屏窗口，纯滚动帧整页仅一次平移合成、不重栅。
 
 ```cpp
-au::Column list{ au::ColumnProps{ .children = {
-    au::Text("行 1"), au::Text("行 2"), /* …长列表… */ } } };
+au::Column list({
+    au::Text("行 1"), au::Text("行 2"), /* …长列表… */ });
 
 // 方式 1：配置块构造（可设 step / overscan）
 au::Scroll scroll{ au::ScrollProps{ .child = std::move(list), .step = 16.0F } };
@@ -1033,10 +1033,10 @@ auto make_card = [](const char *label, bool custom_cb) -> au::Node {
     return au::Node{dis};   // 未注册回调时：飞出后自动从最近 Container 祖先摘除并重排
 };
 
-au::Node root = au::Node{ au::Column(au::ColumnProps{ .children = {
+au::Node root = au::Node{ au::Column({
     make_card("swipe me ->", false),
     make_card("custom callback", true),
-} }) };
+}) };
 
 au::Scene scene{ std::move(root) };
 au::Application app{ std::move(scene), 520, 420 };  // 无头便捷构造；真实窗口见配方 2
@@ -1106,11 +1106,11 @@ auto main() -> int {
     auto ping_label = computed([pings]() -> LocalizedString {
         return LocalizedString{"pings = " + std::to_string(pings.get())};
     });
-    auto root = Column{ColumnProps{.children = {
+    auto root = Column({
         Text{"Main window"},
         Text{TextProps{.content = ping_label}},
         Button{ButtonProps().set_label("Broadcast")},
-    }}};
+    });
 
     WindowOptions opts;
     opts.size = Size{.width = 800.0F, .height = 600.0F};
@@ -1134,10 +1134,10 @@ auto main() -> int {
     aux_opts.title = "Auxiliary";
     aux_opts.role = WindowRole::Auxiliary;
     if (auto aux = create_native_window(aux_opts)) {
-        Node aux_root = Column{ColumnProps{.children = {
+        Node aux_root = Column({
             Text{"Auxiliary window"},
             Text{TextProps{.content = ping_label}},
-        }}};
+        });
         (void)app.open_window(std::move(aux.value()), Scene{std::move(aux_root)}, aux_opts);
     }
 
@@ -1199,8 +1199,8 @@ auto main() -> int {
 
     Sparkline spark{SparklineProps().set_values({4.0, 6.0, 3.0, 8.0, 5.0}).set_line_width(2.0F)};  // 已迁形态：链式装入
 
-    Application app{Scene{Column{ColumnProps{.children = {Node{chart}, Node{donut}, Node{trend},
-                                                              Node{pts}, Node{spark}}}}}};
+    Application app{Scene{Column{Node{chart}, Node{donut}, Node{trend},
+                                 Node{pts}, Node{spark}}}};
     return app.run();
 }
 ```
@@ -1247,7 +1247,7 @@ auto main() -> int {
     with_button.add(Node{Button{"OK"}});
     with_button.set_cross_axis_alignment(CrossAxisAlignment::Baseline);
 
-    Application app{Scene{Column{ColumnProps{.children = {Node{mixed}, Node{icon}, Node{with_button}}}}}};
+    Application app{Scene{Column{Node{mixed}, Node{icon}, Node{with_button}}}};
     return app.run();
 }
 ```
@@ -1584,13 +1584,12 @@ pull->on_refresh([weak_pull]() -> void {
 ### 38.3 吸顶分组头部
 
 ```cpp
-au::Scroll grouped{au::ScrollProps{.child = au::Node{au::Column{au::ColumnProps{
-    .children = {
-        au::Node{au::StickyHeader{au::Node{au::Text{"今天"}}}},
-        au::Node{message_row(1)},  // ...
-        au::Node{au::StickyHeader{au::Node{au::Text{"昨天"}}}},
-        au::Node{message_row(2)},  // ...
-    }}}}}};
+au::Scroll grouped{au::ScrollProps{.child = au::Node{au::Column{
+    au::Node{au::StickyHeader{au::Node{au::Text{"今天"}}}},
+    au::Node{message_row(1)},  // ...
+    au::Node{au::StickyHeader{au::Node{au::Text{"昨天"}}}},
+    au::Node{message_row(2)},  // ...
+}}}};
 ```
 
 `StickyHeader` 正常参与布局（占自身高度、随内容滚），滚过视口顶部后由宿主按 pin 位压顶重绘；下一条头部逼近时把本条**顶出**（CSS `position: sticky` 同语义）。宿主为 `Scroll`（多个头部依次堆叠）或 `LazyList`（粘性项作为普通行实例化）。

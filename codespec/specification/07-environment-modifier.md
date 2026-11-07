@@ -37,7 +37,7 @@ au::Text("Hi").color(ctx.environment<au::Theme>() ? ctx.environment<au::Theme>()
                                                   : au::Theme::light().text);
 ```
 
-构造 `Provider<T>` 用**位置式**而非指定初始化器（`Column` / `Row` 非聚合，须用 `*Props` 聚合或初始化列表）。
+构造 `Provider<T>` 用**位置式**而非指定初始化器（`Column` / `Row` 非聚合；子节点走初始化列表或构造首参，属性走链式 `*Props`，见 [`04-widget.md`](04-widget.md) §2.5）。
 
 **专用 Provider 别名**：`ThemeProvider`（`T = Theme`）、`LocaleProvider`（`T = Locale`）、`MediaQueryProvider`（`T = MediaQuery`）。
 

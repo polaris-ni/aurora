@@ -129,7 +129,7 @@ max_cross = max(max_cross, size_i.cross)
 
 ### 3.4.1 容器轴向归属
 
-`Flex::direction` 不在 `Column` / `Row` 的可配置面里：轴向由控件类型固定（`Column` 恒纵向、`Row` 恒横向），既不序列化也不进自描述。经 `ColumnProps{ .flex = Flex{...} }` 传入的字面量常是部分指定（如 `Flex{.main_axis = Center}`），未写出的 `direction` 会落到 `Flex` 的默认值 `Row`，构造时按容器自身轴向归一，避免 `Column` 被静默换成横向布局器；本轴家族的 `Reverse` 取值仍生效（`Column` 收 `RowReverse` 归一为 `ColumnReverse`）。反向排布的通用语义见 §3.7。
+`Flex::direction` 不在 `Column` / `Row` 的属性面里：轴向由控件类型固定（`Column` 恒纵向、`Row` 恒横向），既不序列化也不进自描述。属性对象只剩 `main_axis_alignment` / `cross_axis_alignment` / `main_axis_size` / `gap` 四行，`Flex` 由容器在布局期按读件现组（轴向按自身类型落 `Column` / `Row`）；**反向排布是控件级开关** `set_reverse(bool = true)` / `reverse()`，同样不进属性表、不序列化，落 `ColumnReverse` / `RowReverse`。反向排布的通用语义见 §3.7。
 
 ### 3.5 容器尺寸
 
@@ -342,14 +342,11 @@ for col in 0..cols:
 - `LayoutEngine` / `LayoutBox`（`layout/layout_engine.h`、`layout/layout_box.h`）：静态布局入口。`LayoutEngine::layout(Widget& root, const Constraints&, const BuildContext& = {})` 驱动 `Widget::layout` 两阶段布局，结果写入各 widget 的 `bounds` / `size`；`LayoutEngine::layout_to_box(Node& root, const Constraints&, ...)` 布局后一次性产出 `LayoutBox` 树（每盒含 `rect` + `children`；`constraints` 字段预留，当前不入盒），供命中测试、调试快照与无头渲染复用；`LayoutEngine::build_box(const Node&)` 仅从已布局的 `Node` 树收集几何，不施加约束。
 
 ```cpp
-au::Text a{ au::TextProps{ .content = "A" } };
-au::Text b{ au::TextProps{ .content = "B" } };
+au::Text a{ au::TextProps().set_content("A") };
+au::Text b{ au::TextProps().set_content("B") };
 b.width(au::px(120)); // 宽度意图走 Widget::width(Length)，返回 Widget&（引用，供原地链式），不可 std::move 其结果塞进 Node
-auto row = au::Row(au::RowProps{
-    // 指定初始化器须按成员声明序：RowProps 中 children 在前、gap 在后
-    .children = { au::Node{ std::move(a) }, au::Node{ std::move(b) } },
-    .gap = 8.0F,
-});
+auto row = au::Row({ au::Node{ std::move(a) }, au::Node{ std::move(b) } },
+                   au::RowProps().set_gap(8.0F));  // 子节点是构造首参，属性走链式写件
 row.modifier = au::Modifier{}.padding(8);
 ```
 
@@ -357,7 +354,7 @@ row.modifier = au::Modifier{}.padding(8);
 
 ### 7.2 Column / Row 的对齐 API
 
-`Column` / `Row` 通过挂载的 `Flex` 承载 `main_axis`、`cross_axis` 与 `main_axis_size`，并提供链式 setter：
+`Column` / `Row` 的四行属性（`main_axis_alignment` / `cross_axis_alignment` / `main_axis_size` / `gap`）承载 `Flex` 的全部可配置面，布局期由容器现组本地 `Flex` 交给 `FlexLayouter`；控件面保留链式 setter（返回控件引用）：
 
 ```cpp
 au::Column{}
@@ -367,7 +364,7 @@ au::Column{}
     .set_gap(8.0F);
 ```
 
-三者均为**固有属性**，随 `Column` / `Row` 序列化（键 `main_axis_alignment` / `cross_axis_alignment` / `main_axis_size` / `gap`），可经 `to_json` / `from_json` / `diff` / `apply_patch` 往返。
+四行均为**属性表内的固有属性**，随 `Column` / `Row` 序列化（键 `main_axis_alignment` / `cross_axis_alignment` / `main_axis_size` / `gap`），可经 `to_json` / `from_json` / `diff` / `apply_patch` 往返；反向排布 `set_reverse` 是控件级开关、不序列化（§3.4.1）。
 
 ### 7.3 共享枚举
 
@@ -1018,7 +1015,7 @@ child.width(au::percent(0.5));
 // 规则 3：布局方程可求解、可验证
 // 父容器宽度 = Σ(子宽度) + Σ(间距) + padding_left + padding_right
 // 方程无解（子总宽 > 父宽）时有明确的溢出策略：Scroll 包裹，或依赖约束 clamp
-au::Scroll(au::ScrollProps{ .child = au::Row(au::RowProps{ .children = { /* ... */ } }) });
+au::Scroll(au::ScrollProps{ .child = au::Row({ /* ... */ }) });
 
 // 规则 4：布局结果可查询
 auto snap = au::render_to_logical_snapshot(root, 800, 600);

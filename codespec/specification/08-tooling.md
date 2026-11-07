@@ -163,9 +163,10 @@ enum class CodeStyle : std::uint8_t { Fluent, StepByStep, DesignatedInit };   //
 
 | 属性类别 | Fluent / DesignatedInit | StepByStep |
 |:---|:---|:---|
-| `*Props` 聚合的顶层同名成员（16 个公开继承的类型） | ✅ 进指定初始化器 | ✅ `w.key = 值` |
+| `*Props` 聚合的顶层同名成员（未迁的公开继承类型） | ✅ 进指定初始化器 | ✅ `w.key = 值` |
+| 已迁到链式形态的 `*Props`（`props_chain_writers` 集合内，字段私有） | ✅ 改发 `au::Type(au::TypeProps().set_key(值)…)`；子节点是构造首参的容器发 `au::Column({子项}, au::ColumnProps()…)` | ✅ `w.set_key(值)` |
 | 基类属性（`width`/`height`/`show`/非 Text 的 `overflow`/a11y 三键） | ❌ 聚合无同名成员，一律省略 | ✅ 链式 setter / 公有成员 / `set_*()` |
-| 嵌套路径（`font.size_pt`、`flex.main_axis`） | ❌ GCC 的 C++ 指定初始化器不支持嵌套设计符 | ✅ `w.font.size_pt = 14.0f;` |
+| 嵌套路径（`font.size_pt`、`snap.alignment`） | ❌ GCC 的 C++ 指定初始化器不支持嵌套设计符 | ✅ `w.font.size_pt = 14.0f;` |
 | setter-only 落点（`TextInput` 样式组、`Stack.fit`、`TitleBar.height`…） | ❌ protected 字段不能在类外赋值 | ✅ `w.set_corner_radius(4.0f);` |
 | 改名成员（`Text` 的 `color` → `text_color`） | ✅ 按登记的落点发射 | ✅ 同左 |
 
@@ -1247,14 +1248,13 @@ std::string yaml2 = au::serialization::to_yaml(json_value);     // Json → YAML
 
 ```cpp
 int main() {
-    auto root = au::Column(au::ColumnProps{
-        .gap = 8,
-        .children = {
+    auto root = au::Column(
+        {
             std::move(au::Text("Button Examples").font_size(20).bold()),
             au::Button(au::ButtonProps().set_label("Primary")),
             std::move(au::Button(au::ButtonProps().set_label("Disabled").set_enabled(false))),
         },
-    });
+        au::ColumnProps().set_gap(8.0F));
     root.modifier = au::Modifier{}.padding(20);
     auto win_res = au::create_window(au::Win32Options{ .title = "Button Example" });
     au::Application app{ au::Scene{ std::move(root) },

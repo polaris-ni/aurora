@@ -55,10 +55,10 @@ int main() {
 namespace au = aurora;
 
 int main() {
-    au::Node root = au::Node{ au::Column(au::ColumnProps{.children = {
+    au::Node root = au::Node{ au::Column({
         au::Node{ std::move(au::Text("Hello, Aurora!").font_size(24)) },
         au::Node{ au::Button(au::ButtonProps().set_label("Click me")) },
-    }})};
+    })};
 
     au::WindowOptions base{ .title = "Hello Aurora" }; // .title 为基类成员，指定初始化器不能指名基类
     au::Win32Options opts;                             // 先构造基类选项再拷贝至派生选项

@@ -791,10 +791,8 @@ app.tick();                                  // 显式推进一帧（内部驱�
 // 父组件设了 font_size=20，子组件「自动继承」
 
 // ✅ 显式样式传递
-au::ThemeProvider{ my_theme, au::Column(au::ColumnProps{
-    .children = {
-        // 此子树内所有组件可经 ctx.environment<Theme>() 读取 my_theme
-    },
+au::ThemeProvider{ my_theme, au::Column({
+    // 此子树内所有组件可经 ctx.environment<Theme>() 读取 my_theme
 }) };
 
 // 或显式参数（不经隐式继承）

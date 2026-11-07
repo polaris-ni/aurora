@@ -171,7 +171,7 @@ auto info = au::Button::describe_static();
 
 ### 2.5 双模 API 与 Props 约定
 
-**部分控件**（布局 / 文本 / 图片 / 滚动 / 导航 / 图表 / 下拉刷新类）采用**继承式双模 API**：`class Xxx : public XxxProps`，属性声明只有 `XxxProps` 这一处，控件不再用私有 `m_*` 重复声明同一属性；已迁形态把 `XxxProps` 的字段收为私有、只留读件与链式写件（见下句），未迁形态下这些字段仍是控件自身的公有字段。采用此模式的控件（共 16 个）：`BarChart` / `BottomNavBar` / `Button` / `Column` / `Divider` / `Grid` / `ImageView` / `LazyRow` / `LineChart` / `PieChart` / `PullToRefresh` / `Row` / `ScatterChart` / `Scroll` / `Sparkline` / `Text`（见各自头声明）。**迁移期两种形态并存**：`BarChart` / `BottomNavBar` / `Button` / `Divider` / `LazyRow` / `LineChart` / `PieChart` / `ScatterChart` / `Sparkline` 九型已改为「私有字段 + 权威表 + 链式写件」——对应 `*Props` 类没有任何可直写的公有成员，属性只经 `set_<键>()` 装入，生效值只经读件读取（无参 `x()` 或带上下文 `x(const BuildContext &)`，逐行由其回落点决定，见 §4.1）；其余 7 类仍是「序列化键 == 公有同名成员」的聚合。例外——`Checkbox` / `Switch` / `Slider` / `ProgressIndicator` / `Dropdown` / `RadioGroup` / `SpinBox` / `SegmentedControl` / `Chip` / `TextInput` 等仍使用私有 `*_` 成员 + setter，未采用双模。
+**部分控件**（布局 / 文本 / 图片 / 滚动 / 导航 / 图表 / 下拉刷新类）采用**继承式双模 API**：`class Xxx : public XxxProps`，属性声明只有 `XxxProps` 这一处，控件不再用私有 `m_*` 重复声明同一属性；已迁形态把 `XxxProps` 的字段收为私有、只留读件与链式写件（见下句），未迁形态下这些字段仍是控件自身的公有字段。采用此模式的控件（共 16 个）：`BarChart` / `BottomNavBar` / `Button` / `Column` / `Divider` / `Grid` / `ImageView` / `LazyRow` / `LineChart` / `PieChart` / `PullToRefresh` / `Row` / `ScatterChart` / `Scroll` / `Sparkline` / `Text`（见各自头声明）。**迁移期两种形态并存**：`BarChart` / `BottomNavBar` / `Button` / `Column` / `Divider` / `LazyRow` / `LineChart` / `PieChart` / `Row` / `ScatterChart` / `Sparkline` 十一型已改为「私有字段 + 权威表 + 链式写件」——对应 `*Props` 类没有任何可直写的公有成员，属性只经 `set_<键>()` 装入，生效值只经读件读取（无参 `x()` 或带上下文 `x(const BuildContext &)`，逐行由其回落点决定，见 §4.1）；其余 5 类仍是「序列化键 == 公有同名成员」的聚合。例外——`Checkbox` / `Switch` / `Slider` / `ProgressIndicator` / `Dropdown` / `RadioGroup` / `SpinBox` / `SegmentedControl` / `Chip` / `TextInput` 等仍使用私有 `*_` 成员 + setter，未采用双模。
 
 ```cpp
 // 形态一：*Props 具名聚合（推荐，可分块生成）
@@ -188,10 +188,10 @@ au::Text("Welcome").font_size(24).bold();
 
 **关键约束：**
 
-- **控件类不是聚合类型**，不能用 `au::Button{ .label = ... }` 这类指定初始化器构造控件（编译失败）。指定初始化器**仅适用于尚未迁移的 `*Props` 聚合结构**与 `Theme` 等纯数据聚合，其中字段顺序无关，遗漏字段回退默认值；已迁到链式形态的 `BarChart` / `Button` / `Divider` / `Sparkline` / `LazyRow` / `LineChart` 不在此列（`au::ButtonProps{ .label = ... }`、`au::SparklineProps{ .values = {...} }`、`au::LineChartProps{ .series = {...} }` 编译红，须写 `au::ButtonProps().set_label(...)`、`au::SparklineProps().set_values({...})`、`au::LineChartProps().set_series({...})`）。但**数组与结构体实参内部的指定初始化器仍可用**（`au::LineChartProps().set_series({{ .name = "A", .values = {1, 3, 2} }})`）——那是 `ChartSeries` 这类未迁聚合的写法，链式形态只约束 `*Props` 本体的字段。
-- 初始化列表形式 `au::Column{ au::Text("A"), au::Text("B") }` 可用——`Column` / `Row` 接受 `std::initializer_list<Node>`。
+- **控件类不是聚合类型**，不能用 `au::Button{ .label = ... }` 这类指定初始化器构造控件（编译失败）。指定初始化器**仅适用于尚未迁移的 `*Props` 聚合结构**与 `Theme` 等纯数据聚合，其中字段顺序无关，遗漏字段回退默认值；已迁到链式形态的 `BarChart` / `BottomNavBar` / `Button` / `Column` / `Divider` / `LazyRow` / `LineChart` / `PieChart` / `Row` / `ScatterChart` / `Sparkline` 不在此列（`au::ButtonProps{ .label = ... }`、`au::SparklineProps{ .values = {...} }`、`au::LineChartProps{ .series = {...} }`、`au::ColumnProps{ .gap = ... }` 编译红，须写 `au::ButtonProps().set_label(...)`、`au::SparklineProps().set_values({...})`、`au::LineChartProps().set_series({...})`、`au::ColumnProps().set_gap(...)`）。但**数组与结构体实参内部的指定初始化器仍可用**（`au::LineChartProps().set_series({{ .name = "A", .values = {1, 3, 2} }})`）——那是 `ChartSeries` 这类未迁聚合的写法，链式形态只约束 `*Props` 本体的字段。
+- 初始化列表形式 `au::Column{ au::Text("A"), au::Text("B") }` 可用——`Column` / `Row` 接受 `std::initializer_list<Node>`；要同时给属性时写 `au::Column({ au::Text("A"), au::Text("B") }, au::ColumnProps().set_gap(8.0F))`——子节点是构造首参、不入属性表（§3.3）。
 - 链式 setter 返回引用；作为子节点放入 `children` 时必须用 `std::move` 包裹（`Widget` 拷贝构造被删除，`Node` 仅移动派生对象）。
-- `Widget::defaults()` 不是虚成员；仅 `Button` 提供静态 `defaults()`（如 `au::Button::defaults() -> ButtonProps`，见 `button.h`），返回该控件的默认 `Props`；其余控件的默认属性来源待补。
+- `Widget::defaults()` 不是虚成员；已迁到链式形态的控件各提供一枚静态 `defaults()`（如 `au::Button::defaults() -> ButtonProps`、`au::Column::defaults() -> ColumnProps`，见各头声明），返回该控件的默认 `Props`（全部非必填行未表态，生效值即各行回落点）；其余控件的默认属性来源待补。
 - 别把控件的 `defaults()` 与 `Theme::defaults()` 混用：前者出**该控件的属性快照**（`ButtonProps`），后者出**本机风格档的整套标定主题**（`Theme`，只定风格轴、不定明暗档，见 [`07-environment-modifier.md`](07-environment-modifier.md) §5.1）。两族同名不同主，返回类型也不同。
 
 `Node(W&&)` 是非 explicit 转换构造函数，值类型控件可隐式转为 `Node`。仅在两分支类型不同的 `?:` 三元、或需要连续两次用户转换的场景才显式包 `Node{...}`。
@@ -318,7 +318,7 @@ au::Text("Welcome").font_size(24).bold();
 
 | 控件 | 关键属性 |
 |:---|:---|
-| `Row` / `Column` | `children`、`gap`、`flex`（含 `main_axis` / `cross_axis` / `main_axis_size`）。`cross_axis` 的 `Baseline` 取值仅对水平主轴（`Row`）有语义（`03-layout-render.md` §3.8）。`modifier` 属 `Widget` 基类，不在此列 |
+| `Row` / `Column` | 子节点是**构造首参**（`Row(std::vector<Node>, RowProps = {})`，或 `Row{ a, b }`），不入属性表；四枚属性键 `main_axis_alignment` / `cross_axis_alignment` / `main_axis_size` / `gap` 已迁到属性单一声明形态（§2.5）：字段私有，写入 `set_gap(8.0F)` 一类链式写件，取值走无参读件（四行回落点都是库内常量，故没有 `x(ctx)` 读件），撤表态走 `clear(ColumnProps::gap_row())`。反向排布是**控件级开关** `set_reverse(bool = true)` / `reverse()`（沿主轴镜像子项顺序与 `Start/End` 语义），既不是属性行也不序列化——与迁移前 `flex.direction` 的可达面一致。`cross_axis_alignment` 的 `Baseline` 取值仅对水平主轴（`Row`）有语义（`03-layout-render.md` §3.8）；`main_axis_alignment` 的 `SpaceBetween` 等分档仅当主轴有剩余空间时可见（`main_axis_size = Max` 或父约束更大）。`modifier` 属 `Widget` 基类，不在此列 |
 | `Stack` | 层叠，`children` 叠加 |
 | `Grid` | `columns`、`children` |
 | `Grid` 虚拟化版 `GridView` | `count`、`columns`、`cell_extent`、`cache_extent`、`scroll_offset`、`restore_key`、`snap_extent` / `snap_paging` / `snap_alignment`（吸附三属性，见下「滚动增强契约」）；辅助 API `set_scroll_offset` / `scroll_to` / `set_snap` / `offset_signal` / `is_gliding` / `visible_row_range` / `live_item_count` / `set_item_builder`（JSON 重建后挂单元格） |
