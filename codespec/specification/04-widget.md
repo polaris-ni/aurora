@@ -171,7 +171,7 @@ auto info = au::Button::describe_static();
 
 ### 2.5 双模 API 与 Props 约定
 
-**部分控件**（布局 / 文本 / 图片 / 滚动 / 导航 / 图表 / 下拉刷新类）采用**继承式双模 API**：`class Xxx : public XxxProps`，属性声明只有 `XxxProps` 这一处，控件不再用私有 `m_*` 重复声明同一属性；已迁形态把 `XxxProps` 的字段收为私有、只留读件与链式写件（见下句），未迁形态下这些字段仍是控件自身的公有字段。采用此模式的控件（共 16 个）：`BarChart` / `BottomNavBar` / `Button` / `Column` / `Divider` / `Grid` / `ImageView` / `LazyRow` / `LineChart` / `PieChart` / `PullToRefresh` / `Row` / `ScatterChart` / `Scroll` / `Sparkline` / `Text`（见各自头声明）。**迁移期两种形态并存**：`BarChart` / `Button` / `Divider` / `LazyRow` / `LineChart` / `PieChart` / `ScatterChart` / `Sparkline` 八型已改为「私有字段 + 权威表 + 链式写件」——`BarChartProps` / `ButtonProps` / `DividerProps` / `LazyRowProps` / `LineChartProps` / `PieChartProps` / `ScatterChartProps` / `SparklineProps` 没有任何可直写的公有成员，属性只经 `set_<键>()` 装入，生效值只经读件读取（无参 `x()` 或带上下文 `x(const BuildContext &)`，逐行由其回落点决定，见 §4.1）；其余 8 类仍是「序列化键 == 公有同名成员」的聚合。例外——`Checkbox` / `Switch` / `Slider` / `ProgressIndicator` / `Dropdown` / `RadioGroup` / `SpinBox` / `SegmentedControl` / `Chip` / `TextInput` 等仍使用私有 `*_` 成员 + setter，未采用双模。
+**部分控件**（布局 / 文本 / 图片 / 滚动 / 导航 / 图表 / 下拉刷新类）采用**继承式双模 API**：`class Xxx : public XxxProps`，属性声明只有 `XxxProps` 这一处，控件不再用私有 `m_*` 重复声明同一属性；已迁形态把 `XxxProps` 的字段收为私有、只留读件与链式写件（见下句），未迁形态下这些字段仍是控件自身的公有字段。采用此模式的控件（共 16 个）：`BarChart` / `BottomNavBar` / `Button` / `Column` / `Divider` / `Grid` / `ImageView` / `LazyRow` / `LineChart` / `PieChart` / `PullToRefresh` / `Row` / `ScatterChart` / `Scroll` / `Sparkline` / `Text`（见各自头声明）。**迁移期两种形态并存**：`BarChart` / `BottomNavBar` / `Button` / `Divider` / `LazyRow` / `LineChart` / `PieChart` / `ScatterChart` / `Sparkline` 九型已改为「私有字段 + 权威表 + 链式写件」——对应 `*Props` 类没有任何可直写的公有成员，属性只经 `set_<键>()` 装入，生效值只经读件读取（无参 `x()` 或带上下文 `x(const BuildContext &)`，逐行由其回落点决定，见 §4.1）；其余 7 类仍是「序列化键 == 公有同名成员」的聚合。例外——`Checkbox` / `Switch` / `Slider` / `ProgressIndicator` / `Dropdown` / `RadioGroup` / `SpinBox` / `SegmentedControl` / `Chip` / `TextInput` 等仍使用私有 `*_` 成员 + setter，未采用双模。
 
 ```cpp
 // 形态一：*Props 具名聚合（推荐，可分块生成）
@@ -409,7 +409,7 @@ au::Text("Welcome").font_size(24).bold();
 | `VideoControls` | 视频播放控件叠层（`media/video_controls.h`），配 `VideoPlayer` 使用，单子容器 |
 | `Placeholder` | 通用降级占位盒（`widget/placeholder.h`），序列化键 `message` 说明文字（`au::Placeholder("…")` 或 `.set_message("…")` 构造，非聚合类型、无 initializer_list 构造） |
 | `Skeleton` | 骨架屏加载占位（shimmer 动画，`width` / `height` / `color` / `highlight` / `duration` 五属性全量序列化往返） |
-| `BottomNavBar` | `items`（每项含 icon 绘制器与 label）、`selected_index`、`bar_height`；回调 `on_select`；按项等分宽度布局（`selected_index` / `bar_height` 序列化往返，`items` 含绘制器故不入 JSON） |
+| `BottomNavBar` | 导航项 `items`（每项含 icon 绘制器与 label）与回调 `on_select` 是控件本体的槽位（不可序列化）；属性表七行——`selected_index` / `bar_height`（常量档，无参读件）与 `background_color` / `divider_color` / `selected_color` / `unselected_color` / `pill_color`（活令牌档，带上下文读件）；按项等分宽度布局（已表态的行才进序列化，`items` 含绘制器故不入 JSON） |
 | `TitleBar` | 自绘标题栏 / CSD |
 | `ToolBar` / `MenuBar` / `TabBar` | 工具栏 / 菜单条 / 标签页 |
 | `TabBody` | 标签内容体（`widget/recipes.h`，`detail` 命名空间）：按 `selected` 索引显示对应页，随状态刷新；与 `TabBar` 配套使用 |
@@ -536,7 +536,7 @@ Aurora 的「真值来源」仍是声明式 `Node` 树加 `XxxProps` 聚合属�
 | `ui::scroll(parent, ScrollProps = {})` | `Scroll` |
 | `ui::lazy_list(parent, count, builder, item_extent = 48.0F)` | `LazyList` |
 | `ui::lazy_row(parent, count, builder, item_extent = 96.0F)` / `ui::lazy_row(parent, LazyRowProps)` | `LazyRow`（双重载） |
-| `ui::bottom_nav_bar(parent, BottomNavBarProps)` | `BottomNavBar` |
+| `ui::bottom_nav_bar(parent, items, BottomNavBarProps = {})` | `BottomNavBar`（导航项与其余属性分参） |
 
 ---
 
