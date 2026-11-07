@@ -1053,7 +1053,13 @@ jobs:
       - name: Setup Emscripten
         uses: emscripten-core/setup-emsdk@v16
         with:
-          version: latest
+          # 钉死版本，不用 latest：latest 浮动到 emscripten 6.0.13 后，在 wasm-pthreads
+          # 运行时（共享内存 + 其捆绑的 node/V8）下对 C++20 协程代码生成/运行出现
+          # memory access out of bounds 崩溃（utest_net_http_await.the_backoff_wakes_at_the_timer），
+          # 本地 6.0.9/6.0.13 源码+同开关均不复现，原生 ASAN+UBSan 对同一用例全绿，
+          # 判定为工具链/运行时层缺陷而非 aurora 源码问题。6.0.9 为本仓历史上 CI 验证良好
+          # 且当前 HEAD 仍能正常构建 wasm 的版本；其捆绑的 node/V8 不含该回归。
+          version: 6.0.9
 
       # wasm 口径：只取 Inspector Server（`setup-net-capability-flags` 的 `wasm` flavor 不装也不给
       # TLS provider——Emscripten 侧没有「含 include/ 与 lib/ 的安装根」，硬给即 configure 期 FATAL；
@@ -1440,7 +1446,13 @@ jobs:
       - name: Setup Emscripten
         uses: emscripten-core/setup-emsdk@v16
         with:
-          version: latest
+          # 钉死版本，不用 latest：latest 浮动到 emscripten 6.0.13 后，在 wasm-pthreads
+          # 运行时（共享内存 + 其捆绑的 node/V8）下对 C++20 协程代码生成/运行出现
+          # memory access out of bounds 崩溃（utest_net_http_await.the_backoff_wakes_at_the_timer），
+          # 本地 6.0.9/6.0.13 源码+同开关均不复现，原生 ASAN+UBSan 对同一用例全绿，
+          # 判定为工具链/运行时层缺陷而非 aurora 源码问题。6.0.9 为本仓历史上 CI 验证良好
+          # 且当前 HEAD 仍能正常构建 wasm 的版本；其捆绑的 node/V8 不含该回归。
+          version: 6.0.9
 
       # ⚠️ 安装必须在 Configure **之前**：AuroraLint.cmake 在 configure 阶段 find_program(clang-tidy)，
       #    找不到就直接 return——`lint` 目标根本不会被定义，届时构建只会报
@@ -1686,7 +1698,13 @@ jobs:
       - name: Setup Emscripten
         uses: emscripten-core/setup-emsdk@v16
         with:
-          version: latest
+          # 钉死版本，不用 latest：latest 浮动到 emscripten 6.0.13 后，在 wasm-pthreads
+          # 运行时（共享内存 + 其捆绑的 node/V8）下对 C++20 协程代码生成/运行出现
+          # memory access out of bounds 崩溃（utest_net_http_await.the_backoff_wakes_at_the_timer），
+          # 本地 6.0.9/6.0.13 源码+同开关均不复现，原生 ASAN+UBSan 对同一用例全绿，
+          # 判定为工具链/运行时层缺陷而非 aurora 源码问题。6.0.9 为本仓历史上 CI 验证良好
+          # 且当前 HEAD 仍能正常构建 wasm 的版本；其捆绑的 node/V8 不含该回归。
+          version: 6.0.9
 
       - name: Lint wasm
         run: |
