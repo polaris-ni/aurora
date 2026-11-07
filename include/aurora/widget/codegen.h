@@ -88,9 +88,9 @@ namespace detail {
 /// @param type 序列化 type 名。
 /// @return 该类型的属性是否只能通过 `set_<键名>()` 链式写件装入。
 [[nodiscard]] constexpr auto props_chain_writers(std::string_view type) noexcept -> bool {
-    constexpr std::array<std::string_view, 13> k_chain = {
-        "BarChart", "BottomNavBar", "Button",   "Column", "Divider",      "Grid",     "Image",
-        "LazyRow",  "LineChart",    "PieChart", "Row",    "ScatterChart", "Sparkline"};
+    constexpr std::array<std::string_view, 14> k_chain = {
+        "BarChart", "BottomNavBar", "Button",   "Column",        "Divider", "Grid",         "Image",
+        "LazyRow",  "LineChart",    "PieChart", "PullToRefresh", "Row",     "ScatterChart", "Sparkline"};
     return std::ranges::find(k_chain, type) != k_chain.end();
 }
 
@@ -860,19 +860,31 @@ struct PropEmit {
     return "au::" + cls + "(au::" + pr + "{" + body + "})";
 }
 
-/// @brief 子节点在其 `*Props` 聚合里的成员名：`Scroll`/`PullToRefresh` 为 `child`；其余类型返回空串
-///        （无此成员，调用方改走初始化列表或首参形态）。
-/// @note 子节点只能在**构造期**交出去：`Scroll(ScrollProps)`/`PullToRefresh(PullToRefreshProps)` 把
-///       `props.child` 搬进 `child_`，构造后再给继承来的 `child` 成员赋值是静默 no-op（树看着对、
-///       画不出来）。已迁移的聚合容器（`Column`/`Row`/`Grid`）没有 Props 子槽，改由
-///       `kids_first_ctor` 走首参形态。
+/// @brief 子节点在其 `*Props` 聚合里的成员名：`Scroll` 为 `child`；其余类型返回空串
+///        （无此成员，调用方改走初始化列表、首参形态或子节点首参形态）。
+/// @note 子节点只能在**构造期**交出去：`Scroll(ScrollProps)` 把 `props.child` 搬进 `child_`，
+///       构造后再给继承来的 `child` 成员赋值是静默 no-op（树看着对、画不出来）。已迁移的聚合容器
+///       （`Column`/`Row`/`Grid`）没有 Props 子槽，改由 `kids_first_ctor` 走首参形态；
+///       单子容器 `PullToRefresh` 已迁移，改由 `single_child_first_ctor` 走子节点首参形态。
 /// @param type 序列化 type 名。
 /// @return 子节点成员名（child）；其余类型返回空串（无此成员，调用方改走初始化列表形）。
 [[nodiscard]] constexpr auto props_child_slot(std::string_view type) noexcept -> std::string_view {
-    if (type == "Scroll" || type == "PullToRefresh") {
+    if (type == "Scroll") {
         return "child";
     }
     return {};
+}
+
+/// @brief 子节点是**构造首参**（`T(Node, TProps = {})`）的链式单子容器。
+///
+/// 子节点已从属性聚合里移出（聚合只管可序列化属性），但容器仍须在构造期接管子节点，于是首参就是
+/// `Node`；属性经第二参 `TProps` 整体移入、在构造尾部接线。发射形态
+/// `au::PullToRefresh(子节点, au::PullToRefreshProps().set_threshold(48.0F))`。
+///
+/// @param type 序列化 type 名。
+/// @return 该类型是否以单个 `Node` 为首参构造。
+[[nodiscard]] constexpr auto single_child_first_ctor(std::string_view type) noexcept -> bool {
+    return type == "PullToRefresh";
 }
 
 /// @brief 子节点是**构造首参**（`T(std::vector<Node>, TProps = {})`）的链式聚合容器。
@@ -932,6 +944,8 @@ struct PropEmit {
 /// （见 `has_props_aggregate` 的说明与 specification/08-tooling.md §2.5）。
 /// 2. 无子节点 → `au::T(au::TProps{ 属性 })`（链式形态为 `au::T(au::TProps().set_x(…))`）。
 /// 3. 子节点是构造首参的链式容器（`kids_first_ctor`）→ `au::T({ 子项 }, au::TProps().set_x(…))`。
+/// 3b. 子节点是构造首参的链式单子容器（`single_child_first_ctor`）→
+///     `au::T(子节点, au::TProps().set_x(…))`（无属性时 `au::T(子节点)`）。
 /// 4. 子节点成员已登记（`props_child_slot`）且需要带属性，或 DesignatedInit → Props 形：子节点成员排在
 /// 前（聚合声明序如此），标量属性随后。
 /// 5. 其余扁平容器 → 初始化列表形 `au::T{ 子项 }`（无标量属性时）。
@@ -962,6 +976,11 @@ struct PropEmit {
         const std::string list = emit_child_list(kids, indent);
         return props_str.empty() ? "au::" + cls + list
                                  : "au::" + cls + "(" + list + ", au::" + pr + "()" + props_str + ")";
+    }
+    if (single_child_first_ctor(type)) {
+        const std::string &kid = kids.front();
+        return props_str.empty() ? "au::" + cls + "(" + kid + ")"
+                                 : "au::" + cls + "(" + kid + ", au::" + pr + "()" + props_str + ")";
     }
     const std::string_view slot = props_child_slot(type);
     if (!slot.empty() && (unified_props || !props_str.empty())) {
@@ -1057,7 +1076,7 @@ struct PropEmit {
     } else if (const std::string_view slot = detail::props_child_slot(type);
                detail::has_props_aggregate(type) && !slot.empty()) {  // 有属性聚合且子槽名已登记：走 Props 子槽构造形
         // 子节点只能在构造期传入：构造后再给继承来的 `children` 成员赋值是静默 no-op。
-        // 单槽类型（`child`）只取第一个子项，与 `Scroll`/`PullToRefresh` 的聚合声明一致。
+        // 单槽类型（`child`）只取第一个子项，与 `Scroll` 的聚合声明一致。
         const std::string list =
             slot == std::string_view{"child"} ? kids.front() : detail::emit_child_list(kids, indent);
         os << "au::" << cls << "(au::" << detail::cpp_props(type) << "{." << slot << " = " << list << "})";

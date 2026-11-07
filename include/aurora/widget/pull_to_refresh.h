@@ -9,12 +9,14 @@
 #include "aurora/animation/animator.h"
 #include "aurora/core/accessibility.h"
 #include "aurora/core/color.h"
+#include "aurora/environment/build_context.h"  // 带上下文的读件需完整类型以解主题作用域
 #include "aurora/event/gesture.h"
 #include "aurora/render/font_engine.h"
 #include "aurora/render/painter.h"
+#include "aurora/theming/color_roles.h"  // 活令牌回落点：roles.primary / surface / on_surface_variant
 #include "aurora/theming/theme_scope.h"
 #include "aurora/widget/descriptor.h"
-#include "aurora/widget/props_io.h"
+#include "aurora/widget/props.h"
 #include "aurora/widget/scroll_viewport.h"
 #include "aurora/widget/widget.h"
 
@@ -27,11 +29,151 @@ enum class PullToRefreshState : std::uint8_t {
     Refreshing,  ///< 刷新中（spinner 持续旋转，待 `finish_refresh()` 收拢）
 };
 
-/// @brief PullToRefresh 属性（聚合，继承式双模 API：字段即控件公有成员）。
-struct PullToRefreshProps {
-    Node child;  ///< 被包裹的滚动子树
-    float threshold = 64.0F;  ///< 触发刷新的下拉距离（dp，超过后松手触发）
-    float max_pull = 128.0F;  ///< 橡皮筋下拉上限（dp）
+/// @brief `PullToRefresh` 的属性权威表：阈值与上限两行常量档、三处主题色三行活令牌档，
+///        被包裹的滚动子树不入表。
+///
+/// 五行全部是**绘制档**（`.paint()`）：阈值只被 `release_pull` 的触发裁决与 `progress()` 读取，
+/// 上限只被橡皮筋映射与回弹夹取读取，三处主题色只在 `on_paint` 的覆盖层里取用——没有一行参与布局，
+/// 写入一律只标脏 paint。
+///
+/// 子树不在本表里：它只能随构造移入（`PullToRefresh(Node)` 或
+/// `PullToRefresh(Node, PullToRefreshProps)`），构造后再给「子节点」赋值无处安放——`SingleChild`
+/// 的唯一插槽是 protected，运行期换子走容器自身的 `set_child`。
+///
+/// @note Thread: main-thread only
+/// @note Side-effects: 写入经宿主链接位标脏；未挂载时是纯 DTO
+class PullToRefreshProps : public AbstractProps<PullToRefreshProps> {
+  public:
+    // ---- 权威表：参数顺序即 schema 顺序 ----
+
+    /// @brief 可空值件：触发刷新的下拉距离（dp）。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto threshold_row() {
+        return prop_row<&PullToRefreshProps::threshold_>("threshold")
+            .paint()
+            .fallback(&PullToRefreshProps::threshold_default)
+            .note("Pull distance that triggers a refresh (dp)");
+    }
+
+    /// @brief 可空值件：橡皮筋下拉上限（dp）。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto max_pull_row() {
+        return prop_row<&PullToRefreshProps::max_pull_>("max_pull")
+            .paint()
+            .fallback(&PullToRefreshProps::max_pull_default)
+            .note("Rubber-band pull limit (dp)");
+    }
+
+    /// @brief 可空值件：下拉指示器强调色；未表态时跟随主题 `roles.primary`。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto indicator_color_row() {
+        return prop_row<&PullToRefreshProps::indicator_color_>("indicator_color")
+            .paint()
+            .fallback<&ColorRoles::primary>()
+            .note("Pull indicator accent (follows theme primary when unset)");
+    }
+
+    /// @brief 可空值件：顶部覆盖层背景色；未表态时跟随主题 `roles.surface`。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto band_color_row() {
+        return prop_row<&PullToRefreshProps::band_color_>("band_color")
+            .paint()
+            .fallback<&ColorRoles::surface>()
+            .note("Top overlay band background (follows theme surface when unset)");
+    }
+
+    /// @brief 可空值件：「刷新中…」提示文字色；未表态时跟随主题 `roles.on_surface_variant`。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto refreshing_text_color_row() {
+        return prop_row<&PullToRefreshProps::refreshing_text_color_>("refreshing_text_color")
+            .paint()
+            .fallback<&ColorRoles::on_surface_variant>()
+            .note("Refreshing hint text color (follows theme on_surface_variant when unset)");
+    }
+
+    /// @brief 权威表本体：本控件全部属性行的元组。
+    /// @return 按声明顺序排列的行元组（发射面与序列化面都遍历它）。
+    [[nodiscard]] static constexpr auto rows() {
+        return make_prop_rows(threshold_row(), max_pull_row(), indicator_color_row(), band_color_row(),
+                              refreshing_text_color_row());
+    }
+
+    // ---- 读面：每行恰一件，形态由该行回落点决定 ----
+
+    /// @brief 当前生效的触发距离（dp）。
+    /// @return 生效距离；未表态时为 64。
+    [[nodiscard]] auto threshold() const -> float { return stated(threshold_row()); }
+
+    /// @brief 当前生效的橡皮筋下拉上限（dp）。
+    /// @return 生效上限；未表态时为 128。
+    [[nodiscard]] auto max_pull() const -> float { return stated(max_pull_row()); }
+
+    /// @brief 当前生效的下拉指示器强调色。
+    /// @param ctx 构建上下文：提供主题作用域。
+    /// @return 生效强调色；未表态时为当前主题的 `roles.primary`。
+    [[nodiscard]] auto indicator_color(const BuildContext &ctx) const -> Color {
+        return resolve(indicator_color_row(), ctx);
+    }
+
+    /// @brief 当前生效的顶部覆盖层背景色。
+    /// @param ctx 构建上下文：提供主题作用域。
+    /// @return 生效背景色；未表态时为当前主题的 `roles.surface`。
+    [[nodiscard]] auto band_color(const BuildContext &ctx) const -> Color { return resolve(band_color_row(), ctx); }
+
+    /// @brief 当前生效的「刷新中…」提示文字色。
+    /// @param ctx 构建上下文：提供主题作用域。
+    /// @return 生效文字色；未表态时为当前主题的 `roles.on_surface_variant`。
+    [[nodiscard]] auto refreshing_text_color(const BuildContext &ctx) const -> Color {
+        return resolve(refreshing_text_color_row(), ctx);
+    }
+
+    // ---- 写面：实参一律裸 T；一次写入即「表态」，未表态才轮到回落点 ----
+
+    /// @brief 装入触发距离（dp）。
+    /// @param value 新距离；原样存入（非正值由使用点的夹取兜底，映射后不会产生下拉）。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_threshold(float value) -> PullToRefreshProps & { return assign(threshold_row(), value); }
+
+    /// @brief 装入橡皮筋下拉上限（dp）。
+    /// @param value 新上限；原样存入（0 表示不产生下拉，与「未表态」不是同一件事）。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_max_pull(float value) -> PullToRefreshProps & { return assign(max_pull_row(), value); }
+
+    /// @brief 装入下拉指示器强调色。
+    /// @param value 新强调色；表态后不再跟随主题换肤。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_indicator_color(Color value) -> PullToRefreshProps & { return assign(indicator_color_row(), value); }
+
+    /// @brief 装入顶部覆盖层背景色。
+    /// @param value 新背景色；表态后不再跟随主题换肤。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_band_color(Color value) -> PullToRefreshProps & { return assign(band_color_row(), value); }
+
+    /// @brief 装入「刷新中…」提示文字色。
+    /// @param value 新文字色；表态后不再跟随主题换肤。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_refreshing_text_color(Color value) -> PullToRefreshProps & {
+        return assign(refreshing_text_color_row(), value);
+    }
+
+    // ---- 回落点提供者：常量档的唯一基线（与迁移前的字段声明处默认值逐值相同） ----
+
+    /// @brief 触发距离回落基线。
+    /// @return 64.0F。
+    [[nodiscard]] static auto threshold_default() -> float { return 64.0F; }
+
+    /// @brief 橡皮筋下拉上限回落基线。
+    /// @return 128.0F。
+    [[nodiscard]] static auto max_pull_default() -> float { return 128.0F; }
+
+  private:
+    std::optional<float> threshold_;  ///< 触发距离表态位（dp）
+    std::optional<float> max_pull_;  ///< 橡皮筋下拉上限表态位（dp）
+    std::optional<Color> indicator_color_;  ///< 指示器强调色表态位
+    std::optional<Color> band_color_;  ///< 覆盖层背景色表态位
+    std::optional<Color> refreshing_text_color_;  ///< 提示文字色表态位
+
+    friend class AbstractProps<PullToRefreshProps>;
 };
 
 /// @brief 下拉刷新容器（specification/04-widget.md）：包住一个滚动子树，顶部继续下拉时
@@ -47,81 +189,56 @@ struct PullToRefreshProps {
 /// `scaled_frame_dt` 折算一次）；
 /// reduce-motion 下直落端点、不产生中间帧（对齐 `AnimationController::tick` 短路语义）。
 ///
+/// 属性面全部经 `PullToRefreshProps` 的读写件访问；子树不入属性表：它只能随构造移入
+/// （`PullToRefresh(Node)` 或 `PullToRefresh(Node, PullToRefreshProps)`）。
+///
 /// 对标 Flutter `RefreshIndicator`、Material 3 pull-to-refresh、iOS UIRefreshControl。
 ///
 /// @note Thread: main-thread only
-/// @note Rebuildable: yes（阈值可序列化；`on_refresh` 回调属运行时接线，重建后须重挂）
+/// @note Rebuildable: yes（阈值/上限/三处主题色可序列化；`on_refresh` 回调属运行时接线，重建后须重挂）
 class PullToRefresh : public SingleChild, public PullToRefreshProps {
   public:
-    /// @brief 默认构造：空子树、缺省阈值（64dp）与下拉上限（128dp）。
+    /// @brief 默认构造：空子树、五行未表态（生效值即回落点），并接线宿主。
     /// 重建路径（serialization 工厂）使用此构造——子树与回调由宿主回填。
-    PullToRefresh() = default;
-    /// @brief 以下拉目标子树构造。
-    /// @param child 被包裹的滚动子树（空节点时保持无子）。
-    explicit PullToRefresh(Node child) {
-        if (child) {
-            child_ = std::move(child);
-        }
+    PullToRefresh() { bind(*this); }
+
+    /// @brief 以下拉目标子树构造（属性全未表态）。
+    /// @param child 被包裹的滚动子树；空节点时保持无子。
+    /// @param props 下拉刷新属性对象；默认全未表态，生效值即各行回落点。
+    explicit PullToRefresh(Node child, PullToRefreshProps props = {})
+        : SingleChild(std::move(child)), PullToRefreshProps(std::move(props)) {
+        bind(*this);
     }
-    /// @brief 以属性聚合构造（子树 + 阈值/上限一次配齐）。
-    /// @param props PullToRefresh 属性（child/threshold/max_pull）。
-    explicit PullToRefresh(PullToRefreshProps props) {
-        if (props.child) {
-            child_ = std::move(props.child);
-        }
-        threshold = props.threshold;
-        max_pull = props.max_pull;
-    }
+
+    /// @brief 以属性聚合构造（子树另经容器构造交入）。
+    /// @param props 下拉刷新属性对象，移动进本实例的 `PullToRefreshProps` 基类子对象。
+    explicit PullToRefresh(PullToRefreshProps props) : PullToRefreshProps(std::move(props)) { bind(*this); }
+
+    /// @brief 运行时可查询的默认属性值（属性表的单一事实来源）。
+    /// @return 一份缺省构造的 `PullToRefreshProps`：五行未表态，生效值即该行回落点。
+    [[nodiscard]] static auto defaults() -> PullToRefreshProps { return {}; }
 
     /// @brief 类型名字符串 "PullToRefresh"。
     /// @return 静态字符串常量，指向类型名。
     [[nodiscard]] auto type_name() const -> const char * override { return "PullToRefresh"; }
 
-    /// @brief 静态属性描述符：threshold/max_pull 标量属性与 on_refresh 事件声明。
-    /// @return 名为 "PullToRefresh"、子策略为 single 的完整描述符。
+    /// @brief 运行时自描述（规格附录 B）：属性项全部由权威表发射，控件只补自己的事实。
+    /// @return 名为 "PullToRefresh" 的描述表：`properties` 按 `rows()` 点名顺序，事件 `on_refresh`，
+    ///         子策略 single。
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
-        return WidgetDescriptor{
-            .name = "PullToRefresh",
-            .properties =
-                {
-                    {.name = "threshold",
-                     .type = "float",
-                     .default_value = "64.0",
-                     .required = false,
-                     .note = "Pull distance that triggers a refresh (dp)"},
-                    {.name = "max_pull",
-                     .type = "float",
-                     .default_value = "128.0",
-                     .required = false,
-                     .note = "Rubber-band pull limit (dp)"},
-                    {.name = "indicator_color",
-                     .type = "Color",
-                     .default_value = "\"theme.primary\"",
-                     .required = false,
-                     .note = "Pull indicator accent (follows theme primary when unset)"},
-                    {.name = "band_color",
-                     .type = "Color",
-                     .default_value = "\"theme.surface\"",
-                     .required = false,
-                     .note = "Top overlay band background (follows theme surface when unset)"},
-                    {.name = "refreshing_text_color",
-                     .type = "Color",
-                     .default_value = "\"theme.on_surface_variant\"",
-                     .required = false,
-                     .note = "Refreshing hint text color (follows theme on_surface_variant when unset)"},
-                },
-            .events = {"on_refresh"},
-            .children_policy = "single",
-            .examples = {"au::PullToRefresh(au::Scroll{...}) /* pull down at the top to trigger a refresh */"},
-        };
+        auto descriptor = props_descriptor("PullToRefresh");
+        descriptor.events = {"on_refresh"};
+        descriptor.children_policy = "single";
+        descriptor.examples = {"au::PullToRefresh(au::Scroll{...}) /* pull down at the top to trigger a refresh */"};
+        return descriptor;
     }
     /// @brief 运行时自描述（规格附录 B）。
     /// @return 与 `describe_static()` 相同的描述符。
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
-    /// @brief 无信号依赖：下拉距离与状态机均为运行时内部状态。
-    /// @param out 信号输出向量；本控件不向其写入任何信号。
-    auto collect_signals([[maybe_unused]] StateSink &out) -> void override {}
+    /// @brief 收集本控件的可订阅信号视图。
+    /// @param out 输出参数，收集响应式来源（表内来源行由表派生；本控件五行均非来源行）。
+    auto collect_signals(StateSink &out) -> void override { collect_prop_sources(out); }
 
     /// @brief 注册刷新回调（松手越过阈值时触发一次；回调内异步取数，完成后调 `finish_refresh`）。
     /// @param cb 无参刷新回调；覆盖既有值。
@@ -131,53 +248,49 @@ class PullToRefresh : public SingleChild, public PullToRefreshProps {
         return *this;
     }
 
-    /// @brief 设置下拉指示器强调色（链式）；未设置时跟随主题 `roles.primary`（ThemeScope 换肤即生效）。
-    /// @param c 强调色（spinner 弧线）；写入 `indicator_color_`。
+    /// @brief 设置触发距离（链式）；转调 `PullToRefreshProps::set_threshold`，返回控件引用。
+    /// @param value 新距离（dp）；写入件原样存入。
     /// @return 自身引用，便于链式调用。
-    auto indicator_color(Color c) -> PullToRefresh & {
-        indicator_color_ = c;
-        mark_needs_paint();
+    /// NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method) 同名控件面写件（返回控件引用）
+    auto set_threshold(float value) -> PullToRefresh & {
+        PullToRefreshProps::set_threshold(value);
         return *this;
     }
 
-    /// @brief 设置顶部覆盖层背景色（链式）；未设置时跟随主题 `roles.surface`。
-    /// @param c 覆盖层带背景色；写入 `band_color_`。
+    /// @brief 设置橡皮筋下拉上限（链式）；转调 `PullToRefreshProps::set_max_pull`，返回控件引用。
+    /// @param value 新上限（dp）；0 表示不产生下拉。
     /// @return 自身引用，便于链式调用。
-    auto band_color(Color c) -> PullToRefresh & {
-        band_color_ = c;
-        mark_needs_paint();
+    /// NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method) 同名控件面写件（返回控件引用）
+    auto set_max_pull(float value) -> PullToRefresh & {
+        PullToRefreshProps::set_max_pull(value);
         return *this;
     }
 
-    /// @brief 设置「刷新中…」提示文字色（链式）；未设置时跟随主题 `roles.on_surface_variant`。
-    /// @param c 提示文字色；写入 `refreshing_text_color_`。
+    /// @brief 设置下拉指示器强调色（链式）；表态后不再跟随主题 `roles.primary`。
+    /// @param value 强调色（spinner 弧线）。
     /// @return 自身引用，便于链式调用。
-    auto refreshing_text_color(Color c) -> PullToRefresh & {
-        refreshing_text_color_ = c;
-        mark_needs_paint();
+    /// NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method) 同名控件面写件（返回控件引用）
+    auto set_indicator_color(Color value) -> PullToRefresh & {
+        PullToRefreshProps::set_indicator_color(value);
         return *this;
     }
 
-    /// @brief 解析下拉指示器强调色：未显式设色时取主题 `roles.primary`（ThemeScope 换肤即生效），
-    ///        显式设色优先。
-    /// @param ctx 构建上下文：提供主题作用域。
-    /// @return 生效强调色。
-    [[nodiscard]] auto resolve_indicator_color(const BuildContext &ctx) const -> Color {
-        return indicator_color_.value_or(inherit_theme(ctx).roles.primary);
+    /// @brief 设置顶部覆盖层背景色（链式）；表态后不再跟随主题 `roles.surface`。
+    /// @param value 覆盖层带背景色。
+    /// @return 自身引用，便于链式调用。
+    /// NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method) 同名控件面写件（返回控件引用）
+    auto set_band_color(Color value) -> PullToRefresh & {
+        PullToRefreshProps::set_band_color(value);
+        return *this;
     }
 
-    /// @brief 解析顶部覆盖层背景色：未显式设色时取主题 `roles.surface`。
-    /// @param ctx 构建上下文：提供主题作用域。
-    /// @return 生效覆盖层背景色。
-    [[nodiscard]] auto resolve_band_color(const BuildContext &ctx) const -> Color {
-        return band_color_.value_or(inherit_theme(ctx).roles.surface);
-    }
-
-    /// @brief 解析「刷新中…」提示文字色：未显式设色时取主题 `roles.on_surface_variant`。
-    /// @param ctx 构建上下文：提供主题作用域。
-    /// @return 生效提示文字色。
-    [[nodiscard]] auto resolve_refreshing_text_color(const BuildContext &ctx) const -> Color {
-        return refreshing_text_color_.value_or(inherit_theme(ctx).roles.on_surface_variant);
+    /// @brief 设置「刷新中…」提示文字色（链式）；表态后不再跟随主题 `roles.on_surface_variant`。
+    /// @param value 提示文字色。
+    /// @return 自身引用，便于链式调用。
+    /// NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method) 同名控件面写件（返回控件引用）
+    auto set_refreshing_text_color(Color value) -> PullToRefresh & {
+        PullToRefreshProps::set_refreshing_text_color(value);
+        return *this;
     }
 
     /// @brief 结束刷新态：指示器收拢回弹（reduce-motion 下直落 0）。数据加载完成后调用。
@@ -197,48 +310,22 @@ class PullToRefresh : public SingleChild, public PullToRefreshProps {
     [[nodiscard]] auto pull_distance() const -> float { return pull_; }
     /// @brief 触发进度（pull/threshold，可 >1；绑定指示器旋转角度/透明度用）。
     /// @return 下拉距离与阈值之比；阈值非正时为 0。
-    [[nodiscard]] auto progress() const -> float { return threshold > 0.0F ? pull_ / threshold : 0.0F; }
+    [[nodiscard]] auto progress() const -> float { return threshold() > 0.0F ? pull_ / threshold() : 0.0F; }
     /// @brief 是否正在回弹滑动（测试观测点）。
     /// @return 短滑动时序仍处于活跃状态时为 true。
     [[nodiscard]] auto is_gliding() const -> bool { return glide_.active; }
 
-    /// @brief 序列化：通用属性 + threshold/max_pull（回调不序列化）。
+    /// @brief 序列化：通用属性 + 自有各行（回调不序列化）。
     /// @param props 目标 JSON 对象。
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);  // 先由基类写入通用属性（width/height/show 等）
-        props.set("threshold", threshold);
-        props.set("max_pull", max_pull);
-        // 三处主题色仅在显式设置时输出：保留「跟随主题」语义（与 Button/Text 同口径）。
-        if (indicator_color_.has_value()) {
-            props.set("indicator_color", color_to_json(*indicator_color_));
-        }
-        if (band_color_.has_value()) {
-            props.set("band_color", color_to_json(*band_color_));
-        }
-        if (refreshing_text_color_.has_value()) {
-            props.set("refreshing_text_color", color_to_json(*refreshing_text_color_));
-        }
+        props_serialize(props);  // 各行只在表态时写：未表态不写键，保持「跟随回落点」语义
     }
-    /// @brief 反序列化：恢复通用属性与 threshold/max_pull（缺失键保持当前值）。
+    /// @brief 反序列化：恢复通用属性与自有各行（缺失键保持当前值）。
     /// @param props 源 JSON 对象。
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);  // 先由基类恢复通用属性
-        if (props.contains("threshold")) {
-            threshold = props.at("threshold")->as_or<float>(0.0F);
-        }
-        if (props.contains("max_pull")) {
-            max_pull = props.at("max_pull")->as_or<float>(0.0F);
-        }
-        // 主题覆盖色仅在显式出现时读入 optional（缺失键保留「跟随主题」默认）。
-        if (props.contains("indicator_color")) {
-            indicator_color_ = json_to_color(*props.at("indicator_color"));
-        }
-        if (props.contains("band_color")) {
-            band_color_ = json_to_color(*props.at("band_color"));
-        }
-        if (props.contains("refreshing_text_color")) {
-            refreshing_text_color_ = json_to_color(*props.at("refreshing_text_color"));
-        }
+        props_deserialize(props);
     }
 
     /// @brief 滚轮余量消费（嵌套滚动协调）：派发器把子级到顶后冒上来的余量改写为
@@ -257,7 +344,7 @@ class PullToRefresh : public SingleChild, public PullToRefreshProps {
         if (grown <= 0.0F) {
             return;
         }
-        pull_ = std::clamp(pull_ + grown, 0.0F, max_pull);
+        pull_ = std::clamp(pull_ + grown, 0.0F, max_pull());
         state_ = PullToRefreshState::Pulling;
         e.is_handled = true;
         e.remaining_y = 0.0F;  // 余量已被下拉吃掉
@@ -281,7 +368,7 @@ class PullToRefresh : public SingleChild, public PullToRefreshProps {
         const bool vertical_down = drag_.axis() == DragAxis::Vertical && drag_.delta().y > 0.0F;
         if (e.action == MouseAction::Move && drag_.is_dragging() && vertical_down && !drag_consumed_ &&
             child_at_top() && state_ != PullToRefreshState::Refreshing) {
-            pull_ = std::clamp(rubber(drag_.delta().y), 0.0F, max_pull);
+            pull_ = std::clamp(rubber(drag_.delta().y), 0.0F, max_pull());
             state_ = PullToRefreshState::Pulling;
             glide_.active = false;
             drag_consumed_ = true;  // 本手势归下拉所有：之后即使回落也不再劫持子级点击
@@ -292,7 +379,7 @@ class PullToRefresh : public SingleChild, public PullToRefreshProps {
             if (drag_.delta().y <= 0.0F) {
                 drag_consumed_ = false;
             } else {
-                pull_ = std::clamp(rubber(drag_.delta().y), 0.0F, max_pull);
+                pull_ = std::clamp(rubber(drag_.delta().y), 0.0F, max_pull());
                 mark_needs_paint();
                 request_frame(false);
             }
@@ -346,12 +433,12 @@ class PullToRefresh : public SingleChild, public PullToRefreshProps {
             return;
         }
         // 顶部覆盖层带：半透明底 + 旋转弧线 spinner（不动布局盒）。
-        const Color accent = resolve_indicator_color(ctx);
+        const Color accent = indicator_color(ctx);
         const Rect band{.origin = Point{.x = bounds.origin.x, .y = bounds.origin.y},
                         .size = Size{.width = bounds.size.width, .height = pull_}};
         const double prev_alpha = p.global_alpha();
         p.set_alpha(prev_alpha * 0.92);
-        p.fill_rect(band, resolve_band_color(ctx));
+        p.fill_rect(band, band_color(ctx));
         p.set_alpha(prev_alpha);
         const float angle = spin_angle_;
         p.stroke_arc(
@@ -362,7 +449,7 @@ class PullToRefresh : public SingleChild, public PullToRefreshProps {
             // CJK-LITERAL: on-screen-demo - 刷新中 提示绘制在下拉带上，属上屏文案，不经控制台输出
             p.draw_text(Rect{.origin = Point{.x = band.origin.x, .y = band.origin.y + pull_ - th - 4.0F},
                              .size = Size{.width = band.size.width, .height = th}},
-                        "刷新中…", Font{.size_pt = 11.0F}, resolve_refreshing_text_color(ctx));
+                        "刷新中…", Font{.size_pt = 11.0F}, refreshing_text_color(ctx));
         }
     }
 
@@ -394,7 +481,7 @@ class PullToRefresh : public SingleChild, public PullToRefreshProps {
             busy = true;
         }
         if (glide_.active) {
-            const float v = std::clamp(glide_.tick(dt), 0.0F, max_pull);
+            const float v = std::clamp(glide_.tick(dt), 0.0F, max_pull());
             if (!glide_.active) {
                 needs_gesture_tick_ = false;
             }
@@ -417,10 +504,11 @@ class PullToRefresh : public SingleChild, public PullToRefreshProps {
     ///        拖满 `max_pull` 恰达半上限 —— 与缺省 `threshold = max_pull/2` 对齐（可触发）。
     [[nodiscard]] auto rubber(float raw) const -> float {
         const float limited = std::max(0.0F, raw);
-        if (max_pull <= 0.0F) {
+        const float limit = max_pull();
+        if (limit <= 0.0F) {
             return 0.0F;
         }
-        return std::min(max_pull, (limited * max_pull) / (limited + max_pull));
+        return std::min(limit, (limited * limit) / (limited + limit));
     }
 
     /// @brief 滚动子树是否位于顶部：找最近的可滚动后代（实现 `accessibility_scroll`），
@@ -448,11 +536,11 @@ class PullToRefresh : public SingleChild, public PullToRefreshProps {
 
     /// @brief 松手裁决：进度达阈值 → 进入刷新态并回弹到驻留高度（约半阈值）；否则回弹归零。
     auto release_pull() -> void {
-        if (pull_ >= threshold && on_refresh_) {
+        if (pull_ >= threshold() && on_refresh_) {
             state_ = PullToRefreshState::Refreshing;
             needs_gesture_tick_ = true;  // spinner 逐帧旋转依赖 tick（回弹目标可能与当前值相等而早退）
             on_refresh_();
-            begin_setback_glide(std::min(pull_, threshold * 0.5F));
+            begin_setback_glide(std::min(pull_, threshold() * 0.5F));
         } else {
             state_ = PullToRefreshState::Idle;
             begin_setback_glide(0.0F);
@@ -477,12 +565,6 @@ class PullToRefresh : public SingleChild, public PullToRefreshProps {
     }
 
     std::function<void()> on_refresh_;
-    /// @brief 下拉指示器强调色（spinner 弧线）；空 = 跟随主题 primary（迁移批：ThemeScope 换肤即生效）。
-    std::optional<Color> indicator_color_;
-    /// @brief 顶部覆盖层背景色；空 = 跟随主题 surface。
-    std::optional<Color> band_color_;
-    /// @brief 「刷新中…」提示文字色；空 = 跟随主题 on_surface_variant。
-    std::optional<Color> refreshing_text_color_;
     DragRecognizer drag_;
     bool drag_consumed_ = false;  ///< 本手势已被下拉劫持（子级点击不再参与）
     PullToRefreshState state_ = PullToRefreshState::Idle;

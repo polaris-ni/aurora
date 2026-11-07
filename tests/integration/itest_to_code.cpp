@@ -70,6 +70,32 @@ AURORA_TEST_CASE(codegen_fluent_grid_puts_column_count_in_props) {
                           "codegen: grid never uses the positional column-count ctor");
 }
 
+AURORA_TEST_CASE(codegen_fluent_pull_to_refresh_child_leads_and_props_chain) {
+    // 单子容器迁移后子节点出表、改作构造首参：`au::PullToRefreshProps{ .child = ... }` 已无该成员，
+    // 属性只能经链式写件接在第二实参上。
+    au::Json node = make_node("PullToRefresh", testing::json_obj({{"threshold", 40.0}, {"max_pull", 90.0}}),
+                              testing::json_arr({make_button("A")}));
+
+    const std::string code = to_code(node);
+    AURORA_TEST_CHECK_MSG(code.find("au::PullToRefresh(au::Button(") != std::string::npos,
+                          "codegen: pull-to-refresh takes the child as first ctor argument");
+    AURORA_TEST_CHECK_MSG(code.find("au::PullToRefreshProps().set_threshold(40.0f)") != std::string::npos,
+                          "codegen: pull-to-refresh emits .set_threshold(40.0f)");
+    AURORA_TEST_CHECK_MSG(code.find(".set_max_pull(90.0f)") != std::string::npos,
+                          "codegen: pull-to-refresh emits .set_max_pull(90.0f)");
+    AURORA_TEST_CHECK_MSG(code.find(".child = ") == std::string::npos,
+                          "codegen: pull-to-refresh child is not a Props member");
+
+    // StepByStep 走「先声明后赋值」：子节点作构造实参交出，属性逐条经写件落到该变量上。
+    const std::string sb = to_code(node, CodeStyle::StepByStep);
+    AURORA_TEST_CHECK_MSG(sb.find("au::PullToRefresh{") != std::string::npos,
+                          "codegen: StepByStep constructs pull-to-refresh around a child");
+    AURORA_TEST_CHECK_MSG(sb.find("au::Node{std::move(__w1)}") != std::string::npos,
+                          "codegen: StepByStep hands the child over by move");
+    AURORA_TEST_CHECK_MSG(sb.find(".set_threshold(40.0f);") != std::string::npos,
+                          "codegen: StepByStep applies .set_threshold");
+}
+
 AURORA_TEST_CASE(codegen_designated_init_and_step_by_step_styles) {
     au::Json node = make_node("Column", au::Json::object(), testing::json_arr({make_button("OK")}));
 

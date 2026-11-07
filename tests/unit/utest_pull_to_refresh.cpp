@@ -5,7 +5,10 @@
 /// 拖拽劫持与松手裁决（达阈值触发 on_refresh / 未达阈值回弹归零）、驻留高度与 finish_refresh 收拢、
 /// reduce-motion 直落端点、指示器覆盖层像素可见性、describe/序列化往返、
 /// 应用内全局时间缩放的 PullToRefresh 消费点（回弹到位帧数按倍率折半且驻留高度不变 /
-/// 冻结段零重绘请求且解冻续跑）
+/// 冻结段零重绘请求且解冻续跑）。属性单一声明迁移后另覆盖权威表的读消费面：逐行撤表态该键退出
+/// 序列化、两枚常量档读件在明 / 暗两档与库内解析全同且不存在带上下文的第二件、三枚活令牌行
+/// 未表态随主题换肤、全量表态的 JSON 逐行复原生效值、非法 JSON 逐档降级（形态不符拒写并撤表态，
+/// 降级经 Diagnostics 上报）、挂载后写入只落绘制档且同值短路
 
 #include <chrono>
 #include <functional>
@@ -16,6 +19,7 @@
 
 #include "aurora/animation/animator.h"
 #include "aurora/core/accessibility.h"
+#include "aurora/core/diagnostics.h"
 #include "aurora/environment/environment.h"
 #include "aurora/event/dispatcher.h"
 #include "aurora/layout/layout_engine.h"
@@ -58,8 +62,8 @@ struct Tree {
 /// 无滚动子树的下拉容器：child_at_top() 恒真，专测拖拽/滚轮通道本身。
 auto make_bare(float threshold = 64.0F, float max_pull = 128.0F) -> Tree {
     auto refreshes = std::make_shared<int>(0);
-    auto ptr = std::make_unique<PullToRefresh>(
-        PullToRefreshProps{.child = Node{std::make_shared<RedBox>()}, .threshold = threshold, .max_pull = max_pull});
+    auto ptr = std::make_unique<PullToRefresh>(Node{std::make_shared<RedBox>()},
+                                               PullToRefreshProps().set_threshold(threshold).set_max_pull(max_pull));
     ptr->on_refresh([refreshes] { ++(*refreshes); });
     LayoutEngine::layout(*ptr, bounded(200.0F, 200.0F));
     return Tree{.ptr = std::move(ptr), .refreshes = std::move(refreshes)};
@@ -194,13 +198,55 @@ auto themed_ctx(const Theme &t) -> std::pair<std::shared_ptr<Environment>, Build
     return {std::move(env), ctx};
 }
 
+/// 探针：把只在库内消费的读件提到可读位置（`present` 表态位、`resolve` 带上下文解析）。
+/// 两者都不升公共面，故判据只能经派生类点名读取；读到的仍是生产侧同一条函数，不是用例另算一遍。
+class PullToRefreshProbe final : public PullToRefresh {
+  public:
+    using PullToRefresh::present;
+    using PullToRefresh::PullToRefresh;
+    using PullToRefresh::resolve;
+};
+
+/// 标脏观察器：`Widget::on_dirty` 的 bool 入参把两档合一，这里拆成两枚计数器。
+struct PullDirty {
+    int paints = 0;  ///< 绘制档落账次数
+    int layouts = 0;  ///< 布局档落账次数
+
+    /// @brief 把观察回调挂到目标控件上（挂上即归零，用例只断增量）。
+    /// @param target 待观察的控件。
+    auto attach_to(PullToRefresh &target) -> void {
+        paints = 0;
+        layouts = 0;
+        target.on_dirty = [this](bool layout) {
+            if (layout) {
+                ++layouts;
+            } else {
+                ++paints;
+            }
+        };
+    }
+};
+
+/// 「带上下文的触发距离读件」形态：常量档行不应存在这第二件。
+/// 用概念而非裸 `requires` 式判定：GCC 在非模板上下文把非法简单要求判成硬错误而非 false。
+template <typename W>
+concept ScopedThresholdReader = requires(const W &probe, const BuildContext &scope) { probe.threshold(scope); };
+
+/// 同上，对下拉上限行。
+template <typename W>
+concept ScopedMaxPullReader = requires(const W &probe, const BuildContext &scope) { probe.max_pull(scope); };
+
+/// 活令牌行的反向形态：三处主题色不应存在无参读件（未表态值必须现场解主题）。
+template <typename W>
+concept BareIndicatorReader = requires(const W &probe) { probe.indicator_color(); };
+
 }  // namespace
 
 AURORA_TEST_CASE(defaults_and_describe) {
     const PullToRefresh d;
     AURORA_TEST_CHECK_EQ(std::string{d.type_name()}, std::string{"PullToRefresh"});
-    AURORA_TEST_CHECK_NEAR(d.threshold, 64.0F, 1e-4F);
-    AURORA_TEST_CHECK_NEAR(d.max_pull, 128.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(d.threshold(), 64.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(d.max_pull(), 128.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(d.pull_distance(), 0.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(d.progress(), 0.0F, 1e-4F);
     AURORA_TEST_CHECK_FALSE(d.is_gliding());
@@ -208,25 +254,36 @@ AURORA_TEST_CASE(defaults_and_describe) {
     // 包装层本身不向读屏透传滚动 range（读屏直接驱动内部滚动子树）
     AURORA_TEST_CHECK_FALSE(d.accessibility_scroll().has_value());
 
+    // 运行时默认值查询件与实例生效值同源（同一张权威表，不是第二份常量）。
+    const auto defs = PullToRefresh::defaults();
+    AURORA_TEST_CHECK_NEAR(defs.threshold(), 64.0F, 1e-6F);
+    AURORA_TEST_CHECK_NEAR(defs.max_pull(), 128.0F, 1e-6F);
+
     const auto desc = PullToRefresh::describe_static();
     AURORA_TEST_CHECK_EQ(desc.name, std::string{"PullToRefresh"});
     AURORA_TEST_CHECK_EQ(desc.children_policy, std::string{"single"});
     AURORA_TEST_CHECK_EQ(desc.events.size(), 1U);
     AURORA_TEST_CHECK_EQ(desc.events[0], std::string{"on_refresh"});
-    bool found_threshold = false;
-    for (const auto &prop : desc.properties) {
-        if (prop.name == "threshold") {
-            found_threshold = true;
-            AURORA_TEST_CHECK_EQ(prop.default_value, std::string{"64.0"});
-        }
+    AURORA_TEST_REQUIRE_EQ(desc.properties.size(), 5U);
+    const std::vector<std::string> expected_names{"threshold", "max_pull", "indicator_color", "band_color",
+                                                  "refreshing_text_color"};
+    for (std::size_t i = 0; i < expected_names.size(); ++i) {
+        AURORA_TEST_CHECK_EQ(desc.properties[i].name, expected_names[i]);
     }
-    AURORA_TEST_CHECK_TRUE(found_threshold);
+    // 常量档：默认值是原生数字（不是显示串），来源即该行回落点提供者。
+    AURORA_TEST_CHECK_TRUE(desc.properties[0].default_native.is_number());
+    AURORA_TEST_CHECK_NEAR(desc.properties[0].default_native.as_or<float>(0.0F), 64.0F, 1e-6F);
+    AURORA_TEST_CHECK_NEAR(desc.properties[1].default_native.as_or<float>(0.0F), 128.0F, 1e-6F);
+    // 活令牌档：默认值给令牌短名，schema 里是带引号的 `theme.*` 表达式串。
+    AURORA_TEST_CHECK_EQ(desc.properties[2].default_value, std::string{"\"theme.primary\""});
+    AURORA_TEST_CHECK_EQ(desc.properties[3].default_value, std::string{"\"theme.surface\""});
+    AURORA_TEST_CHECK_EQ(desc.properties[4].default_value, std::string{"\"theme.on_surface_variant\""});
 }
 
 AURORA_TEST_CASE(threshold_and_max_pull_serialize_round_trip) {
     PullToRefresh src;
-    src.threshold = 40.0F;
-    src.max_pull = 90.0F;
+    src.set_threshold(40.0F);
+    src.set_max_pull(90.0F);
     Json props = Json::object();
     src.serialize_props(props);
     AURORA_TEST_CHECK_NEAR(require_field<float>(props, "threshold"), 40.0F, 1e-4F);
@@ -234,8 +291,8 @@ AURORA_TEST_CASE(threshold_and_max_pull_serialize_round_trip) {
 
     PullToRefresh dst;
     dst.deserialize_props(props);
-    AURORA_TEST_CHECK_NEAR(dst.threshold, 40.0F, 1e-4F);
-    AURORA_TEST_CHECK_NEAR(dst.max_pull, 90.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(dst.threshold(), 40.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(dst.max_pull(), 90.0F, 1e-4F);
 }
 
 AURORA_TEST_CASE(wheel_margin_pulls_and_rubber_bands_are_capped) {
@@ -254,7 +311,7 @@ AURORA_TEST_CASE(wheel_margin_pulls_and_rubber_bands_are_capped) {
     for (int i = 0; i < 20; ++i) {
         wheel(ptr, 30.0F);
     }
-    AURORA_TEST_CHECK_TRUE(ptr.pull_distance() <= ptr.max_pull + 1e-4F);
+    AURORA_TEST_CHECK_TRUE(ptr.pull_distance() <= ptr.max_pull() + 1e-4F);
     AURORA_TEST_CHECK_TRUE(ptr.pull_distance() > 100.0F);
 
     // 负增量（向下滚、露出下方内容）不属下拉语义：原样放行、不改状态
@@ -267,7 +324,7 @@ AURORA_TEST_CASE(wheel_margin_pulls_and_rubber_bands_are_capped) {
 AURORA_TEST_CASE(wheel_channel_gated_by_child_scroll_position) {
     auto scroll = std::make_shared<Scroll>();
     scroll->add(Node{std::make_shared<RedBox>()});  // 内容自然高 200
-    PullToRefresh ptr{PullToRefreshProps{.child = Node{scroll}, .threshold = 64.0F, .max_pull = 128.0F}};
+    PullToRefresh ptr{Node{scroll}, PullToRefreshProps().set_threshold(64.0F).set_max_pull(128.0F)};
     int refreshes = 0;
     ptr.on_refresh([&refreshes] { ++refreshes; });
     LayoutEngine::layout(ptr, bounded(200.0F, 100.0F));  // 视口高 100 < 内容 200 → 可滚 100
@@ -319,7 +376,7 @@ AURORA_TEST_CASE(drag_hijacks_past_threshold_then_refreshes_and_settles) {
     send(d, ptr, MouseAction::Move, 100.0F, 60.0F);
     AURORA_TEST_CHECK_TRUE(ptr.pull_distance() > 0.0F);
     send(d, ptr, MouseAction::Move, 100.0F, 180.0F);
-    AURORA_TEST_CHECK_TRUE(ptr.pull_distance() >= ptr.threshold);
+    AURORA_TEST_CHECK_TRUE(ptr.pull_distance() >= ptr.threshold());
     AURORA_TEST_CHECK_EQ(static_cast<int>(ptr.state()), static_cast<int>(PullToRefreshState::Pulling));
 
     send(d, ptr, MouseAction::Release, 100.0F, 180.0F);
@@ -431,32 +488,238 @@ AURORA_TEST_CASE(indicator_overlay_paints_over_content) {
     AURORA_TEST_CHECK_EQ(static_cast<int>(below.g), 0);
 }
 
-// ---- 主题跟随（迁移批）：未显式设色 → 角色回退；显式设色 → 不被主题覆盖 ----
+// ===========================================================================
+// 权威表的读消费面（属性单一声明迁移批）：逐行撤表态 / 常量档两档恒等 / 活令牌随主题 /
+// 全量键复原 / 非法值降级 / 挂载后逐档标脏
+// ===========================================================================
 
-AURORA_TEST_CASE(pull_to_refresh_colors_follow_theme_when_unset) {
-    // 两态语义：未显式设色时 resolve 取主题角色；主题翻转 ⇒ 解析值翻转（换肤生效）。
+AURORA_TEST_CASE(pull_to_refresh_writers_store_raw_and_zero_limits_disable_pull) {
+    // 写件是纯 DTO 语义：非法值原样存入；生效点的夹取兜底在消费侧，合法性把关在反序列化通道。
+    auto t = make_bare();
+    PullToRefresh &ptr = *t.ptr;
+    ptr.set_threshold(0.0F);
+    AURORA_TEST_CHECK_NEAR(ptr.threshold(), 0.0F, 0.0F);
+    AURORA_TEST_CHECK_NEAR(ptr.progress(), 0.0F, 1e-6F);  // 阈值非正 ⇒ 进度恒 0（除零守卫）
+
+    ptr.set_max_pull(0.0F);
+    AURORA_TEST_CHECK_NEAR(ptr.max_pull(), 0.0F, 0.0F);
+    const ScrollEvent e = wheel(ptr, 10.0F);  // 上限为 0 ⇒ 橡皮筋映射恒 0，余量原样交还
+    AURORA_TEST_CHECK_FALSE(e.is_handled);
+    AURORA_TEST_CHECK_NEAR(ptr.pull_distance(), 0.0F, 1e-6F);
+}
+
+AURORA_TEST_CASE(pull_to_refresh_clear_unstates_each_row_and_drops_every_key) {
+    // 五行逐行「表态 ⇒ 该键在盘 ⇒ clear ⇒ 该键退盘且取值回到该行回落点」。
+    // 子树不进表：序列化里既没有 child，也没有 children。
+    PullToRefreshProbe ptr{Node{std::make_shared<RedBox>()}};
+    ptr.set_threshold(48.0F)
+        .set_max_pull(96.0F)
+        .set_indicator_color(Color{0xE0, 0x1B, 0x24})
+        .set_band_color(Color{0x12, 0x34, 0x56})
+        .set_refreshing_text_color(Color{0x77, 0x88, 0x99});
+    Json stated = Json::object();
+    ptr.serialize_props(stated);
+    for (const char *key : {"threshold", "max_pull", "indicator_color", "band_color", "refreshing_text_color"}) {
+        AURORA_TEST_CHECK_TRUE(stated.contains(key));  // 五行全表态 ⇒ 五键逐键在盘
+    }
+    for (const char *key : {"child", "children"}) {
+        AURORA_TEST_CHECK_FALSE(stated.contains(key));  // 表外名字（子节点）不是属性键
+    }
+
+    const BuildContext bare;  // 无注入：`inherit_theme` 回落 light
+    ptr.clear(PullToRefreshProps::threshold_row());
+    AURORA_TEST_CHECK_FALSE(ptr.present(PullToRefreshProps::threshold_row()));
+    AURORA_TEST_CHECK_NEAR(ptr.threshold(), 64.0F, 1e-6F);
+    ptr.clear(PullToRefreshProps::max_pull_row());
+    AURORA_TEST_CHECK_FALSE(ptr.present(PullToRefreshProps::max_pull_row()));
+    AURORA_TEST_CHECK_NEAR(ptr.max_pull(), 128.0F, 1e-6F);
+    ptr.clear(PullToRefreshProps::indicator_color_row());
+    AURORA_TEST_CHECK_FALSE(ptr.present(PullToRefreshProps::indicator_color_row()));
+    AURORA_TEST_CHECK(ptr.indicator_color(bare) == Color::blue());  // light primary
+    ptr.clear(PullToRefreshProps::band_color_row());
+    AURORA_TEST_CHECK_FALSE(ptr.present(PullToRefreshProps::band_color_row()));
+    AURORA_TEST_CHECK(ptr.band_color(bare) == Color::white());  // light surface
+    ptr.clear(PullToRefreshProps::refreshing_text_color_row());
+    AURORA_TEST_CHECK_FALSE(ptr.present(PullToRefreshProps::refreshing_text_color_row()));
+    AURORA_TEST_CHECK(ptr.refreshing_text_color(bare) == Color{0x47, 0x47, 0x47});  // light on_surface_variant
+
+    Json cleared = Json::object();
+    ptr.serialize_props(cleared);
+    for (const char *key : {"threshold", "max_pull", "indicator_color", "band_color", "refreshing_text_color"}) {
+        AURORA_TEST_CHECK_FALSE(cleared.contains(key));  // 意图集合里再无一键
+    }
+    AURORA_TEST_CHECK_EQ(ptr.child_nodes().size(), 1U);  // 撤表态不动子节点所有权
+}
+
+AURORA_TEST_CASE(pull_to_refresh_constant_rows_read_identically_under_light_and_dark) {
+    // 恒等关系的正面取证：两行都是常量档，没有 `x(ctx)` 第二件，其无参读件**就是**生效值——
+    // 明 / 暗两档主题下与库内 `resolve(row, ctx)` 取值全同。
+    static_assert(!ScopedThresholdReader<PullToRefresh>);
+    static_assert(!ScopedMaxPullReader<PullToRefresh>);
+
+    const auto [env_l, light] = themed_ctx(Theme::light());
+    const auto [env_d, dark] = themed_ctx(Theme::dark());
+    PullToRefreshProbe ptr;
+    AURORA_TEST_CHECK_NEAR(ptr.threshold(), ptr.resolve(PullToRefreshProps::threshold_row(), light), 1e-6F);
+    AURORA_TEST_CHECK_NEAR(ptr.threshold(), ptr.resolve(PullToRefreshProps::threshold_row(), dark), 1e-6F);
+    AURORA_TEST_CHECK_NEAR(ptr.max_pull(), ptr.resolve(PullToRefreshProps::max_pull_row(), light), 1e-6F);
+    AURORA_TEST_CHECK_NEAR(ptr.max_pull(), ptr.resolve(PullToRefreshProps::max_pull_row(), dark), 1e-6F);
+
+    // 表态后仍与解析同值；控件面同名写件返回控件引用，链式表的是「同一个对象」而非第二份属性。
+    PullToRefresh &chain = ptr.set_threshold(50.0F).set_max_pull(100.0F);
+    AURORA_TEST_CHECK(&chain == static_cast<PullToRefresh *>(&ptr));
+    AURORA_TEST_CHECK_NEAR(ptr.threshold(), 50.0F, 1e-6F);
+    AURORA_TEST_CHECK_NEAR(ptr.threshold(), ptr.resolve(PullToRefreshProps::threshold_row(), light), 1e-6F);
+    AURORA_TEST_CHECK_NEAR(ptr.max_pull(), 100.0F, 1e-6F);
+    AURORA_TEST_CHECK_NEAR(ptr.max_pull(), ptr.resolve(PullToRefreshProps::max_pull_row(), dark), 1e-6F);
+}
+
+// ---- 主题跟随（活令牌档）：未显式设色 → 角色回退；显式设色 → 不被主题覆盖 ----
+
+AURORA_TEST_CASE(pull_to_refresh_live_token_rows_follow_theme_when_unstated) {
+    // 三行都是活令牌档：只有带上下文的读件（无参那份不存在，否则未表态值会被烘成常量）。
+    static_assert(!BareIndicatorReader<PullToRefresh>);
+
     const BuildContext bare;  // 无注入：inherit_theme 回落 light（与 OS 未表态同口径）
-    PullToRefresh ptr{PullToRefreshProps{.child = Node{std::make_shared<RedBox>()}}};
-    AURORA_TEST_CHECK(ptr.resolve_indicator_color(bare) == Color::blue());  // light primary = (0,0,255)
-    AURORA_TEST_CHECK(ptr.resolve_band_color(bare) == Color::white());  // light surface = white
-    AURORA_TEST_CHECK(ptr.resolve_refreshing_text_color(bare) == Color{0x47, 0x47, 0x47});  // light on_surface_variant
+    PullToRefresh ptr{Node{std::make_shared<RedBox>()}};
+    AURORA_TEST_CHECK(ptr.indicator_color(bare) == Color::blue());  // light primary = (0,0,255)
+    AURORA_TEST_CHECK(ptr.band_color(bare) == Color::white());  // light surface = white
+    AURORA_TEST_CHECK(ptr.refreshing_text_color(bare) == Color{0x47, 0x47, 0x47});  // light on_surface_variant
 
     const auto [env, dark] = themed_ctx(Theme::dark());
-    AURORA_TEST_CHECK(ptr.resolve_indicator_color(dark) == Color{0xC0, 0xC1, 0xFF});  // dark primary
-    AURORA_TEST_CHECK(ptr.resolve_band_color(dark) == Color{0x20, 0x21, 0x24});  // dark surface
-    AURORA_TEST_CHECK(ptr.resolve_refreshing_text_color(dark) == Color{0xC6, 0xC6, 0xC6});  // dark on_surface_variant
+    AURORA_TEST_CHECK(ptr.indicator_color(dark) == Color{0xC0, 0xC1, 0xFF});  // dark primary
+    AURORA_TEST_CHECK(ptr.band_color(dark) == Color{0x20, 0x21, 0x24});  // dark surface
+    AURORA_TEST_CHECK(ptr.refreshing_text_color(dark) == Color{0xC6, 0xC6, 0xC6});  // dark on_surface_variant
 }
 
 AURORA_TEST_CASE(pull_to_refresh_explicit_colors_override_theme) {
-    // 对照组：显式设色不被主题覆盖（两态语义的另一半）。
+    // 对照组：显式设色不被主题覆盖（活令牌两态语义的另一半）。
     const auto [env, dark] = themed_ctx(Theme::dark());
-    PullToRefresh ptr{PullToRefreshProps{.child = Node{std::make_shared<RedBox>()}}};
-    ptr.indicator_color(Color{0xE0, 0x1B, 0x24});  // error 红，刻意区别于两档 primary
-    ptr.band_color(Color{0x12, 0x34, 0x56});
-    ptr.refreshing_text_color(Color{0x77, 0x88, 0x99});
-    AURORA_TEST_CHECK(ptr.resolve_indicator_color(dark) == Color{0xE0, 0x1B, 0x24});
-    AURORA_TEST_CHECK(ptr.resolve_band_color(dark) == Color{0x12, 0x34, 0x56});
-    AURORA_TEST_CHECK(ptr.resolve_refreshing_text_color(dark) == Color{0x77, 0x88, 0x99});
+    PullToRefresh ptr{Node{std::make_shared<RedBox>()}};
+    ptr.set_indicator_color(Color{0xE0, 0x1B, 0x24});  // error 红，刻意区别于两档 primary
+    ptr.set_band_color(Color{0x12, 0x34, 0x56});
+    ptr.set_refreshing_text_color(Color{0x77, 0x88, 0x99});
+    AURORA_TEST_CHECK(ptr.indicator_color(dark) == Color{0xE0, 0x1B, 0x24});
+    AURORA_TEST_CHECK(ptr.band_color(dark) == Color{0x12, 0x34, 0x56});
+    AURORA_TEST_CHECK(ptr.refreshing_text_color(dark) == Color{0x77, 0x88, 0x99});
+}
+
+AURORA_TEST_CASE(pull_to_refresh_full_key_json_restores_every_effective_value) {
+    // 逐行表态的属性对象，其序列化输出灌回一份空白控件：每行都重新表态且生效值逐键相等，
+    // 最终下拉行为落同一读数（同一起手行程得到同一下拉距离与同一进度）。
+    PullToRefresh src{Node{std::make_shared<RedBox>()}};
+    src.set_threshold(48.0F)
+        .set_max_pull(96.0F)
+        .set_indicator_color(Color{0xE0, 0x1B, 0x24})
+        .set_band_color(Color{0x12, 0x34, 0x56})
+        .set_refreshing_text_color(Color{0x77, 0x88, 0x99});
+    Json legacy = Json::object();
+    src.serialize_props(legacy);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(legacy, "threshold"), 48.0F, 1e-6F);
+
+    PullToRefreshProbe dst{Node{std::make_shared<RedBox>()}};
+    dst.deserialize_props(legacy);
+    for (auto row_present :
+         {dst.present(PullToRefreshProps::threshold_row()), dst.present(PullToRefreshProps::max_pull_row()),
+          dst.present(PullToRefreshProps::indicator_color_row()), dst.present(PullToRefreshProps::band_color_row()),
+          dst.present(PullToRefreshProps::refreshing_text_color_row())}) {
+        AURORA_TEST_CHECK_TRUE(row_present);
+    }
+    const BuildContext ctx;
+    AURORA_TEST_CHECK_NEAR(dst.threshold(), src.threshold(), 1e-6F);
+    AURORA_TEST_CHECK_NEAR(dst.max_pull(), src.max_pull(), 1e-6F);
+    AURORA_TEST_CHECK(dst.indicator_color(ctx) == src.indicator_color(ctx));
+    AURORA_TEST_CHECK(dst.band_color(ctx) == src.band_color(ctx));
+    AURORA_TEST_CHECK(dst.refreshing_text_color(ctx) == src.refreshing_text_color(ctx));
+
+    LayoutEngine::layout(src, bounded(200.0F, 200.0F));
+    LayoutEngine::layout(dst, bounded(200.0F, 200.0F));
+    wheel(src, 3.0F);
+    wheel(dst, 3.0F);
+    AURORA_TEST_CHECK_NEAR(dst.pull_distance(), src.pull_distance(), 1e-6F);
+    AURORA_TEST_CHECK_NEAR(dst.progress(), src.progress(), 1e-6F);
+}
+
+AURORA_TEST_CASE(pull_to_refresh_invalid_json_degrades_to_row_fallback) {
+    // 非法值一律不写入：可空行撤表态退回该行回落点，且降级经 `Diagnostics` 上报。
+    Diagnostics::take();  // 清掉前序用例残留，本条只看自己产生的降级
+    const std::size_t baseline = Diagnostics::count();
+
+    // ① 常量行类型不符（`threshold` 应为 number，喂串）⇒ 撤表态，生效值回 64。
+    PullToRefreshProbe ptr;
+    ptr.set_threshold(48.0F);
+    Json wrong_type = Json::object();
+    wrong_type.set("threshold", Json{"wide"});
+    ptr.deserialize_props(wrong_type);
+    AURORA_TEST_CHECK_FALSE(ptr.present(PullToRefreshProps::threshold_row()));
+    AURORA_TEST_CHECK_NEAR(ptr.threshold(), 64.0F, 1e-6F);  // 基线来自回落点，不是零值兜底
+    AURORA_TEST_CHECK_EQ(Diagnostics::count(), baseline + 1U);
+
+    // ② 活令牌行形态不符（`indicator_color` 应为 `[r,g,b,a]`，喂数字）⇒ 撤表态并继续随主题。
+    ptr.set_indicator_color(Color{0xE0, 0x1B, 0x24});
+    Json bad_color = Json::object();
+    bad_color.set("indicator_color", Json{7});
+    ptr.deserialize_props(bad_color);
+    AURORA_TEST_CHECK_FALSE(ptr.present(PullToRefreshProps::indicator_color_row()));
+    const auto [env_d, dark] = themed_ctx(Theme::dark());
+    AURORA_TEST_CHECK(ptr.indicator_color(dark) == Color{0xC0, 0xC1, 0xFF});  // 退回角色而非烘进旧值
+    AURORA_TEST_CHECK_EQ(Diagnostics::count(), baseline + 2U);
+
+    // ③ 分量越界同样拒写（0-255 之外）。
+    Json too_bright = Json::array();
+    too_bright.push_back(300);
+    too_bright.push_back(0);
+    too_bright.push_back(0);
+    too_bright.push_back(255);
+    Json out_of_range = Json::object();
+    out_of_range.set("band_color", too_bright);
+    ptr.deserialize_props(out_of_range);
+    AURORA_TEST_CHECK_FALSE(ptr.present(PullToRefreshProps::band_color_row()));
+    AURORA_TEST_CHECK(ptr.band_color(dark) == Color{0x20, 0x21, 0x24});  // dark surface
+    AURORA_TEST_CHECK_EQ(Diagnostics::count(), baseline + 3U);
+
+    // ④ 反面对照（防空转）：同一路径灌合法值仍照常写入并表态。
+    Json legit_color = Json::array();
+    legit_color.push_back(0x12);
+    legit_color.push_back(0x34);
+    legit_color.push_back(0x56);
+    legit_color.push_back(255);
+    Json good = Json::object();
+    good.set("threshold", Json{40.0});
+    good.set("band_color", legit_color);
+    ptr.deserialize_props(good);
+    AURORA_TEST_CHECK_TRUE(ptr.present(PullToRefreshProps::threshold_row()));
+    AURORA_TEST_CHECK_TRUE(ptr.present(PullToRefreshProps::band_color_row()));
+    AURORA_TEST_CHECK_NEAR(ptr.threshold(), 40.0F, 1e-6F);
+    AURORA_TEST_CHECK(ptr.band_color(dark) == Color{0x12, 0x34, 0x56, 255});
+    AURORA_TEST_CHECK_EQ(Diagnostics::count(), baseline + 3U);  // 合法值不再上报
+
+    Diagnostics::take();
+}
+
+AURORA_TEST_CASE(pull_to_refresh_mounted_writers_mark_paint_tier_only) {
+    // 五行都只声明绘制档：挂载后每次写入都只落绘制档，布局档不落账；同值写入由行上的判等守卫短路。
+    PullToRefresh ptr;
+    const BuildContext ctx;
+    ptr.mount(ctx);
+    PullDirty dirty;
+    dirty.attach_to(ptr);
+
+    ptr.set_threshold(48.0F);
+    AURORA_TEST_CHECK_EQ(dirty.paints, 1);
+    AURORA_TEST_CHECK_EQ(dirty.layouts, 0);
+    ptr.set_threshold(48.0F);  // 同值：判等短路，不落账
+    AURORA_TEST_CHECK_EQ(dirty.paints, 1);
+    ptr.set_max_pull(96.0F);
+    AURORA_TEST_CHECK_EQ(dirty.paints, 2);
+    AURORA_TEST_CHECK_EQ(dirty.layouts, 0);
+    ptr.set_indicator_color(Color::blue());
+    AURORA_TEST_CHECK_EQ(dirty.paints, 3);
+    ptr.set_band_color(Color::white());
+    AURORA_TEST_CHECK_EQ(dirty.paints, 4);
+    ptr.set_refreshing_text_color(Color::black());
+    AURORA_TEST_CHECK_EQ(dirty.paints, 5);
+    AURORA_TEST_CHECK_EQ(dirty.layouts, 0);
 }
 
 // ---- 应用内全局时间缩放：ScrollGlide 的 PullToRefresh 消费点（判据 9 / 10 / 11(b)）----
