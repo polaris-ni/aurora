@@ -30,7 +30,7 @@ static auto build_clock() -> au::Node {
     return au::Timer(
         1s,
         [clock_str](const au::ReadOnlyState<int> &) -> au::Text {
-            return au::Text{au::TextProps{.content = clock_str}};
+            return au::Text{au::TextProps().set_content(clock_str)};
         },
         [clock_str](int) -> void { clock_str.set(au::LocalizedString{"clock: " + now_string()}); });
 }
@@ -39,7 +39,7 @@ static auto build_clock() -> au::Node {
 static auto build_countdown() -> au::Node {
     au::State<au::LocalizedString> cd{au::LocalizedString{"countdown: 10"}};
     return au::Timer(
-        1s, [cd](const au::ReadOnlyState<int> &) -> au::Text { return au::Text{au::TextProps{.content = cd}}; },
+        1s, [cd](const au::ReadOnlyState<int> &) -> au::Text { return au::Text{au::TextProps().set_content(cd)}; },
         [cd](int n) -> void {
             const int left = 10 - n;
             cd.set(au::LocalizedString{left > 0 ? "countdown: " + std::to_string(left) : "countdown: done"});

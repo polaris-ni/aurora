@@ -474,7 +474,7 @@ class AppCellLeaf : public au::LeafWidget {
     auto bar = std::make_shared<au::Canvas>(
         4.0F, 18.0F, [th](au::Painter &p, const au::Rect &b) -> void { p.fill_rounded_rect(b, 2.0F, th.accent); });
     auto text = std::make_shared<au::Text>(
-        au::TextProps{.content = title, .font = au::Font{.size_pt = 15.0F, .weight = 700}, .text_color = th.text});
+        au::TextProps().set_content(title).set_font_size(15.0F).set_font_weight(700).set_color(th.text));
     text->set_modifier(
         au::Modifier{}.padding(au::EdgeInsets{.left = 10.0F, .top = 0.0F, .right = 0.0F, .bottom = 0.0F}));
     auto row = std::make_shared<Row>();
@@ -507,8 +507,8 @@ class AppCellLeaf : public au::LeafWidget {
                 th.text);
         }
     });
-    auto bar_title = std::make_shared<au::Text>(au::TextProps{
-        .content = "Aurora Store", .font = au::Font{.size_pt = 20.0F, .weight = 700}, .text_color = th.primary});
+    auto bar_title = std::make_shared<au::Text>(
+        au::TextProps().set_content("Aurora Store").set_font_size(20.0F).set_font_weight(700).set_color(th.primary));
     bar_title->set_modifier(
         au::Modifier{}.padding(au::EdgeInsets{.left = 12.0F, .top = 0.0F, .right = 0.0F, .bottom = 0.0F}));
     auto avatar = std::make_shared<au::Canvas>(28.0F, 28.0F, [th](au::Painter &p, const au::Rect &b) -> void {
@@ -604,10 +604,10 @@ class AppCellLeaf : public au::LeafWidget {
                                    {data.tile_a, data.tile_b}, {0.0F, 1.0F});
             p.draw_text(b, data.title.substr(0, 1), au::Font{.size_pt = 34.0F, .weight = 700}, th.on_primary);
         });
-        auto title = std::make_shared<au::Text>(au::TextProps{
-            .content = data.title, .font = au::Font{.size_pt = 14.0F, .weight = 600}, .text_color = th.text});
-        auto subtitle = std::make_shared<au::Text>(au::TextProps{
-            .content = data.subtitle, .font = au::Font{.size_pt = 12.0F}, .text_color = th.text_secondary});
+        auto title = std::make_shared<au::Text>(
+            au::TextProps().set_content(data.title).set_font_size(14.0F).set_font_weight(600).set_color(th.text));
+        auto subtitle = std::make_shared<au::Text>(
+            au::TextProps().set_content(data.subtitle).set_font_size(12.0F).set_color(th.text_secondary));
         auto col =
             std::make_shared<Column>(std::vector<Node>{Node{title}, Node{subtitle}}, ColumnProps().set_gap(4.0F));
         auto item = std::make_shared<Row>();
@@ -633,21 +633,25 @@ class AppCellLeaf : public au::LeafWidget {
                 p.draw_text(b, wrap_elem(REVIEWERS, i).substr(0, 1), au::Font{.size_pt = 16.0F, .weight = 700},
                             th.on_primary);
             });
-        auto name = std::make_shared<au::Text>(au::TextProps{.content = wrap_elem(REVIEWERS, i),
-                                                             .font = au::Font{.size_pt = 13.0F, .weight = 600},
-                                                             .text_color = th.text});
-        auto meta = std::make_shared<au::Text>(au::TextProps{.content = "2026-09-1" + std::to_string(1 + (i % 9)),
-                                                             .font = au::Font{.size_pt = 11.0F},
-                                                             .text_color = th.text_secondary});
+        auto name = std::make_shared<au::Text>(au::TextProps()
+                                                   .set_content(wrap_elem(REVIEWERS, i))
+                                                   .set_font_size(13.0F)
+                                                   .set_font_weight(600)
+                                                   .set_color(th.text));
+        auto meta = std::make_shared<au::Text>(au::TextProps()
+                                                   .set_content("2026-09-1" + std::to_string(1 + (i % 9)))
+                                                   .set_font_size(11.0F)
+                                                   .set_color(th.text_secondary));
         auto info = std::make_shared<Column>(std::vector<Node>{Node{name}, Node{meta}}, ColumnProps().set_gap(2.0F));
         auto head = std::make_shared<Row>();
         head->add(Node{avatar_small});
         head->add(Node{info});
-        auto body_text = std::make_shared<au::Text>(au::TextProps{.content = wrap_elem(BODIES, i),
-                                                                  .font = au::Font{.size_pt = 12.0F},
-                                                                  .text_color = th.text,
-                                                                  .max_lines = 2,
-                                                                  .soft_wrap = true});
+        auto body_text = std::make_shared<au::Text>(au::TextProps()
+                                                        .set_content(wrap_elem(BODIES, i))
+                                                        .set_font_size(12.0F)
+                                                        .set_color(th.text)
+                                                        .set_max_lines(2)
+                                                        .set_soft_wrap(true));
         auto card =
             std::make_shared<Column>(std::vector<Node>{Node{head}, Node{body_text}}, ColumnProps().set_gap(6.0F));
         card->set_modifier(
@@ -687,9 +691,10 @@ class AppCellLeaf : public au::LeafWidget {
                     c);  // 订阅：卡片
             }
         });
-        auto label = std::make_shared<au::Text>(au::TextProps{.content = wrap_elem(NAV_LABELS, i),
-                                                              .font = au::Font{.size_pt = 10.0F},
-                                                              .text_color = (i == 0) ? th.primary : th.text_secondary});
+        auto label = std::make_shared<au::Text>(au::TextProps()
+                                                    .set_content(wrap_elem(NAV_LABELS, i))
+                                                    .set_font_size(10.0F)
+                                                    .set_color((i == 0) ? th.primary : th.text_secondary));
         auto item = std::make_shared<Column>(std::vector<Node>{Node{icon}, Node{label}}, ColumnProps().set_gap(3.0F));
         nav->add(Node{item});
     }

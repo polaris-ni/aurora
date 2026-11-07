@@ -263,7 +263,7 @@ auto main() -> int {
         gap(8.0F),
         aurora::Text{aurora::LocalizedString{"Loopback JSON stub · Resource reads three branches · reload cuts the "
                                              "in-flight exchange"}},
-        aurora::Text{aurora::TextProps{.content = line}},
+        aurora::Text{aurora::TextProps().set_content(line)},
         aurora::Row{std::move(reload), std::move(toggle)},
     };
     return run_demo(std::move(root), "Net HTTP · Aurora Demo", 620.0F, 320.0F);

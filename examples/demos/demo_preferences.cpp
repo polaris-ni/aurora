@@ -57,7 +57,7 @@ auto main() -> int {
             au::Show{show_switch, au::Row{std::move(sw), au::Text{"Dark mode (persisted in " +
                                                                   prefs.file_path().filename().string() + ")"}}},
             gap(4.0F),
-            au::Text{au::TextProps{.content = persisted_line}},
+            au::Text{au::TextProps().set_content(persisted_line)},
             gap(8.0F),
             au::Row{std::move(appearance_sw), au::Text{"Dark mode (group appearance, nested persistence)"}},
             gap(8.0F),

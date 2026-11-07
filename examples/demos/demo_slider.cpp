@@ -18,7 +18,7 @@ auto main() -> int {
         GradientTitle{"Slider widget"},
         gap(12),
         std::move(sl),
-        au::Text{au::TextProps{.content = *label}},
+        au::Text{au::TextProps().set_content(*label)},
     };
     return run_demo(Card{std::move(root)}, "Slider · Aurora Demo", 480.0F, 360.0F);
 }

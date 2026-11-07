@@ -4293,7 +4293,7 @@
       "children_policy": "none",
       "examples": [
         "au::Text(\"Hello\")",
-        "au::Text(au::TextProps{ .content = \"Hi\" }).font_size(16)"
+        "au::Text(au::TextProps().set_content(\"Hi\").set_font_size(16.0F))"
       ]
     },
     {

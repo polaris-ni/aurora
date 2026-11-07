@@ -46,7 +46,7 @@ auto VideoControls::build_children() -> void {
     });
     seek->set_modifier(Modifier{}.expand());  // 在 Row 中撑满剩余空间
 
-    auto time = std::make_unique<Text>(TextProps{.content = time_label_});
+    auto time = std::make_unique<Text>(TextProps().set_content(time_label_));
     time->color(Color::white());
 
     auto mute = std::make_unique<Button>(ButtonProps().set_label(mute_label_));

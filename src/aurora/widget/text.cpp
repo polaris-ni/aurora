@@ -11,288 +11,26 @@
 
 namespace aurora {
 
-auto Text::describe_static() -> WidgetDescriptor {
-    return WidgetDescriptor{
-        .name = "Text",
-        .properties =
-            {
-                {.name = "content",
-                 .type = "LocalizedString",
-                 .default_value = "\"\"",
-                 .required = true,
-                 .note = "Text content",
-                 .json_type = "string|$msg"},
-                {.name = "font_size",
-                 .type = "float",
-                 .default_value = "14.0",
-                 .required = false,
-                 .note = "Font size (pt)",
-                 .json_type = "number",
-                 .enum_values = {},
-                 .min_value = "0"},
-                {.name = "color",
-                 .type = "Color",
-                 .default_value = "\"theme.on_surface\"",
-                 .required = false,
-                 .note = "Text color (follows theme on_surface when unset)",
-                 .json_type = "array"},
-                {.name = "text_align",
-                 .type = "TextAlign",
-                 .default_value = "Left",
-                 .required = false,
-                 .note = "Horizontal alignment",
-                 .json_type = "string",
-                 .enum_values = {"Left", "Right", "Center", "Start", "End", "Justify"}},
-                {.name = "direction",
-                 .type = "TextDirection",
-                 .default_value = "auto",
-                 .required = false,
-                 .note = "Text direction (auto = inherit from environment)",
-                 .json_type = "string",
-                 .enum_values = {"LTR", "RTL"}},
-                {.name = "max_lines",
-                 .type = "int",
-                 .default_value = "0",
-                 .required = false,
-                 .note = "Max line count (0 = unlimited)",
-                 .json_type = "integer",
-                 .enum_values = {},
-                 .min_value = "0"},
-                {.name = "overflow",
-                 .type = "TextOverflow",
-                 .default_value = "Clip",
-                 .required = false,
-                 .note = "Overflow handling",
-                 .json_type = "string",
-                 .enum_values = {"Clip", "Ellipsis", "Fade"}},
-                {.name = "soft_wrap",
-                 .type = "bool",
-                 .default_value = "true",
-                 .required = false,
-                 .note = "Auto line wrap",
-                 .json_type = "boolean"},
-                {.name = "line_height",
-                 .type = "float",
-                 .default_value = "1.0",
-                 .required = false,
-                 .note = "Line height multiplier",
-                 .json_type = "number",
-                 .enum_values = {},
-                 .min_value = "0"},
-                {.name = "letter_spacing",
-                 .type = "float",
-                 .default_value = "0.0",
-                 .required = false,
-                 .note = "Letter spacing",
-                 .json_type = "number"},
-                {.name = "word_spacing",
-                 .type = "float",
-                 .default_value = "0.0",
-                 .required = false,
-                 .note = "Word spacing",
-                 .json_type = "number"},
-                {.name = "font_weight",
-                 .type = "FontWeight",
-                 .default_value = "Normal",
-                 .required = false,
-                 .note = "Font weight",
-                 .json_type = "string",
-                 .enum_values = {"Thin", "ExtraLight", "Light", "Normal", "Medium", "SemiBold", "Bold", "ExtraBold",
-                                 "Black"}},
-                {.name = "font_style",
-                 .type = "FontStyle",
-                 .default_value = "Normal",
-                 .required = false,
-                 .note = "Font style",
-                 .json_type = "string",
-                 .enum_values = {"Normal", "Italic"}},
-                {.name = "decoration",
-                 .type = "TextDecoration",
-                 .default_value = "None",
-                 .required = false,
-                 .note = "Text decoration",
-                 .json_type = "string",
-                 .enum_values = {"None", "Underline", "Overline", "LineThrough"}},
-                {.name = "decoration_color",
-                 .type = "Color",
-                 .default_value = "\"theme.on_surface\"",
-                 .required = false,
-                 .note = "Decoration color (follows text color when unset)",
-                 .json_type = "array"},
-                {.name = "background_color",
-                 .type = "Color",
-                 .default_value = "transparent",
-                 .required = false,
-                 .note = "Text background color",
-                 .json_type = "array"},
-                {.name = "width",
-                 .type = "Length",
-                 .default_value = "auto",
-                 .required = false,
-                 .note = "",
-                 .json_type = "array"},
-                {.name = "height",
-                 .type = "Length",
-                 .default_value = "auto",
-                 .required = false,
-                 .note = "",
-                 .json_type = "array"},
-                {.name = "show",
-                 .type = "bool",
-                 .default_value = "true",
-                 .required = false,
-                 .note = "",
-                 .json_type = "boolean"},
-            },
-        .events = {},
-        .children_policy = "none",
-        .examples = {"au::Text(\"Hello\")", "au::Text(au::TextProps{ .content = \"Hi\" }).font_size(16)"},
-    };
-}
-
 // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
 
 auto Text::serialize_props(Json &props) const -> void {
     Widget::serialize_props(props);
-    props.set("content", localizable_to_json(content_.get()));
-    props.set("font_size", font.size_pt);
-    // 文字色 / 装饰线色仅在显式设置时输出：保留「跟随主题」语义（与 Button 同口径）
-    if (text_color.has_value()) {
-        props.set("color", color_to_json(*text_color));
-    }
-
-    props.set("text_align", text_align_to_json(text_align));
-    if (direction.has_value()) {
-        props.set("direction", text_direction_to_json(*direction));
-    }
-    props.set("max_lines", max_lines);
-    props.set("overflow", text_overflow_to_json(overflow));
-    props.set("soft_wrap", Json{soft_wrap});
-    props.set("line_height", line_height);
-    props.set("letter_spacing", letter_spacing);
-    props.set("word_spacing", word_spacing);
-    props.set("font_weight", font_weight_to_json(static_cast<FontWeight>(font.weight)));
-    props.set("font_style", font_style_to_json(font_style));
-    props.set("decoration", text_decoration_to_json(decoration));
-    if (decoration_color.has_value()) {
-        props.set("decoration_color", color_to_json(*decoration_color));
-    }
-    props.set("background_color", color_to_json(background_color));
+    props_serialize(props);
+    // 键位撞名：基类 `overflow` 是 `OverflowStrategy`（恒写 Visible），本控件 `overflow` 是
+    // `TextOverflow`（属行只在本控件表态时写）。基类先写、props_serialize 未表态时不覆盖，
+    // 会把基类值留给 schema 当默认值 ⇒ 这里无条件以文本溢出策略收口。
+    props.set("overflow", text_overflow_to_json(overflow()));
 }
 
 auto Text::deserialize_props(const Json &props) -> void {
     Widget::deserialize_props(props);
-    if (props.contains("content")) {
-        static const PropDescriptor D_CONTENT{.name = "content", .json_type = "string|$msg"};
-        set_content(validate_or_default<LocalizedString>(*props.at("content"), D_CONTENT, LocalizedString{}));
-    }
-    if (props.contains("font_size")) {
-        static const PropDescriptor D_FONT_SIZE{.name = "font_size", .json_type = "number", .min_value = "0"};
-        font.size_pt = validate_or_default<float>(*props.at("font_size"), D_FONT_SIZE, 14.0F);
-    }
-    if (props.contains("color")) {
-        static const PropDescriptor D_COLOR{.name = "color", .json_type = "array"};
-        text_color = validate_or_default<Color>(*props.at("color"), D_COLOR, Color::black());
-    }
-    if (props.contains("text_align")) {
-        if (props.at("text_align")->is_string()) {
-            text_align = json_to_text_align(*props.at("text_align"));
-        } else {
-            Diagnostics::degraded("text_align expects string", type_name(), "invalid-prop-value");
-        }
-    }
-    if (props.contains("direction")) {
-        if (props.at("direction")->is_string()) {
-            direction = json_to_text_direction(*props.at("direction"));
-        } else {
-            Diagnostics::degraded("direction expects string", type_name(), "invalid-prop-value");
-        }
-    }
-    if (props.contains("max_lines")) {
-        if (props.at("max_lines")->is_number()) {
-            max_lines = props.at("max_lines")->as_or<std::int32_t>(0);
-        } else {
-            Diagnostics::degraded("max_lines expects integer", type_name(), "invalid-prop-value");
-        }
-    }
-    if (props.contains("overflow")) {
-        if (props.at("overflow")->is_string()) {
-            overflow = json_to_text_overflow(*props.at("overflow"));
-        } else {
-            Diagnostics::degraded("overflow expects string", type_name(), "invalid-prop-value");
-        }
-    }
-    if (props.contains("soft_wrap")) {
-        if (props.at("soft_wrap")->is_bool()) {
-            soft_wrap = props.at("soft_wrap")->as_or<bool>(false);
-        } else {
-            Diagnostics::degraded("soft_wrap expects boolean", type_name(), "invalid-prop-value");
-        }
-    }
-    if (props.contains("line_height")) {
-        if (props.at("line_height")->is_number()) {
-            const auto v = props.at("line_height")->as_or<float>(0.0F);
-            if (v > 0) {
-                line_height = v;
-            } else {
-                Diagnostics::degraded("line_height must be > 0, got " + std::to_string(v), type_name(),
-                                      "invalid-prop-value");
-            }
-        } else {
-            Diagnostics::degraded("line_height expects number", type_name(), "invalid-prop-value");
-        }
-    }
-    if (props.contains("letter_spacing")) {
-        if (props.at("letter_spacing")->is_number()) {
-            letter_spacing = props.at("letter_spacing")->as_or<float>(0.0F);
-        } else {
-            Diagnostics::degraded("letter_spacing expects number", type_name(), "invalid-prop-value");
-        }
-    }
-    if (props.contains("word_spacing")) {
-        if (props.at("word_spacing")->is_number()) {
-            word_spacing = props.at("word_spacing")->as_or<float>(0.0F);
-        } else {
-            Diagnostics::degraded("word_spacing expects number", type_name(), "invalid-prop-value");
-        }
-    }
-    if (props.contains("font_weight")) {
-        if (props.at("font_weight")->is_string() || props.at("font_weight")->is_number()) {
-            font.weight = static_cast<int>(json_to_font_weight(*props.at("font_weight")));
-        } else {
-            Diagnostics::degraded("font_weight expects string or number", type_name(), "invalid-prop-value");
-        }
-    }
-    if (props.contains("font_style")) {
-        if (props.at("font_style")->is_string()) {
-            font_style = json_to_font_style(*props.at("font_style"));
-        } else {
-            Diagnostics::degraded("font_style expects string", type_name(), "invalid-prop-value");
-        }
-    }
-    if (props.contains("decoration")) {
-        decoration = json_to_text_decoration(*props.at("decoration"));
-    }
-    if (props.contains("decoration_color")) {
-        if (props.at("decoration_color")->is_array() && props.at("decoration_color")->size() >= 4) {
-            decoration_color = json_to_color(*props.at("decoration_color"));
-        } else {
-            Diagnostics::degraded("decoration_color expects [r,g,b,a] array", type_name(), "invalid-prop-value");
-        }
-    }
-    if (props.contains("background_color")) {
-        if (props.at("background_color")->is_array() && props.at("background_color")->size() >= 4) {
-            background_color = json_to_color(*props.at("background_color"));
-        } else {
-            Diagnostics::degraded("background_color expects [r,g,b,a] array", type_name(), "invalid-prop-value");
-        }
-    }
+    props_deserialize(props);
 }
 
 auto Text::validate_props() const -> Result<void> {
-    if (font.size_pt <= 0.0F) {
+    if (font_size() <= 0.0F) {
         return make_error(ErrorCode::WidgetInvalidProp,
-                          "Text.font_size must be > 0, got " + std::to_string(font.size_pt),
+                          "Text.font_size must be > 0, got " + std::to_string(font_size()),
                           "Use positive font size (e.g. 14)");
     }
     return Result<void>{};
@@ -302,11 +40,11 @@ auto Text::baseline_distance(const BuildContext &ctx) const -> std::optional<flo
     // 首行从内容盒顶起排（见 on_paint 的 `float y = bounds.origin.y;`），故基线即有效字体的 ascent。
     // 不做整像素 snap：容器按 cross_pos = max_above - baseline 定位后，绘制侧
     // pen_y = floor(top + ascent + 0.5) 里的 ascent 与之相消，各子项实绘基线像素一致。
-    return render::FontEngine::measure_ascent(effective_font(font, ctx));
+    return render::FontEngine::measure_ascent(effective_font(current_font(), ctx));
 }
 
 auto Text::on_layout(const Constraints &c, const BuildContext &ctx) -> Size {
-    const Font f = effective_font(font, ctx);
+    const Font f = effective_font(current_font(), ctx);
     // resolved_text 缓存：on_layout 在 content 变化时必被调用，此处计算并缓存
     cached_resolved_text_ = resolved_text(ctx);
     resolved_dirty_ = false;
@@ -314,12 +52,12 @@ auto Text::on_layout(const Constraints &c, const BuildContext &ctx) -> Size {
     display_text_ = s;  // 缓存显示文本供命中测试/选区：即便尚未绘制，拖选也应可用
     const bool bounded = std::isfinite(c.max.width);
     const float max_w = bounded ? c.max.width : 1e9F;
-    const render::TextLayoutOpts opts{.letter_spacing = letter_spacing,
-                                      .word_spacing = word_spacing,
-                                      .italic = (font_style == FontStyle::Italic),
+    const render::TextLayoutOpts opts{.letter_spacing = letter_spacing(),
+                                      .word_spacing = word_spacing(),
+                                      .italic = (font_style() == FontStyle::Italic),
                                       .direction = effective_direction(ctx)};
-    line_h_ = render::FontEngine::measure_height(f) * std::max(0.1F, line_height);
-    auto [lines, cp_start] = wrap_lines(s, f, max_w, soft_wrap, max_lines, overflow, opts);
+    line_h_ = render::FontEngine::measure_height(f) * std::max(0.1F, line_height());
+    auto [lines, cp_start] = wrap_lines(s, f, max_w, soft_wrap(), max_lines(), overflow(), opts);
     lines_ = std::move(lines);
     line_cp_start_ = std::move(cp_start);
 
@@ -328,7 +66,7 @@ auto Text::on_layout(const Constraints &c, const BuildContext &ctx) -> Size {
     // 导致后者无法选中的问题；长段落仍正常换行填满。
     const float intrinsic = render::FontEngine::measure_width(s, f, opts) + 2.0F;
     float w = 0.0F;
-    if (bounded && soft_wrap) {
+    if (bounded && soft_wrap()) {
         w = (intrinsic <= max_w) ? intrinsic : c.max.width;
     } else {
         w = intrinsic;
@@ -348,10 +86,10 @@ auto Text::on_pointer_event(MouseEvent &e) -> void {
     if (display_text_.empty()) {
         return;
     }
-    const Font f = effective_font(font);
-    const render::TextLayoutOpts opts{.letter_spacing = letter_spacing,
-                                      .word_spacing = word_spacing,
-                                      .italic = (font_style == FontStyle::Italic),
+    const Font f = effective_font(current_font());
+    const render::TextLayoutOpts opts{.letter_spacing = letter_spacing(),
+                                      .word_spacing = word_spacing(),
+                                      .italic = (font_style() == FontStyle::Italic),
                                       .direction = effective_direction()};
     const float lx = e.local_position.x;
     const float ly = e.local_position.y;
@@ -367,7 +105,7 @@ auto Text::on_pointer_event(MouseEvent &e) -> void {
     const bool rtl = effective_direction() == TextDirection::RTL;
     const float line_w = render::FontEngine::measure_width(lines_[li], f, opts);
     float line_off = 0.0F;
-    switch (text_align) {
+    switch (text_align()) {
         case TextAlign::Right:
             line_off = layout_w_ - line_w;
             break;
@@ -411,7 +149,7 @@ auto Text::on_key_event(KeyEvent &e) -> void {
     if (!is_focused() || display_text_.empty() || e.action != KeyAction::Down) {
         return;
     }
-    const Font f = effective_font(font);
+    const Font f = effective_font(current_font());
     const bool shift = (e.modifiers & ModifierKey::Shift) != 0U;  // NOLINT(*-redundant-parentheses)
     const bool ctrl = (e.modifiers & ModifierKey::Control) != 0U;  // NOLINT(*-redundant-parentheses)
     const size_t n = cp_count(display_text_);
@@ -649,16 +387,16 @@ auto Text::effective_font(const Font &base, const BuildContext &ctx) -> Font {
 auto Text::effective_direction(const BuildContext &ctx) const -> std::optional<TextDirection> {
     // 三级优先（见 core/directionality.h）：控件显式属性 > Environment > 进程级（host_set）；
     // 无任何显式来源返回 nullopt——shaping 保持 hb 按内容 guess（默认行为逐位不变）。
-    if (direction.has_value()) {
-        return direction;
+    if (present(direction_row())) {
+        return direction();
     }
     return explicit_text_direction(ctx);
 }
 
 auto Text::effective_direction() const -> std::optional<TextDirection> {
     // 无上下文版（命中测试路径）：回落进程级。
-    if (direction.has_value()) {
-        return direction;
+    if (present(direction_row())) {
+        return direction();
     }
     const Directionality &proc = current_directionality();
     if (proc.host_set) {
@@ -725,7 +463,7 @@ auto Text::justify_layout(const std::string &line, const Font &f, const render::
 }
 
 auto Text::is_justified_line(size_t li) const -> bool {
-    return text_align == TextAlign::Justify && lines_.size() > 1 && (li + 1 < lines_.size());
+    return text_align() == TextAlign::Justify && lines_.size() > 1 && (li + 1 < lines_.size());
 }
 
 auto Text::line_caret_x(size_t li, size_t cp_in_line, const Font &f, const render::TextLayoutOpts &opts,

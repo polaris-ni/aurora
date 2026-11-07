@@ -187,10 +187,10 @@ AURORA_TEST_CASE(tick_updates_time_text_from_controller) {
     ControlsHook c(&player);
     player.seek_fraction(0.5);  // 30s
     c.tick_gestures(t_ms(0));
-    AURORA_TEST_CHECK_EQ(c.time_text()->content().get().text, "0:30 / 1:00");
+    AURORA_TEST_CHECK_EQ(c.time_text()->content().text, "0:30 / 1:00");
     player.seek_fraction(0.0);
     c.tick_gestures(t_ms(0));
-    AURORA_TEST_CHECK_EQ(c.time_text()->content().get().text, "0:00 / 1:00");
+    AURORA_TEST_CHECK_EQ(c.time_text()->content().text, "0:00 / 1:00");
 }
 
 AURORA_TEST_CASE(public_tick_entry_refreshes_readouts) {
@@ -202,7 +202,7 @@ AURORA_TEST_CASE(public_tick_entry_refreshes_readouts) {
     // 回归点：`Widget::tick` 在 `needs_gesture_tick_` 为假时直接早退，叠层便永远停在初始
     // 「Play / 0:00 / 0:00」读数上——既有用例直调受保护 `tick_gestures`，掩盖了这个门。
     AURORA_TEST_CHECK_TRUE(c.play_button()->label() == LocalizedString{"Pause"});
-    AURORA_TEST_CHECK_EQ(c.time_text()->content().get().text, "0:30 / 1:00");
+    AURORA_TEST_CHECK_EQ(c.time_text()->content().text, "0:30 / 1:00");
 }
 
 AURORA_TEST_CASE(backend_facts_do_not_fire_user_commands) {
@@ -221,7 +221,7 @@ AURORA_TEST_CASE(backend_facts_do_not_fire_user_commands) {
     AURORA_TEST_CHECK_EQ(ctl.mute_calls, 0);
     // tick 确实走了回填：文案与时间读数已随事实更新。
     AURORA_TEST_CHECK_TRUE(c.play_button()->label() == LocalizedString{"Pause"});
-    AURORA_TEST_CHECK_EQ(c.time_text()->content().get().text, "0:24 / 1:00");
+    AURORA_TEST_CHECK_EQ(c.time_text()->content().text, "0:24 / 1:00");
 
     // 子控件类型由 VideoControls 的固定布局决定（seek / volume 行内是 Slider），按已知结构取具体类型。
     // NOLINTBEGIN(cppcoreguidelines-pro-type-static-cast-downcast)

@@ -886,6 +886,12 @@ struct PropCodec<TextAlign> : detail::EnumPropCodec<TextAlign, &text_align_to_js
     /// @brief schema 的 C++ 类型名。
     /// @return `TextAlign`。
     [[nodiscard]] static constexpr auto type_text() -> std::string_view { return "TextAlign"; }
+
+    /// @brief 枚举档位名（schema 的 `enum`）。
+    /// @return 与枚举声明序一致的档位名。
+    [[nodiscard]] static auto enum_names() -> std::vector<std::string_view> {
+        return {"Left", "Right", "Center", "Start", "End", "Justify"};
+    }
 };
 
 /// @brief 文本方向属性。
@@ -895,6 +901,10 @@ struct PropCodec<TextDirection>
     /// @brief schema 的 C++ 类型名。
     /// @return `TextDirection`。
     [[nodiscard]] static constexpr auto type_text() -> std::string_view { return "TextDirection"; }
+
+    /// @brief 枚举档位名（schema 的 `enum`）。
+    /// @return 与枚举声明序一致的档位名。
+    [[nodiscard]] static auto enum_names() -> std::vector<std::string_view> { return {"LTR", "RTL"}; }
 };
 
 /// @brief 文本溢出策略属性。
@@ -903,6 +913,10 @@ struct PropCodec<TextOverflow> : detail::EnumPropCodec<TextOverflow, &text_overf
     /// @brief schema 的 C++ 类型名。
     /// @return `TextOverflow`。
     [[nodiscard]] static constexpr auto type_text() -> std::string_view { return "TextOverflow"; }
+
+    /// @brief 枚举档位名（schema 的 `enum`）。
+    /// @return 与枚举声明序一致的档位名。
+    [[nodiscard]] static auto enum_names() -> std::vector<std::string_view> { return {"Clip", "Ellipsis", "Fade"}; }
 };
 
 /// @brief 字重属性。
@@ -911,6 +925,12 @@ struct PropCodec<FontWeight> : detail::EnumPropCodec<FontWeight, &font_weight_to
     /// @brief schema 的 C++ 类型名。
     /// @return `FontWeight`。
     [[nodiscard]] static constexpr auto type_text() -> std::string_view { return "FontWeight"; }
+
+    /// @brief 枚举档位名（schema 的 `enum`）。
+    /// @return 与枚举声明序一致的档位名。
+    [[nodiscard]] static auto enum_names() -> std::vector<std::string_view> {
+        return {"Thin", "ExtraLight", "Light", "Normal", "Medium", "SemiBold", "Bold", "ExtraBold", "Black"};
+    }
 };
 
 /// @brief 字形属性。
@@ -919,6 +939,10 @@ struct PropCodec<FontStyle> : detail::EnumPropCodec<FontStyle, &font_style_to_js
     /// @brief schema 的 C++ 类型名。
     /// @return `FontStyle`。
     [[nodiscard]] static constexpr auto type_text() -> std::string_view { return "FontStyle"; }
+
+    /// @brief 枚举档位名（schema 的 `enum`）。
+    /// @return 与枚举声明序一致的档位名。
+    [[nodiscard]] static auto enum_names() -> std::vector<std::string_view> { return {"Normal", "Italic"}; }
 };
 
 /// @brief 文本装饰属性。
@@ -928,6 +952,12 @@ struct PropCodec<TextDecoration>
     /// @brief schema 的 C++ 类型名。
     /// @return `TextDecoration`。
     [[nodiscard]] static constexpr auto type_text() -> std::string_view { return "TextDecoration"; }
+
+    /// @brief 枚举档位名（schema 的 `enum`）。
+    /// @return 与枚举声明序一致的档位名。
+    [[nodiscard]] static auto enum_names() -> std::vector<std::string_view> {
+        return {"None", "Underline", "Overline", "LineThrough"};
+    }
 };
 
 /// @brief 主轴尺寸属性。

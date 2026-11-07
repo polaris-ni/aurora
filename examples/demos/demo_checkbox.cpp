@@ -33,7 +33,7 @@ auto main() -> int {
     au::Node root = au::Column{
         GradientTitle{"Checkbox widget"},
         gap(12),
-        au::Row{std::move(cb), au::Text{au::TextProps{.content = *label}}},
+        au::Row{std::move(cb), au::Text{au::TextProps().set_content(*label)}},
         gap(12),
         au::Row{std::move(cb2), au::Text{au::LocalizedString{"Pre-checked + custom active color"}}},
         gap(12),

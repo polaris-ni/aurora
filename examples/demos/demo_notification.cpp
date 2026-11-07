@@ -76,9 +76,9 @@ auto main() -> int {
     au::Node root = au::Column({
         GradientTitle{"System notification"},
         gap(8),
-        au::Text{au::TextProps{.content = *status}},
+        au::Text{au::TextProps().set_content(*status)},
         gap(8),
-        au::Text{au::TextProps{.content = *activated}},
+        au::Text{au::TextProps().set_content(*activated)},
         gap(12),
         action_button("Post low urgency", [&post]() -> void { post("demo-low", au::NotificationUrgency::Low, 0); }),
         gap(8),

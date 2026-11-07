@@ -34,12 +34,12 @@ auto main() -> int {
     au::Node root = au::Column{
         GradientTitle{"State / Reactivity"},
         gap(12),
-        au::Text{au::TextProps{.content = status}},
-        au::Text{au::TextProps{.content = frozen}},
+        au::Text{au::TextProps().set_content(status)},
+        au::Text{au::TextProps().set_content(frozen)},
         std::move(up),
         gap(8),
-        au::Text{au::TextProps{.content = name_line}},
-        au::Text{au::TextProps{.content = size_line}},
+        au::Text{au::TextProps().set_content(name_line)},
+        au::Text{au::TextProps().set_content(size_line)},
         std::move(add),
     };
     return run_demo(Card{std::move(root)}, "State · Aurora Demo", 520.0F, 460.0F);

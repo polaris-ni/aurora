@@ -27,8 +27,11 @@ auto main() -> int {
     };
 
     au::Node root = au::Column{
-        GradientTitle{"ScatterChart widget"},          gap(12), std::move(chart), gap(8),
-        au::Text{au::TextProps{.content = *last_tap}},
+        GradientTitle{"ScatterChart widget"},
+        gap(12),
+        std::move(chart),
+        gap(8),
+        au::Text{au::TextProps().set_content(*last_tap)},
     };
     return run_demo(Card{std::move(root)}, "ScatterChart · Aurora Demo", 640.0F, 420.0F);
 }

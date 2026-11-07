@@ -384,9 +384,9 @@ class BottomNavBar : public Widget, public BottomNavBarProps {
                 .origin = Point{.x = cell.origin.x + 4.0F, .y = cell.origin.y + cell.size.height - 22.0F},
                 .size = Size{.width = cell_w - 8.0F, .height = 16.0F}};
             auto label = std::make_shared<Text>(items[i].label);
-            label->text_color = sel ? selected_color(ctx) : unselected_color(ctx);
-            label->font.size_pt = 12.0F;
-            label->text_align = TextAlign::Center;
+            label->set_color(sel ? selected_color(ctx) : unselected_color(ctx));
+            label->set_font_size(12.0F);
+            label->set_text_align(TextAlign::Center);
             Node ln{label};
             ln.widget().layout(Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = label_rect.size}, ctx);
             ln.widget().paint(p, label_rect, ctx);

@@ -50,7 +50,7 @@ struct MessageArg {
 /// - 本地化：以 `id` 查 `MessageCatalog`，按 `Locale` 从当前回退视图取模板，并用具名 `args`
 /// 经消息引擎格式化（命名占位 `{name}`、函数化 `{count, number}`、CLDR 选择器
 /// `{count, plural, =0{…} one{…} other{…}}`，见 plural.h）
-/// 提供从文本的隐式构造，便于 AI 直接写 `Text{ .content = "Hi" }`。
+/// 提供从文本的隐式构造，便于 AI 直接写 `Text(TextProps().set_content("Hi"))`。
 ///
 /// @note Thread: main-thread only
 /// @note Side-effects: none

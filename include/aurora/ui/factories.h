@@ -47,7 +47,7 @@ template <typename T, typename... Args>
 /// @param props 文本属性块（默认构造）
 /// @return 指向新建 `Text` 的裸指针，生命周期由 parent 子树持有
 inline auto label(Container &parent, std::string_view text, TextProps props = {}) -> Text * {
-    props.content = std::string(text);
+    props.set_content(std::string(text));
     return detail::make_add<Text>(parent, std::move(props));
 }
 

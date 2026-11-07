@@ -16,19 +16,19 @@ auto Text::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> 
     }
     const std::string &s = cached_resolved_text_;
     display_text_ = s;  // 缓存显示文本供命中测试/选区
-    const Font f = effective_font(font, ctx);
-    const render::TextLayoutOpts opts{.letter_spacing = letter_spacing,
-                                      .word_spacing = word_spacing,
-                                      .italic = (font_style == FontStyle::Italic),
+    const Font f = effective_font(current_font(), ctx);
+    const render::TextLayoutOpts opts{.letter_spacing = letter_spacing(),
+                                      .word_spacing = word_spacing(),
+                                      .italic = (font_style() == FontStyle::Italic),
                                       .direction = effective_direction(ctx)};
-    const render::TextAAMode aa = text_aa_mode.has_value() ? *text_aa_mode : render::FontEngine::text_aa_mode();
+    const render::TextAAMode aa = text_aa_mode_.has_value() ? *text_aa_mode_ : render::FontEngine::text_aa_mode();
     paint_scale_ = p.scale();  // 实显宽度校正与绘制同源：命中测试（无 Painter）复用最近一次绘制的像素比
 
     // 若布局阶段未产出行（极端情况），在此兜底计算
     float line_h = line_h_;
     if (lines_.empty() || line_h <= 0.0F) {
-        line_h = render::FontEngine::measure_height(f) * std::max(0.1F, line_height);
-        auto [lines, cp_start] = wrap_lines(s, f, bounds.size.width, soft_wrap, max_lines, overflow, opts);
+        line_h = render::FontEngine::measure_height(f) * std::max(0.1F, line_height());
+        auto [lines, cp_start] = wrap_lines(s, f, bounds.size.width, soft_wrap(), max_lines(), overflow(), opts);
         lines_ = std::move(lines);
         line_cp_start_ = std::move(cp_start);
         // 写回成员：即使未经过 on_layout（如独立文本/测试场景），后续命中测试
@@ -36,7 +36,7 @@ auto Text::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> 
         line_h_ = line_h;
     }
 
-    const bool justify = (text_align == TextAlign::Justify);
+    const bool justify = (text_align() == TextAlign::Justify);
     float y = bounds.origin.y;
     // 文字色：显式优先，否则跟随主题 on_surface（迁移批；ThemeScope 换肤即生效）。
     const Color fg = resolve_text_color(ctx);
@@ -47,7 +47,7 @@ auto Text::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> 
         const std::string &line = lines_[li];
         const float line_w = render::FontEngine::measure_width(line, f, opts);
         float x = bounds.origin.x;
-        switch (text_align) {
+        switch (text_align()) {
             case TextAlign::Right:
                 x = bounds.origin.x + (bounds.size.width - line_w);
                 break;
@@ -67,10 +67,11 @@ auto Text::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> 
         }
 
         // 文本底色
-        if (background_color.a > 0) {
+        const Color bg = background_color();
+        if (bg.a > 0) {
             p.fill_rect(Rect{.origin = Point{.x = bounds.origin.x, .y = y},
                              .size = Size{.width = bounds.size.width, .height = line_h}},
-                        background_color);
+                        bg);
         }
 
         // 本行绘制范围（用于装饰线对齐）；Justify 时整行铺满。
@@ -108,20 +109,21 @@ auto Text::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> 
         }
 
         // 装饰线（上划线 / 下划线 / 删除线）按整行绘制。
-        if (decoration != TextDecoration::None) {
-            const Color dc = decoration_color.value_or(fg);
+        const TextDecoration deco = decoration();
+        if (deco != TextDecoration::None) {
+            const Color dc = decoration_color(ctx);
             const float thick = std::max(1.0F, line_h * 0.06F);
-            if (decoration_has(decoration, TextDecoration::Underline)) {
+            if (decoration_has(deco, TextDecoration::Underline)) {
                 p.fill_rect(Rect{.origin = Point{.x = line_left, .y = y + (line_h * 0.82F)},
                                  .size = Size{.width = line_right - line_left, .height = thick}},
                             dc);
             }
-            if (decoration_has(decoration, TextDecoration::Overline)) {
+            if (decoration_has(deco, TextDecoration::Overline)) {
                 p.fill_rect(Rect{.origin = Point{.x = line_left, .y = y + (line_h * 0.12F)},
                                  .size = Size{.width = line_right - line_left, .height = thick}},
                             dc);
             }
-            if (decoration_has(decoration, TextDecoration::LineThrough)) {
+            if (decoration_has(deco, TextDecoration::LineThrough)) {
                 p.fill_rect(Rect{.origin = Point{.x = line_left, .y = y + (line_h * 0.5F)},
                                  .size = Size{.width = line_right - line_left, .height = thick}},
                             dc);
@@ -167,7 +169,7 @@ auto Text::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> 
             // NOLINTNEXTLINE 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
             const float line_w = render::FontEngine::measure_width(lines_[li], f, opts);
             float line_off = 0.0F;
-            switch (text_align) {
+            switch (text_align()) {
                 case TextAlign::Right:
                     line_off = bounds.size.width - line_w;
                     break;

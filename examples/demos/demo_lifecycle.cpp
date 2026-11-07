@@ -41,8 +41,8 @@ auto main() -> int {
         gap(8),
         au::Show{visible, std::move(subtree)},
         gap(8),
-        au::Text{au::TextProps{.content = status}},
-        au::Text{au::TextProps{.content = count_label}},
+        au::Text{au::TextProps().set_content(status)},
+        au::Text{au::TextProps().set_content(count_label)},
         au::Text{au::LocalizedString{"Tip: showing/hiding subtree with Show does not remount (count stays 1); "
                                      "on_unmount triggers only when window closes"}},
     };

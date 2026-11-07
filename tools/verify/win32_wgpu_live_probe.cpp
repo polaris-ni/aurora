@@ -404,7 +404,7 @@ auto main(int argc, char **argv) -> int {
     std::vector<aurora::Node> cp;
     cp.push_back(std::move(video_widget));
     cp.emplace_back(
-        std::make_shared<aurora::Text>(aurora::TextProps{.content = aurora::LocalizedString{"wgpu verify 0123"}}));
+        std::make_shared<aurora::Text>(aurora::TextProps().set_content(aurora::LocalizedString{"wgpu verify 0123"})));
     cp.emplace_back(std::make_shared<aurora::Column>(std::move(grid_props)));
     auto root_widget = std::make_shared<aurora::Column>(std::move(cp));
     // Node 以 shared_ptr 重载接管所有权；present_root(Node&) 需命名左值逐帧传引用，

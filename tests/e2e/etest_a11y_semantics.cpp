@@ -58,12 +58,12 @@ constexpr std::string_view AURORA_A11Y_FRAME_TITLE = "aurora_e2e_a11y";
 
     return au::Node{au::Column{
         au::Button{au::ButtonProps().set_label(au::LocalizedString{AURORA_A11Y_BUTTON_NAME})},
-        au::Row{au::Text{au::TextProps{.content = au::LocalizedString{AURORA_A11Y_CHECKBOX_LABEL}}},
+        au::Row{au::Text{au::TextProps().set_content(au::LocalizedString{AURORA_A11Y_CHECKBOX_LABEL})},
                 au::Checkbox{checked}},
-        au::Row{au::Text{au::TextProps{.content = au::LocalizedString{AURORA_A11Y_SLIDER_LABEL}}},
+        au::Row{au::Text{au::TextProps().set_content(au::LocalizedString{AURORA_A11Y_SLIDER_LABEL})},
                 std::move(slider_node)},
         std::move(input_node),
-        au::Text{au::TextProps{.content = au::LocalizedString{AURORA_A11Y_TEXT_NAME}}},
+        au::Text{au::TextProps().set_content(au::LocalizedString{AURORA_A11Y_TEXT_NAME})},
     }};
 }
 

@@ -88,15 +88,15 @@ namespace detail {
 /// @param type 序列化 type 名。
 /// @return 该类型的属性是否只能通过 `set_<键名>()` 链式写件装入。
 [[nodiscard]] constexpr auto props_chain_writers(std::string_view type) noexcept -> bool {
-    constexpr std::array<std::string_view, 15> k_chain = {
-        "BarChart",  "BottomNavBar", "Button",        "Column", "Divider",      "Grid",   "Image",    "LazyRow",
-        "LineChart", "PieChart",     "PullToRefresh", "Row",    "ScatterChart", "Scroll", "Sparkline"};
+    constexpr std::array<std::string_view, 16> k_chain = {
+        "BarChart",  "BottomNavBar", "Button",        "Column", "Divider",      "Grid",   "Image",     "LazyRow",
+        "LineChart", "PieChart",     "PullToRefresh", "Row",    "ScatterChart", "Scroll", "Sparkline", "Text"};
     return std::ranges::find(k_chain, type) != k_chain.end();
 }
 
 /// @brief 属性键在 C++ 侧的写入落点。
 struct PropTarget {
-    std::string lhs;  ///< 成员路径（可嵌套，如 `font.size_pt`）或链式 setter 名
+    std::string lhs;  ///< 成员路径（可嵌套）或链式 setter 名
     bool via_setter = false;  ///< true = 生成 `w.lhs(值)`；false = 生成 `w.lhs = 值`
 };
 
@@ -240,19 +240,15 @@ struct PropTarget {
 /// @brief 键名 ≠ 公开成员名、路径嵌套、或只能经 setter 写入的属性差集表。
 ///
 /// 逐条由 `aurora_cli describe <Type>` 的 `props` 表键集与控件头文件的成员声明比对得出，
-/// 并以 `g++ -fsyntax-only` 编译产物验证（未登记者按同名公开成员处理）。典型三类：
-/// ① 嵌套聚合（Text 的 `font_size` 落在 `font.size_pt`）；② 改名（Text 的 `color` 落在
-/// `text_color`）；③ protected 字段 + 公有链式 setter（TextInput 的一整组样式键）。②可进指定
-/// 初始化器，①③不可（GCC 的 C++ 指定初始化器不支持嵌套设计符，protected 字段不可在类外赋值），
-/// 故只在 StepByStep 出现。链式形态的类型不在此表登记：落点由词根 `set_<键>` 推出。
+/// 并以 `g++ -fsyntax-only` 编译产物验证（未登记者按同名公开成员处理）。当前在册的只有
+/// protected 字段 + 公有链式 setter 一类（TextInput / Stack / Skeleton / TitleBar 等）：
+/// 这类落点不能进指定初始化器（protected 字段不可在类外赋值），故只在 StepByStep 出现；
+/// 属性面已迁到链式写件的类型不在此表登记——落点由词根 `set_<键>` 推出。
 ///
 /// @return 函数级 static 只读表（键为 type.key 拼接串），首次调用构造、此后只读缓存。
 [[nodiscard]] inline auto prop_target_table() -> const std::unordered_map<std::string, PropTarget> & {
     // NOLINTNEXTLINE(bugprone-dynamic-static-initializers) 函数级只读表，理由同 enum_type_for_key
     static const std::unordered_map<std::string, PropTarget> M = {
-        {"Text.color", {.lhs = "text_color", .via_setter = false}},
-        {"Text.font_size", {.lhs = "font.size_pt", .via_setter = false}},
-        {"Text.font_weight", {.lhs = "font.weight", .via_setter = false}},
         {"TextInput.background", {.lhs = "set_background", .via_setter = true}},
         {"TextInput.border_color", {.lhs = "set_border_color", .via_setter = true}},
         {"TextInput.border_width", {.lhs = "set_border_width", .via_setter = true}},
@@ -1012,7 +1008,7 @@ struct PropEmit {
 /// 变量编号仍按前序分配（根 = `__w0`）。
 ///
 /// 这是三种风格里唯一**完整**的一种：基类属性（`width`/`height`/`show`/`overflow`/a11y 三键）、
-/// 嵌套路径（`font.size_pt`）与 setter-only 属性（TextInput 的样式组）都只能在构造后写入。
+/// 嵌套成员路径与 setter-only 属性（TextInput 的样式组）都只能在构造后写入。
 ///
 /// @param node 子树快照 JSON。
 /// @param indent 缩进层级（一级 4 空格）。

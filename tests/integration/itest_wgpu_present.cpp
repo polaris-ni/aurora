@@ -72,7 +72,7 @@ AURORA_TEST_CASE(wgpu_win32_surface_present_frames_and_no_fallback) {
     auto *ws = dynamic_cast<HostWgpuSurface *>(&surface);
     AURORA_TEST_REQUIRE(ws != nullptr);
 
-    session.mount(au::Text{au::TextProps{.content = au::LocalizedString{"Wgpu Aa 01"}}});
+    session.mount(au::Text{au::TextProps().set_content(au::LocalizedString{"Wgpu Aa 01"})});
     // 开窗后的首批 map/configure/expose 事件会触发宿主「同步重绘」（present_request_ → 对缓存
     // 根再渲染一帧），属真实窗口语义而非回退；先短 settle 泵掉该突发，保持下方逐帧帧数口径为
     // 精确相等。该路径若绕过 GPU 帧通道直接 present()，软件缓冲上屏即白闪——故此处一并断言
@@ -143,7 +143,7 @@ AURORA_TEST_CASE(wayland_host_gpu_routing_and_frames) {
     AURORA_TEST_REQUIRE(sink != nullptr);
     AURORA_TEST_CHECK_EQ(sink->name(), std::string_view("gpu-wgpu"));
 
-    au::Node page = au::Text{au::TextProps{.content = au::LocalizedString{"Wgpu Wayland Aa 01"}}};
+    au::Node page = au::Text{au::TextProps().set_content(au::LocalizedString{"Wgpu Wayland Aa 01"})};
     // 同首用例口径：泵掉 map/configure 触发的同步重绘突发（该路径必须走 GPU 帧通道，不得以
     // 软件 wl_shm 帧兜底），保持逐帧帧数精确相等。
     for (int k = 0; k < 5; ++k) {
@@ -191,7 +191,7 @@ AURORA_TEST_CASE(wayland_csd_decoration_replays_into_gpu_frame) {
     // 强制 CSD 确实生效的判据（否则下方「装饰回放递增」会因 csd_title=false 恒 0 而空转）。
     AURORA_TEST_CHECK_GT(ws->content_inset().top, 0.0F);
 
-    au::Node page = au::Text{au::TextProps{.content = au::LocalizedString{"Wgpu CSD Aa 01"}}};
+    au::Node page = au::Text{au::TextProps().set_content(au::LocalizedString{"Wgpu CSD Aa 01"})};
     for (int k = 0; k < 5; ++k) {
         ws->poll_platform_events();
         std::this_thread::sleep_for(std::chrono::milliseconds(20));

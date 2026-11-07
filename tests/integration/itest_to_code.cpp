@@ -130,12 +130,12 @@ AURORA_TEST_CASE(codegen_designated_init_and_step_by_step_styles) {
 
 AURORA_TEST_CASE(codegen_scalar_props_string_bool_float_int) {
     const std::string str_code = to_code(make_text(testing::json_obj({{"content", "Hello"}})));
-    AURORA_TEST_CHECK_MSG(str_code.find(".content = \"Hello\"") != std::string::npos, "emit_props: string content");
+    AURORA_TEST_CHECK_MSG(str_code.find(".set_content(\"Hello\")") != std::string::npos, "emit_props: string content");
 
     const std::string bool_true = to_code(make_text(testing::json_obj({{"soft_wrap", au::Json{true}}})));
-    AURORA_TEST_CHECK_MSG(bool_true.find(".soft_wrap = true") != std::string::npos, "emit_props: bool true");
+    AURORA_TEST_CHECK_MSG(bool_true.find(".set_soft_wrap(true)") != std::string::npos, "emit_props: bool true");
     const std::string bool_false = to_code(make_text(testing::json_obj({{"soft_wrap", au::Json{false}}})));
-    AURORA_TEST_CHECK_MSG(bool_false.find(".soft_wrap = false") != std::string::npos, "emit_props: bool false");
+    AURORA_TEST_CHECK_MSG(bool_false.find(".set_soft_wrap(false)") != std::string::npos, "emit_props: bool false");
 
     // 整数值浮点属性（`14.0`）必须带小数点：`14f` 会被解析成用户字面量 `operator""f`。
     const std::string float_code = to_code(make_node("Button", testing::json_obj({{"corner_radius", 14.0}})));
@@ -189,9 +189,9 @@ AURORA_TEST_CASE(codegen_color_and_edge_insets_values) {
     const std::string color = to_code(make_text(testing::json_obj({{"color", testing::json_arr({255, 0, 0, 255})}})));
     AURORA_TEST_CHECK_MSG(color.find("au::Color{255,0,0,255}") != std::string::npos,
                           "emit_props: Color array as au::Color RGBA");
-    // Text 的 `color` 键落在聚合成员 `text_color`（异名换算）。
-    AURORA_TEST_CHECK_MSG(color.find(".text_color = au::Color{") != std::string::npos,
-                          "emit_props: Text color aliases to text_color");
+    // Text 的 `color` 键经链式写件 `set_color` 装入（属性单一声明形态）。
+    AURORA_TEST_CHECK_MSG(color.find(".set_color(au::Color{") != std::string::npos,
+                          "emit_props: Text color through set_color");
 
     const std::string insets = to_code(make_node(
         "Button",
@@ -202,20 +202,17 @@ AURORA_TEST_CASE(codegen_color_and_edge_insets_values) {
 }
 
 AURORA_TEST_CASE(codegen_enum_keys_emit_qualified_expressions) {
+    AURORA_TEST_CHECK_MSG(to_code(make_text(testing::json_obj({{"text_align", "Center"}})))
+                                  .find(".set_text_align(au::TextAlign::Center)") != std::string::npos,
+                          "emit_props: enum TextAlign");
+    AURORA_TEST_CHECK_MSG(to_code(make_text(testing::json_obj({{"overflow", "Ellipsis"}})))
+                                  .find(".set_overflow(au::TextOverflow::Ellipsis)") != std::string::npos,
+                          "emit_props: Text overflow key → TextOverflow");
+    AURORA_TEST_CHECK_MSG(to_code(make_text(testing::json_obj({{"font_style", "Italic"}})))
+                                  .find(".set_font_style(au::FontStyle::Italic)") != std::string::npos,
+                          "emit_props: enum FontStyle");
     AURORA_TEST_CHECK_MSG(
-        to_code(make_text(testing::json_obj({{"text_align", "Center"}}))).find("au::TextAlign::Center") !=
-            std::string::npos,
-        "emit_props: enum TextAlign");
-    AURORA_TEST_CHECK_MSG(
-        to_code(make_text(testing::json_obj({{"overflow", "Ellipsis"}}))).find("au::TextOverflow::Ellipsis") !=
-            std::string::npos,
-        "emit_props: Text overflow key → TextOverflow");
-    AURORA_TEST_CHECK_MSG(
-        to_code(make_text(testing::json_obj({{"font_style", "Italic"}}))).find("au::FontStyle::Italic") !=
-            std::string::npos,
-        "emit_props: enum FontStyle");
-    AURORA_TEST_CHECK_MSG(
-        to_code(make_text(testing::json_obj({{"direction", "RTL"}}))).find("au::TextDirection::RTL") !=
+        to_code(make_text(testing::json_obj({{"direction", "RTL"}}))).find(".set_direction(au::TextDirection::RTL)") !=
             std::string::npos,
         "emit_props: enum TextDirection");
     // 基类 `overflow`（非 Text 类型）是 OverflowStrategy，经 overflow_strategy() setter 写入。
@@ -265,8 +262,8 @@ AURORA_TEST_CASE(codegen_key_without_public_write_path_is_dropped_not_invented) 
 AURORA_TEST_CASE(codegen_font_weight_and_text_decoration) {
     // 落点 `Font::weight` 是 int（CSS 100..900），故发射数值字面量而非枚举名。
     const std::string bold = to_code(make_text(testing::json_obj({{"font_weight", "700"}})), CodeStyle::StepByStep);
-    AURORA_TEST_CHECK_MSG(bold.find("__w0.font.weight = 700;") != std::string::npos,
-                          "emit_props: FontWeight 700 → font.weight int");
+    AURORA_TEST_CHECK_MSG(bold.find("__w0.set_font_weight(700);") != std::string::npos,
+                          "emit_props: FontWeight 700 → set_font_weight int");
 
     const std::string single =
         to_code(make_text(testing::json_obj({{"decoration", testing::json_arr({"Underline"})}})));
@@ -333,19 +330,19 @@ AURORA_TEST_CASE(codegen_never_invents_props_aggregate) {
 }
 
 AURORA_TEST_CASE(codegen_nested_and_setter_props_only_reach_step_style) {
-    // 嵌套路径（font.size_pt）与 setter-only（TextInput 样式组）无法进指定初始化器：
-    // GCC 的 C++ 指定初始化器不支持嵌套设计符，protected 字段不能在类外赋值。
-    const au::Json text_props =
-        testing::json_obj({{"content", "Hi"}, {"font_size", 16.0F}, {"main_axis_alignment", "Center"}});
+    // Text 的字体尺寸经链式写件 `set_font_size` 装入，表达式风格同样承载（不再是嵌套路径）；
+    // 没有 `TProps()` 词根可挂、只留 protected 字段 + setter 的 TextInput 样式键仍只在 StepByStep 出现。
+    const au::Json text_props = testing::json_obj({{"content", "Hi"}, {"font_size", 16.0F}});
     const std::string expr = to_code(make_text(text_props));
-    AURORA_TEST_CHECK_MSG(expr.find(".font_size") == std::string::npos, "expression style drops nested font_size");
-    AURORA_TEST_CHECK_MSG(expr.find(".content = \"Hi\"") != std::string::npos,
-                          "expression style keeps top-level member");
+    AURORA_TEST_CHECK_MSG(expr.find(".set_font_size(16.0f)") != std::string::npos,
+                          "expression style keeps font_size through its writer");
+    AURORA_TEST_CHECK_MSG(expr.find(".set_content(\"Hi\")") != std::string::npos,
+                          "expression style keeps top-level content writer");
 
     const std::string step =
         to_code(make_text(testing::json_obj({{"content", "Hi"}, {"font_size", 16.0F}})), CodeStyle::StepByStep);
-    AURORA_TEST_CHECK_MSG(step.find("__w0.font.size_pt = 16.0f;") != std::string::npos,
-                          "step writes nested font.size_pt");
+    AURORA_TEST_CHECK_MSG(step.find("__w0.set_font_size(16.0f);") != std::string::npos,
+                          "step writes font_size through its setter");
 
     const au::Json col_props = testing::json_obj({{"main_axis_alignment", "SpaceBetween"},
                                                   {"cross_axis_alignment", "Stretch"},
@@ -459,17 +456,17 @@ AURORA_TEST_CASE(codegen_multi_prop_mixed_emission) {
         {"max_lines", 2},
     });
     const std::string expr = to_code(make_text(props));
-    AURORA_TEST_CHECK_MSG(expr.find(".content = \"Hello\"") != std::string::npos, "mixed: content");
+    AURORA_TEST_CHECK_MSG(expr.find(".set_content(\"Hello\")") != std::string::npos, "mixed: content");
     AURORA_TEST_CHECK_MSG(expr.find("au::TextAlign::Center") != std::string::npos, "mixed: text_align");
     AURORA_TEST_CHECK_MSG(expr.find("au::Color{255,0,0,255}") != std::string::npos, "mixed: color");
-    AURORA_TEST_CHECK_MSG(expr.find(".max_lines = 2") != std::string::npos, "mixed: int member");
+    AURORA_TEST_CHECK_MSG(expr.find(".set_max_lines(2)") != std::string::npos, "mixed: int writer");
     AURORA_TEST_CHECK_MSG(expr.find(".show") == std::string::npos, "mixed: base show omitted from expression");
-    AURORA_TEST_CHECK_MSG(expr.find(".font_size") == std::string::npos, "mixed: nested font_size omitted");
+    AURORA_TEST_CHECK_MSG(expr.find(".set_font_size(16.0f)") != std::string::npos, "mixed: font_size writer kept");
 
     const std::string step = to_code(make_text(props), CodeStyle::StepByStep);
-    AURORA_TEST_CHECK_MSG(step.find("__w0.content = \"Hello\";") != std::string::npos, "mixed step: content");
+    AURORA_TEST_CHECK_MSG(step.find("__w0.set_content(\"Hello\");") != std::string::npos, "mixed step: content");
     AURORA_TEST_CHECK_MSG(step.find("__w0.set_show(true);") != std::string::npos, "mixed step: show setter");
-    AURORA_TEST_CHECK_MSG(step.find("__w0.font.weight = 700;") != std::string::npos, "mixed step: font weight");
+    AURORA_TEST_CHECK_MSG(step.find("__w0.set_font_weight(700);") != std::string::npos, "mixed step: font weight");
     AURORA_TEST_CHECK_MSG(step.find("__w0.width(au::px(200.0f));") != std::string::npos, "mixed step: width setter");
 }
 
@@ -477,8 +474,9 @@ AURORA_TEST_CASE(codegen_from_widget_snapshot_compiles_shape) {
     // 便捷入口：直接对控件取快照再生成（Inspector / export_code 的同一条路径）。
     auto text = au::Text("Hi");
     const std::string code = au::serialization::to_code(text);
-    AURORA_TEST_CHECK_MSG(code.find("au::Text(au::TextProps{") != std::string::npos, "widget overload emits TextProps");
-    AURORA_TEST_CHECK_MSG(code.find(".content = \"Hi\"") != std::string::npos, "widget overload keeps content");
+    AURORA_TEST_CHECK_MSG(code.find("au::Text(au::TextProps()") != std::string::npos,
+                          "widget overload emits TextProps");
+    AURORA_TEST_CHECK_MSG(code.find(".set_content(\"Hi\")") != std::string::npos, "widget overload keeps content");
 }
 
 AURORA_TEST_CASE(codegen_designated_initializers_follow_declaration_order) {
@@ -530,7 +528,7 @@ AURORA_TEST_CASE(codegen_font_weight_and_enum_numeric_forms) {
     // 数字取值必须留在 int 形态，不能拼成 `au::FontWeight::400`（那不是合法标识符）。
     const std::string weight =
         to_code(make_text(testing::json_obj({{"content", "Hi"}, {"font_weight", "400"}})), CodeStyle::StepByStep);
-    AURORA_TEST_CHECK_MSG(weight.find("__w0.font.weight = 400;") != std::string::npos,
+    AURORA_TEST_CHECK_MSG(weight.find("__w0.set_font_weight(400);") != std::string::npos,
                           "font_weight: CSS numeric string -> int literal");
     AURORA_TEST_CHECK_MSG(weight.find("au::FontWeight::") == std::string::npos,
                           "font_weight: does not assemble an enum member name");

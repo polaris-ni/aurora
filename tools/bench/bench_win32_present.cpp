@@ -80,14 +80,15 @@ auto main() -> int {
         "beyond the quiet hills and the pale moon rises above the sleeping town. "
         "The quick brown fox jumps over the lazy dog while a silent river flows "
         "beyond the quiet hills and the pale moon rises above the sleeping town.";
-    auto para = std::make_shared<Text>(TextProps{
-        .content = k_para, .font = Font{.size_pt = 15.0F}, .text_align = TextAlign::Justify, .soft_wrap = true});
+    auto para = std::make_shared<Text>(
+        TextProps().set_content(k_para).set_font_size(15.0F).set_text_align(TextAlign::Justify).set_soft_wrap(true));
     std::vector<Node> kids;
     kids.reserve(9);
     for (int i = 0; i < 8; ++i) {
         kids.emplace_back(std::make_shared<Text>(
-            TextProps{.content = LocalizedString{"line " + std::to_string(i) + " · sample line content"},
-                      .font = Font{.size_pt = 16.0F}}));
+            TextProps()
+                .set_content(LocalizedString{"line " + std::to_string(i) + " · sample line content"})
+                .set_font_size(16.0F)));
     }
     kids.emplace_back(para);
     Node root{std::make_shared<Column>(std::move(kids))};

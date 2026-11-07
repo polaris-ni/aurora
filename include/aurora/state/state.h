@@ -42,7 +42,7 @@ class State {
 
     /// @brief 由初值构造，采用默认等价策略（载荷可相等比较时按 `==` 去重）。
     ///
-    /// 刻意不加 explicit：属性字段靠这条隐式转换支持 `Text{ .content = "Hi" }` 与
+    /// 刻意不加 explicit：属性字段靠这条隐式转换支持 `TextProps().set_content("Hi")` 与
     /// `Checkbox{ true }` 这类写法；加 explicit 会让全部控件的属性直写与默认值初始化失败。
     /// @param initial 初始值（移入来源）。
     State(T initial)  // NOLINT(google-explicit-constructor)

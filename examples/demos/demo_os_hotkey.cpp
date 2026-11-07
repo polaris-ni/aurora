@@ -74,9 +74,9 @@ auto main() -> int {
     au::Node root = au::Column({
         GradientTitle{"OS hotkey"},
         gap(8),
-        au::Text{au::TextProps{.content = *status}},
+        au::Text{au::TextProps().set_content(*status)},
         gap(8),
-        au::Text{au::TextProps{.content = *hits_text}},
+        au::Text{au::TextProps().set_content(*hits_text)},
         gap(12),
         action_button("Register Ctrl+Shift+K",
                       [&hotkeys, &registered, &log_status]() -> void {

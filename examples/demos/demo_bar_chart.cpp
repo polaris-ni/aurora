@@ -37,7 +37,7 @@ auto main() -> int {
         gap(12),
         std::move(grouped),
         gap(8),
-        au::Text{au::TextProps{.content = *last_tap}},
+        au::Text{au::TextProps().set_content(*last_tap)},
         gap(16),
         std::move(stacked),
     };

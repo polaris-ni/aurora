@@ -43,7 +43,7 @@ auto main() -> int {
 
     // 方案 A：自定义 Surface 经 Application 接入，离屏 render_to_png 产出可见产物（无事件循环挂起）。
     {
-        au::Scene scene{au::Text{au::TextProps{.content = au::LocalizedString{"Custom Surface"}}}};
+        au::Scene scene{au::Text{au::TextProps().set_content(au::LocalizedString{"Custom Surface"})}};
         au::Application app{std::move(scene), std::make_unique<DemoSurface>()};
         auto r = app.render_to_png("build/demo_custom_surface_custom.png");
         AURORA_LOG_INFO("demo", "[demo_custom_surface] custom Surface PNG: ", r ? "OK" : r.error().message);
@@ -56,7 +56,7 @@ auto main() -> int {
             .window(win_res ? std::move(win_res.value()) : nullptr)
             .title("surface-demo")
             .size(360, 200)
-            .view(au::Text{au::TextProps{.content = au::LocalizedString{"Headless Window"}}})
+            .view(au::Text{au::TextProps().set_content(au::LocalizedString{"Headless Window"})})
             .frames(1)
             .run();
     }

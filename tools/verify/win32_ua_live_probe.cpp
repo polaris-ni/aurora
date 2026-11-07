@@ -216,7 +216,7 @@ auto emit(const std::string &text) -> void { AURORA_LOG_RAW("verify", text, "\n"
     // 二者放进**纵向**列：`sibling_label_name` 的行内相邻判据在纵向下刻意不命中，
     // 且引用者自身无内置标签 —— 故它的 UIA Name 只可能来自 labelled_by 的解析结果。
     // CJK-LITERAL: cjk-fixture - caption referenced by set_labelled_by; its Han Name is asserted via UIA (#21)
-    auto caption = std::make_shared<aurora::Text>(aurora::TextProps{.content = aurora::LocalizedString{"季度汇总"}});
+    auto caption = std::make_shared<aurora::Text>(aurora::TextProps().set_content(aurora::LocalizedString{"季度汇总"}));
     caption->set_stable_key("probe-caption");
     auto referrer = std::make_shared<aurora::Checkbox>(CHECKED);
     referrer->set_labelled_by("probe-caption");
@@ -227,15 +227,15 @@ auto emit(const std::string &text) -> void { AURORA_LOG_RAW("verify", text, "\n"
         // CJK-LITERAL: cjk-fixture - Han widget texts painted in the live window and asserted via UIA Names
         aurora::Button{aurora::ButtonProps().set_label(aurora::LocalizedString{"确定"})},
         // CJK-LITERAL: cjk-fixture - Han sibling label resolved into the Checkbox UIA Name
-        aurora::Row{aurora::Text{aurora::TextProps{.content = aurora::LocalizedString{"启用自动更新"}}},
+        aurora::Row{aurora::Text{aurora::TextProps().set_content(aurora::LocalizedString{"启用自动更新"})},
                     aurora::Checkbox{CHECKED}},
         // CJK-LITERAL: cjk-fixture - Han sibling label resolved into the Slider UIA Name
-        aurora::Row{aurora::Text{aurora::TextProps{.content = aurora::LocalizedString{"音量"}}},
+        aurora::Row{aurora::Text{aurora::TextProps().set_content(aurora::LocalizedString{"音量"})},
                     aurora::Slider{SLIDER_VALUE}},
         // CJK-LITERAL: cjk-fixture - Han placeholder is the Edit control's Name source (require_name)
         aurora::TextInput{aurora::TextInputProps{.value = "abc", .placeholder = "请输入"}},
         // CJK-LITERAL: cjk-fixture - Han text node asserted through the UIA Name property
-        aurora::Text{aurora::TextProps{.content = aurora::LocalizedString{"订单总额"}}},
+        aurora::Text{aurora::TextProps().set_content(aurora::LocalizedString{"订单总额"})},
         aurora::Node{std::move(caption)},
         aurora::Node{std::move(referrer)},
     }};

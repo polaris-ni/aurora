@@ -7,8 +7,9 @@
 auto main() -> int {
     auto img_res = au::Image::load("test.bmp");
     au::Node hero = img_res ? au::Node{au::ImageView{img_res.value()}}
-                            : au::Node{au::Text{au::TextProps{.content = au::LocalizedString{"[image placeholder]"},
-                                                              .text_color = pal::AURORA_MUTED}}};
+                            : au::Node{au::Text{au::TextProps()
+                                                    .set_content(au::LocalizedString{"[image placeholder]"})
+                                                    .set_color(pal::AURORA_MUTED)}};
 
     au::Node root = au::Column{
         GradientTitle{"ImageView widget"},

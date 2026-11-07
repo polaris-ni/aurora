@@ -300,8 +300,8 @@ target_include_directories(aurora
         "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_compile_features(aurora PUBLIC cxx_std_20)
 # Warnings（mirrors CODING_STANDARDS.md §10）——aurora 自身目标级，不污染三方库与消费者目标。
-# -Wno-missing-field-initializers：本库仍有大量采用聚合 Props 的部分初始化（如 TextProps{...} 仅给
-# 部分字段赋值），其余字段本就会被值初始化为零，该告警纯属噪音，故关闭。
+# -Wno-missing-field-initializers：本库仍有大量采用聚合 Props 的部分初始化（仅给部分字段赋值），
+# 其余字段本就会被值初始化为零，该告警纯属噪音，故关闭。
 # MSVC 不识别 GCC 风格 -W*（D8021 硬错误），保持其默认 /W3 即可。
 if (NOT MSVC)
     target_compile_options(aurora PRIVATE -Wall -Wextra -Wpedantic -Wno-missing-field-initializers)

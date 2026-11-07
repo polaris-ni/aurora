@@ -65,7 +65,7 @@ auto main() -> int {
     au::Node anim = au::Timer(
         200ms,
         [ticks_label](const au::ReadOnlyState<int> &) -> au::Text {
-            return au::Text{au::TextProps{.content = ticks_label}};
+            return au::Text{au::TextProps().set_content(ticks_label)};
         },
         [paused, ticks, ticks_label](int) -> void {
             if (!paused.get()) {

@@ -31,7 +31,7 @@ AURORA_TEST_CASE(headless_options_png_path_writes_on_present) {
     AURORA_TEST_REQUIRE(static_cast<bool>(created));
 
     auto win = std::move(created.value());
-    au::Node page = au::Text{au::TextProps{.content = au::LocalizedString{"x"}}};
+    au::Node page = au::Text{au::TextProps().set_content(au::LocalizedString{"x"})};
     const auto r = win->present_root(page);
     AURORA_TEST_CHECK(static_cast<bool>(r));
     AURORA_TEST_CHECK_EQ(win->surface().frame_count(), 1);

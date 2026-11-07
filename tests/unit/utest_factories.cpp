@@ -16,10 +16,10 @@ AURORA_TEST_CASE(label_adds_text_and_overrides_content) {
     aurora::Text *t = ui::label(root, "hello");
     AURORA_TEST_REQUIRE_NOT_NULL(t);
     AURORA_TEST_CHECK_EQ(root.child_nodes().size(), 1U);
-    AURORA_TEST_CHECK_EQ(t->content().get().text, "hello");
+    AURORA_TEST_CHECK_EQ(t->content().text, "hello");
     // props.content 被主文案覆盖。
-    aurora::Text *t2 = ui::label(root, "world", aurora::TextProps{.content = aurora::LocalizedString{"ignored"}});
-    AURORA_TEST_CHECK_EQ(t2->content().get().text, "world");
+    aurora::Text *t2 = ui::label(root, "world", aurora::TextProps().set_content(aurora::LocalizedString{"ignored"}));
+    AURORA_TEST_CHECK_EQ(t2->content().text, "world");
     AURORA_TEST_CHECK_EQ(root.child_nodes().size(), 2U);
 }
 

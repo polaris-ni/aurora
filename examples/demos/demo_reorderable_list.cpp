@@ -80,7 +80,7 @@ auto main() -> int {
         gap(8),
         au::Node{std::move(viewport_ptr)},
         gap(8),
-        au::Text{au::TextProps{.content = order}},
+        au::Text{au::TextProps().set_content(order)},
     };
     return run_demo(Card{std::move(root)}, "Reorderable list · Aurora Demo", 560.0F, 620.0F);
 }

@@ -614,12 +614,12 @@ AURORA_TEST_CASE(font_scale_scales_text_layout_geometry) {
 
     aurora::set_accessibility_settings(aurora::AccessibilitySettings{});
     aurora::Text base{std::string{"Aurora"}};
-    base.font.size_pt = 14.0F;
+    base.set_font_size(14.0F);
     aurora::LayoutEngine::layout(base, bounded);
 
     aurora::set_accessibility_settings(aurora::AccessibilitySettings{.font_scale = 2.0F});
     aurora::Text scaled{std::string{"Aurora"}};
-    scaled.font.size_pt = 14.0F;
+    scaled.set_font_size(14.0F);
     aurora::LayoutEngine::layout(scaled, bounded);
 
     // 字号倍率生效 ⇒ 度量结果变大（相对比较，不依赖具体字体/度量后端）。

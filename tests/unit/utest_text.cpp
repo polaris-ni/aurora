@@ -35,19 +35,33 @@ constexpr const char *AURORA_LONG_WORDS = "aaa bbb ccc ddd eee fff ggg hhh iii j
 
 }  // namespace
 
+/// 探针：把只在库内消费的表态位提到可读位置（`present` 不升公共面）。
+class TextProbe final : public Text {
+  public:
+    using Text::present;
+};
+
 AURORA_TEST_CASE(default_text_state_and_type_name) {
     const Text t;
     AURORA_TEST_CHECK_EQ(std::string{t.type_name()}, "Text");
 
     Json props = Json::object();
     t.serialize_props(props);
+    // 必填行恒写；可空行只在表态时写——未表态与「显式写入同一生效值」在盘上第一次可区分。
     AURORA_TEST_CHECK_EQ(require_field<std::string>(props, "content"), "");
-    AURORA_TEST_CHECK_NEAR(require_field<float>(props, "font_size"), 14.0F, 1e-4F);  // 默认 14pt
-    AURORA_TEST_CHECK_EQ(require_field<int>(props, "max_lines"), 0);  // 0 = 不限
-    AURORA_TEST_CHECK_EQ(require_field<bool>(props, "soft_wrap"), true);
-    AURORA_TEST_CHECK_NEAR(require_field<float>(props, "line_height"), 1.0F, 1e-4F);
+    AURORA_TEST_CHECK_FALSE(props.contains("font_size"));
+    AURORA_TEST_CHECK_FALSE(props.contains("max_lines"));
+    AURORA_TEST_CHECK_FALSE(props.contains("soft_wrap"));
+    AURORA_TEST_CHECK_FALSE(props.contains("line_height"));
     // 默认未显式设色 ⇒ 跟随主题 on_surface，「显式才输出」语义下 color 键不落盘。
     AURORA_TEST_CHECK_FALSE(props.contains("color"));
+    // `overflow` 与基类键撞名：本控件恒以文本溢出策略收口（不跟随基类 OverflowStrategy）。
+    AURORA_TEST_CHECK_EQ(require_field<std::string>(props, "overflow"), std::string{"Clip"});
+    // 未表态行读回落点，与旧「恒写默认值」的生效值逐项相同。
+    AURORA_TEST_CHECK_NEAR(t.font_size(), 14.0F, 1e-4F);
+    AURORA_TEST_CHECK_EQ(t.max_lines(), 0);
+    AURORA_TEST_CHECK_TRUE(t.soft_wrap());
+    AURORA_TEST_CHECK_NEAR(t.line_height(), 1.0F, 1e-4F);
 }
 
 AURORA_TEST_CASE(chain_setters_update_serialized_props) {
@@ -87,9 +101,9 @@ AURORA_TEST_CASE(font_size_degrade_and_validate_props) {
     }
 
     // 配置块构造可绕过降级路径，让 validate_props 真正拦截非法值。
-    Text bad{TextProps{.font = Font{.size_pt = 0.0F}}};
+    Text bad{TextProps().set_font_size(0.0F)};
     AURORA_TEST_CHECK_FALSE(bad.validate_props().ok());
-    Text ok{TextProps{.font = Font{.size_pt = 14.0F}}};
+    Text ok{TextProps().set_font_size(14.0F)};
     AURORA_TEST_CHECK_TRUE(ok.validate_props().ok());
 }
 
@@ -169,12 +183,12 @@ AURORA_TEST_CASE(serialize_deserialize_roundtrip) {
 
     Text dst;
     dst.deserialize_props(props);
-    AURORA_TEST_CHECK_NEAR(dst.font.size_pt, 16.0F, 1e-4F);
-    AURORA_TEST_CHECK_TRUE(dst.text_align == TextAlign::Center);
-    AURORA_TEST_CHECK_EQ(dst.max_lines, 2);
-    AURORA_TEST_CHECK_FALSE(dst.soft_wrap);
-    AURORA_TEST_CHECK_NEAR(dst.line_height, 1.25F, 1e-4F);
-    AURORA_TEST_CHECK_EQ(static_cast<int>(dst.font.weight), 700);  // bold() 经 JSON 往返
+    AURORA_TEST_CHECK_NEAR(dst.font_size(), 16.0F, 1e-4F);
+    AURORA_TEST_CHECK_TRUE(dst.text_align() == TextAlign::Center);
+    AURORA_TEST_CHECK_EQ(dst.max_lines(), 2);
+    AURORA_TEST_CHECK_FALSE(dst.soft_wrap());
+    AURORA_TEST_CHECK_NEAR(dst.line_height(), 1.25F, 1e-4F);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(dst.font_weight()), 700);  // bold() 经 JSON 往返
 
     // 再序列化比对枚举/颜色字段（不硬编码枚举拼写）。
     Json out = Json::object();
@@ -218,10 +232,10 @@ AURORA_TEST_CASE(text_direction_serialize_and_unset_omitted) {
     rtl.serialize_props(props);
     AURORA_TEST_CHECK_EQ(require_field<std::string>(props, "direction"), std::string{"RTL"});
 
-    Text back;
+    TextProbe back;
     back.deserialize_props(props);
-    AURORA_TEST_CHECK_TRUE(back.direction.has_value());
-    AURORA_TEST_CHECK_TRUE(require_value(back.direction) == TextDirection::RTL);
+    AURORA_TEST_CHECK_TRUE(back.present(TextProps::direction_row()));
+    AURORA_TEST_CHECK_TRUE(back.direction() == TextDirection::RTL);
 
     Text inherit("inherit");
     Json plain = Json::object();

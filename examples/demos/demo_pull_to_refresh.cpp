@@ -54,7 +54,7 @@ auto main() -> int {
         }
     });
 
-    au::Text status_line{au::TextProps{.content = *status}};
+    au::Text status_line{au::TextProps().set_content(*status)};
 
     au::Node root = au::Column{
         GradientTitle{"PullToRefresh"}, gap(12), std::move(status_line), gap(8), Card{au::Node{pull}},

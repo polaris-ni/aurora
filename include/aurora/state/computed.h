@@ -26,7 +26,7 @@ using ComputedResult = std::remove_cvref_t<std::invoke_result_t<std::remove_cvre
 /// @code
 /// au::State<int> count{0};
 /// auto doubled = au::computed([count] { return count.get() * 2; });
-/// au::Text text{au::TextProps{.content = doubled}};
+/// au::Text text{au::TextProps().set_content(doubled)};
 /// @endcode
 ///
 /// @tparam F 计算体类型；返回值即派生值类型。

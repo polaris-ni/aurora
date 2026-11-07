@@ -107,7 +107,7 @@ inline auto expect_text(const Node &root, std::string_view needle) -> void {
         std::string text;
         const std::string tn = w.type_name();
         if (tn == "Text") {
-            text = dynamic_cast<const Text &>(w).content().get().text;
+            text = dynamic_cast<const Text &>(w).content().text;
         } else if (tn == "TextInput") {
             text = dynamic_cast<const TextInput &>(w).value();
         }

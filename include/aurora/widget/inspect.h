@@ -245,7 +245,7 @@ struct WidgetPatchOp {
     const bool vis = w.show();
     std::string text;
     if (tn == "Text") {
-        text = dynamic_cast<const Text &>(w).content().get().text;
+        text = dynamic_cast<const Text &>(w).content().text;
     } else if (tn == "TextInput") {
         text = dynamic_cast<const TextInput &>(w).value();
     }

@@ -175,12 +175,12 @@ auto main(int argc, char *argv[]) -> int {
         aurora::Node input_node{aurora::TextInput{aurora::TextInputProps{.value = "abc", .placeholder = "Type here"}}};
         aurora::Node root{aurora::Column{
             aurora::Button{aurora::ButtonProps().set_label(aurora::LocalizedString{AURORA_BUTTON_NAME})},
-            aurora::Row{aurora::Text{aurora::TextProps{.content = aurora::LocalizedString{AURORA_CHECKBOX_LABEL}}},
+            aurora::Row{aurora::Text{aurora::TextProps().set_content(aurora::LocalizedString{AURORA_CHECKBOX_LABEL})},
                         aurora::Checkbox{checked}},
-            aurora::Row{aurora::Text{aurora::TextProps{.content = aurora::LocalizedString{AURORA_SLIDER_LABEL}}},
+            aurora::Row{aurora::Text{aurora::TextProps().set_content(aurora::LocalizedString{AURORA_SLIDER_LABEL})},
                         std::move(slider_node)},
             std::move(input_node),
-            aurora::Text{aurora::TextProps{.content = aurora::LocalizedString{AURORA_TEXT_NAME}}}}};
+            aurora::Text{aurora::TextProps().set_content(aurora::LocalizedString{AURORA_TEXT_NAME})}}};
 
         const auto presented = session.present(root);
         check(presented.ok(), "present fixture", presented ? "" : presented.error().message);

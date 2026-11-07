@@ -47,7 +47,7 @@ auto main() -> int {
         gap(12),
         au::Text{au::LocalizedString{"Background task via au::async().with_timeout().then() callback"}},
         au::Text{au::LocalizedString{"Coroutine: co_await au::co_async(...) continuation on main thread"}},
-        au::Text{au::TextProps{.content = *status}},
+        au::Text{au::TextProps().set_content(*status)},
     };
     return run_demo(Card{std::move(root)}, "Async · Aurora Demo", 520.0F, 360.0F);
 }

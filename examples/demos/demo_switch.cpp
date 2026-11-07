@@ -16,7 +16,7 @@ auto main() -> int {
     au::Node root = au::Column{
         GradientTitle{"Switch widget"},
         gap(12),
-        au::Row{std::move(sw), au::Text{au::TextProps{.content = *label}}},
+        au::Row{std::move(sw), au::Text{au::TextProps().set_content(*label)}},
     };
     return run_demo(Card{std::move(root)}, "Switch · Aurora Demo", 480.0F, 320.0F);
 }

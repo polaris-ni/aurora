@@ -80,7 +80,7 @@ auto main() -> int {
     au::Node root = au::Column({
         GradientTitle{"System tray"},
         gap(8),
-        au::Text{au::TextProps{.content = *last_msg}},
+        au::Text{au::TextProps().set_content(*last_msg)},
         gap(8),
         action_button("Show balloon",
                       [&tray, &show_balloon]() -> void { show_balloon(tray, "Balloon from the window"); }),

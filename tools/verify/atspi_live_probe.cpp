@@ -351,7 +351,7 @@ struct ProbeWidgets {
     aurora::Node list_node{aurora::ReorderableList<std::string>{
         items,
         [](const std::string &label, int) {
-            return aurora::Node{aurora::Text{aurora::TextProps{.content = aurora::LocalizedString{label}}}};
+            return aurora::Node{aurora::Text{aurora::TextProps().set_content(aurora::LocalizedString{label})}};
         },
         4.0F}};
     ProbeWidgets probe;
@@ -364,7 +364,7 @@ struct ProbeWidgets {
         entry_node,
         list_node,
         // CJK-LITERAL: cjk-fixture - the client asserts the STATIC node by this exact Han Name
-        aurora::Text{aurora::TextProps{.content = aurora::LocalizedString{"订单总额"}}},
+        aurora::Text{aurora::TextProps().set_content(aurora::LocalizedString{"订单总额"})},
     }};
     return probe;
 }
