@@ -292,9 +292,9 @@ AURORA_TEST_CASE(inspector_panel_get_and_set_widget_props) {
     // 单属性回写 → 读回一致；再恢复原值。
     auto &col_ref = dynamic_cast<Column &>(root.widget());
     set_widget_prop(root.widget(), "gap", Json(16.0F));
-    AURORA_TEST_CHECK_NEAR(col_ref.gap, 16.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(col_ref.gap(), 16.0F, 1e-4F);
     set_widget_prop(root.widget(), "gap", Json(8.0F));
-    AURORA_TEST_CHECK_NEAR(col_ref.gap, 8.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(col_ref.gap(), 8.0F, 1e-4F);
 }
 
 }  // namespace aurora::test_cases::utest_inspector_panel

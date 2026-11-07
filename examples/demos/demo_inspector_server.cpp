@@ -38,14 +38,13 @@ auto build_form(const std::shared_ptr<au::State<int>> &count,
         label->set(au::LocalizedString{"submit count = " + std::to_string(next)});
     };
 
-    return au::Node{au::Column{au::ColumnProps{
-        .children = {
-            au::Node{au::Text{"User info form"}},
-            au::Node{au::TextInput{au::TextInputProps{.value = "", .placeholder = "Enter name"}}},
-            au::Node{au::TextInput{au::TextInputProps{.value = "alice@example.com", .placeholder = "Enter email"}}},
-            au::Node{std::move(submit)},
-            au::Node{au::Text{au::TextProps{.content = *label}}},
-        }}}};
+    return au::Node{au::Column({
+        au::Node{au::Text{"User info form"}},
+        au::Node{au::TextInput{au::TextInputProps{.value = "", .placeholder = "Enter name"}}},
+        au::Node{au::TextInput{au::TextInputProps{.value = "alice@example.com", .placeholder = "Enter email"}}},
+        au::Node{std::move(submit)},
+        au::Node{au::Text{au::TextProps{.content = *label}}},
+    })};
 }
 
 }  // namespace

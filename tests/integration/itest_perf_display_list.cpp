@@ -54,7 +54,7 @@ auto build_tree(int n) -> Node {
     for (int i = 0; i < n; ++i) {
         items.emplace_back(std::make_shared<FillLeaf>());
     }
-    auto col = std::make_shared<Column>(ColumnProps{.children = std::move(items)});
+    auto col = std::make_shared<Column>(std::move(items));
     return Node{std::move(col)};
 }
 

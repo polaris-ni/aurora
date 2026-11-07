@@ -72,23 +72,27 @@ AURORA_TEST_CASE(codegen_designated_init_and_step_by_step_styles) {
     au::Json node = make_node("Column", au::Json::object(), testing::json_arr({make_button("OK")}));
 
     // 指定初始化器只对**仍是聚合**的 `*Props` 合法：控件类本身是非聚合类型，`au::Button{.label=...}` 编译不过；
-    // 已迁移的 `Button` 连 `ButtonProps` 都不可设计（字段私有），故 DesignatedInit 对它同样发链式形。
+    // 已迁移的 `Button` 与 `Column` 连 `*Props` 都不可设计（字段私有），故 DesignatedInit 对它们同样
+    // 发链式形：容器子项走构造首参，属性续在 `TProps()` 之后。
     const std::string di = to_code(node, CodeStyle::DesignatedInit);
-    AURORA_TEST_CHECK_MSG(di.find("au::Column(au::ColumnProps{") != std::string::npos,
-                          "codegen: DesignatedInit wraps container in ColumnProps");
+    AURORA_TEST_CHECK_MSG(di.find("au::Column{") != std::string::npos,
+                          "codegen: DesignatedInit puts container children in the init list");
+    AURORA_TEST_CHECK_MSG(di.find("ColumnProps") == std::string::npos,
+                          "codegen: DesignatedInit no longer routes containers through a Props aggregate");
     AURORA_TEST_CHECK_MSG(di.find("au::Button(au::ButtonProps().set_label(\"OK\"))") != std::string::npos,
                           "codegen: DesignatedInit wraps migrated leaf in chained ButtonProps");
-    AURORA_TEST_CHECK_MSG(di.find(".children = {") != std::string::npos, "codegen: DesignatedInit uses .children slot");
 
     const std::string sb = to_code(node, CodeStyle::StepByStep);
     AURORA_TEST_CHECK_MSG(sb.find("auto __w1 = au::Button{};") != std::string::npos,
                           "codegen: StepByStep declares Button var");
     AURORA_TEST_CHECK_MSG(sb.find("__w1.set_label(\"OK\");") != std::string::npos,
                           "codegen: StepByStep writes label through set_label");
-    AURORA_TEST_CHECK_MSG(sb.find("auto __w0 = au::Column(au::ColumnProps{") != std::string::npos,
+    AURORA_TEST_CHECK_MSG(sb.find("auto __w0 = au::Column{") != std::string::npos,
                           "codegen: StepByStep passes children at construction");
     AURORA_TEST_CHECK_MSG(sb.find("__w0.children =") == std::string::npos,
                           "codegen: StepByStep never assigns children post-construction");
+    AURORA_TEST_CHECK_MSG(sb.find("__w0.set_children") == std::string::npos,
+                          "codegen: StepByStep never rebuilds children through a setter");
     AURORA_TEST_CHECK_MSG(sb.find("au::Node{std::move(__w1)}") != std::string::npos,
                           "codegen: StepByStep hands child over by move");
 
@@ -301,7 +305,7 @@ AURORA_TEST_CASE(codegen_never_invents_props_aggregate) {
 }
 
 AURORA_TEST_CASE(codegen_nested_and_setter_props_only_reach_step_style) {
-    // 嵌套路径（font.size_pt / flex.main_axis）与 setter-only（TextInput 样式组）无法进指定初始化器：
+    // 嵌套路径（font.size_pt）与 setter-only（TextInput 样式组）无法进指定初始化器：
     // GCC 的 C++ 指定初始化器不支持嵌套设计符，protected 字段不能在类外赋值。
     const au::Json text_props =
         testing::json_obj({{"content", "Hi"}, {"font_size", 16.0F}, {"main_axis_alignment", "Center"}});
@@ -320,17 +324,23 @@ AURORA_TEST_CASE(codegen_nested_and_setter_props_only_reach_step_style) {
                                                   {"main_axis_size", "Max"},
                                                   {"gap", 12.0F}});
     const std::string col_expr = to_code(make_node("Column", col_props));
-    AURORA_TEST_CHECK_MSG(col_expr.find(".gap = 12.0f") != std::string::npos, "container keeps plain gap member");
-    AURORA_TEST_CHECK_MSG(col_expr.find("main_axis_alignment") == std::string::npos,
-                          "expression style drops nested flex alignment");
+    AURORA_TEST_CHECK_MSG(col_expr.find(".set_gap(12.0f)") != std::string::npos,
+                          "container gap goes through the chained writer");
+    AURORA_TEST_CHECK_MSG(
+        col_expr.find(".set_main_axis_alignment(au::MainAxisAlignment::SpaceBetween)") != std::string::npos,
+        "expression style keeps the container alignment writer");
+    AURORA_TEST_CHECK_MSG(
+        col_expr.find(".set_cross_axis_alignment(au::CrossAxisAlignment::Stretch)") != std::string::npos,
+        "expression style keeps the container cross-axis writer");
     const std::string col_step = to_code(make_node("Column", col_props), CodeStyle::StepByStep);
     AURORA_TEST_CHECK_MSG(
-        col_step.find("__w0.flex.main_axis = au::MainAxisAlignment::SpaceBetween;") != std::string::npos,
-        "step writes flex.main_axis");
-    AURORA_TEST_CHECK_MSG(col_step.find("__w0.flex.cross_axis = au::CrossAxisAlignment::Stretch;") != std::string::npos,
-                          "step writes flex.cross_axis");
-    AURORA_TEST_CHECK_MSG(col_step.find("__w0.flex.main_axis_size = au::MainAxisSize::Max;") != std::string::npos,
-                          "step writes flex.main_axis_size");
+        col_step.find("__w0.set_main_axis_alignment(au::MainAxisAlignment::SpaceBetween);") != std::string::npos,
+        "step writes set_main_axis_alignment");
+    AURORA_TEST_CHECK_MSG(
+        col_step.find("__w0.set_cross_axis_alignment(au::CrossAxisAlignment::Stretch);") != std::string::npos,
+        "step writes set_cross_axis_alignment");
+    AURORA_TEST_CHECK_MSG(col_step.find("__w0.set_main_axis_size(au::MainAxisSize::Max);") != std::string::npos,
+                          "step writes set_main_axis_size");
 
     // CJK-LITERAL: cjk-fixture - Han placeholder fed to the generator as payload data
     const std::string input_step =
@@ -462,12 +472,12 @@ AURORA_TEST_CASE(codegen_designated_initializers_follow_declaration_order) {
         AURORA_TEST_CHECK_MSG(at > prev, std::string("declaration order: ") + needle + " follows its predecessor");
         prev = at;
     }
-    // 子节点槽排在所有标量成员之前（`ColumnProps.children` 是聚合首成员）。
+    // 子节点排在所有标量属性之前：子项是容器构造的首参（`au::Column(子项, Props)`）。
     const std::string container =
         to_code(make_node("Column", testing::json_obj({{"gap", 8.0F}}), testing::json_arr({make_button("OK")})),
                 CodeStyle::DesignatedInit);
-    AURORA_TEST_CHECK_MSG(container.find(".children") < container.find(".gap"),
-                          "declaration order: children slot precedes scalar members");
+    AURORA_TEST_CHECK_MSG(container.find("au::Column(") < container.find(".set_gap"),
+                          "declaration order: children argument precedes scalar writers");
 }
 
 AURORA_TEST_CASE(codegen_enum_values_canonicalized_from_self_description) {

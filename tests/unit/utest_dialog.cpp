@@ -64,10 +64,8 @@ auto mouse(MouseAction action, float x, float y) -> MouseEvent {
 auto make_content(int &hits) -> Node {
     auto btn = Button(ButtonProps().set_label("OK"));
     btn.set_on_click([&hits]() -> void { ++hits; });
-    auto content = Column(ColumnProps{
-        .children = {std::move(Text("Title").font_size(18).bold()), std::move(btn)},
-        .gap = 12.0F,
-    });
+    auto content =
+        Column({std::move(Text("Title").font_size(18).bold()), std::move(btn)}, ColumnProps().set_gap(12.0F));
     return {std::move(content)};
 }
 

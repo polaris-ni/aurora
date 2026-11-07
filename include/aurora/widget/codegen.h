@@ -88,9 +88,9 @@ namespace detail {
 /// @param type 序列化 type 名。
 /// @return 该类型的属性是否只能通过 `set_<键名>()` 链式写件装入。
 [[nodiscard]] constexpr auto props_chain_writers(std::string_view type) noexcept -> bool {
-    constexpr std::array<std::string_view, 9> k_chain = {"BarChart", "BottomNavBar", "Button",
-                                                         "Divider",  "LazyRow",      "LineChart",
-                                                         "PieChart", "ScatterChart", "Sparkline"};
+    constexpr std::array<std::string_view, 11> k_chain = {"BarChart", "BottomNavBar", "Button",    "Column",
+                                                          "Divider",  "LazyRow",      "LineChart", "PieChart",
+                                                          "Row",      "ScatterChart", "Sparkline"};
     return std::ranges::find(k_chain, type) != k_chain.end();
 }
 
@@ -241,10 +241,10 @@ struct PropTarget {
 ///
 /// 逐条由 `aurora_cli describe <Type>` 的 `props` 表键集与控件头文件的成员声明比对得出，
 /// 并以 `g++ -fsyntax-only` 编译产物验证（未登记者按同名公开成员处理）。典型三类：
-/// ① 嵌套聚合（Text 的 `font_size` 落在 `font.size_pt`、Column 的 `main_axis_alignment` 落在
-/// `flex.main_axis`）；② 改名（Text 的 `color` 落在 `text_color`）；③ protected 字段 + 公有
-/// 链式 setter（TextInput 的一整组样式键）。②可进指定初始化器，①③不可（GCC 的 C++ 指定初始化器
-/// 不支持嵌套设计符，protected 字段不可在类外赋值），故只在 StepByStep 出现。
+/// ① 嵌套聚合（Text 的 `font_size` 落在 `font.size_pt`）；② 改名（Text 的 `color` 落在
+/// `text_color`）；③ protected 字段 + 公有链式 setter（TextInput 的一整组样式键）。②可进指定
+/// 初始化器，①③不可（GCC 的 C++ 指定初始化器不支持嵌套设计符，protected 字段不可在类外赋值），
+/// 故只在 StepByStep 出现。链式形态的类型不在此表登记：落点由词根 `set_<键>` 推出。
 ///
 /// @return 函数级 static 只读表（键为 type.key 拼接串），首次调用构造、此后只读缓存。
 [[nodiscard]] inline auto prop_target_table() -> const std::unordered_map<std::string, PropTarget> & {
@@ -253,12 +253,6 @@ struct PropTarget {
         {"Text.color", {.lhs = "text_color", .via_setter = false}},
         {"Text.font_size", {.lhs = "font.size_pt", .via_setter = false}},
         {"Text.font_weight", {.lhs = "font.weight", .via_setter = false}},
-        {"Column.main_axis_alignment", {.lhs = "flex.main_axis", .via_setter = false}},
-        {"Column.cross_axis_alignment", {.lhs = "flex.cross_axis", .via_setter = false}},
-        {"Column.main_axis_size", {.lhs = "flex.main_axis_size", .via_setter = false}},
-        {"Row.main_axis_alignment", {.lhs = "flex.main_axis", .via_setter = false}},
-        {"Row.cross_axis_alignment", {.lhs = "flex.cross_axis", .via_setter = false}},
-        {"Row.main_axis_size", {.lhs = "flex.main_axis_size", .via_setter = false}},
         {"Scroll.snap_alignment", {.lhs = "snap.alignment", .via_setter = false}},
         {"Scroll.snap_extent", {.lhs = "snap.extent", .via_setter = false}},
         {"Scroll.snap_paging", {.lhs = "snap.paging", .via_setter = false}},
@@ -865,20 +859,33 @@ struct PropEmit {
     return "au::" + cls + "(au::" + pr + "{" + body + "})";
 }
 
-/// @brief 子节点在其 `*Props` 聚合里的成员名：`Column`/`Row`/`Grid` 为 `children`、`Scroll`/
-///        `PullToRefresh` 为 `child`；其余类型返回空串（无此成员，调用方改走初始化列表形态）。
-/// @note 子节点只能在**构造期**交出去：`Column(ColumnProps)` 把 `props.children` 搬进
+/// @brief 子节点在其 `*Props` 聚合里的成员名：`Grid` 为 `children`、`Scroll`/`PullToRefresh` 为
+///        `child`；其余类型返回空串（无此成员，调用方改走初始化列表或首参形态）。
+/// @note 子节点只能在**构造期**交出去：`Grid(GridProps)` 把 `props.children` 搬进
 ///       `Container::children_`，构造后再给继承来的 `children` 成员赋值是静默 no-op（树看着对、画不出来）。
+///       已迁移的聚合容器（`Column`/`Row`）没有 Props 子槽，改由 `kids_first_ctor` 走首参形态。
 /// @param type 序列化 type 名。
-/// @return 子节点成员名（children/child）；其余类型返回空串（无此成员，调用方改走初始化列表形态）。
+/// @return 子节点成员名（children/child）；其余类型返回空串（无此成员，调用方改走初始化列表形）。
 [[nodiscard]] constexpr auto props_child_slot(std::string_view type) noexcept -> std::string_view {
-    if (type == "Column" || type == "Row" || type == "Grid") {
+    if (type == "Grid") {
         return "children";
     }
     if (type == "Scroll" || type == "PullToRefresh") {
         return "child";
     }
     return {};
+}
+
+/// @brief 子节点是**构造首参**（`T(std::vector<Node>, TProps = {})`）的链式聚合容器。
+///
+/// 子节点已从属性聚合里移出（聚合只管可序列化属性），但容器仍须在构造期接管子项，于是首参就是
+/// `std::vector<Node>`；属性经第二参 `TProps` 整体移入、在构造尾部接线。发射形态
+/// `au::Column({ 子项 }, au::ColumnProps().set_gap(8.0F))`。
+///
+/// @param type 序列化 type 名。
+/// @return 该类型是否以子节点列表为首参构造。
+[[nodiscard]] constexpr auto kids_first_ctor(std::string_view type) noexcept -> bool {
+    return type == "Column" || type == "Row";
 }
 
 /// @brief 该类型能否在构造期交出子节点：不能则告警并返回空列表。
@@ -924,11 +931,12 @@ struct PropEmit {
 /// 形态选择（每条都必须是可编译的真实构造）：
 /// 1. 无属性聚合的类型（`Stack`/`Spacer`…）→ `au::T{}` 或初始化列表形 `au::T{ 子项 }`；属性无处安放
 /// （见 `has_props_aggregate` 的说明与 specification/08-tooling.md §2.5）。
-/// 2. 无子节点 → `au::T(au::TProps{ 属性 })`。
-/// 3. 子节点成员已登记（`props_child_slot`）且需要带属性，或 DesignatedInit → Props 形：子节点成员排在
+/// 2. 无子节点 → `au::T(au::TProps{ 属性 })`（链式形态为 `au::T(au::TProps().set_x(…))`）。
+/// 3. 子节点是构造首参的链式容器（`kids_first_ctor`）→ `au::T({ 子项 }, au::TProps().set_x(…))`。
+/// 4. 子节点成员已登记（`props_child_slot`）且需要带属性，或 DesignatedInit → Props 形：子节点成员排在
 /// 前（聚合声明序如此），标量属性随后。
-/// 4. 其余扁平容器 → 初始化列表形 `au::T{ 子项 }`（无标量属性时）。
-/// 5. 非扁平容器兜底 → `au::T(au::TProps{ 属性, .children = { 子项 } })`。
+/// 5. 其余扁平容器 → 初始化列表形 `au::T{ 子项 }`（无标量属性时）。
+/// 6. 非扁平容器兜底 → `au::T(au::TProps{ 属性, .children = { 子项 } })`。
 ///
 /// @param type          序列化 type 名。
 /// @param props_str     emit_props 的标量属性串（形如 `.gap = 8.0f, .columns = 2`）。
@@ -950,6 +958,11 @@ struct PropEmit {
     if (kids.empty()) {
         return wrap_props_ctor(cls, pr, props_str, chain);
     }
+    if (kids_first_ctor(type)) {
+        const std::string list = emit_child_list(kids, indent);
+        return props_str.empty() ? "au::" + cls + list
+                                 : "au::" + cls + "(" + list + ", au::" + pr + "()" + props_str + ")";
+    }
     const std::string_view slot = props_child_slot(type);
     if (!slot.empty() && (unified_props || !props_str.empty())) {
         std::string body{std::string{"."} + std::string{slot}};
@@ -963,9 +976,8 @@ struct PropEmit {
         return "au::" + cls + emit_child_list(kids, indent);
     }
     std::string body = props_str;  // 兜底形态的 Props 成员片段累加器（先标量属性后 .children）
-    // 链式形态的类型今天全是叶子（`props_chain_writers` 里的 `Button`、`Divider`、`Sparkline` 都无子节点
-    // 槽），故这条兜底分支仍按聚合形态发射；容器迁移时这条分支要改走 `set_children(...)`，与
-    // `props_child_slot` 一并处理。
+    // 链式聚合容器（`Column`/`Row`）已在 `kids_first_ctor` 分支按首参发射；走到这里的只剩尚未迁移、
+    // `*Props` 里仍带 `.children` 成员的聚合容器。
     if (!body.empty()) {
         body += ", ";
     }

@@ -42,11 +42,11 @@ inline auto form_layout(std::vector<FormRow> rows, float label_width = 120.0F) -
         label.width(px(label_width));
         row_children.emplace_back(std::move(label));
         row_children.push_back(std::move(r.field));
-        Row row{RowProps{.children = std::move(row_children)}};
+        Row row{std::move(row_children)};
         row.set_modifier(Modifier{}.padding(4.0F));
         kids.emplace_back(std::move(row));
     }
-    Column col{ColumnProps{.children = std::move(kids)}};
+    Column col{std::move(kids)};
     return col;
 }
 
@@ -54,7 +54,7 @@ inline auto form_layout(std::vector<FormRow> rows, float label_width = 120.0F) -
 /// @param actions 动作控件节点列表（横向排列）。
 /// @return 组合完成的工具栏节点。
 inline auto toolbar(std::vector<Node> actions) -> Node {
-    Row row{RowProps{.children = std::move(actions)}};
+    Row row{std::move(actions)};
     row.set_modifier(Modifier{}.fill_max_width().background(Color{245, 245, 247, 255}).padding(4.0F));
     return row;
 }
@@ -64,7 +64,7 @@ inline auto toolbar(std::vector<Node> actions) -> Node {
 /// @param width 侧边栏宽度（dp，默认 200）。
 /// @return 组合完成的侧边栏节点。
 inline auto sidebar(std::vector<Node> items, float width = 200.0F) -> Node {
-    Column col{ColumnProps{.children = std::move(items)}};
+    Column col{std::move(items)};
     col.set_modifier(Modifier{}.width(width).background(Color{245, 245, 247, 255}).padding(4.0F));
     return col;
 }
@@ -73,7 +73,7 @@ inline auto sidebar(std::vector<Node> items, float width = 200.0F) -> Node {
 /// @param items 菜单项节点列表（横向排列）。
 /// @return 组合完成的菜单栏节点。
 inline auto menu_bar(std::vector<Node> items) -> Node {
-    Row row{RowProps{.children = std::move(items)}};
+    Row row{std::move(items)};
     row.set_modifier(Modifier{}.fill_max_width().background(Color{235, 235, 240, 255}).padding(2.0F));
     return row;
 }
@@ -82,7 +82,7 @@ inline auto menu_bar(std::vector<Node> items) -> Node {
 /// @param items 列表项节点列表（纵向排列）。
 /// @return 包裹好滚动容器的列表视图节点。
 inline auto list_view(std::vector<Node> items) -> Node {
-    Column col{ColumnProps{.children = std::move(items)}};
+    Column col{std::move(items)};
     Scroll scroll{ScrollProps{.child = std::move(col), .step = 16.0F}};
     return scroll;
 }
@@ -185,9 +185,9 @@ inline auto tab_view(std::vector<TabPage> pages) -> Node {
     Node body = detail::TabBody{selected, std::move(bodies)};
 
     std::vector<Node> col_children;
-    col_children.emplace_back(Row{RowProps{.children = std::move(tab_buttons)}});
+    col_children.emplace_back(Row(std::move(tab_buttons)));
     col_children.push_back(std::move(body));
-    return Column{ColumnProps{.children = std::move(col_children)}};
+    return Column(std::move(col_children));
 }
 
 }  // namespace aurora

@@ -16,7 +16,7 @@ auto main() -> int {
         txt->set_modifier(au::Modifier{}.size(260.0F, 120.0F).background(au::Color{220, 50, 50, 255}));
 
         // 容器：固定 150x60，绿色背景
-        au::Column col{au::ColumnProps{.children = {au::Node{txt}}}};
+        au::Column col{std::vector<au::Node>{au::Node{txt}}};
         col.set_modifier(au::Modifier{}
                              .size(150.0F, 60.0F)
                              .background(au::Color{50, 180, 80, 255})

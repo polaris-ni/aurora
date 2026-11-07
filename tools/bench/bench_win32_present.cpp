@@ -90,7 +90,7 @@ auto main() -> int {
                       .font = Font{.size_pt = 16.0F}}));
     }
     kids.emplace_back(para);
-    Node root{std::make_shared<Column>(ColumnProps{.children = std::move(kids)})};
+    Node root{std::make_shared<Column>(std::move(kids))};
 
     (void)win->present_root(root);  // First frame full paint (mount + layout + paint + present)
     const Size logical = win->size();

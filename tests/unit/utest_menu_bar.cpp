@@ -142,7 +142,7 @@ AURORA_TEST_CASE(flyout_point_reaches_menu_bar_in_column_host) {
     int hits = 0;
     int last = -1;
     const std::shared_ptr<MenuBar> bar = make_menu_bar(hits, last);
-    const auto root = std::make_shared<Column>(ColumnProps{.children = {Node{bar}}, .gap = 0.0F});
+    const auto root = std::make_shared<Column>(std::vector<Node>{Node{bar}}, ColumnProps().set_gap(0.0F));
     LayoutEngine::layout(*root, host_constraints());
 
     const Rect bb = child_box(*root, *bar);
@@ -169,7 +169,7 @@ AURORA_TEST_CASE(flyout_press_triggers_menu_item_via_real_dispatch) {
     int hits = 0;
     int last = -1;
     const std::shared_ptr<MenuBar> bar = make_menu_bar(hits, last);
-    const auto root = std::make_shared<Column>(ColumnProps{.children = {Node{bar}}, .gap = 0.0F});
+    const auto root = std::make_shared<Column>(std::vector<Node>{Node{bar}}, ColumnProps().set_gap(0.0F));
     LayoutEngine::layout(*root, host_constraints());
 
     const Rect bb = child_box(*root, *bar);
@@ -215,7 +215,7 @@ AURORA_TEST_CASE(closed_menu_bar_does_not_claim_flyout_area) {
     int hits = 0;
     int last = -1;
     const std::shared_ptr<MenuBar> bar = make_menu_bar(hits, last);
-    const auto root = std::make_shared<Column>(ColumnProps{.children = {Node{bar}}, .gap = 0.0F});
+    const auto root = std::make_shared<Column>(std::vector<Node>{Node{bar}}, ColumnProps().set_gap(0.0F));
     LayoutEngine::layout(*root, host_constraints());
 
     const Rect bb = child_box(*root, *bar);
@@ -240,7 +240,7 @@ AURORA_TEST_CASE(compat_entry_and_dispatch_entry_agree_pointwise) {
     int hits = 0;
     int last = -1;
     const std::shared_ptr<MenuBar> bar = make_menu_bar(hits, last);
-    const auto root = std::make_shared<Column>(ColumnProps{.children = {Node{bar}}, .gap = 0.0F});
+    const auto root = std::make_shared<Column>(std::vector<Node>{Node{bar}}, ColumnProps().set_gap(0.0F));
     LayoutEngine::layout(*root, host_constraints());
     bar->open(0);
 
@@ -264,7 +264,7 @@ AURORA_TEST_CASE(bar_click_opens_and_toggles_menu) {
     int hits = 0;
     int last = -1;
     const std::shared_ptr<MenuBar> bar = make_menu_bar(hits, last);
-    auto root = std::make_shared<Column>(ColumnProps{.children = {Node{bar}}, .gap = 0.0F});
+    auto root = std::make_shared<Column>(std::vector<Node>{Node{bar}}, ColumnProps().set_gap(0.0F));
     LayoutEngine::layout(*root, host_constraints());
 
     const Rect bb = child_box(*root, *bar);
@@ -289,7 +289,7 @@ AURORA_TEST_CASE(bar_empty_click_closes) {
     int hits = 0;
     int last = -1;
     const std::shared_ptr<MenuBar> bar = make_menu_bar(hits, last);
-    const auto root = std::make_shared<Column>(ColumnProps{.children = {Node{bar}}, .gap = 0.0F});
+    const auto root = std::make_shared<Column>(std::vector<Node>{Node{bar}}, ColumnProps().set_gap(0.0F));
     LayoutEngine::layout(*root, host_constraints());
     bar->open(1);
 
@@ -318,7 +318,7 @@ AURORA_TEST_CASE(add_menu_appends_and_relayouts) {
     bar->add_menu(std::move(extra));
     AURORA_TEST_CHECK_EQ(bar->menu_count(), 3U);
 
-    auto root = std::make_shared<Column>(ColumnProps{.children = {Node{bar}}, .gap = 0.0F});
+    auto root = std::make_shared<Column>(std::vector<Node>{Node{bar}}, ColumnProps().set_gap(0.0F));
     LayoutEngine::layout(*root, host_constraints());  // 追加后重新布局不崩溃
     bar->open(0);
     AURORA_TEST_CHECK(bar->dropdown_bounds().size.height > 0.0F);  // 展开时浮层含菜单项高度
@@ -363,7 +363,7 @@ AURORA_TEST_CASE(paint_dropdown_with_separator_checkable_shortcut) {
 
     auto bar = std::make_shared<MenuBar>(std::move(menus));
     bar->set_bar_height(AURORA_BAR_HEIGHT);
-    auto root = std::make_shared<Column>(ColumnProps{.children = {Node{bar}}, .gap = 0.0F});
+    auto root = std::make_shared<Column>(std::vector<Node>{Node{bar}}, ColumnProps().set_gap(0.0F));
     LayoutEngine::layout(*root, host_constraints());
     bar->open(0);
 

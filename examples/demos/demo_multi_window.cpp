@@ -28,20 +28,15 @@ auto aux_ui(int index, std::function<void()> close_self,
             const std::shared_ptr<au::State<au::LocalizedString>> &last_ping) -> au::Node {
     au::Button close_btn{au::ButtonProps().set_label("Close this window")};
     close_btn.on_click = std::move(close_self);
-    return au::Column{
-        au::ColumnProps{
-            .children =
-                {
-                    GradientTitle{"Auxiliary #" + std::to_string(index)},
-                    gap(12),
-                    au::Text{"Each window owns its own Scene + FocusManager."},
-                    gap(8),
-                    au::Text{au::TextProps{.content = *last_ping}},
-                    gap(8),
-                    std::move(close_btn),
-                },
-        },
-    };
+    return au::Column({
+        GradientTitle{"Auxiliary #" + std::to_string(index)},
+        gap(12),
+        au::Text{"Each window owns its own Scene + FocusManager."},
+        gap(8),
+        au::Text{au::TextProps{.content = *last_ping}},
+        gap(8),
+        std::move(close_btn),
+    });
 }
 
 /// @brief 主窗 UI：在 `Application` 已构造之后构建，故按钮回调可直接捕获 `app`。
@@ -99,13 +94,13 @@ auto build_main_ui(au::Application &app, const std::shared_ptr<au::State<au::Loc
         auto self_id = std::make_shared<au::WindowId>(au::AURORA_INVALID_WINDOW_ID);
         au::Button close{au::ButtonProps().set_label("Close modal")};
         close.on_click = [&app, self_id]() -> void { app.close_window(*self_id); };
-        au::Node ui = au::Column{au::ColumnProps{.children = {
-                                                     GradientTitle{"Modal dialog"},
-                                                     gap(12),
-                                                     au::Text{"Main window input is blocked until this closes."},
-                                                     gap(8),
-                                                     std::move(close),
-                                                 }}};
+        au::Node ui = au::Column({
+            GradientTitle{"Modal dialog"},
+            gap(12),
+            au::Text{"Main window input is blocked until this closes."},
+            gap(8),
+            std::move(close),
+        });
         *self_id = app.open_window(std::move(w.value()), au::Scene{std::move(ui)}, o);
     };
 
@@ -130,34 +125,29 @@ auto build_main_ui(au::Application &app, const std::shared_ptr<au::State<au::Loc
         app.bus().post(PingMessage{.text = "broadcast #" + std::to_string(ping_seq)}, app.main_window());
     };
 
-    return au::Column{
-        au::ColumnProps{
-            .children =
-                {
-                    GradientTitle{"Multi-window"},
-                    gap(12),
-                    au::Text{au::TextProps{.content = *label}},
-                    gap(8),
-                    std::move(new_btn),
-                    gap(8),
-                    std::move(close_btn),
-                    gap(8),
-                    std::move(quit_btn),
-                    gap(8),
-                    std::move(modal_btn),
-                    gap(8),
-                    std::move(display_btn),
-                    gap(8),
-                    std::move(cast_btn),
-                    gap(12),
-                    au::Text{au::TextProps{.content = *last_ping}},
-                    gap(12),
-                    au::Text{"Auxiliary windows are independent: closing one leaves the rest running."},
-                    gap(4),
-                    au::Text{"Closing the main window exits the app (ExitPolicy::LastWindowClosed)."},
-                },
-        },
-    };
+    return au::Column({
+        GradientTitle{"Multi-window"},
+        gap(12),
+        au::Text{au::TextProps{.content = *label}},
+        gap(8),
+        std::move(new_btn),
+        gap(8),
+        std::move(close_btn),
+        gap(8),
+        std::move(quit_btn),
+        gap(8),
+        std::move(modal_btn),
+        gap(8),
+        std::move(display_btn),
+        gap(8),
+        std::move(cast_btn),
+        gap(12),
+        au::Text{au::TextProps{.content = *last_ping}},
+        gap(12),
+        au::Text{"Auxiliary windows are independent: closing one leaves the rest running."},
+        gap(4),
+        au::Text{"Closing the main window exits the app (ExitPolicy::LastWindowClosed)."},
+    });
 }
 
 }  // namespace

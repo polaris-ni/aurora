@@ -263,7 +263,7 @@ auto open_preview(au::Application &app, au::DecorationPolicy p, const std::share
     };
     kids.emplace_back(std::move(close_btn));
 
-    return au::Column{au::ColumnProps{.children = std::move(kids)}};
+    return au::Column(std::move(kids));
 }
 
 /// @brief 控制窗 UI：五档策略按钮 + 实时 content_inset 读数 + 退出。
@@ -301,7 +301,7 @@ auto open_preview(au::Application &app, au::DecorationPolicy p, const std::share
     quit_btn.on_click = [&app]() -> void { app.quit(); };
     kids.emplace_back(std::move(quit_btn));
 
-    return au::Column{au::ColumnProps{.children = std::move(kids)}};
+    return au::Column(std::move(kids));
 }
 
 }  // namespace

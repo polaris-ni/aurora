@@ -145,8 +145,12 @@ AURORA_TEST_CASE(a_dropped_temporary_node_keeps_the_layout_parent_chain_intact) 
 AURORA_TEST_CASE(removing_a_child_clears_its_layout_parent_and_the_old_widget_stays_usable) {
     auto probe = std::make_shared<DirtyProbe>();
     probe->install_counters();
-    auto col = std::make_shared<Column>(ColumnProps{.children = {Node{probe}}});
+    auto col = std::make_shared<Column>(std::vector<Node>{Node{probe}});
     drive_layout(*col);
+    // 首次布局会补挂新子树（`adopt_children` 的既有路径），挂载期的信号接线会给探针自身标几次脏；
+    // 本用例只关心摘除**之后**那一次标脏，故清零计数后再断绝对值。
+    probe->self_dirty = 0;
+    probe->reached_probe = 0;
 
     AURORA_TEST_REQUIRE(probe->layout_parent() == col.get());
     AURORA_TEST_REQUIRE(col->remove_child(probe.get()));
@@ -168,8 +172,10 @@ AURORA_TEST_CASE(parent_destruction_clears_the_layout_parent_of_a_still_alive_ch
     auto probe = std::make_shared<DirtyProbe>();
     probe->install_counters();
     {
-        auto col = std::make_shared<Column>(ColumnProps{.children = {Node{probe}}});
+        auto col = std::make_shared<Column>(std::vector<Node>{Node{probe}});
         drive_layout(*col);
+        probe->self_dirty = 0;  // 同上：清零首帧挂载期的自标脏，只断父亡后的那一次
+        probe->reached_probe = 0;
         AURORA_TEST_REQUIRE(probe->layout_parent() == col.get());
     }  // 父容器析构；probe 被局部 shared_ptr 持有，继续存活
 

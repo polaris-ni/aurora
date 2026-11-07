@@ -5,17 +5,18 @@
 // try/catch 包装
 // NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
-    au::Row start{au::RowProps{
-        .children = {au::Text{au::LocalizedString{"A"}}, au::Text{au::LocalizedString{"B"}}},
-        .flex = au::Flex{.main_axis = au::MainAxisAlignment::Start, .cross_axis = au::CrossAxisAlignment::Center}}};
+    au::Row start({au::Text{au::LocalizedString{"A"}}, au::Text{au::LocalizedString{"B"}}},
+                  au::RowProps()
+                      .set_main_axis_alignment(au::MainAxisAlignment::Start)
+                      .set_cross_axis_alignment(au::CrossAxisAlignment::Center));
     start.set_modifier(
         au::Modifier{}.size(280.0F, 80.0F).background(pal::AURORA_SURFACE).border(1.0F, pal::AURORA_BORDER));
 
-    au::Row space_between{au::RowProps{
-        .children = {au::Text{au::LocalizedString{"Left"}}, au::Text{au::LocalizedString{"Middle"}},
-                     au::Text{au::LocalizedString{"Right"}}},
-        .flex =
-            au::Flex{.main_axis = au::MainAxisAlignment::SpaceBetween, .cross_axis = au::CrossAxisAlignment::Center}}};
+    au::Row space_between({au::Text{au::LocalizedString{"Left"}}, au::Text{au::LocalizedString{"Middle"}},
+                           au::Text{au::LocalizedString{"Right"}}},
+                          au::RowProps()
+                              .set_main_axis_alignment(au::MainAxisAlignment::SpaceBetween)
+                              .set_cross_axis_alignment(au::CrossAxisAlignment::Center));
     space_between.set_modifier(
         au::Modifier{}.size(280.0F, 80.0F).background(pal::AURORA_SURFACE).border(1.0F, pal::AURORA_BORDER));
 

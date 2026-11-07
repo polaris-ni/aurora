@@ -226,17 +226,17 @@ struct LayerResult {
     std::vector<Node> rows;
     rows.reserve(AURORA_GRID_ROWS);
     for (int r = 0; r < AURORA_GRID_ROWS; ++r) {
-        RowProps rp;
-        rp.children.reserve(AURORA_GRID_COLS);
+        std::vector<Node> rp;
+        rp.reserve(AURORA_GRID_COLS);
         for (int c = 0; c < AURORA_GRID_COLS; ++c) {
             const auto idx = static_cast<unsigned>((r * AURORA_GRID_COLS) + c);
             const auto hue = static_cast<std::uint8_t>((idx * 37U) % 256U);
-            rp.children.emplace_back(std::make_shared<BenchBox>(40.0F, 24.0F, Color{hue, 120, 200, 255}));
+            rp.emplace_back(std::make_shared<BenchBox>(40.0F, 24.0F, Color{hue, 120, 200, 255}));
         }
         rows.emplace_back(std::make_shared<Row>(std::move(rp)));
     }
-    ColumnProps cp;
-    cp.children = std::move(rows);
+    std::vector<Node> cp;
+    cp = std::move(rows);
     auto root = std::make_shared<Column>(std::move(cp));
     constexpr BuildContext ctx;
     root->mount(ctx);

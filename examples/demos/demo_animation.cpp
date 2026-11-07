@@ -265,23 +265,23 @@ auto main() -> int {
     au::Stack track_alt = make_stage(std::vector{au::Node{alt_marker}}, narrow_w, narrow_h, au::Alignment::Center);
     au::Stack track_finite =
         make_stage(std::vector{au::Node{finite_marker}}, narrow_w, narrow_h, au::Alignment::Center);
-    au::Row row_same{au::RowProps{
-        .children = {make_caption("infinite, same direction"), au::Node{std::move(track_same)}}, .gap = 8.0F}};
-    au::Row row_alt{
-        au::RowProps{.children = {make_caption("infinite, alternate"), au::Node{std::move(track_alt)}}, .gap = 8.0F}};
-    au::Row row_finite{
-        au::RowProps{.children = {make_caption("repeat(3), finite"), au::Node{std::move(track_finite)}}, .gap = 8.0F}};
-    au::Column repeat_rows{au::ColumnProps{.children = {au::Node{std::move(row_same)}, au::Node{std::move(row_alt)},
-                                                        au::Node{std::move(row_finite)}, au::Node{loop_note.widget}},
-                                           .gap = 4.0F}};
+    au::Row row_same{std::vector<au::Node>{make_caption("infinite, same direction"), au::Node{std::move(track_same)}},
+                     au::RowProps().set_gap(8.0F)};
+    au::Row row_alt{std::vector<au::Node>{make_caption("infinite, alternate"), au::Node{std::move(track_alt)}},
+                    au::RowProps().set_gap(8.0F)};
+    au::Row row_finite{std::vector<au::Node>{make_caption("repeat(3), finite"), au::Node{std::move(track_finite)}},
+                       au::RowProps().set_gap(8.0F)};
+    au::Column repeat_rows{std::vector<au::Node>{au::Node{std::move(row_same)}, au::Node{std::move(row_alt)},
+                                                 au::Node{std::move(row_finite)}, au::Node{loop_note.widget}},
+                           au::ColumnProps().set_gap(4.0F)};
 
     // 场景二舞台：三枚倍率芯片 + 一条 4 秒循环的进度条 + 当前倍率/进度读数。
-    au::Row chips_row{
-        au::RowProps{.children = {au::Node{chip_normal}, au::Node{chip_slow}, au::Node{chip_frozen}}, .gap = 8.0F}};
+    au::Row chips_row{std::vector<au::Node>{au::Node{chip_normal}, au::Node{chip_slow}, au::Node{chip_frozen}},
+                      au::RowProps().set_gap(8.0F)};
     au::Stack ramp_track = make_stage(std::vector{au::Node{ramp_bar}}, wide_w, 20.0F, au::Alignment::CenterLeft);
-    au::Column scale_rows{au::ColumnProps{
-        .children = {au::Node{std::move(chips_row)}, au::Node{std::move(ramp_track)}, au::Node{scale_note.widget}},
-        .gap = 6.0F}};
+    au::Column scale_rows{std::vector<au::Node>{au::Node{std::move(chips_row)}, au::Node{std::move(ramp_track)},
+                                                au::Node{scale_note.widget}},
+                          au::ColumnProps().set_gap(6.0F)};
 
     // 场景三舞台：整块舞台即拖拽面（拖拽来源是库里的 Draggable 修饰，与 demo_multitouch 同接法：
     // 按下绑指针、Move 上报增量、Release 结束），标记随进度位移并淡入淡出。
@@ -310,8 +310,8 @@ auto main() -> int {
                                              scrub.reverse();
                                          }
                                      }));
-    au::Column scrub_rows{
-        au::ColumnProps{.children = {au::Node{std::move(scrub_stage)}, au::Node{scrub_note.widget}}, .gap = 4.0F}};
+    au::Column scrub_rows{std::vector<au::Node>{au::Node{std::move(scrub_stage)}, au::Node{scrub_note.widget}},
+                          au::ColumnProps().set_gap(4.0F)};
 
     // 场景四舞台：弹簧轨道 + 再踢一脚的点击条 + 收敛状态读数。
     au::Stack spring_track = make_stage(std::vector{au::Node{spring_marker}}, wide_w, 26.0F, au::Alignment::Center);
@@ -330,17 +330,17 @@ auto main() -> int {
                                                             /*initial_velocity=*/spring_goal ? 2.5 : -2.5,
                                                             /*tolerance=*/0.005);
                                  }));
-    au::Column spring_rows{au::ColumnProps{
-        .children = {au::Node{std::move(spring_track)}, au::Node{std::move(spring_kick)}, au::Node{spring_note.widget}},
-        .gap = 4.0F}};
+    au::Column spring_rows{std::vector<au::Node>{au::Node{std::move(spring_track)}, au::Node{std::move(spring_kick)},
+                                                 au::Node{spring_note.widget}},
+                           au::ColumnProps().set_gap(4.0F)};
 
     // 场景五舞台：两条同形对照轨道（上：逐段整形，下：全线性）。
     au::Stack track_shaped = make_stage(std::vector{au::Node{shaped_marker}}, wide_w, narrow_h, au::Alignment::Center);
     au::Stack track_plain = make_stage(std::vector{au::Node{plain_marker}}, wide_w, narrow_h, au::Alignment::Center);
-    au::Column kf_rows{au::ColumnProps{
-        .children = {make_caption("per-stop curves"), au::Node{std::move(track_shaped)}, make_caption("all linear"),
-                     au::Node{std::move(track_plain)}, au::Node{kf_note.widget}},
-        .gap = 4.0F}};
+    au::Column kf_rows{
+        std::vector<au::Node>{make_caption("per-stop curves"), au::Node{std::move(track_shaped)},
+                              make_caption("all linear"), au::Node{std::move(track_plain)}, au::Node{kf_note.widget}},
+        au::ColumnProps().set_gap(4.0F)};
 
     au::Node root = au::Column{
         GradientTitle{"Animation"},

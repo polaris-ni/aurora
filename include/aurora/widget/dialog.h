@@ -252,33 +252,32 @@ namespace detail {
 [[nodiscard]] inline auto dialog_actions(const Theme &theme, Node accept, Node reject = {}) -> Node {
     const auto order = theme.conventions.dialog_button_order;
     const float gap = theme.spacing.medium;
-    const Flex fill_right{.main_axis = MainAxisAlignment::End, .main_axis_size = MainAxisSize::Max};
+    const auto fill_right = []() {  // 动作行统一口径：主轴 End、撑满可用宽度
+        return RowProps().set_main_axis_alignment(MainAxisAlignment::End).set_main_axis_size(MainAxisSize::Max);
+    };
 
     if (!reject) {
         if (order == DialogButtonOrder::AcceptFirst) {
             return accept;  // 与接线前同构：按钮直接作 Column 子项
         }
-        auto row = Row(RowProps{.children = {std::move(accept)}, .flex = fill_right});
+        auto row = Row({std::move(accept)}, fill_right());
         return {std::move(row)};
     }
 
     if (order == DialogButtonOrder::VerticalRightAligned) {
-        auto stack = Column(ColumnProps{
-            .children = {std::move(accept), std::move(reject)},
-            .flex = Flex{.direction = FlexDirection::Column, .cross_axis = CrossAxisAlignment::End},
-            .gap = gap,
-        });
-        auto row = Row(RowProps{.children = {Node{std::move(stack)}}, .flex = fill_right});
+        auto stack = Column({std::move(accept), std::move(reject)},
+                            ColumnProps().set_cross_axis_alignment(CrossAxisAlignment::End).set_gap(gap));
+        auto row = Row({Node{std::move(stack)}}, fill_right());
         return {std::move(row)};
     }
 
     if (order == DialogButtonOrder::AcceptLast) {
         std::swap(accept, reject);  // 拒绝钮换到行首、接受钮落到行尾（Adwaita 的 [取消] 左、[确认] 右）
-        auto row = Row(RowProps{.children = {std::move(accept), std::move(reject)}, .flex = fill_right, .gap = gap});
+        auto row = Row({std::move(accept), std::move(reject)}, fill_right().set_gap(gap));
         return {std::move(row)};
     }
 
-    auto row = Row(RowProps{.children = {std::move(accept), std::move(reject)}, .gap = gap});
+    auto row = Row({std::move(accept), std::move(reject)}, RowProps().set_gap(gap));
     return {std::move(row)};
 }
 
@@ -313,13 +312,13 @@ namespace detail {
         ok_btn.set_on_click(std::move(on_ok));
     }
 
-    auto content = Column(ColumnProps{
-        .children = {detail::dialog_title_text(title, theme), std::move(Text(message).font_size(14)),
-                     detail::dialog_actions(theme, std::move(ok_btn))},
-        .flex = Flex{.cross_axis = detail::dialog_stretches_children(theme) ? CrossAxisAlignment::Stretch
-                                                                            : CrossAxisAlignment::Start},
-        .gap = theme.spacing.large,
-    });
+    auto content =
+        Column({detail::dialog_title_text(title, theme), std::move(Text(message).font_size(14)),
+                detail::dialog_actions(theme, std::move(ok_btn))},
+               ColumnProps()
+                   .set_cross_axis_alignment(detail::dialog_stretches_children(theme) ? CrossAxisAlignment::Stretch
+                                                                                      : CrossAxisAlignment::Start)
+                   .set_gap(theme.spacing.large));
     return {std::move(content)};
 }
 
@@ -342,13 +341,13 @@ namespace detail {
         no_btn.set_on_click([on_result]() -> void { on_result(false); });
     }
 
-    auto content = Column(ColumnProps{
-        .children = {detail::dialog_title_text(title, theme), std::move(Text(message).font_size(14)),
-                     detail::dialog_actions(theme, std::move(yes_btn), std::move(no_btn))},
-        .flex = Flex{.cross_axis = detail::dialog_stretches_children(theme) ? CrossAxisAlignment::Stretch
-                                                                            : CrossAxisAlignment::Start},
-        .gap = theme.spacing.large,
-    });
+    auto content =
+        Column({detail::dialog_title_text(title, theme), std::move(Text(message).font_size(14)),
+                detail::dialog_actions(theme, std::move(yes_btn), std::move(no_btn))},
+               ColumnProps()
+                   .set_cross_axis_alignment(detail::dialog_stretches_children(theme) ? CrossAxisAlignment::Stretch
+                                                                                      : CrossAxisAlignment::Start)
+                   .set_gap(theme.spacing.large));
     return {std::move(content)};
 }
 

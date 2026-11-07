@@ -77,22 +77,21 @@ auto main() -> int {
         AURORA_LOG_INFO("demo", "[tray] activated");
     });
 
-    au::Node root = au::Column{au::ColumnProps{
-        .children = {
-            GradientTitle{"System tray"},
-            gap(8),
-            au::Text{au::TextProps{.content = *last_msg}},
-            gap(8),
-            action_button("Show balloon",
-                          [&tray, &show_balloon]() -> void { show_balloon(tray, "Balloon from the window"); }),
-            gap(8),
-            action_button("Hide tray icon", [&tray]() -> void { tray.hide(); }),
-            gap(8),
-            action_button("Show tray icon", [&tray]() -> void { tray.show(); }),
-            gap(12),
-            au::Text{"Left-click the tray icon to fire on_activate; "
-                     "right-click it for the context menu."},
-        }}};
+    au::Node root = au::Column({
+        GradientTitle{"System tray"},
+        gap(8),
+        au::Text{au::TextProps{.content = *last_msg}},
+        gap(8),
+        action_button("Show balloon",
+                      [&tray, &show_balloon]() -> void { show_balloon(tray, "Balloon from the window"); }),
+        gap(8),
+        action_button("Hide tray icon", [&tray]() -> void { tray.hide(); }),
+        gap(8),
+        action_button("Show tray icon", [&tray]() -> void { tray.show(); }),
+        gap(12),
+        au::Text{"Left-click the tray icon to fire on_activate; "
+                 "right-click it for the context menu."},
+    });
     app.scene().root_node() = std::move(root);
     app.focus().set_root(&app.scene().root());
 

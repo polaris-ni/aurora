@@ -146,7 +146,7 @@ AURORA_TEST_CASE(panel_point_reaches_dropdown_in_column_host) {
     // 核心证人：面板画在布局盒之外，经 Column 宿主派发时该点必须进链并止于 Dropdown。
     ChangeLog log;
     const std::shared_ptr<Dropdown> dd = make_dropdown(log);
-    auto root = std::make_shared<Column>(ColumnProps{.children = {Node{dd}}, .gap = 0.0F});
+    auto root = std::make_shared<Column>(std::vector<Node>{Node{dd}}, ColumnProps().set_gap(0.0F));
     LayoutEngine::layout(*root, host_constraints());
 
     const Rect db = child_box(*root, *dd);
@@ -170,8 +170,8 @@ AURORA_TEST_CASE(panel_press_selects_option_via_real_dispatch) {
     auto btn = Button(ButtonProps().set_label("Below"));
     int btn_hits = 0;
     btn.set_on_click([&btn_hits]() -> void { ++btn_hits; });
-    auto root =
-        std::make_shared<Column>(ColumnProps{.children = {Node{dd}, Node{std::move(btn)}}, .gap = AURORA_SIBLING_GAP});
+    auto root = std::make_shared<Column>(std::vector<Node>{Node{dd}, Node{std::move(btn)}},
+                                         ColumnProps().set_gap(AURORA_SIBLING_GAP));
     LayoutEngine::layout(*root, host_constraints());
 
     const Rect db = child_box(*root, *dd);
@@ -233,8 +233,8 @@ AURORA_TEST_CASE(closed_dropdown_never_covers_the_sibling_below) {
     auto btn = Button(ButtonProps().set_label("Below"));
     int btn_hits = 0;
     btn.set_on_click([&btn_hits]() -> void { ++btn_hits; });
-    auto root =
-        std::make_shared<Column>(ColumnProps{.children = {Node{dd}, Node{std::move(btn)}}, .gap = AURORA_SIBLING_GAP});
+    auto root = std::make_shared<Column>(std::vector<Node>{Node{dd}, Node{std::move(btn)}},
+                                         ColumnProps().set_gap(AURORA_SIBLING_GAP));
     LayoutEngine::layout(*root, host_constraints());
 
     const Widget &sibling = root->child_nodes().back().widget();
@@ -261,8 +261,8 @@ AURORA_TEST_CASE(point_below_open_panel_still_goes_to_sibling) {
     auto btn = Button(ButtonProps().set_label("Below"));
     int btn_hits = 0;
     btn.set_on_click([&btn_hits]() -> void { ++btn_hits; });
-    auto root =
-        std::make_shared<Column>(ColumnProps{.children = {Node{dd}, Node{std::move(btn)}}, .gap = AURORA_SIBLING_GAP});
+    auto root = std::make_shared<Column>(std::vector<Node>{Node{dd}, Node{std::move(btn)}},
+                                         ColumnProps().set_gap(AURORA_SIBLING_GAP));
     LayoutEngine::layout(*root, host_constraints());
 
     const Rect db = child_box(*root, *dd);
@@ -293,7 +293,7 @@ AURORA_TEST_CASE(stale_panel_point_misses_after_close) {
     // 展开结束后陈旧点不中：收起即追加盒为空，上一帧还在面板内的点不得再命中 Dropdown。
     ChangeLog log;
     const std::shared_ptr<Dropdown> dd = make_dropdown(log);
-    auto root = std::make_shared<Column>(ColumnProps{.children = {Node{dd}}, .gap = 0.0F});
+    auto root = std::make_shared<Column>(std::vector<Node>{Node{dd}}, ColumnProps().set_gap(0.0F));
     LayoutEngine::layout(*root, host_constraints());
 
     const Rect db = child_box(*root, *dd);
@@ -319,8 +319,8 @@ AURORA_TEST_CASE(compat_entry_and_dispatch_entry_agree_pointwise) {
     const std::shared_ptr<Dropdown> dd = make_dropdown(log);
     auto above = Button(ButtonProps().set_label("Above"));
     auto below = Button(ButtonProps().set_label("Below"));
-    auto root = std::make_shared<Column>(
-        ColumnProps{.children = {Node{std::move(above)}, Node{dd}, Node{std::move(below)}}, .gap = 0.0F});
+    auto root = std::make_shared<Column>(std::vector<Node>{Node{std::move(above)}, Node{dd}, Node{std::move(below)}},
+                                         ColumnProps().set_gap(0.0F));
     LayoutEngine::layout(*root, host_constraints());
     dd->set_open(true);
 
@@ -378,7 +378,7 @@ AURORA_TEST_CASE(grandchild_extra_hit_box_propagates_three_levels) {
     // 每行 = Row 内放 Dropdown（复现 borealis 设置面板的「LazyList → Row → Dropdown」形态）。
     // 上下内边距各 8 ⇒ 行高 56 时 Dropdown 的紧约束盒高 40，与真实场景一致。
     auto make_row = [](const std::shared_ptr<Dropdown> &target) -> Node {
-        const auto row = std::make_shared<Row>(RowProps{.children = {Node{target}}});
+        const auto row = std::make_shared<Row>(std::vector<Node>{Node{target}});
         row->set_modifier(Modifier{}.padding(8.0F));
         return Node{row};
     };
@@ -420,7 +420,7 @@ AURORA_TEST_CASE(clipped_list_item_extra_hit_box_stays_unreachable) {
     // 即「条目可见但面板不可见」的最坏形态——面板本就不该可点。
     ChangeLog log;
     const std::shared_ptr<Dropdown> dd = make_dropdown(log);
-    const std::shared_ptr<Row> row = std::make_shared<Row>(RowProps{.children = {Node{dd}}});
+    const std::shared_ptr<Row> row = std::make_shared<Row>(std::vector<Node>{Node{dd}});
     row->set_modifier(Modifier{}.padding(8.0F));
     // 20 行，Dropdown 在最后一行（index 19）。
     auto make_row = [row](int index) -> Node { return index == 19 ? Node{row} : Node{}; };
@@ -465,7 +465,7 @@ AURORA_TEST_CASE(scroll_and_lazy_list_agree_on_clipped_extra_hit_box) {
     // 面板自其下方 30dp 起 ⇒ 整段落在视口下沿（260）之外。
     {
         const std::shared_ptr<Dropdown> dd = make_dropdown(log);
-        const std::shared_ptr<Row> row = std::make_shared<Row>(RowProps{.children = {Node{dd}}});
+        const std::shared_ptr<Row> row = std::make_shared<Row>(std::vector<Node>{Node{dd}});
         row->set_modifier(Modifier{}.padding(8.0F));
         auto list =
             std::make_shared<LazyList>(20, [row](int i) -> Node { return i == 19 ? Node{row} : Node{}; }, 56.0F);
@@ -494,7 +494,7 @@ AURORA_TEST_CASE(scroll_and_lazy_list_agree_on_clipped_extra_hit_box) {
     {
         const std::shared_ptr<Dropdown> dd = make_dropdown(log);
         auto content = std::make_shared<Column>(
-            ColumnProps{.children = {Node{Button(ButtonProps().set_label("top"))}, Node{dd}}, .gap = 400.0F});
+            std::vector<Node>{Node{Button(ButtonProps().set_label("top"))}, Node{dd}}, ColumnProps().set_gap(400.0F));
         auto scroller = std::make_shared<Scroll>(ScrollProps{.child = Node{content}});
         LayoutEngine::layout(*scroller, host_constraints());
         dd->set_open(true);
@@ -556,7 +556,8 @@ AURORA_TEST_CASE(scroll_passes_viewport_space_offset_to_descendant_extra_hit_box
     auto filler = std::make_shared<OffsetProbe>();
     // gap 600dp 撑出远超视口（260dp）的内容高，使滚动真正生效。**单子项时 gap 不产生间距**
     // （它是「相邻子项」间距），故必须两个子项。缺此垫高则 offset 恒 0、判据不可观测。
-    auto content = std::make_shared<Column>(ColumnProps{.children = {Node{probe}, Node{filler}}, .gap = 600.0F});
+    auto content =
+        std::make_shared<Column>(std::vector<Node>{Node{probe}, Node{filler}}, ColumnProps().set_gap(600.0F));
     scroller->add(Node{content});
     LayoutEngine::layout(*scroller, host_constraints());
 

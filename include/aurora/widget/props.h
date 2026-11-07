@@ -936,6 +936,10 @@ struct PropCodec<MainAxisSize> : detail::EnumPropCodec<MainAxisSize, &main_axis_
     /// @brief schema 的 C++ 类型名。
     /// @return `MainAxisSize`。
     [[nodiscard]] static constexpr auto type_text() -> std::string_view { return "MainAxisSize"; }
+
+    /// @brief 合法值表（发射 schema 的 `enum` 字段；拼写沿用枚举成员名）。
+    /// @return `{"Min", "Max"}`。
+    [[nodiscard]] static auto enum_names() -> std::vector<std::string_view> { return {"Min", "Max"}; }
 };
 
 /// @brief 主轴对齐属性。
@@ -945,6 +949,12 @@ struct PropCodec<MainAxisAlignment>
     /// @brief schema 的 C++ 类型名。
     /// @return `MainAxisAlignment`。
     [[nodiscard]] static constexpr auto type_text() -> std::string_view { return "MainAxisAlignment"; }
+
+    /// @brief 合法值表（发射 schema 的 `enum` 字段；拼写沿用枚举成员名）。
+    /// @return `{"Start", "Center", "End", "SpaceBetween", "SpaceAround", "SpaceEvenly"}`。
+    [[nodiscard]] static auto enum_names() -> std::vector<std::string_view> {
+        return {"Start", "Center", "End", "SpaceBetween", "SpaceAround", "SpaceEvenly"};
+    }
 };
 
 /// @brief 交叉轴对齐属性。
@@ -954,6 +964,12 @@ struct PropCodec<CrossAxisAlignment>
     /// @brief schema 的 C++ 类型名。
     /// @return `CrossAxisAlignment`。
     [[nodiscard]] static constexpr auto type_text() -> std::string_view { return "CrossAxisAlignment"; }
+
+    /// @brief 合法值表（发射 schema 的 `enum` 字段；拼写沿用枚举成员名）。
+    /// @return `{"Start", "Center", "End", "Stretch", "Baseline"}`。
+    [[nodiscard]] static auto enum_names() -> std::vector<std::string_view> {
+        return {"Start", "Center", "End", "Stretch", "Baseline"};
+    }
 };
 
 /// @brief 滚动吸附对齐属性。

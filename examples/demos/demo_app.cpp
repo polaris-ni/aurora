@@ -14,11 +14,11 @@ auto main() -> int {
     line1.set_modifier(aurora::Modifier{}.size(240.0F, 28.0F));
     line2.set_modifier(aurora::Modifier{}.size(240.0F, 28.0F));
 
-    auto root = aurora::Column{aurora::ColumnProps{.children = {
-                                                       std::move(line1),
-                                                       gap(12.0F),
-                                                       std::move(line2),
-                                                   }}};
+    auto root = aurora::Column({
+        std::move(line1),
+        gap(12.0F),
+        std::move(line2),
+    });
     aurora::Node tree{std::move(root)};  // 单一宿主：inspector 与 App 各持一份共享句柄
 
 #ifdef AURORA_BUILD_INSPECTOR_SERVER

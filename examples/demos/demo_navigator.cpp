@@ -22,15 +22,15 @@ auto main() -> int {
     au::RouteRegistry registry;
     registry["home"] = [](const std::string &) -> au::Route {
         au::Text t{"Home"};
-        return au::Route{au::Column{au::ColumnProps{.children = {std::move(t)}}}, "home"};
+        return au::Route{au::Column({std::move(t)}), "home"};
     };
     registry["detail"] = [](const std::string &) -> au::Route {
         au::Text t{"Detail"};
-        return au::Route{au::Column{au::ColumnProps{.children = {std::move(t)}}}, "detail"};
+        return au::Route{au::Column({std::move(t)}), "detail"};
     };
     registry["settings"] = [](const std::string &) -> au::Route {
         au::Text t{"Settings"};
-        return au::Route{au::Column{au::ColumnProps{.children = {std::move(t)}}}, "settings"};
+        return au::Route{au::Column({std::move(t)}), "settings"};
     };
 
     // 初始栈：home
@@ -48,7 +48,7 @@ auto main() -> int {
         // 被本检查一律判为「不应抛出」（operator() 非 noexcept，static_assert 已证）
         // NOLINTNEXTLINE(bugprone-exception-escape)
         reset.set_on_click([host, registry]() -> void { host->open_uri("home", registry); });
-        return au::Column{au::ColumnProps{.children = {std::move(jump), gap(12.0F), std::move(reset)}}};
+        return au::Column({std::move(jump), gap(12.0F), std::move(reset)});
     };
     host->push(au::Route{make_controls(), "controls"});
 

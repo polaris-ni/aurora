@@ -362,17 +362,16 @@ FilePickerView::FilePickerView(PickerMode mode, const file_dialog::Options &opts
     std::vector<Node> column;
     column.emplace_back(title);
     column.emplace_back(path_label_);
-    column.emplace_back(Row(RowProps{.children = std::move(path_row), .gap = AURORA_PICKER_GAP}));
+    column.emplace_back(Row(std::move(path_row), RowProps().set_gap(AURORA_PICKER_GAP)));
     column.emplace_back(list_scroll);
     if (!opts.filters.empty()) {
         auto filter_label = std::make_shared<Text>(filter_summary(opts.filters));
         filter_label->font_size(12);
         column.emplace_back(filter_label);
     }
-    column.emplace_back(
-        Row(RowProps{.children = {Node{confirm_button_}, Node{cancel_button}}, .gap = AURORA_PICKER_GAP}));
+    column.emplace_back(Row({Node{confirm_button_}, Node{cancel_button}}, RowProps().set_gap(AURORA_PICKER_GAP)));
 
-    set_content(Node{Column(ColumnProps{.children = std::move(column), .gap = AURORA_PICKER_GAP})});
+    set_content(Node{Column(std::move(column), ColumnProps().set_gap(AURORA_PICKER_GAP))});
     refresh_ui();
 }
 

@@ -52,8 +52,7 @@ auto sizes_row(const au::Color &accent) -> au::Node {
     s24.set_size(au::IconSize::S24);
     au::Icon s32{"frame"};
     s32.set_size(au::IconSize::S32).set_color(accent);
-    return au::Row{
-        au::RowProps{.children = {std::move(s16), std::move(s20), std::move(s24), std::move(s32)}, .gap = 24.0F}};
+    return au::Row({std::move(s16), std::move(s20), std::move(s24), std::move(s32)}, au::RowProps().set_gap(24.0F));
 }
 
 /// 一行 IconButton 演示：常态 + 禁用态，覆盖四态取色的静态可见部分。
@@ -65,21 +64,19 @@ auto buttons_row() -> au::Node {
     disabled.set_on_click([] {}).set_enabled(false).set_semantic_label("Remove");
     au::IconButton framed{"frame"};
     framed.set_on_click([] {}).set_semantic_label("Frame");
-    return au::Row{au::RowProps{.children = {std::move(normal), std::move(disabled), std::move(framed)}, .gap = 16.0F}};
+    return au::Row({std::move(normal), std::move(disabled), std::move(framed)}, au::RowProps().set_gap(16.0F));
 }
 
 /// 单侧（明或暗）主题下的整段图廊正文。
 auto gallery_body(const au::Color &accent) -> au::Node {
-    return au::Column{au::ColumnProps{
-        .children =
-            {
-                au::Text{"Sizes: 16 / 20 / 24 / 32 dp"},
-                sizes_row(accent),
-                au::Text{"IconButton: normal / disabled / frame"},
-                buttons_row(),
-            },
-        .gap = 16.0F,
-    }};
+    return au::Column(
+        {
+            au::Text{"Sizes: 16 / 20 / 24 / 32 dp"},
+            sizes_row(accent),
+            au::Text{"IconButton: normal / disabled / frame"},
+            buttons_row(),
+        },
+        au::ColumnProps().set_gap(16.0F));
 }
 
 /// 把一段正文包进指定主题作用域。
@@ -100,19 +97,17 @@ auto main() -> int {
     au::Node light_side = themed(au::Theme::light(), gallery_body(light_accent));
     au::Node dark_side = themed(au::Theme::dark(), gallery_body(dark_accent));
 
-    au::Node root = au::Column{au::ColumnProps{
-        .children =
-            {
-                GradientTitle{"Icon gallery"},
-                gap(8),
-                au::Text{"Light theme"},
-                std::move(light_side),
-                gap(12),
-                au::Text{"Dark theme"},
-                std::move(dark_side),
-            },
-        .gap = 12.0F,
-    }};
+    au::Node root = au::Column(
+        {
+            GradientTitle{"Icon gallery"},
+            gap(8),
+            au::Text{"Light theme"},
+            std::move(light_side),
+            gap(12),
+            au::Text{"Dark theme"},
+            std::move(dark_side),
+        },
+        au::ColumnProps().set_gap(12.0F));
 
     return run_demo(Card{std::move(root)}, "Icon gallery - Aurora Demo", 640.0F, 560.0F);
 }

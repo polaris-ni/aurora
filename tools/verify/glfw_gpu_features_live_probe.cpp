@@ -259,19 +259,19 @@ auto main(int argc, char **argv) -> int {
     auto video = std::make_shared<StreamVideoBox>(160, 90, stream_key + 1U);
     std::vector<aurora::Node> rows;
     for (int r = 0; r < 6; ++r) {
-        aurora::RowProps rp;
+        std::vector<aurora::Node> rp;
         for (int c = 0; c < 8; ++c) {
             const auto hue = static_cast<std::uint8_t>((((r * 8) + c) * 29U) % 256U);
-            rp.children.emplace_back(std::make_shared<GridBox>(32.0F, 18.0F, aurora::Color{hue, 130, 200, 255}));
+            rp.emplace_back(std::make_shared<GridBox>(32.0F, 18.0F, aurora::Color{hue, 130, 200, 255}));
         }
         rows.emplace_back(std::make_shared<aurora::Row>(std::move(rp)));
     }
     std::shared_ptr<aurora::Widget> video_widget = video;  // 共享别名入树（video 本体保留供 advance_version）
-    aurora::ColumnProps grid_props;
-    grid_props.children = std::move(rows);
-    aurora::ColumnProps cp;
-    cp.children.emplace_back(std::move(video_widget));
-    cp.children.emplace_back(std::make_shared<aurora::Column>(std::move(grid_props)));
+    std::vector<aurora::Node> grid_props;
+    grid_props = std::move(rows);
+    std::vector<aurora::Node> cp;
+    cp.emplace_back(std::move(video_widget));
+    cp.emplace_back(std::make_shared<aurora::Column>(std::move(grid_props)));
     auto root_widget = std::make_shared<aurora::Column>(std::move(cp));
     // Node 以 shared_ptr 重载接管所有权（无控件拷贝）；present_root(Node&) 需命名左值逐帧传引用，
     // 跨帧指针身份稳定，窗口脏区追踪的根指针比较才能命中。

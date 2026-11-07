@@ -462,9 +462,9 @@ class AppCellLeaf : public au::LeafWidget {
             chip->set_label("item " + std::to_string(r) + "-" + std::to_string(c));
             cells.emplace_back(chip);
         }
-        rows.emplace_back(std::make_shared<Row>(RowProps{.children = std::move(cells)}));
+        rows.emplace_back(std::make_shared<Row>(std::move(cells)));
     }
-    auto col = std::make_shared<Column>(ColumnProps{.children = std::move(rows)});
+    auto col = std::make_shared<Column>(std::move(rows));
     return Node{std::make_shared<Scroll>(ScrollProps{.child = Node{std::move(col)}})};
 }
 
@@ -582,9 +582,9 @@ class AppCellLeaf : public au::LeafWidget {
                 au::EdgeInsets{.left = 4.0F, .top = 4.0F, .right = 4.0F, .bottom = 4.0F}));
             row_cells.emplace_back(cell);
         }
-        grid_rows.emplace_back(std::make_shared<Row>(RowProps{.children = std::move(row_cells)}));
+        grid_rows.emplace_back(std::make_shared<Row>(std::move(row_cells)));
     }
-    body.emplace_back(std::make_shared<Column>(ColumnProps{.children = std::move(grid_rows)}));
+    body.emplace_back(std::make_shared<Column>(std::move(grid_rows)));
 
     body.push_back(section_header("Recommended for you"));
     // 静态推荐行：缩略图 + 两行文本。同理不用 LazyRow（横向可滚动控件同样会抢滚轮）。
@@ -608,8 +608,8 @@ class AppCellLeaf : public au::LeafWidget {
             .content = data.title, .font = au::Font{.size_pt = 14.0F, .weight = 600}, .text_color = th.text});
         auto subtitle = std::make_shared<au::Text>(au::TextProps{
             .content = data.subtitle, .font = au::Font{.size_pt = 12.0F}, .text_color = th.text_secondary});
-        auto col = std::make_shared<Column>(
-            ColumnProps{.children = std::vector<Node>{Node{title}, Node{subtitle}}, .gap = 4.0F});
+        auto col =
+            std::make_shared<Column>(std::vector<Node>{Node{title}, Node{subtitle}}, ColumnProps().set_gap(4.0F));
         auto item = std::make_shared<Row>();
         item->add(Node{thumb});
         item->add(Node{col});
@@ -639,8 +639,7 @@ class AppCellLeaf : public au::LeafWidget {
         auto meta = std::make_shared<au::Text>(au::TextProps{.content = "2026-09-1" + std::to_string(1 + (i % 9)),
                                                              .font = au::Font{.size_pt = 11.0F},
                                                              .text_color = th.text_secondary});
-        auto info =
-            std::make_shared<Column>(ColumnProps{.children = std::vector<Node>{Node{name}, Node{meta}}, .gap = 2.0F});
+        auto info = std::make_shared<Column>(std::vector<Node>{Node{name}, Node{meta}}, ColumnProps().set_gap(2.0F));
         auto head = std::make_shared<Row>();
         head->add(Node{avatar_small});
         head->add(Node{info});
@@ -649,14 +648,14 @@ class AppCellLeaf : public au::LeafWidget {
                                                                   .text_color = th.text,
                                                                   .max_lines = 2,
                                                                   .soft_wrap = true});
-        auto card = std::make_shared<Column>(
-            ColumnProps{.children = std::vector<Node>{Node{head}, Node{body_text}}, .gap = 6.0F});
+        auto card =
+            std::make_shared<Column>(std::vector<Node>{Node{head}, Node{body_text}}, ColumnProps().set_gap(6.0F));
         card->set_modifier(
             au::Modifier{}.padding(au::EdgeInsets{.left = 16.0F, .top = 8.0F, .right = 16.0F, .bottom = 8.0F}));
         body.emplace_back(card);
     }
 
-    auto body_col = std::make_shared<Column>(ColumnProps{.children = std::move(body)});
+    auto body_col = std::make_shared<Column>(std::move(body));
     auto scroll = std::make_shared<Scroll>(ScrollProps{.child = Node{std::move(body_col)}});
     scroll->set_modifier(au::Modifier{}.expand());
 
@@ -691,8 +690,7 @@ class AppCellLeaf : public au::LeafWidget {
         auto label = std::make_shared<au::Text>(au::TextProps{.content = wrap_elem(NAV_LABELS, i),
                                                               .font = au::Font{.size_pt = 10.0F},
                                                               .text_color = (i == 0) ? th.primary : th.text_secondary});
-        auto item =
-            std::make_shared<Column>(ColumnProps{.children = std::vector<Node>{Node{icon}, Node{label}}, .gap = 3.0F});
+        auto item = std::make_shared<Column>(std::vector<Node>{Node{icon}, Node{label}}, ColumnProps().set_gap(3.0F));
         nav->add(Node{item});
     }
 
@@ -701,7 +699,7 @@ class AppCellLeaf : public au::LeafWidget {
     root.emplace_back(search_row);
     root.emplace_back(scroll);
     root.emplace_back(nav);
-    return Node{std::make_shared<Column>(ColumnProps{.children = std::move(root)})};
+    return Node{std::make_shared<Column>(std::move(root))};
 }
 
 /// @brief L5-C isolated scenario: LazyList self-driven scroll path (not via the outer Scroll buffer).

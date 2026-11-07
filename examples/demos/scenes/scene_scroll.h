@@ -36,7 +36,7 @@ namespace aurora::demo_scenes {
         lines.emplace_back(std::move(l));
     }
 
-    au::Scroll scroll{au::Column{au::ColumnProps{.children = std::move(lines)}}};
+    au::Scroll scroll{au::Column(std::move(lines))};
     scroll.set_modifier(au::Modifier{}.size(360.0F, 240.0F).border(1.0F, pal::AURORA_BORDER));
 
     au::Node root = au::Column{

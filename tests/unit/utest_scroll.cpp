@@ -222,7 +222,7 @@ auto make_regression_tree() -> Node {
     for (int i = 0; i < 40; ++i) {
         rows.emplace_back(box(300.0F, 40.0F));
     }
-    auto col = std::make_shared<Column>(ColumnProps{.children = std::move(rows)});
+    auto col = std::make_shared<Column>(std::move(rows));
     ScrollProps props;
     props.child = Node{std::move(col)};
     return Node{std::make_shared<Scroll>(props)};

@@ -28,15 +28,15 @@ namespace aurora::demo_scenes {
 ///
 /// 契约：根为 `Card`（含 GradientTitle 与说明文本），画布 560×560（与 demo 一致）。
 [[nodiscard]] inline auto build_column() -> Node {
-    au::Column start{
-        au::ColumnProps{.children = {au::Text{au::LocalizedString{"A"}}, au::Text{au::LocalizedString{"B"}}},
-                        .flex = au::Flex{.main_axis = au::MainAxisAlignment::Start}}};
+    au::Column start({au::Text{au::LocalizedString{"A"}}, au::Text{au::LocalizedString{"B"}}},
+                     au::ColumnProps().set_main_axis_alignment(au::MainAxisAlignment::Start));
     start.set_modifier(
         au::Modifier{}.size(240.0F, 160.0F).background(pal::AURORA_SURFACE).border(1.0F, pal::AURORA_BORDER));
 
-    au::Column center{au::ColumnProps{
-        .children = {au::Text{au::LocalizedString{"A"}}, au::Text{au::LocalizedString{"B"}}},
-        .flex = au::Flex{.main_axis = au::MainAxisAlignment::Center, .cross_axis = au::CrossAxisAlignment::Center}}};
+    au::Column center({au::Text{au::LocalizedString{"A"}}, au::Text{au::LocalizedString{"B"}}},
+                      au::ColumnProps()
+                          .set_main_axis_alignment(au::MainAxisAlignment::Center)
+                          .set_cross_axis_alignment(au::CrossAxisAlignment::Center));
     center.set_modifier(
         au::Modifier{}.size(240.0F, 160.0F).background(pal::AURORA_SURFACE).border(1.0F, pal::AURORA_BORDER));
 

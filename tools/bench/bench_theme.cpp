@@ -240,7 +240,7 @@ auto build_probes(ReadForm form, int count) -> std::vector<aurora::Node> {
         for (int c = 0; c < cols && placed < count; ++c, ++placed) {
             cells.emplace_back(std::make_shared<ThemeProbe>(form, 2.0F, 2.0F));
         }
-        out.emplace_back(std::make_shared<aurora::Row>(aurora::RowProps{.children = std::move(cells)}));
+        out.emplace_back(std::make_shared<aurora::Row>(std::move(cells)));
     }
     return out;
 }
@@ -267,7 +267,7 @@ auto theme_with_long_family() -> aurora::Theme { return with_long_family(aurora:
 // 注入场景：ThemeProvider(State<Theme>) 包住探针方阵 —— 换肤即写这枚 State。
 // long_family 决定注入主题的族名档位：false 用 Material 基线档短族名（落在 SSO 内，拷贝零分配），true 用越界长族名。
 auto build_scene(ReadForm form, int count, bool long_family) -> Scene {
-    auto col = std::make_shared<aurora::Column>(aurora::ColumnProps{.children = build_probes(form, count)});
+    auto col = std::make_shared<aurora::Column>(build_probes(form, count));
     auto theme_state =
         std::make_shared<aurora::State<aurora::Theme>>(long_family ? theme_with_long_family() : aurora::Theme::light());
     auto provider = std::make_shared<aurora::ThemeProvider>(*theme_state, aurora::Node{std::move(col)});
@@ -282,7 +282,7 @@ auto build_scene(ReadForm form, int count, bool long_family) -> Scene {
 // 应用根无 `ThemeProvider` 的场景：探针方阵直接作根，不经 `Provider` 重建子环境。注意它**不是**「无注入」
 // ——`Window::prepare_context` 每帧仍把本机风格档注入根环境，故这里读到的是平台档（Windows 上族名越 SSO）。
 auto build_fallback_scene(ReadForm form, int count) -> Scene {
-    auto col = std::make_shared<aurora::Column>(aurora::ColumnProps{.children = build_probes(form, count)});
+    auto col = std::make_shared<aurora::Column>(build_probes(form, count));
     return Scene{
         .root = aurora::Node{std::move(col)},
         .theme_state = nullptr,

@@ -148,7 +148,7 @@ AURORA_TEST_CASE(hit_dispatch_follows_inset_translation) {
     std::vector<aurora::Node> kids;
     kids.emplace_back(aurora::Text{"filler"});
     kids.emplace_back(std::move(button_node));
-    aurora::Node root{aurora::Column{aurora::ColumnProps{.children = std::move(kids)}}};
+    aurora::Node root{aurora::Column(std::move(kids))};
     (void)win->present_root(root);
 
     const aurora::Rect painted = button_widget->paint_bounds();

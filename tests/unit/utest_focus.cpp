@@ -370,9 +370,9 @@ AURORA_TEST_CASE(tab_cycle_hits_only_interactive_controls) {
     // 无需宿主逐个 set_focusable(false)（改默认值前该树是 6 个停点）。
     auto a = std::make_shared<Button>("A");
     auto b = std::make_shared<Button>("B");
-    auto inner = std::make_shared<Row>(RowProps{.children = {Node{a}, Node{b}}});
+    auto inner = std::make_shared<Row>(std::vector<Node>{Node{a}, Node{b}});
     auto label = std::make_shared<Text>("label");
-    Column root{ColumnProps{.children = {Node{label}, Node{inner}, Node{Spacer{}}}}};
+    Column root{std::vector<Node>{Node{label}, Node{inner}, Node{Spacer{}}}};
 
     FocusManager fm;
     fm.set_root(&root);

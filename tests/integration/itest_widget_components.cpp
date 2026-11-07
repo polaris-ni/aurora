@@ -200,8 +200,8 @@ AURORA_TEST_CASE(long_press_fires_after_threshold) {
 
 AURORA_TEST_CASE(logical_snapshot_and_pixels_are_deterministic) {
     auto make_tree = []() -> Node {
-        auto col = std::make_shared<Column>(ColumnProps{
-            .children = {Node{Row{RowProps{.children = {Node{Text{"A"}}, Node{Text{"B"}}}}}}, Node{Text{"C"}}}});
+        auto col =
+            std::make_shared<Column>(std::vector<Node>{Node{Row({Node{Text{"A"}}, Node{Text{"B"}}})}, Node{Text{"C"}}});
         col->set_modifier(Modifier{}.fill_max_size());
         return Node{std::move(col)};
     };

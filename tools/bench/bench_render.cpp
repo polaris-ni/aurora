@@ -60,9 +60,9 @@ auto build_tree(std::shared_ptr<aurora::Chip> *out_probe) -> aurora::Node {
             }
             chips.emplace_back(chip);
         }
-        rows.emplace_back(std::make_shared<aurora::Row>(aurora::RowProps{.children = std::move(chips)}));
+        rows.emplace_back(std::make_shared<aurora::Row>(std::move(chips)));
     }
-    return aurora::Node{std::make_shared<aurora::Column>(aurora::ColumnProps{.children = std::move(rows)})};
+    return aurora::Node{std::make_shared<aurora::Column>(std::move(rows))};
 }
 
 // Representative text (Latin + digits + CJK) covering the fallback chain and atlas-cache paths.
@@ -89,7 +89,7 @@ auto build_scroll_tree() -> aurora::Node {
         chip->set_label("row " + std::to_string(i));
         items.emplace_back(std::move(chip));
     }
-    auto col = std::make_shared<aurora::Column>(aurora::ColumnProps{.children = std::move(items)});
+    auto col = std::make_shared<aurora::Column>(std::move(items));
     return aurora::Node{std::make_shared<aurora::Scroll>(aurora::ScrollProps{.child = aurora::Node{std::move(col)}})};
 }
 

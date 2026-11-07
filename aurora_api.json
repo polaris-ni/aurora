@@ -727,7 +727,8 @@
       "events": [],
       "children_policy": "multiple",
       "examples": [
-        "au::Column{ au::Text(\"A\"), au::Text(\"B\") }"
+        "au::Column{ au::Text(\"A\"), au::Text(\"B\") }",
+        "au::Column({ au::Text(\"A\"), au::Text(\"B\") }, au::ColumnProps().set_gap(8.0F))"
       ],
       "invariants": [
         "gap >= 0"
@@ -2930,7 +2931,8 @@
       "events": [],
       "children_policy": "multiple",
       "examples": [
-        "au::Row{ au::Text(\"A\"), au::Text(\"B\") }"
+        "au::Row{ au::Text(\"A\"), au::Text(\"B\") }",
+        "au::Row({ au::Text(\"A\"), au::Text(\"B\") }, au::RowProps().set_gap(8.0F))"
       ],
       "invariants": [
         "gap >= 0"

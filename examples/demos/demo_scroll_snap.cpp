@@ -11,7 +11,7 @@ auto main() -> int {
     for (int i = 0; i < 5; ++i) {
         au::Text label{"Page " + std::to_string(i + 1) + " · snap paging"};
         label.set_modifier(au::Modifier{}.padding(12.0F));
-        au::Column page{au::ColumnProps{.children = {std::move(label)}}};
+        au::Column page{std::vector<au::Node>{std::move(label)}};
         page.set_modifier(au::Modifier{}
                               .size(360.0F, aurora_page_height)
                               .background(i % 2 == 0 ? pal::AURORA_SURFACE : pal::AURORA_BORDER)
@@ -20,7 +20,7 @@ auto main() -> int {
     }
 
     au::Scroll pager{au::ScrollProps{
-        .child = au::Node{au::Column{au::ColumnProps{.children = std::move(pages)}}},
+        .child = au::Node{au::Column(std::move(pages))},
         .snap = au::ScrollSnap::page(),
     }};
     pager.set_modifier(au::Modifier{}.size(360.0F, aurora_page_height).border(1.0F, pal::AURORA_BORDER));

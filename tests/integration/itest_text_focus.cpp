@@ -52,7 +52,7 @@ struct Stage {
     Stage() {
         txt = std::make_shared<Text>("Click the button to change the count (visible in the run log)");
         btn = std::make_shared<Button>();
-        col = std::make_shared<Column>(ColumnProps{.children = {Node{txt}, Node{btn}}});
+        col = std::make_shared<Column>(std::vector<Node>{Node{txt}, Node{btn}});
         col->set_focusable(false);  // 容器不抢占焦点，焦点应落在叶控件上
         col->mount(ctx);
         constexpr Constraints cc{.min = Size{.width = 0.0F, .height = 0.0F},

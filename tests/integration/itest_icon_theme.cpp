@@ -96,9 +96,9 @@ auto sample_gallery() -> Node {
     row_b.emplace_back(std::move(dead));
 
     std::vector<Node> rows;
-    rows.emplace_back(Row{RowProps{.children = std::move(row_a), .gap = 16.0F}});
-    rows.emplace_back(Row{RowProps{.children = std::move(row_b), .gap = 16.0F}});
-    return Node{std::make_shared<Column>(ColumnProps{.children = std::move(rows), .gap = 16.0F})};
+    rows.emplace_back(Row(std::move(row_a), RowProps().set_gap(16.0F)));
+    rows.emplace_back(Row(std::move(row_b), RowProps().set_gap(16.0F)));
+    return Node{std::make_shared<Column>(std::move(rows), ColumnProps().set_gap(16.0F))};
 }
 
 /// 把图廊包进主题作用域。

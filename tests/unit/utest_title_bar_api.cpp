@@ -191,7 +191,7 @@ AURORA_TEST_CASE(paint_covers_icon_title_subtitle_glyphs_and_snap) {
     bar->set_subtitle("Sub");
     bar->set_window_controls(true);
 
-    auto root = std::make_shared<Column>(ColumnProps{.children = {Node{bar}}, .gap = 0.0F});
+    auto root = std::make_shared<Column>(std::vector<Node>{Node{bar}}, ColumnProps().set_gap(0.0F));
     LayoutEngine::layout(*root, host_constraints());
 
     Painter painter;

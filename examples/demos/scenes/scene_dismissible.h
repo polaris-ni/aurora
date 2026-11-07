@@ -47,30 +47,20 @@ namespace aurora::demo_scenes {
         return au::Node{dis};
     };
 
-    auto list = au::Column{
-        au::ColumnProps{
-            .children =
-                {
-                    make_card("swipe me ->", pal::AURORA_PRIMARY_SOFT, false),
-                    make_card("swipe away ->", pal::AURORA_OK, false),
-                    make_card("custom callback", pal::AURORA_ACCENT, true),
-                },
-        },
-    };
+    auto list = au::Column({
+        make_card("swipe me ->", pal::AURORA_PRIMARY_SOFT, false),
+        make_card("swipe away ->", pal::AURORA_OK, false),
+        make_card("custom callback", pal::AURORA_ACCENT, true),
+    });
     const auto list_ptr = std::make_shared<au::Column>(std::move(list));
 
-    au::Node root = au::Column{
-        au::ColumnProps{
-            .children =
-                {
-                    GradientTitle{"Dismissible"},
-                    gap(12),
-                    au::Text{"Drag a card horizontally; release past half to dismiss."},
-                    gap(16),
-                    Card{au::Node{list_ptr}},
-                },
-        },
-    };
+    au::Node root = au::Column({
+        GradientTitle{"Dismissible"},
+        gap(12),
+        au::Text{"Drag a card horizontally; release past half to dismiss."},
+        gap(16),
+        Card{au::Node{list_ptr}},
+    });
     return root;
 }
 

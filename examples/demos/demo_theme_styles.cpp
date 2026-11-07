@@ -303,7 +303,7 @@ struct Carrier {
     return {
         std::move(headline),
         au::Divider{},
-        au::Row{au::RowProps{.children = {au::Button{"Alpha"}, au::Checkbox{au::State<bool>{true}}}, .gap = 8.0F}},
+        au::Row({au::Button{"Alpha"}, au::Checkbox{au::State<bool>{true}}}, au::RowProps().set_gap(8.0F)),
         std::move(slide),
         std::move(picker),
         std::move(caption),
@@ -325,7 +325,7 @@ struct Carrier {
     toggle.set_on_click(std::move(on_toggle));
 
     auto kids = control_kit(t);
-    kids.insert(kids.begin(), au::Row{au::RowProps{.children = {std::move(title), std::move(toggle)}, .gap = 8.0F}});
+    kids.insert(kids.begin(), au::Row({std::move(title), std::move(toggle)}, au::RowProps().set_gap(8.0F)));
     if (wide) {
         kids.emplace_back(au::Divider{});
         for (const auto &line : token_lines(t)) {
@@ -335,7 +335,7 @@ struct Carrier {
         }
     }
 
-    auto body = au::Column{au::ColumnProps{.children = std::move(kids), .gap = wide ? 8.0F : 6.0F}};
+    auto body = au::Column(std::move(kids), au::ColumnProps().set_gap(wide ? 8.0F : 6.0F));
     body.set_modifier(au::Modifier{}
                           .width(wide ? AURORA_WIDE_CELL_WIDTH : AURORA_CELL_WIDTH)
                           .padding(wide ? t.spacing.large : t.spacing.medium)
@@ -382,9 +382,9 @@ struct Carrier {
         for (std::size_t c = 0; c < AURORA_CELL_SCHEMES.size(); ++c) {
             cells.emplace_back(make_cell(themes.at(s).at(c), false, toggle_action(carrier, base + c, true)));
         }
-        rows.emplace_back(au::Row{au::RowProps{.children = std::move(cells), .gap = 12.0F}});
+        rows.emplace_back(au::Row(std::move(cells), au::RowProps().set_gap(12.0F)));
     }
-    return au::Column{au::ColumnProps{.children = std::move(rows), .gap = 12.0F}};
+    return au::Column(std::move(rows), au::ColumnProps().set_gap(12.0F));
 }
 
 /// @brief 一行下拉的选项文本（按档位数组顺序逐项标签化，避免手写死顺序）。
@@ -475,8 +475,7 @@ template <typename T>
     });
     // NOLINTEND(bugprone-exception-escape)
 
-    kids.emplace_back(
-        au::Row{au::RowProps{.children = {std::move(style_picker), std::move(scheme_picker)}, .gap = 12.0F}});
+    kids.emplace_back(au::Row({std::move(style_picker), std::move(scheme_picker)}, au::RowProps().set_gap(12.0F)));
 
     auto open_dialog = au::Button{"Confirm dialog"};
     open_dialog.set_on_click([carrier]() -> void {
@@ -491,7 +490,7 @@ template <typename T>
         // 卡面由载体自绘：本库 `Dialog` 只铺遮罩 + 居中内容，不画卡（见 widget/dialog.h 的几何契约，
         // 卡片宽与底色归宿主）。这里顺带把 `roles.surface` / `shapes.medium` 两枚令牌用上，
         // 让「按钮排布」在深色遮罩上有可比对的底面。修饰链挂在控件上，故外面包一层 Column 承载。
-        auto card = au::Column{au::ColumnProps{.children = {std::move(body)}}};
+        auto card = au::Column({std::move(body)});
         card.set_modifier(au::Modifier{}
                               .padding(t.spacing.large + t.spacing.medium)
                               .background(t.roles.surface, t.shapes.medium)
@@ -507,8 +506,8 @@ template <typename T>
     // 实况套装：不给任何显式色，控件应随根注入变色。
     auto live_slide = au::Slider{au::State<double>{0.5}};
     live_slide.set_range(0.0, 1.0);
-    kids.emplace_back(au::Row{
-        au::RowProps{.children = {au::Button{"Live button"}, au::Checkbox{au::State<bool>{true}}}, .gap = 8.0F}});
+    kids.emplace_back(
+        au::Row({au::Button{"Live button"}, au::Checkbox{au::State<bool>{true}}}, au::RowProps().set_gap(8.0F)));
     kids.emplace_back(std::move(live_slide));
     kids.emplace_back(au::Divider{});
 
@@ -524,13 +523,13 @@ template <typename T>
                 *carrier->zoom.at(index), make_cell(themes.at(s).at(c), true, toggle_action(carrier, index, false))});
         }
     }
-    auto body = au::Column{au::ColumnProps{.children = std::move(scrollable), .gap = 12.0F}};
+    auto body = au::Column(std::move(scrollable), au::ColumnProps().set_gap(12.0F));
     kids.emplace_back(std::move(caption));
     auto scroller = au::Scroll{au::ScrollProps{.child = std::move(body)}};
     scroller.set_modifier(au::Modifier{}.height(AURORA_GRID_VIEWPORT_HEIGHT));
     kids.emplace_back(std::move(scroller));
 
-    auto page = au::Column{au::ColumnProps{.children = std::move(kids), .gap = 8.0F}};
+    auto page = au::Column(std::move(kids), au::ColumnProps().set_gap(8.0F));
     page.set_modifier(au::Modifier{}.padding(AURORA_PAGE_PADDING));
     return page;
 }
