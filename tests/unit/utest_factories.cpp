@@ -113,13 +113,16 @@ AURORA_TEST_CASE(lazy_row_and_list_forward_builder) {
 
 AURORA_TEST_CASE(bottom_nav_bar_forward_props) {
     aurora::Column root;
+    std::vector<aurora::BottomNavItem> items;
+    items.push_back(aurora::BottomNavItem{.icon = {}, .label = "Home"});
+    items.push_back(aurora::BottomNavItem{.icon = {}, .label = "Settings"});
     aurora::BottomNavBarProps props;
-    props.items.push_back(aurora::BottomNavItem{.icon = {}, .label = "Home"});
-    props.items.push_back(aurora::BottomNavItem{.icon = {}, .label = "Settings"});
-    props.selected_index = 1;
-    aurora::BottomNavBar *bar = ui::bottom_nav_bar(root, std::move(props));
+    props.set_selected_index(1);
+    aurora::BottomNavBar *bar = ui::bottom_nav_bar(root, std::move(items), std::move(props));
     AURORA_TEST_REQUIRE_NOT_NULL(bar);
     AURORA_TEST_CHECK_EQ(std::string{bar->type_name()}, "BottomNavBar");
+    AURORA_TEST_CHECK_EQ(bar->items.size(), 2U);
+    AURORA_TEST_CHECK_EQ(bar->selected_index(), 1);
 }
 
 AURORA_TEST_CASE(factories_take_ownership_via_parent_tree) {

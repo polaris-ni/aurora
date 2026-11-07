@@ -90,14 +90,14 @@ AURORA_TEST_CASE(virtualized_widgets_rebuild_with_their_props) {
     AURORA_TEST_CHECK_NEAR(ll->content_height(), 168.0F, 1e-3F);  // 7 × 24：行高随之还原
 
     BottomNavBar bar;
-    bar.selected_index = 2;
-    bar.bar_height = 80.0F;
+    bar.set_selected_index(2);
+    bar.set_bar_height(80.0F);
     const auto bar_rebuilt = from_json(to_json(bar));
     AURORA_TEST_REQUIRE_MSG(bar_rebuilt.ok(), "BottomNavBar from_json succeeds");
     const auto *bnb = dynamic_cast<const BottomNavBar *>(bar_rebuilt.value().get());
     AURORA_TEST_REQUIRE_MSG(bnb != nullptr, "rebuilt widget is a BottomNavBar");
-    AURORA_TEST_CHECK_EQ(bnb->selected_index, 2);
-    AURORA_TEST_CHECK_NEAR(bnb->bar_height, 80.0F, 1e-4F);
+    AURORA_TEST_CHECK_EQ(bnb->selected_index(), 2);
+    AURORA_TEST_CHECK_NEAR(bnb->bar_height(), 80.0F, 1e-4F);
 }
 
 AURORA_TEST_CASE(rebuilt_grid_renders_after_host_attaches_builder) {

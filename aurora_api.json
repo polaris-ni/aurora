@@ -243,7 +243,8 @@
       ],
       "children_policy": "none",
       "examples": [
-        "au::BottomNavBar{ au::BottomNavBarProps{ .items = {...}, .on_select = [](int){} } }"
+        "au::BottomNavBar({au::BottomNavItem{.label = \"Home\"}}, au::BottomNavBarProps().set_selected_index(0))",
+        "au::BottomNavBar(au::BottomNavBarProps().set_selected_index(1))"
       ]
     },
     {

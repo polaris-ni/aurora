@@ -186,10 +186,12 @@ inline auto lazy_list(Container &parent, int count, LazyList::ItemBuilder builde
 
 /// @brief 底部导航栏（`BottomNavBar`）。
 /// @param parent 目标父容器
-/// @param props 导航栏属性块
+/// @param items 导航项列表（栏宽按项数等分，依序排列）
+/// @param props 其余属性块（默认全未表态，生效值即各行回落点）
 /// @return 指向新建 `BottomNavBar` 的裸指针，生命周期由 parent 子树持有
-inline auto bottom_nav_bar(Container &parent, BottomNavBarProps props) -> BottomNavBar * {
-    return detail::make_add<BottomNavBar>(parent, std::move(props));
+inline auto bottom_nav_bar(Container &parent, std::vector<BottomNavItem> items, BottomNavBarProps props = {})
+    -> BottomNavBar * {
+    return detail::make_add<BottomNavBar>(parent, std::move(items), std::move(props));
 }
 
 }  // namespace aurora::ui
