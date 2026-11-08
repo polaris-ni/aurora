@@ -100,8 +100,8 @@ AURORA_TEST_CASE(codegen_fluent_pull_to_refresh_child_leads_and_props_chain) {
 AURORA_TEST_CASE(codegen_designated_init_and_step_by_step_styles) {
     au::Json node = make_node("Column", au::Json::object(), testing::json_arr({make_button("OK")}));
 
-    // DesignatedInit 是 Fluent 的别名：指定初始化器要求 `*Props` 的公有同名成员，而 17 型聚合字段全私有、
-    // 其余 59 型不在发射名单内（属性按能力边界省略），故没有一条产物再发设计符。容器子项走构造首参，
+    // DesignatedInit 是 Fluent 的别名：指定初始化器要求 `*Props` 的公有同名成员，而 18 型聚合字段全私有、
+    // 其余 58 型不在发射名单内（属性按能力边界省略），故没有一条产物再发设计符。容器子项走构造首参，
     // 属性续在 `TProps()` 之后。
     const std::string di = to_code(node, CodeStyle::DesignatedInit);
     AURORA_TEST_CHECK_MSG(di.find("au::Column{") != std::string::npos,
@@ -142,11 +142,35 @@ AURORA_TEST_CASE(codegen_designated_init_is_the_fluent_alias) {
         make_node("Stack", au::Json::object(), testing::json_arr({make_button("OK")})),
         make_node("PullToRefresh", testing::json_obj({{"threshold", 40.0F}}), testing::json_arr({make_button("OK")})),
         make_node("Divider", testing::json_obj({{"orientation", "vertical"}})),
+        make_node("WebView", testing::json_obj({{"url", "https://example.com"}, {"mode", "Snapshot"}})),
     };
     for (const auto &node : samples) {
         AURORA_TEST_CHECK_MSG(to_code(node) == to_code(node, CodeStyle::DesignatedInit),
                               "codegen alias: DesignatedInit output is byte-identical to Fluent");
     }
+}
+
+AURORA_TEST_CASE(codegen_namespaced_type_lands_in_its_own_subnamespace) {
+    // `WebView` 是在册 76 型里唯一不挂在 `aurora` 直属下的控件（真身 `aurora::webview::WebView`）。
+    // 它迁到链式形态后进了发射名单，于是发射面第一次要处理「类名之外还有一段子命名空间」：类名、聚合名
+    // 与枚举行自描述给出的类型名都取自同一段前缀，漏掉任何一处都会产出 `au::WebView` /
+    // `au::WebViewMode::Snapshot` 这种不存在的名字（编译红），而非少发一条属性。
+    const au::Json node =
+        make_node("WebView", testing::json_obj({{"url", "https://example.com"}, {"mode", "Snapshot"}}));
+    const std::string fluent = to_code(node, CodeStyle::Fluent);
+    AURORA_TEST_CHECK_MSG(fluent.find("au::webview::WebView(au::webview::WebViewProps()") != std::string::npos,
+                          "codegen: the ctor and its Props aggregate both carry the webview:: segment");
+    AURORA_TEST_CHECK_MSG(fluent.find(".set_mode(au::webview::WebViewMode::Snapshot)") != std::string::npos,
+                          "codegen: the enum row lands in webview::WebViewMode, not a bare WebViewMode");
+    AURORA_TEST_CHECK_MSG(fluent.find("au::WebView") == std::string::npos,
+                          "codegen: no unqualified au::WebView / au::WebViewMode reaches the output");
+
+    const std::string step =
+        to_code(make_node("WebView", testing::json_obj({{"mode", "snapshot"}})), CodeStyle::StepByStep);
+    AURORA_TEST_CHECK_MSG(step.find("auto __w0 = au::webview::WebView{};") != std::string::npos,
+                          "codegen: StepByStep declares the namespaced type qualified");
+    AURORA_TEST_CHECK_MSG(step.find("__w0.set_mode(au::webview::WebViewMode::Snapshot);") != std::string::npos,
+                          "codegen: StepByStep writes the mode row through set_mode (case-normalised)");
 }
 
 AURORA_TEST_CASE(codegen_child_slot_guard_keeps_output_compilable) {

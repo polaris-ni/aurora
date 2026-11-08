@@ -148,7 +148,7 @@ auto scenarios() -> std::vector<Scenario> {
          .build = []() -> Node {
              auto col = std::make_shared<Column>();
              col->add(Node{
-                 std::make_shared<webview::WebView>(webview::WebViewProps{.mode = webview::WebViewMode::Snapshot})});
+                 std::make_shared<webview::WebView>(webview::WebViewProps().set_mode(webview::WebViewMode::Snapshot))});
              col->add(box(100.0F, 20.0F));
              return Node{col};
          }},
@@ -414,7 +414,7 @@ AURORA_TEST_CASE(webview_snapshot_blits_into_the_painter_frame_stream) {
     webview::NativeViewHost::set_current(&host);
 
     auto wv = std::make_shared<webview::WebView>(
-        webview::WebViewProps{.mode = webview::WebViewMode::Snapshot, .background = Color{9, 9, 9, 255}});
+        webview::WebViewProps().set_mode(webview::WebViewMode::Snapshot).set_background(Color{9, 9, 9, 255}));
     auto col = std::make_shared<Column>();
     col->add(Node{std::static_pointer_cast<Widget>(wv)});
 

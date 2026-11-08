@@ -9,6 +9,11 @@
 /// 另覆盖：属性的序列化往返逐值一致、每挂载恰好一条告警（不是一次性）、宿主登记表随
 /// 显式卸载与树拆除两条路径回落（后者是框架不代调 `on_unmount` 的唯一防线）。
 ///
+/// 权威表的读消费面（属性单一声明迁移批）另覆盖四条：未表态不写键、`clear(row)` 撤表态后该键
+/// 退盘且生效值退回该行回落基线、非法 JSON 逐行降级（数值行形态不符 ⇒ 不写入并撤表态——迁移前是
+/// 「保留现值」，枚举行与字符串行未登记校验 ⇒ 走宽容通路照常表态，与迁移前「静默跳过」同值不同意）、
+/// 以及行上声明的 `bounds("0.25", "5")` 第一次真正执行（越界值拒写并上报，迁移前那句声明无人兑现）。
+///
 /// 判据纪律：不拿「没崩」当通过——每条都断言具体 slug；且用 `Diagnostics::take()` 取出的
 /// 真实条目为准，不用 `count()` 的差值（后者会把别处遗留的诊断算进来）；告警条数按
 /// 「本次挂载新产生的全部诊断」计，故 `take()` 兼作清场。
@@ -17,6 +22,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "aurora/core/diagnostics.h"
@@ -207,6 +213,16 @@ auto logged(const StubSink &sink, const std::string &entry) -> bool {
     return std::find(sink.log.begin(), sink.log.end(), entry) != sink.log.end();
 }
 
+/// @brief 探针：把只在库内消费的读件 `present`（表态位）提到可读位置。
+///
+/// 它不升公共面，故「这行到底表不表了态」只能经派生类点名读取；读到的仍是生产侧同一条函数，
+/// 不是用例另算一遍（与其余已迁型的探针同形态）。
+class WebViewProbe final : public webview::WebView {
+  public:
+    using webview::WebView::present;
+    using webview::WebView::WebView;
+};
+
 auto mount_in_tree(const std::shared_ptr<webview::WebView> &wv) -> std::shared_ptr<Column> {
     auto root = std::make_shared<Column>();
     root->add(Node{std::static_pointer_cast<Widget>(wv)});
@@ -285,7 +301,7 @@ AURORA_TEST_CASE(interactive_mode_unsupported_degrades_with_unsupported_mode) {
     bind_stub_host(host);
     webview::NativeViewHost::set_current(&host);
 
-    auto wv = std::make_shared<webview::WebView>(webview::WebViewProps{.mode = webview::WebViewMode::Interactive});
+    auto wv = std::make_shared<webview::WebView>(webview::WebViewProps().set_mode(webview::WebViewMode::Interactive));
     const std::vector<Diagnostic> items = collect_after([&wv]() { mount_in_tree(wv); });
     AURORA_TEST_CHECK(wv->degraded());
     AURORA_TEST_CHECK_EQ(items.size(), 1U);
@@ -301,7 +317,7 @@ AURORA_TEST_CASE(snapshot_mode_unsupported_degrades_with_snapshot_unsupported) {
     bind_stub_host(host);
     webview::NativeViewHost::set_current(&host);
 
-    auto wv = std::make_shared<webview::WebView>(webview::WebViewProps{.mode = webview::WebViewMode::Snapshot});
+    auto wv = std::make_shared<webview::WebView>(webview::WebViewProps().set_mode(webview::WebViewMode::Snapshot));
     const std::vector<Diagnostic> items = collect_after([&wv]() { mount_in_tree(wv); });
     AURORA_TEST_CHECK(wv->degraded());
     AURORA_TEST_CHECK_EQ(items.size(), 1U);
@@ -342,7 +358,7 @@ AURORA_TEST_CASE(snapshot_mode_registers_view_and_blits_captured_pixels) {
     bind_stub_host(host);
     webview::NativeViewHost::set_current(&host);
 
-    auto wv = std::make_shared<webview::WebView>(webview::WebViewProps{.mode = webview::WebViewMode::Snapshot});
+    auto wv = std::make_shared<webview::WebView>(webview::WebViewProps().set_mode(webview::WebViewMode::Snapshot));
     const std::shared_ptr<Column> root = mount_in_tree(wv);
     AURORA_TEST_REQUIRE_TRUE(!wv->degraded());
     AURORA_TEST_CHECK_EQ(host.view_count(), 1U);
@@ -371,7 +387,7 @@ AURORA_TEST_CASE(failed_capture_keeps_the_last_good_bitmap) {
     bind_stub_host(host);
     webview::NativeViewHost::set_current(&host);
 
-    auto wv = std::make_shared<webview::WebView>(webview::WebViewProps{.mode = webview::WebViewMode::Snapshot});
+    auto wv = std::make_shared<webview::WebView>(webview::WebViewProps().set_mode(webview::WebViewMode::Snapshot));
     const std::shared_ptr<Column> root = mount_in_tree(wv);
     AURORA_TEST_REQUIRE_TRUE(engine->last_sink != nullptr);
 
@@ -396,7 +412,7 @@ AURORA_TEST_CASE(snapshot_request_without_view_reports_and_resolves_empty) {
     // 「没收到回调」与「收到空图」是两种状态，只有后者可被调用方判读，故回调不得悬着。
     install_capable_engine();
     webview::NativeViewHost::set_current(nullptr);
-    auto wv = std::make_shared<webview::WebView>(webview::WebViewProps{.mode = webview::WebViewMode::Snapshot});
+    auto wv = std::make_shared<webview::WebView>(webview::WebViewProps().set_mode(webview::WebViewMode::Snapshot));
     Diagnostics::take();
     mount_in_tree(wv);
     const std::vector<Diagnostic> mounted = Diagnostics::take();
@@ -488,10 +504,11 @@ AURORA_TEST_CASE(mount_installs_gate_props_and_initial_navigation_in_order) {
     bind_stub_host(host);
     webview::NativeViewHost::set_current(&host);
 
-    auto wv = std::make_shared<webview::WebView>(webview::WebViewProps{.url = "https://example.invalid/a",
-                                                                       .mode = webview::WebViewMode::Interactive,
-                                                                       .zoom_factor = 1.5F,
-                                                                       .javascript_enabled = false});
+    auto wv = std::make_shared<webview::WebView>(webview::WebViewProps()
+                                                     .set_url("https://example.invalid/a")
+                                                     .set_mode(webview::WebViewMode::Interactive)
+                                                     .set_zoom_factor(1.5F)
+                                                     .set_javascript_enabled(false));
     const std::shared_ptr<Column> root = mount_in_tree(wv);
     AURORA_TEST_REQUIRE_TRUE(!wv->degraded());
     AURORA_TEST_REQUIRE_TRUE(engine->last_sink != nullptr);
@@ -519,7 +536,7 @@ AURORA_TEST_CASE(mount_navigates_inline_html_only_when_url_is_empty) {
     webview::NativeViewHost::set_current(&host);
 
     auto wv = std::make_shared<webview::WebView>(
-        webview::WebViewProps{.html = "<p>hi</p>", .base_uri = "https://example.invalid/"});
+        webview::WebViewProps().set_html("<p>hi</p>").set_base_uri("https://example.invalid/"));
     const std::shared_ptr<Column> root = mount_in_tree(wv);
     AURORA_TEST_REQUIRE_TRUE(engine->last_sink != nullptr);
     AURORA_TEST_CHECK_TRUE(logged(*engine->last_sink, "navigate_to_string:<p>hi</p>@https://example.invalid/"));
@@ -563,7 +580,7 @@ AURORA_TEST_CASE(commands_forward_to_the_registered_view) {
     AURORA_TEST_CHECK_TRUE(engine->last_sink->log == expected);
     AURORA_TEST_CHECK_EQ(got_script, std::string{"\"ok\""});
     // 命令同时留意图在属性上：缺引擎时序列化仍读得到（判据 5）。
-    AURORA_TEST_CHECK_EQ(wv->url, std::string{"https://example.invalid/b"});
+    AURORA_TEST_CHECK_EQ(wv->url(), std::string{"https://example.invalid/b"});
 
     webview::NativeViewHost::set_current(nullptr);
     webview::install_engine(nullptr);
@@ -581,8 +598,8 @@ AURORA_TEST_CASE(commands_without_a_view_only_record_intent) {
     wv->go_back();
     wv->go_forward();
     wv->post_json("{}");
-    AURORA_TEST_CHECK(wv->url == "https://example.invalid/c");
-    AURORA_TEST_CHECK(wv->html == "<b>x</b>");
+    AURORA_TEST_CHECK(wv->url() == "https://example.invalid/c");
+    AURORA_TEST_CHECK(wv->html() == "<b>x</b>");
 
     // `evaluate_script` 无视图时**必须**让回调落地（空串即既有的失败编码），
     // 不回才是让调用方的续延永久悬空。
@@ -650,68 +667,152 @@ AURORA_TEST_CASE(callback_gate_drops_events_once_the_owner_is_gone) {
 
 AURORA_TEST_CASE(props_round_trip_through_json) {
     webview::WebView src;
-    src.url = "https://example.invalid/page";
-    src.html = "<p>hi</p>";
-    src.base_uri = "https://example.invalid/";
-    src.mode = webview::WebViewMode::Snapshot;
-    src.zoom_factor = 1.5F;
-    src.javascript_enabled = false;
-    src.background = Color{10, 20, 30, 40};
+    src.set_url("https://example.invalid/page");
+    src.set_html("<p>hi</p>");
+    src.set_base_uri("https://example.invalid/");
+    src.set_mode(webview::WebViewMode::Snapshot);
+    src.set_zoom_factor(1.5F);
+    src.set_javascript_enabled(false);
+    src.set_background(Color{10, 20, 30, 40});
 
     Json props = Json::object();
     src.serialize_props(props);
 
     webview::WebView dst;
     dst.deserialize_props(props);
-    AURORA_TEST_CHECK(dst.url == src.url);
-    AURORA_TEST_CHECK(dst.html == src.html);
-    AURORA_TEST_CHECK(dst.base_uri == src.base_uri);
-    AURORA_TEST_CHECK_EQ(static_cast<int>(dst.mode), static_cast<int>(webview::WebViewMode::Snapshot));
-    AURORA_TEST_CHECK(dst.zoom_factor == src.zoom_factor);
-    AURORA_TEST_CHECK_FALSE(dst.javascript_enabled);
-    AURORA_TEST_CHECK_TRUE(dst.background == src.background);
+    AURORA_TEST_CHECK(dst.url() == src.url());
+    AURORA_TEST_CHECK(dst.html() == src.html());
+    AURORA_TEST_CHECK(dst.base_uri() == src.base_uri());
+    AURORA_TEST_CHECK_EQ(static_cast<int>(dst.mode()), static_cast<int>(webview::WebViewMode::Snapshot));
+    AURORA_TEST_CHECK(dst.zoom_factor() == src.zoom_factor());
+    AURORA_TEST_CHECK_FALSE(dst.javascript_enabled());
+    AURORA_TEST_CHECK_TRUE(dst.background() == src.background());
 }
 
-AURORA_TEST_CASE(deserialize_ignores_absent_and_mistyped_keys) {
-    // 键缺失或类型不符都要保留现值（不清零、不抛），这是 `deserialize_props` 的既有契约。
-    webview::WebView wv;
-    wv.url = "https://example.invalid/keep";
-    wv.zoom_factor = 2.0F;
+AURORA_TEST_CASE(unstated_rows_are_absent_and_clear_drops_the_key) {
+    // 「未表态不写键」与「撤表态该键退盘」是同一条口径的两半：序列化面不再把回落基线伪装成用户意图。
+    webview::WebView fresh;
+    Json empty = Json::object();
+    fresh.serialize_props(empty);
+    for (std::string_view key :
+         {"url", "html", "base_uri", "mode", "zoom_factor", "javascript_enabled", "background"}) {
+        AURORA_TEST_CHECK_FALSE(empty.contains(key));
+    }
+    // 生效值仍逐行可读，且等于各行回落点（不写键不等于没有值）。
+    AURORA_TEST_CHECK_TRUE(fresh.url().empty());
+    AURORA_TEST_CHECK_EQ(static_cast<int>(fresh.mode()), static_cast<int>(webview::WebViewMode::Interactive));
+    AURORA_TEST_CHECK(fresh.zoom_factor() == 1.0F);
+    AURORA_TEST_CHECK_TRUE(fresh.javascript_enabled());
+
+    // 表态即写键；`clear(row)` 是本类型公共面上唯一的撤表态通道，撤后该键重新消失、值退回基线。
+    WebViewProbe wv;
+    wv.set_url("https://example.invalid/x");
+    Json stated = Json::object();
+    wv.serialize_props(stated);
+    AURORA_TEST_CHECK_TRUE(stated.contains("url"));
+
+    wv.clear(webview::WebViewProps::url_row());
+    AURORA_TEST_CHECK_FALSE(wv.present(webview::WebViewProps::url_row()));
+    AURORA_TEST_CHECK_TRUE(wv.url().empty());
+    Json cleared = Json::object();
+    wv.serialize_props(cleared);
+    AURORA_TEST_CHECK_FALSE(cleared.contains("url"));
+}
+
+AURORA_TEST_CASE(deserialize_withdraws_statements_on_bad_values) {
+    // 键缺失 ⇒ 保留现值；形态不符 ⇒ 一律不写入。已表态的可空数值行因此**撤表态**退回该行回落基线
+    // （迁移前是「静默跳过、保留上一次写入的值」）；枚举行与字符串行都没登记 `validate`，走宽容通路：
+    // 枚举未知名退交互档、非字符串退空串，两者都照常表态且不产生降级上报。
+    Diagnostics::take();  // 清掉前序用例残留，本条只看自己产生的降级
+    const std::size_t baseline = Diagnostics::count();
+
+    WebViewProbe wv;
+    wv.set_url("https://example.invalid/keep");
+    wv.set_zoom_factor(2.0F);
+    wv.set_mode(webview::WebViewMode::Snapshot);
 
     Json props = Json::object();
     props.set("url", Json{"https://example.invalid/new"});
-    props.set("zoom_factor", Json{"not-a-number"});  // 类型不符
-    props.set("mode", Json{"Bogus"});  // 枚举值非法
+    props.set("zoom_factor", Json{"not-a-number"});  // 形态不符
+    props.set("mode", Json{"Bogus"});  // 枚举值非法：未登记校验 ⇒ 宽容退默认档
     wv.deserialize_props(props);
 
-    AURORA_TEST_CHECK(wv.url == "https://example.invalid/new");
-    AURORA_TEST_CHECK(wv.zoom_factor == 2.0F);
-    AURORA_TEST_CHECK_EQ(static_cast<int>(wv.mode), static_cast<int>(webview::WebViewMode::Interactive));
+    AURORA_TEST_CHECK(wv.url() == "https://example.invalid/new");
+    AURORA_TEST_CHECK(wv.zoom_factor() == 1.0F);  // 撤表态 ⇒ 回落基线，而不是保留 2.0
+    AURORA_TEST_CHECK_FALSE(wv.present(webview::WebViewProps::zoom_factor_row()));
+    AURORA_TEST_CHECK_EQ(static_cast<int>(wv.mode()), static_cast<int>(webview::WebViewMode::Interactive));
+    AURORA_TEST_CHECK_EQ(Diagnostics::count(), baseline + 1U);  // 只有形态不符那一行上报
+
+    // 行上声明的界在迁移后第一次真正执行：迁移前的手写描述符同样写着 0.25 / 5，但反序列化只判
+    // 「是不是数」，99 会被原样烘进字段；进表后同一份约束由反序列化拒写并撤表态（写件仍不夹取）。
+    Json above_max = Json::object();
+    above_max.set("zoom_factor", Json{99.0});
+    wv.set_zoom_factor(2.0F);
+    wv.deserialize_props(above_max);
+    AURORA_TEST_CHECK_FALSE(wv.present(webview::WebViewProps::zoom_factor_row()));
+    AURORA_TEST_CHECK(wv.zoom_factor() == 1.0F);
+    AURORA_TEST_CHECK_EQ(Diagnostics::count(), baseline + 2U);
+
+    // 反证：界内的值照常装入并表态，上面的红灯不是「该行一律不吃 JSON」。
+    Json in_range = Json::object();
+    in_range.set("zoom_factor", Json{1.5});
+    wv.deserialize_props(in_range);
+    AURORA_TEST_CHECK_TRUE(wv.present(webview::WebViewProps::zoom_factor_row()));
+    AURORA_TEST_CHECK(wv.zoom_factor() == 1.5F);
+    AURORA_TEST_CHECK_EQ(Diagnostics::count(), baseline + 2U);
+
+    // 键缺失即整行不动：同一份属性对象里没出现的键不参与本轮写入。
+    Json only_url = Json::object();
+    only_url.set("url", Json{"https://example.invalid/y"});
+    wv.deserialize_props(only_url);
+    AURORA_TEST_CHECK(wv.url() == "https://example.invalid/y");
+    AURORA_TEST_CHECK(wv.zoom_factor() == 1.5F);
+
+    // 字符串行不登记 `validate` ⇒ 走宽容通路：喂进非字符串（这里是数）不报错、退空串并照常表态。
+    // 迁移前那一腿是 `is_string()` 闸外的静默跳过（保留上一次写入的值），两者都零上报，但
+    // 「生效值」与「该键是否落盘」两处都变了 —— 与 `Image` 那批钉住的是同一条适用边界。
+    Json url_wrong_shape = Json::object();
+    url_wrong_shape.set("url", Json{42});
+    wv.deserialize_props(url_wrong_shape);
+    AURORA_TEST_CHECK(wv.url().empty());
+    AURORA_TEST_CHECK_TRUE(wv.present(webview::WebViewProps::url_row()));
+    AURORA_TEST_CHECK_EQ(Diagnostics::count(), baseline + 2U);
 }
 
 AURORA_TEST_CASE(defaults_are_interactive_and_script_enabled) {
     webview::WebView w;
-    AURORA_TEST_CHECK_EQ(static_cast<int>(w.mode), static_cast<int>(webview::WebViewMode::Interactive));
-    AURORA_TEST_CHECK(w.javascript_enabled);
-    AURORA_TEST_CHECK(w.url.empty());
-    AURORA_TEST_CHECK(w.zoom_factor == 1.0F);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(w.mode()), static_cast<int>(webview::WebViewMode::Interactive));
+    AURORA_TEST_CHECK(w.javascript_enabled());
+    AURORA_TEST_CHECK(w.url().empty());
+    AURORA_TEST_CHECK(w.zoom_factor() == 1.0F);
     AURORA_TEST_CHECK(std::string{w.type_name()} == "WebView");
     AURORA_TEST_CHECK_FALSE(w.wants_focus());  // 焦点契约：不进本库 Tab 焦点链
+    // `defaults()` 是属性表的单一事实来源：七行皆未表态，生效值即各行回落点。
+    const webview::WebViewProps d = webview::WebView::defaults();
+    AURORA_TEST_CHECK_TRUE(d.url().empty());
+    AURORA_TEST_CHECK_EQ(static_cast<int>(d.mode()), static_cast<int>(webview::WebViewMode::Interactive));
+    AURORA_TEST_CHECK(d.zoom_factor() == 1.0F);
+    AURORA_TEST_CHECK_TRUE(d.javascript_enabled());
 }
 
 AURORA_TEST_CASE(describe_static_exposes_mode_enumeration) {
     const WidgetDescriptor d = webview::WebView::describe_static();
     AURORA_TEST_CHECK(d.name == "WebView");
     AURORA_TEST_CHECK(d.children_policy == "none");
+    std::size_t row_count = 0;
     bool found = false;
     for (const PropDescriptor &p : d.properties) {
         if (p.name == "mode") {
             found = true;
             AURORA_TEST_CHECK_EQ(p.enum_values.size(), 2U);
-            AURORA_TEST_CHECK_EQ(p.default_value, std::string{"Interactive"});
+            // 默认值表示由常量档回落点经该类型的 codec 格式化，串本身带 JSON 引号（与其余已迁型同形态）。
+            AURORA_TEST_CHECK_EQ(p.default_value, std::string{"\"Interactive\""});
         }
+        ++row_count;
     }
     AURORA_TEST_CHECK(found);
+    // 属性项全部来自权威表：七行，通用件（width / height / show / overflow）由采集侧补齐、不在本表内。
+    AURORA_TEST_CHECK_EQ(row_count, 7U);
 }
 
 }  // namespace aurora::test_cases::utest_web_view
