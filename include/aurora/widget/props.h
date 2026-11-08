@@ -1324,18 +1324,20 @@ class AbstractProps {
     ///
     /// 参数类型由该行的字段形状推出：只读来源行收 `ReadOnlyState<T>`，可写来源行收 `State<T>`——
     /// 后者要求调用方给的是可写句柄，本库不允许把一枚只读源换成控件写不回去的源。
+    /// 句柄形参**按值**收、内部真移动：来源行写件的公共面本就按值给句柄（换源是一次性动作，不是
+    /// 逐帧路径），形参若改成 const 引用，调用点上那句 `std::move` 会静默退化成拷贝。
     /// @tparam Row 表行类型（必须来源型）。
     /// @param row 目标行。
-    /// @param source 新的来源句柄。
+    /// @param source 新的来源句柄（移入该行槽位）。
     /// @return 派生属性对象引用。
     template <typename Row>
-    auto rebind(const Row &row, const typename Row::Handle &source) -> Derived & {
+    auto rebind(const Row &row, Row::Handle source) -> Derived & {
         static_assert(Row::is_source(), "rebind() only applies to handle-shaped rows");
         auto &self = static_cast<Derived &>(*this);
         if constexpr (Row::is_required()) {
-            self.*(Row::field()) = source;
+            self.*(Row::field()) = std::move(source);
         } else {
-            self.*(Row::field()) = std::optional<typename Row::Handle>{source};
+            self.*(Row::field()) = std::optional<typename Row::Handle>{std::move(source)};
         }
         link_.resubscribe();
         link_.mark(row.dirty);

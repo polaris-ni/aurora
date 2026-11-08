@@ -572,6 +572,7 @@ class TextInput : public LeafWidget, public TextInputProps {
     /// 路径（键入 / 粘贴 / 删除 / 无障碍替换）不经本件，改由 `notify_changed()` 统一上报，故不双发。
     /// @param v 新的 UTF-8 文本。
     /// @return 本控件引用（`*this`），支持链式调用。
+    /// NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method) 同名控件面写件（返回控件引用）
     auto set_value(const std::string &v) -> TextInput & {
         TextInputProps::set_value(v);
         notify_accessibility_event(AccessibilityEvent{.kind = AccessibilityEventKind::ValueChanged, .target = this});
@@ -744,7 +745,7 @@ class TextInput : public LeafWidget, public TextInputProps {
         if (limit > 0 && cp_count(next) > limit) {
             next = cp_slice(next, 0, limit);  // 限长按码点截断（与键盘输入同口径）
         }
-        TextInputProps::set_value(std::move(next));
+        TextInputProps::set_value(next);  // 值件形参按 const 引用（无移动可发生）
         const std::size_t caret_cp = byte_to_cp(value_ref(), std::min(a + utf8.size(), value_ref().size()));
         caret_ = caret_cp;
         sel_start_ = caret_cp;

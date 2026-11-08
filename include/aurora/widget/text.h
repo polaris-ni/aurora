@@ -489,7 +489,7 @@ class Text : public LeafWidget, public TextProps {
     explicit Text(TextProps props) : TextProps(std::move(props)) { bind(*this); }
     /// @brief 以本地化字符串构造（内容为自有常量来源，随换源可控）。
     /// @param s 待显示的 `LocalizedString`（key + fallback 文本）。
-    explicit Text(LocalizedString s) : Text() { set_content(std::move(s)); }
+    explicit Text(const LocalizedString &s) : Text() { set_content(s); }
     /// @brief 以 UTF-8 文本构造。
     /// @param s 待显示的字面文本（包成非本地化内容）。
     explicit Text(const std::string &s) : Text() { set_content(s); }
@@ -514,6 +514,7 @@ class Text : public LeafWidget, public TextProps {
     /// @brief 替换文本内容来源（展示属性换源）：常量由隐式 `ReadOnlyState` 构造接入。
     /// @param next 新的内容来源；挂载后调用会退订旧源、订阅新源并标脏。
     /// @return 自身引用，便于链式调用。
+    /// NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method) 同名控件面写件（返回控件引用）
     auto set_content(const LocalizedString &next) -> Text & {
         TextProps::set_content(next);
         return *this;
@@ -522,6 +523,7 @@ class Text : public LeafWidget, public TextProps {
     /// @brief 替换文本内容（链式常量写法）。
     /// @param s 新的 UTF-8 文本（换入自有常量来源，不反写任何上游）。
     /// @return 自身引用，便于链式调用。
+    /// NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method) 同名控件面写件（返回控件引用）
     auto set_content(const std::string &s) -> Text & {
         TextProps::set_content(s);
         return *this;
@@ -530,6 +532,7 @@ class Text : public LeafWidget, public TextProps {
     /// @brief 替换文本内容（C 字符串常量写法；消除 `const char*` 在两个常量重载间的歧义）。
     /// @param s 新的 UTF-8 文本；nullptr 语义由 `LocalizedString` 转换处理。
     /// @return 自身引用，便于链式调用。
+    /// NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method) 同名控件面写件（返回控件引用）
     auto set_content(const char *s) -> Text & {
         TextProps::set_content(s);
         return *this;
@@ -538,6 +541,7 @@ class Text : public LeafWidget, public TextProps {
     /// @brief 换绑文本内容来源（响应式换源）。
     /// @param next 新的只读句柄来源。
     /// @return 自身引用，便于链式调用。
+    /// NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method) 同名控件面写件（返回控件引用）
     auto set_content(ReadOnlyState<LocalizedString> next) -> Text & {
         TextProps::set_content(std::move(next));
         return *this;
