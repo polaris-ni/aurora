@@ -734,7 +734,7 @@ GLFW 同口径自 `third_party/glfw` 源码构建，但仅在 `AURORA_BACKEND_GL
 | `AURORA_BACKEND_*` | `target_compile_definitions(aurora PUBLIC …)` | 由 §3 开关控制 | 后端 feature 宏（HEADLESS 除外，见下行） |
 | `AURORA_BACKEND_HEADLESS` | `aurora_define_feature(AURORA_BACKEND_HEADLESS EXPORT)`（无条件） | 恒注入 | 无头内存 / PNG 后端**恒编入、无开关**：测试套件与像素读回回退路径以 `HeadlessSurface` 为基底（大量测试 TU 直接引用），关闭它不存在受支持的构建组合，故不再提供选项。宏随安装导出，消费端与库同 ODR 口径 |
 
-除宏定义外，`aurora_setup_consumer_target`（`cmake/AuroraUtils.cmake`）在 **MinGW** 下对全部消费者目标（demo / 测试 / 工具）追加 `-Wa,-mbig-obj`：MinGW 汇编器的 COFF 目标文件默认段数上限 65535 会被 Debug（`-g`）下的超大消费者 TU 击穿（实测已退役的 `demo_google_play.cpp` 达 33614 段，报 "too many sections" / "file too big"），该标志把上限放宽到 2^32 段，产物仍为标准 COFF，对链接器透明；MSVC / clang-cl 的汇编器无此上限，不注入。`AURORA_ENABLE_COVERAGE` 的 GCC 分支出于同一原因亦注入（见 §4 约束）。
+除宏定义外，`aurora_setup_consumer_target`（`cmake/AuroraUtils.cmake`）在 **MinGW** 下对全部消费者目标（demo / 测试 / 工具）追加 `-Wa,-mbig-obj`：MinGW 汇编器的 COFF 目标文件默认段数上限 65535 会被 Debug（`-g`）下的超大消费者 TU 击穿（实测已退役的 `demo_google_play.cpp` 达 33614 段，报 "too many sections" / "file too big"），该标志把上限放宽到 2^32 段，产物仍为标准 COFF，对链接器透明。**MSVC 撞的是同一枚上限，但撞点在 obj 写出器而非汇编器**（`cl` 无独立汇编步骤，经典 COFF 文件头的段数字段是 16 位），超限在 TU 编译末尾报 `fatal error C1128` 且不产出 obj，对位旗标是 `/bigobj`，见 §8 编译器行与 `CMakeLists.txt` 的 MSVC 分支（触发 TU、CI 定年与本机段数读数就地记在那段注释里）。clang-cl 按同一枚 COFF 布局写 obj，实测未撞上限（CI `windows-llvm` Debug 腿与 MinGW 腿同绿），不注入。`AURORA_ENABLE_COVERAGE` 的 GCC 分支出于同一原因亦注入（见 §4 约束）。
 
 ---
 
@@ -804,7 +804,7 @@ GLFW 同口径自 `third_party/glfw` 源码构建，但仅在 `AURORA_BACKEND_GL
 | `CMAKE_BUILD_TYPE` | `Release`（若未设） | 常规构建默认 Release；覆盖率 / ASan 开关会自行清除其中的 `-O3` / `-Os` / `-DNDEBUG` |
 | `CMAKE_CXX_STANDARD` | `20` | 强制 C++20（`CMAKE_CXX_STANDARD_REQUIRED ON`，`CMAKE_CXX_EXTENSIONS OFF`） |
 | 生成器 | — | 推荐 `Ninja`（空转 / 增量调度远快于 Make）；Make 仍支持。GLFW / D3D11 后端链接依赖对应工具链的 `lib-*` 目录 |
-| 编译器 | — | GCC / Clang / MSVC（Visual Studio 2022 x64，经 vcvars / VsDevShell 提供 `cl`）均为受支持工具链。MSVC 注记：源码为 UTF-8，构建系统自动加 `/utf-8`；项目统一告警 `-Wall -Wextra -Wpedantic` 仅注入 GCC/Clang 目标（MSVC 保持默认 `/W3`）；`-ffp-contract=off` 的 MSVC 等价为 `/fp:precise` |
+| 编译器 | — | GCC / Clang / MSVC（Visual Studio 2022 x64，经 vcvars / VsDevShell 提供 `cl`）均为受支持工具链。MSVC 注记：源码为 UTF-8，构建系统自动加 `/utf-8`；`/bigobj` 同处全局注入（放宽 obj 的 COFF 段数字段，触发面与代价见 §6 末段与 `CMakeLists.txt` 的 MSVC 分支注释），它不是 usage requirement，装走的库与消费者无需携带；项目统一告警 `-Wall -Wextra -Wpedantic` 仅注入 GCC/Clang 目标（MSVC 保持默认 `/W3`）；`-ffp-contract=off` 的 MSVC 等价为 `/fp:precise` |
 
 ---
 
