@@ -11,33 +11,9 @@
 
 #include "aurora/core/diagnostics.h"
 #include "aurora/render/painter.h"
-#include "aurora/widget/descriptor.h"  // PropDescriptor / validate_or_default<Color>
+#include "aurora/widget/descriptor.h"  // WidgetDescriptor（属性条目由权威表发射，本 TU 不再手写）
 
 namespace aurora::webview {
-
-namespace {
-
-[[nodiscard]] auto mode_to_string(WebViewMode m) -> std::string_view {
-    switch (m) {
-        case WebViewMode::Interactive:
-            return "Interactive";
-        case WebViewMode::Snapshot:
-            return "Snapshot";
-    }
-    return "Interactive";
-}
-
-[[nodiscard]] auto mode_from_string(std::string_view s) -> std::optional<WebViewMode> {
-    if (s == "Snapshot") {
-        return WebViewMode::Snapshot;
-    }
-    if (s == "Interactive") {
-        return WebViewMode::Interactive;
-    }
-    return std::nullopt;
-}
-
-}  // namespace
 
 auto WebView::capabilities() const -> WebViewCapabilities { return current_capabilities(); }
 
@@ -67,20 +43,25 @@ auto WebView::registered_sink() -> WebViewSink * {
 }
 
 auto WebView::load_url(std::string uri) -> void {
-    url = std::move(uri);
-    // 无视图时只保留意图：`url` 仍可被序列化读出，不因缺引擎而报错（验收判据 5）。
+    // 形参是本函数持有的副本，先落成局部（一次真移动），再由写件装入表态位。
+    // string 行的写件与其余已迁型同形态——只收 `const std::string &`，装入即一次拷贝。
+    const std::string target = std::move(uri);
+    set_url(target);
+    // 无视图时只保留意图：`url` 行仍可被序列化读出，不因缺引擎而报错（验收判据 5）。
     // 意图同时是挂载时的初始导航来源，故「先构造后挂载」与「挂载后调用」两条路都真加载。
     if (WebViewSink *sink = registered_sink(); sink != nullptr) {
-        sink->navigate(url);
+        sink->navigate(target);
     }
 }
 
 auto WebView::load_html(std::string html_text, std::string uri_base) -> void {
-    html = std::move(html_text);
-    base_uri = std::move(uri_base);
+    const std::string document = std::move(html_text);  // 同 `load_url`：局部一次真移动，写件一次拷贝
+    const std::string base = std::move(uri_base);
+    set_html(document);
+    set_base_uri(base);
     // `url` 非空时按属性声明的优先级忽略内联 HTML（与挂载期初始导航同一口径）。
-    if (WebViewSink *sink = registered_sink(); sink != nullptr && url.empty()) {
-        sink->navigate_to_string(html, base_uri);
+    if (WebViewSink *sink = registered_sink(); sink != nullptr && url().empty()) {
+        sink->navigate_to_string(document, base);
     }
 }
 
@@ -154,121 +135,20 @@ auto WebView::request_snapshot(std::function<void(const Image &)> done) -> void 
 }
 
 auto WebView::describe_static() -> WidgetDescriptor {
-    return WidgetDescriptor{
-        .name = "WebView",
-        .properties =
-            {
-                {.name = "url",
-                 .type = "string",
-                 .default_value = "",
-                 .required = false,
-                 .note = "Initial navigation target (empty = no initial load)",
-                 .json_type = "string"},
-                {.name = "html",
-                 .type = "string",
-                 .default_value = "",
-                 .required = false,
-                 .note = "Inline HTML (ignored when url is non-empty)",
-                 .json_type = "string"},
-                {.name = "base_uri",
-                 .type = "string",
-                 .default_value = "",
-                 .required = false,
-                 .note = "Base URI for resolving relative resources of inline HTML",
-                 .json_type = "string"},
-                {.name = "mode",
-                 .type = "WebViewMode",
-                 .default_value = "Interactive",
-                 .required = false,
-                 .note = "Interactive = native child view (no Painter compositing); "
-                         "Snapshot = blit into the Painter frame",
-                 .json_type = "string",
-                 .enum_values = {"Interactive", "Snapshot"}},
-                {.name = "zoom_factor",
-                 .type = "float",
-                 .default_value = "1",
-                 .required = false,
-                 .note = "Page zoom factor (1 = natural size)",
-                 .json_type = "number",
-                 .enum_values = {},
-                 .min_value = "0.25",
-                 .max_value = "5"},
-                {.name = "javascript_enabled",
-                 .type = "bool",
-                 .default_value = "true",
-                 .required = false,
-                 .note = "Whether the page may execute scripts",
-                 .json_type = "boolean"},
-                {.name = "background",
-                 .type = "Color",
-                 .default_value = "{245,245,245,255}",
-                 .required = false,
-                 .note = "Backdrop color for the placeholder and the snapshot mode",
-                 .json_type = "array"},
-                {.name = "width",
-                 .type = "Length",
-                 .default_value = "auto",
-                 .required = false,
-                 .note = "",
-                 .json_type = "array"},
-                {.name = "height",
-                 .type = "Length",
-                 .default_value = "auto",
-                 .required = false,
-                 .note = "",
-                 .json_type = "array"},
-                {.name = "show",
-                 .type = "bool",
-                 .default_value = "true",
-                 .required = false,
-                 .note = "",
-                 .json_type = "boolean"},
-            },
-        .events = {},
-        .children_policy = "none",
-        .examples = {"au::webview::WebView{ au::webview::WebViewProps{ .url = \"...\" } }"},
-    };
+    auto descriptor = props_descriptor("WebView");
+    descriptor.children_policy = "none";
+    descriptor.examples = {"au::webview::WebView(au::webview::WebViewProps().set_url(\"https://example.com\"))"};
+    return descriptor;
 }
 
 auto WebView::serialize_props(Json &props) const -> void {
     Widget::serialize_props(props);
-    props.set("url", url);
-    props.set("html", html);
-    props.set("base_uri", base_uri);
-    props.set("mode", std::string{mode_to_string(mode)});
-    props.set("zoom_factor", zoom_factor);
-    props.set("javascript_enabled", Json{javascript_enabled});
-    props.set("background", color_to_json(background));
+    props_serialize(props);
 }
 
 auto WebView::deserialize_props(const Json &props) -> void {
     Widget::deserialize_props(props);
-    if (props.contains("url") && props.at("url")->is_string()) {
-        url = props.at("url")->as_or<std::string>("");
-    }
-    if (props.contains("html") && props.at("html")->is_string()) {
-        html = props.at("html")->as_or<std::string>("");
-    }
-    if (props.contains("base_uri") && props.at("base_uri")->is_string()) {
-        base_uri = props.at("base_uri")->as_or<std::string>("");
-    }
-    if (props.contains("mode") && props.at("mode")->is_string()) {
-        if (const std::optional<WebViewMode> m = mode_from_string(props.at("mode")->as_or<std::string>(""))) {
-            mode = *m;
-        }
-    }
-    if (props.contains("zoom_factor") && props.at("zoom_factor")->is_number()) {
-        zoom_factor = props.at("zoom_factor")->as_or<float>(1.0F);
-    }
-    if (props.contains("javascript_enabled") && props.at("javascript_enabled")->is_bool()) {
-        javascript_enabled = props.at("javascript_enabled")->as_or<bool>(true);
-    }
-    // 背景色必须与 `serialize_props` 对称回读，否则往返后控件换了个底色（快照/占位外观随之变样）。
-    // 类型闸用 `is_array()`：`validate_prop<Color>` 认的就是 [r,g,b,a] 数组形态。
-    if (props.contains("background") && props.at("background")->is_array()) {
-        static const PropDescriptor D_BACKGROUND{.name = "background", .type = "Color", .json_type = "array"};
-        background = validate_or_default<Color>(*props.at("background"), D_BACKGROUND, background);
-    }
+    props_deserialize(props);
 }
 
 auto WebView::on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size {
@@ -286,13 +166,13 @@ auto WebView::on_paint(Painter &p, const Rect &bounds, const BuildContext & /*ct
         paint_placeholder(p, bounds);
         return;
     }
-    if (mode == WebViewMode::Snapshot && !snapshot_.pixels.empty()) {
+    if (mode() == WebViewMode::Snapshot && !snapshot_.pixels.empty()) {
         p.draw_image(snapshot_, bounds);
         return;
     }
     // 交互模式：原生视图盖在本矩形之上，此处填底只为「原生视图未就位时不露脏区」，
     // 且保证该矩形的绘制结果是确定性的（可进逻辑快照）。
-    p.draw_rect(bounds, background);
+    p.draw_rect(bounds, background());
 }
 
 auto WebView::on_mount(const BuildContext &ctx) -> void {
@@ -315,11 +195,11 @@ auto WebView::on_mount(const BuildContext &ctx) -> void {
         enter_degraded("webview-host-unbound", "no native window host bound for this frame");
         return;
     }
-    if (mode == WebViewMode::Interactive && !caps.interactive) {
+    if (mode() == WebViewMode::Interactive && !caps.interactive) {
         enter_degraded("webview-unsupported-mode", "interactive mode needs a native child surface");
         return;
     }
-    if (mode == WebViewMode::Snapshot && !caps.snapshot) {
+    if (mode() == WebViewMode::Snapshot && !caps.snapshot) {
         enter_degraded("webview-snapshot-unsupported", "snapshot mode unavailable");
         return;
     }
@@ -333,7 +213,7 @@ auto WebView::on_mount(const BuildContext &ctx) -> void {
     }
     // 票据与登记号成对留存：析构期的注销只能经票据判活后回访宿主（见 `detach_from_host`）。
     host_ticket_ = host->ticket();
-    host_token_ = host->register_view(this, std::move(view), mode == WebViewMode::Interactive);
+    host_token_ = host->register_view(this, std::move(view), mode() == WebViewMode::Interactive);
 
     WebViewSink *sink = registered_sink();
     if (sink == nullptr) {
@@ -341,13 +221,15 @@ auto WebView::on_mount(const BuildContext &ctx) -> void {
     }
     // 入向回调交弱引用：控件析构后引擎的异步回调 `lock()` 即空，天然判活。
     sink->set_callbacks(callbacks_);
-    sink->set_zoom_factor(zoom_factor);
-    sink->set_javascript_enabled(javascript_enabled);
+    sink->set_zoom_factor(zoom_factor());
+    sink->set_javascript_enabled(javascript_enabled());
     // 初始导航：`url` 优先（非空时按属性声明忽略内联 HTML），二者皆空则停在空白页。
-    if (!url.empty()) {
-        sink->navigate(url);
-    } else if (!html.empty()) {
-        sink->navigate_to_string(html, base_uri);
+    // 读件返回副本，故整段导航只取一次，避免逐条比较各复制一遍字符串。
+    const std::string initial_url = url();
+    if (!initial_url.empty()) {
+        sink->navigate(initial_url);
+    } else if (const std::string initial_html = html(); !initial_html.empty()) {
+        sink->navigate_to_string(initial_html, base_uri());
     }
 }
 
@@ -372,7 +254,7 @@ auto WebView::paint_placeholder(Painter &p, const Rect &bounds) -> void {
     if (bounds.size.width > 2.0F && bounds.size.height > 2.0F) {
         p.draw_rect(Rect{.origin = Point{.x = bounds.origin.x + 1.0F, .y = bounds.origin.y + 1.0F},
                          .size = Size{.width = bounds.size.width - 2.0F, .height = bounds.size.height - 2.0F}},
-                    background);
+                    background());
     }
 }
 

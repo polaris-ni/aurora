@@ -4971,7 +4971,7 @@
       "events": [],
       "children_policy": "none",
       "examples": [
-        "au::webview::WebView{ au::webview::WebViewProps{ .url = \"...\" } }"
+        "au::webview::WebView(au::webview::WebViewProps().set_url(\"https://example.com\"))"
       ]
     }
   ],

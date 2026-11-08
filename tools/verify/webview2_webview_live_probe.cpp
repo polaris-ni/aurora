@@ -450,10 +450,12 @@ auto main(int argc, char **argv) -> int {
 
     // ---- 场景：Column{ 交互视图, 快照视图 }（两者同窗，快照视图永不原生可见）----
     Probe probe;
-    probe.interactive = std::make_shared<aurora::webview::WebView>(aurora::webview::WebViewProps{
-        .url = {}, .html = {}, .mode = aurora::webview::WebViewMode::Interactive, .javascript_enabled = true});
-    probe.snapshot_view = std::make_shared<aurora::webview::WebView>(aurora::webview::WebViewProps{
-        .url = {}, .html = {}, .mode = aurora::webview::WebViewMode::Snapshot, .javascript_enabled = true});
+    // 其余行（url / html / javascript_enabled）刻意不表态：生效值即各行回落点，与迁移前显式写的
+    // `{}` / `{}` / `true` 逐值相同，只是不再把系统默认伪装成用户意图。
+    probe.interactive = std::make_shared<aurora::webview::WebView>(
+        aurora::webview::WebViewProps().set_mode(aurora::webview::WebViewMode::Interactive));
+    probe.snapshot_view = std::make_shared<aurora::webview::WebView>(
+        aurora::webview::WebViewProps().set_mode(aurora::webview::WebViewMode::Snapshot));
     // 初始尺寸意图显式化：改档判据（Resize 阶段）据此产生确定增量。
     probe.interactive->width(aurora::px(AURORA_PROBE_VIEW_W0)).height(aurora::px(AURORA_PROBE_VIEW_H0));
     probe.snapshot_view->width(aurora::px(AURORA_PROBE_VIEW_W0)).height(aurora::px(AURORA_PROBE_VIEW_H0));
