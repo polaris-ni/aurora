@@ -84,7 +84,9 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # 手抄单 TU 探针（不带 PCH）：`/O2 /Zi /MDd` 85,147 段并当场复现 C1128，同档去掉 /Zi 64,432 段
 # （限内、余量只剩 1,103 段），Release 档 `/O2 /MD /DNDEBUG` 59,969 段；MSBuild 真实构建面（PCH
 # 生效、/O2 + /Zi）加 /bigobj 后 dumpbin 报 13,548 段。两处编译旗标不同（`/Yu` 与否），差值未归因，
-# 故「CI 是否转绿」只能以推送后的 CI 为准。
+# 故「CI 是否转绿」当时只能以推送后的 CI 为准——该读数已到手：run 42489004411 的
+# `core (windows-msvc-debug)` 转 success（同分支更早的 run 42478361236 该腿仍 failure），
+# 本机那枚 13,548 段的 obj 从未是判据，也不该被当成判据。
 #
 # 为什么落在全局而非 `target_compile_options(aurora PRIVATE …)`：超限面是「把整族属性表实例化
 # 进一枚 TU 的翻译单元」，不止这一枚 .cpp——测试与工具侧同样 include 这些头，只钉库目标就是把
