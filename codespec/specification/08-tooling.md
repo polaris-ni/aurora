@@ -1219,6 +1219,7 @@ std::string dump = au::dump_tree_json(root).dump();
 - 格式为 JSON Schema / OpenAPI 风格接口描述。
 - 不仅包含函数签名，还要包含**类型约束、默认值、组件组合规则**。
 - Schema 从代码**自动生成**（`gen_api_tools`），保证与实现同步。
+- **上面的片段是早期示意，真实产物按 `widgets` 数组（76 型）与一批顶层非条目块组织**，实际消费方须以 `aurora_api.json` 为准。顶层除 `library` / `language` / `include` / `alias` / `widgets` / `enums` / `error_codes` / `debug` / `state_patterns` / `layout_rules` 外另有两枚**一次性常量规则块**：`theme_tokens` 登记五组主题令牌的逐组 `{owner, field, prefix, type, tokens, count}`（69 枚短名，口径见 [`07-environment-modifier.md`](07-environment-modifier.md) §5.1），`accessor_rules` 登记「表键词根 → 访问器名与签名」的 15 条规则（读件两形互斥、值写件与换源写件同名重载、已退役名字清单与其适用面），使消费方**不读头文件也能推全公共名**。两枚块与逐键的 `source` 布尔位、provider 条目的 `payload`（`{type, channel}`，`ThemeProvider` / `LocaleProvider` / `MediaQueryProvider` 三枚）同属「代码是唯一天，块只登记规则与集合」这一类；它们登记进 `check_api_schema_sync` 的非条目白名单，一致性由 `check_theme_token_registry`（表 ↔ 字段双向）与 `check_no_theme_display_literals`（源码不得手抄令牌显示串）判定。**两块目前尚无消费端**——MCP / CLI / LSP 仍只读 `widgets` 与 `enums`，接线随后续批。
 
 **验收标准：** `aurora_api.json` 覆盖全部已注册控件；新增 / 删除 widget 或类型后重跑生成器即可同步，无手工维护项。
 
