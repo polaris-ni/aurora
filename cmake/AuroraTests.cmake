@@ -254,6 +254,12 @@ if (AURORA_BUILD_TESTS)
         add_test(NAME check_workflow_yaml
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_workflow_yaml.py" --root "${AURORA_SOURCE_DIR}"
                 WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
+        # 统计比较载体的注入变异自证：同码 A/A 恒定通过、确定性退化转红、重复不足判噪声不足、
+        # 跳过 / 跨桶 / 基线篡改与缺失判数据缺失、显式种子可复现。属普通 CTest 用例，
+        # 不进 declared_gates.txt 现役一票否决门禁声明集合。
+        add_test(NAME bench_compare_selftest
+                COMMAND ${PYTHON3_EXE} "${_check_dir}/bench_compare.py" selftest
+                WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
     endif ()
 
     # ---- 空源集 guard ----

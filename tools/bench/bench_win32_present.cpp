@@ -55,9 +55,11 @@ using aurora::bench::time_ms;
 
 // NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
+    aurora::bench::process_result().identify("bench_win32_present", "present-split");
 #ifndef AURORA_BACKEND_WIN32
     AURORA_LOG_RAW("bench", "bench_win32_present: no Win32 backend, skip\n");
-    return 0;
+    aurora::bench::process_result().skip("backend-unavailable");
+    return aurora::bench::finalize_process("bench_win32_present", "present-split") ? 0 : 1;
 #else
     enable_dpi_awareness();
 
@@ -69,7 +71,8 @@ auto main() -> int {
     auto win_res = create_window(Win32Options{wopts});
     if (!win_res) {
         AURORA_LOG_RAW("bench", "bench_win32_present: window creation failed (", win_res.error().message, "), skip\n");
-        return 0;
+        aurora::bench::process_result().skip("window-creation-failed");
+        return aurora::bench::finalize_process("bench_win32_present", "present-split") ? 0 : 1;
     }
     auto win = std::move(win_res.value());
 
@@ -257,6 +260,6 @@ auto main() -> int {
 #endif  // AURORA_BACKEND_D3D11
 
     AURORA_LOG_RAW("bench", "\n", AURORA_BENCH_DISCLAIMER, "\n");
-    return 0;
+    return aurora::bench::finalize_process("bench_win32_present", "present-split") ? 0 : 1;
 #endif
 }

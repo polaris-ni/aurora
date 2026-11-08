@@ -358,6 +358,11 @@ auto report_read_row(const std::string &scene_label, ReadForm form, int probes, 
     const auto ns_per_read = (frame_ms - baseline_ms) * 1.0E6 / reads;
     const auto allocs_per_read = (static_cast<double>(counters.allocs) - static_cast<double>(baseline.allocs)) /
                                  (form == ReadForm::None ? 1.0 : reads);
+    const std::string key = scene_label + "/form" + std::to_string(static_cast<int>(form));
+    aurora::bench::process_result().metric(key + "/frame_ms", frame_ms);
+    aurora::bench::process_result().metric(key + "/ns_per_read", ns_per_read, "ns");
+    aurora::bench::process_result().metric(key + "/allocs_per_read", allocs_per_read, "count");
+    aurora::bench::process_result().flag(key + "/traversal_ok", traversal_ok);
     AURORA_LOG_RAW("bench", "| ", scene_label, " | ", form_label(form), " | ", probes, " | ", counters.reads, " | ",
                    counters.paints, " | ", counters.allocs, " | ", counters.bytes, " | ",
                    aurora::bench::ffmt(2, allocs_per_read), " | ", aurora::bench::ffmt(1, ns_per_read), " | ",
@@ -418,6 +423,11 @@ auto measure_swap(aurora::Window &win, Scene &scene, double steady_ms) -> SwapCo
 }
 
 auto report_swap_row(const std::string &scene_label, ReadForm form, int probes, const SwapCounters &c) -> void {
+    const std::string key = scene_label + "/form" + std::to_string(static_cast<int>(form)) + "/swap";
+    aurora::bench::process_result().metric(key + "/steady_ms", c.steady_ms);
+    aurora::bench::process_result().metric(key + "/swap_ms", c.swap_ms);
+    aurora::bench::process_result().metric(key + "/set_ms", c.set_ms);
+    aurora::bench::process_result().metric(key + "/swap_allocs", static_cast<double>(c.swap_allocs), "count");
     AURORA_LOG_RAW("bench", "| ", scene_label, " | ", form_label(form), " | ", probes, " | ",
                    aurora::bench::ffmt(3, c.steady_ms), " | ", aurora::bench::ffmt(3, c.swap_ms), " | ",
                    aurora::bench::ffmt(3, c.set_ms), " | ", c.swap_allocs, " |\n");
@@ -465,6 +475,7 @@ auto run_scene(Scene &scene, bool with_swap) -> SceneRun {
 // 入口函数允许库异常逃逸到 main（terminate 即失败路径），基准工具不做 try/catch 包装。
 // NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
+    aurora::bench::process_result().identify("bench_theme", "read-face");
     AURORA_LOG_RAW("bench", "sizeof(Theme) = ", sizeof(aurora::Theme),
                    " bytes; sizeof(ColorRoles) = ", sizeof(aurora::ColorRoles),
                    "; sizeof(TypeScale) = ", sizeof(aurora::TypeScale), "\n\n");
@@ -532,11 +543,15 @@ auto main() -> int {
     }
 
     AURORA_LOG_RAW("bench", "\n", aurora::bench::AURORA_BENCH_DISCLAIMER, "\n");
-    return 0;
+    return aurora::bench::finalize_process("bench_theme", "read-face") ? 0 : 1;
 }
 
 #else
 
-auto main() -> int { return 0; }
+auto main() -> int {
+    aurora::bench::process_result().identify("bench_theme", "read-face");
+    aurora::bench::process_result().skip("backend-unavailable");
+    return aurora::bench::finalize_process("bench_theme", "read-face") ? 0 : 1;
+}
 
 #endif  // AURORA_BACKEND_HEADLESS

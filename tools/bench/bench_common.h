@@ -12,6 +12,7 @@
 #include <string>
 
 #include "aurora/aurora.h"
+#include "bench_result.h"
 
 namespace aurora::bench {
 
@@ -45,6 +46,7 @@ inline constexpr auto AURORA_BENCH_DISCLAIMER =
 // this shape; bench_render uses a different 5-column format including size, so it does not share it).
 // After unification, changing the header/precision only needs to happen here.
 inline auto bench_row(const char *name, double ms) -> void {
+    process_result().metric(std::string{name}, ms);
     AURORA_LOG_RAW("bench", "| ", name, " | ", ffmt(3, ms), " ms |\n");
 }
 

@@ -54,6 +54,7 @@
 #include "aurora/widget/scroll.h"
 #include "aurora/widget/text.h"
 #include "aurora/widget/text_input.h"
+#include "bench_result.h"
 
 using aurora::Chip;
 using aurora::Column;
@@ -754,6 +755,23 @@ auto emit(const std::string &format, const ScrollBenchHarness::Result &r, bool &
     }
 }
 
+/// @brief Mirror every reported reading into the structured result file.
+/// @param result process-wide result object.
+/// @param prefix stable scene prefix for the metric keys.
+/// @param r one scene sample.
+auto collect(aurora::bench::BenchResult &result, const std::string &prefix, const ScrollBenchHarness::Result &r)
+    -> void {
+    result.metric(prefix + "avg_frame_ms", r.avg_frame_ms());
+    result.metric(prefix + "p50_ms", r.p50_ms());
+    result.metric(prefix + "p95_ms", r.p95_ms());
+    result.metric(prefix + "p99_ms", r.p99_ms());
+    result.metric(prefix + "worst_ms", r.worst_ms());
+    result.metric(prefix + "jitter_ms", r.jitter_ms());
+    result.metric(prefix + "long_tasks", static_cast<double>(r.long_task_count()), "count");
+    result.metric(prefix + "full_redraw_frames", static_cast<double>(r.full_redraw_frames()), "count");
+    result.flag(prefix + "trustworthy", r.trustworthy());
+}
+
 /// @brief Repeat sampling and take the best (the lowest p99).
 ///
 /// **Why take min instead of average**: measured on 300 frames at the same config, `avg`/`p50`
@@ -933,6 +951,10 @@ auto main(int argc, char **argv) -> int {  // NOLINT(*-function-cognitive-comple
     cfg.scale = static_cast<float>(cli_args.get<double>("scale").value());
     cfg.fling = cli_args.flag("fling");
 
+    aurora::bench::process_result().identify("bench_scroll", scene);
+    aurora::bench::process_result().frame_counts(cfg.warmup_frames, 0, cfg.frames);
+    auto &result = aurora::bench::process_result();
+
     constexpr Size viewport{.width = 1100.0F, .height = 760.0F};  // fixed convention across all scenes
     bool csv_header_written = false;
 
@@ -957,6 +979,7 @@ auto main(int argc, char **argv) -> int {  // NOLINT(*-function-cognitive-comple
             AURORA_LOG_RAW("bench", note);
         }
         emit(format, r, csv_header_written);
+        collect(result, "app.", r);
     }
 
     if (scene == "synthetic" || scene == "all") {
@@ -968,6 +991,7 @@ auto main(int argc, char **argv) -> int {  // NOLINT(*-function-cognitive-comple
             AURORA_LOG_RAW("bench", note);
         }
         emit(format, r, csv_header_written);
+        collect(result, "synthetic.", r);
     }
 
     if (scene == "lazy" || scene == "all") {
@@ -979,6 +1003,7 @@ auto main(int argc, char **argv) -> int {  // NOLINT(*-function-cognitive-comple
             AURORA_LOG_RAW("bench", note);
         }
         emit(format, r, csv_header_written);
+        collect(result, "lazy.", r);
     }
 
     if (scene == "grid" || scene == "all") {
@@ -990,15 +1015,18 @@ auto main(int argc, char **argv) -> int {  // NOLINT(*-function-cognitive-comple
             AURORA_LOG_RAW("bench", note);
         }
         emit(format, r, csv_header_written);
+        collect(result, "grid.", r);
     }
 
+    result.trust(!any_untrustworthy, any_untrustworthy ? "self-check-failed" : "all self-checks passed");
+    const bool written = aurora::bench::finalize_process("bench_scroll", scene);
     if (any_untrustworthy) {
         // Non-zero exit code: the baseline collection script uses this to refuse writing untrusted
-        // readings into the comparison table.
+        // readings into the comparison table. The result file is still written with untrusted status.
         AURORA_LOG_ERROR("bench",
                          "At least one scenario reading is unreliable (scroll container not found / idle "
                          "frame drops); non-zero exit code set");
         return 2;
     }
-    return 0;
+    return written ? 0 : 1;
 }

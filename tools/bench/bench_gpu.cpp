@@ -666,6 +666,9 @@ auto run() -> void {
     AURORA_LOG_RAW("bench", "## Scenarios 3/4/5/6: not compiled (`AURORA_BACKEND_GPU_WGPU=OFF`)\n\n");
 #endif
 
+    process_result().metric("layer_baseline_steady_ms", base.steady_ms_per_frame);
+    process_result().metric("layer_cached_steady_ms", cached.steady_ms_per_frame);
+    process_result().metric("layer_speedup", layer_speedup, "ratio");
     AURORA_LOG_RAW("bench", AURORA_BENCH_DISCLAIMER, "\n");
 }
 
@@ -676,6 +679,7 @@ auto run() -> void {
 // 入口不吞异常：基准程序的失败即未捕获异常 → terminate，与各 demo 入口同口径（场景数值自报，无需 try/catch）。
 // NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
+    aurora::bench::process_result().identify("bench_gpu", "streaming-layer-cache");
     aurora::bench::run();
-    return 0;
+    return aurora::bench::finalize_process("bench_gpu", "streaming-layer-cache") ? 0 : 1;
 }

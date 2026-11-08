@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "note": "Explicit write only. Plain measurements and comparisons never mutate this file.",
+  "buckets": {},
+  "checksum": "2a4835274514371f323725b793ef42114a2b8a0f831c016451bbd9b08ad96c4b"
+}

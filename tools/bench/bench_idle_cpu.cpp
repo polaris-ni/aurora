@@ -101,9 +101,11 @@ auto run_scenario(bool force_redraw_each_frame, int duration_ms) -> RunResult {
 // try/catch 包装
 // NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
+    aurora::bench::process_result().identify("bench_idle_cpu", "frame-loop");
 #ifndef AURORA_BACKEND_WIN32
     AURORA_LOG_RAW("bench", "bench_idle_cpu: no Win32 backend, skip\n");
-    return 0;
+    aurora::bench::process_result().skip("backend-unavailable");
+    return aurora::bench::finalize_process("bench_idle_cpu", "frame-loop") ? 0 : 1;
 #else
     au::enable_dpi_awareness();
     int failures = 0;
@@ -133,6 +135,15 @@ auto main() -> int {
         AURORA_LOG_RAW("bench", "[active 3s] PASS: fps clamped near max_fps=60\n");
     }
 
-    return failures == 0 ? 0 : 1;
+    auto &result = aurora::bench::process_result();
+    result.metric("idle_cpu_ratio", idle.cpu_ratio * 100.0, "percent");
+    result.metric("idle_render_fps", idle.fps, "fps");
+    result.metric("idle_wakeups_per_s", idle.wakeup_per_s, "count/s");
+    result.metric("active_cpu_ratio", active.cpu_ratio * 100.0, "percent");
+    result.metric("active_render_fps", active.fps, "fps");
+    result.flag("idle_cpu_under_5pct", idle.cpu_ratio < 0.05);
+    result.flag("active_fps_throttled", active.fps >= 30.0 && active.fps <= 90.0);
+    result.trust(failures == 0, failures == 0 ? "all self-checks passed" : "self-check-failed");
+    return (failures == 0 && aurora::bench::finalize_process("bench_idle_cpu", "frame-loop")) ? 0 : 1;
 #endif
 }
