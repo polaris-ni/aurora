@@ -1,7 +1,9 @@
 #pragma once
 
+#include <array>
 #include <concepts>
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -242,6 +244,47 @@ concept prop_token_registered = requires {
     { Scale::token_name(MemberPtr) } -> std::convertible_to<std::string_view>;
 };
 
+namespace detail {
+
+/// @brief 令牌成员指针 → 该组登记表里的短名（`.shows_token<>()` 的取值件）。
+///
+/// 未登记组成员名不在其表里时 `token_name` 回落空串，故概念判定与空串断言两道都要：前者拦「这组根本没有
+/// 登记表」，后者拦「表存在但这枚成员没进表」（同名不同组的成员指针也会走到第二道）。
+/// @tparam TokenPtr 令牌成员指针（`&ColorRoles::primary` 一类）。
+/// @return 形如 `theme.primary` 的短名（不带引号，引号由发射侧补，与活令牌档同一口径）。
+template <auto TokenPtr>
+[[nodiscard]] consteval auto prop_token_shown_name() -> std::string_view {
+    using Scale = PropFieldOwnerT<decltype(TokenPtr)>;
+    static_assert(prop_token_registered<Scale, TokenPtr>,
+                  "shown token group must register a member-pointer to short-name table");
+    constexpr std::string_view name = Scale::token_name(TokenPtr);
+    static_assert(!name.empty(), "shown token must be listed in its group table");
+    return name;
+}
+
+/// @brief 令牌显示串的发射形态：逐枚补引号、按给出顺序以 `" / "` 连接。
+///
+/// 引号在这里补而不在登记表面补，是为了让活令牌档（`.fallback<&ColorRoles::primary>()`）与派生档
+/// （`.shows_token<&ColorRoles::on_surface>()`）共用同一份登记表原文、发出逐字节同形的 `default_expr`。
+/// @tparam Row 表行类型。
+/// @param row 目标行（`shows_token_count` 已由 `.shows_token<>()` 填好）。
+/// @return 形如 `"theme.on_surface"`；两枚时为 `"theme.spacing.large" / "theme.spacing.small"`。
+template <typename Row>
+[[nodiscard]] auto shown_tokens_display(const Row &row) -> std::string {
+    std::string display;
+    for (std::size_t slot = 0; slot < row.shows_token_count; ++slot) {
+        if (slot != 0) {
+            display += " / ";
+        }
+        display += '"';
+        display += row.shows_tokens.at(slot);
+        display += '"';
+    }
+    return display;
+}
+
+}  // namespace detail
+
 /// @brief 权威表的一行：属性键名、私有字段、脏档位、约束与回落点的唯一声明处。
 ///
 /// 行对象是字面类型（成员只有 `std::string_view`、标志位与函数指针），整张表因此可在常量求值里
@@ -253,8 +296,10 @@ concept prop_token_registered = requires {
 ///   - `.fallback<&ColorRoles::primary>()` —— 活令牌档：随作用域换肤而变，本行发 `x(ctx)`。
 ///   - `.fallback(&XxxProps::some_default)` —— 常量档（`static T()`）：全库唯一基线，本行发 `x()`。
 ///   - `.fallback(&XxxProps::some_derived)` —— 派生档（`static T(const Derived &, const BuildContext &)`）：
-///     读同族他行的生效值再加工（如 hover 由当前背景调暗），本行发 `x(ctx)`，且必须配
-///     `.shows("...")` 给出静态可显示的默认串（没有实例就求不出值，发射面只能取显示串）。
+///     读同族他行的生效值再加工（如 hover 由当前背景调暗），本行发 `x(ctx)`，且必须给出静态可显示的默认串
+///     （没有实例就求不出值）。串的来源按回落点是否只读已登记令牌分两枚写件：只读令牌的用
+///     `.shows_token<&SpacingScale::large, ...>()`（名由登记表反查、引号发射时补，改名即编译红），
+///     不是令牌名的（`"auto"` / `"none"` 一类）才用 `.shows("...")` 手抄。
 ///
 /// @tparam FieldPtr 本行对应的私有数据成员指针（`&XxxProps::field_`）。
 /// @note Thread: 行不可变，可跨帧持有
@@ -289,6 +334,12 @@ class PropRow {
         return detail::PropIsWritableHandle<detail::PropUnoptionalT<Field>>::value;
     }
 
+    /// @brief 一行最多登记几枚令牌显示串（`.shows_token<>()` 的槽数上限）。
+    ///
+    /// 派生回落点里读两档间距（内边距）是现况上限，四枚留一倍余量；超出即编译红，不做动态扩容——
+    /// 行对象必须保持字面类型且零堆分配，`std::vector` 会让整张常量表不可在常量求值里成形。
+    static constexpr std::size_t AURORA_SHOWN_TOKEN_LIMIT = 4;
+
     std::string_view key;  ///< 序列化键名（同 schema 的属性名）
     detail::PropDirtyBits dirty;  ///< 脏档位
     std::string_view note_text;  ///< 说明（描述符的 `note`）
@@ -296,7 +347,9 @@ class PropRow {
     std::string_view min_text;  ///< 数值下界（描述符的 `minimum`）
     std::string_view max_text;  ///< 数值上界（描述符的 `maximum`）
     std::string_view requires_text;  ///< 属性依赖（描述符的 `requires_props`）
-    std::string_view shows_text;  ///< 默认值显示串（派生档必需，其余档为可选覆写）
+    std::string_view shows_text;  ///< 默认值显示串（非令牌名的覆写，如 `auto` / `none`）
+    std::array<std::string_view, AURORA_SHOWN_TOKEN_LIMIT> shows_tokens{};  ///< 回落点读的令牌短名（未用槽留空）
+    std::uint8_t shows_token_count = 0;  ///< 上面用了几枚；0 表示本行没有令牌显示串
     std::string_view token_name;  ///< 活令牌短名（非空即回落点跟随主题）
     Bare (*token_fn)(const BuildContext &) = nullptr;  ///< 活令牌档取值体
     Bare (*const_fn)() = nullptr;  ///< 常量档提供者
@@ -414,6 +467,25 @@ class PropRow {
     [[nodiscard]] constexpr auto shows(std::string_view alias) const -> PropRow {
         auto next = *this;
         next.shows_text = alias;
+        return next;
+    }
+
+    /// @brief 默认值显示串由令牌登记表给出（派生档回落点只读已登记令牌时的写法）。
+    ///
+    /// 与 `.shows("...")` 的分工：本件的名字**不写在源码里**，而由该组「成员指针 → 短名」对照表反查、
+    /// 引号在发射侧补 —— 于是令牌改名或从表里撤登记，控件侧当场编译红，不会在 schema 里留下陈旧串
+    /// （手抄显示串正是历史同一档出现两种拼法的来源）。多枚按给出顺序以 `" / "` 连接，对应一次回落
+    /// 读几档间距的派生提供者。
+    /// @tparam TokenPtr 令牌成员指针，一枚到 `AURORA_SHOWN_TOKEN_LIMIT` 枚。
+    /// @return 带令牌显示串的新行。
+    template <auto... TokenPtr>
+    [[nodiscard]] constexpr auto shows_token() const -> PropRow {
+        static_assert(sizeof...(TokenPtr) > 0, "shows_token needs at least one token member pointer");
+        static_assert(sizeof...(TokenPtr) <= AURORA_SHOWN_TOKEN_LIMIT, "shows_token exceeds the row's token slots");
+        auto next = *this;
+        std::size_t slot = 0;
+        ((next.shows_tokens.at(slot++) = detail::prop_token_shown_name<TokenPtr>()), ...);
+        next.shows_token_count = static_cast<std::uint8_t>(sizeof...(TokenPtr));
         return next;
     }
 
@@ -1477,6 +1549,8 @@ class AbstractProps {
         entry.json_type =
             row.json_type_text.empty() ? std::string{PropCodec<Bare>::json_text()} : std::string{row.json_type_text};
         entry.required = Row::is_required();
+        // 来源型位由字段形状推出，不读任何旁注：该行能接句柄（只读源或可写源）即为 true。
+        entry.source = Row::is_source();
         entry.note = std::string{row.note_text};
         entry.min_value = std::string{row.min_text};
         entry.max_value = std::string{row.max_text};
@@ -1489,6 +1563,8 @@ class AbstractProps {
         // 而不是字符串。
         if (!row.shows_text.empty()) {
             entry.default_value = std::string{row.shows_text};
+        } else if (row.shows_token_count > 0) {
+            entry.default_value = detail::shown_tokens_display(row);
         } else if (!row.token_name.empty()) {
             entry.default_value = std::string{"\""} + std::string{row.token_name} + "\"";
         } else if (row.const_fn != nullptr) {

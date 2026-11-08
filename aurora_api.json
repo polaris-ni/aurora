@@ -298,11 +298,13 @@
           "type": "LocalizedString",
           "default": "",
           "required": true,
+          "source": true,
           "note": "Button text"
         },
         {
           "name": "color",
           "type": "Color",
+          "source": true,
           "note": "Background color (follows theme primary when unset)",
           "default_expr": "\"theme.primary\""
         },
@@ -330,7 +332,7 @@
           "name": "padding",
           "type": "EdgeInsets",
           "note": "Padding (follows theme spacing when unset)",
-          "default_expr": "\"theme.spacing(large/small)\""
+          "default_expr": "\"theme.spacing.large\" / \"theme.spacing.small\""
         },
         {
           "name": "enabled",
@@ -452,7 +454,7 @@
           "name": "active_color",
           "type": "Color",
           "note": "Checked fill color (defaults to theme primary)",
-          "default_expr": "theme.primary"
+          "default_expr": "\"theme.primary\""
         },
         {
           "name": "border_color",
@@ -1072,7 +1074,7 @@
           "name": "accent_color",
           "type": "Color",
           "note": "Selection highlight color (defaults to theme primary)",
-          "default_expr": "theme.primary"
+          "default_expr": "\"theme.primary\""
         },
         {
           "name": "box_color",
@@ -1524,7 +1526,7 @@
           "name": "color",
           "type": "Color",
           "note": "Icon color (follows theme on_surface_variant when unset)",
-          "default_expr": "theme.on_surface_variant"
+          "default_expr": "\"theme.on_surface_variant\""
         },
         {
           "name": "semantic_label",
@@ -1585,7 +1587,7 @@
           "name": "color",
           "type": "Color",
           "note": "Icon color (theme role per state when unset)",
-          "default_expr": "theme.on_surface_variant"
+          "default_expr": "\"theme.on_surface_variant\""
         },
         {
           "name": "semantic_label",
@@ -2034,7 +2036,11 @@
       "children_policy": "single",
       "examples": [
         "au::Provider<Theme>(theme, child)"
-      ]
+      ],
+      "payload": {
+        "type": "Locale",
+        "channel": "first constructor argument; descendants read it via BuildContext::environment<T>()"
+      }
     },
     {
       "type": "MediaQueryProvider",
@@ -2064,7 +2070,11 @@
       "children_policy": "single",
       "examples": [
         "au::Provider<Theme>(theme, child)"
-      ]
+      ],
+      "payload": {
+        "type": "MediaQuery",
+        "channel": "first constructor argument; descendants read it via BuildContext::environment<T>()"
+      }
     },
     {
       "type": "MenuBar",
@@ -2514,7 +2524,7 @@
           "name": "color",
           "type": "Color",
           "note": "Fill color (defaults to theme primary)",
-          "default_expr": "theme.primary"
+          "default_expr": "\"theme.primary\""
         },
         {
           "name": "track_color",
@@ -2668,7 +2678,7 @@
           "name": "active_color",
           "type": "Color",
           "note": "Selected ring and dot color (defaults to theme primary)",
-          "default_expr": "theme.primary"
+          "default_expr": "\"theme.primary\""
         },
         {
           "name": "border_color",
@@ -3120,7 +3130,7 @@
           "name": "active_color",
           "type": "Color",
           "note": "Selected segment fill color (defaults to theme primary)",
-          "default_expr": "theme.primary"
+          "default_expr": "\"theme.primary\""
         },
         {
           "name": "text_color",
@@ -3327,7 +3337,7 @@
           "name": "active_color",
           "type": "Color",
           "note": "Filled track and thumb color (defaults to theme primary)",
-          "default_expr": "theme.primary"
+          "default_expr": "\"theme.primary\""
         },
         {
           "name": "inactive_color",
@@ -3913,7 +3923,7 @@
           "name": "active_color",
           "type": "Color",
           "note": "Track color when on (defaults to theme primary)",
-          "default_expr": "theme.primary"
+          "default_expr": "\"theme.primary\""
         },
         {
           "name": "inactive_color",
@@ -4030,7 +4040,7 @@
           "name": "active_color",
           "type": "Color",
           "note": "Selected text and indicator color (defaults to theme primary)",
-          "default_expr": "theme.primary"
+          "default_expr": "\"theme.primary\""
         },
         {
           "name": "bar_background",
@@ -4133,6 +4143,7 @@
           "type": "LocalizedString",
           "default": "",
           "required": true,
+          "source": true,
           "note": "Text content"
         },
         {
@@ -4145,6 +4156,7 @@
         {
           "name": "color",
           "type": "Color",
+          "source": true,
           "note": "Text color (follows theme on_surface when unset)",
           "default_expr": "\"theme.on_surface\""
         },
@@ -4304,6 +4316,7 @@
           "type": "string",
           "default": "",
           "required": true,
+          "source": true,
           "note": "Text value"
         },
         {
@@ -4488,7 +4501,11 @@
       "children_policy": "single",
       "examples": [
         "au::Provider<Theme>(theme, child)"
-      ]
+      ],
+      "payload": {
+        "type": "Theme",
+        "channel": "first constructor argument; descendants read it via BuildContext::environment<T>()"
+      }
     },
     {
       "type": "TimePicker",
@@ -5596,6 +5613,151 @@
       "json_example": "{\"type\": \"Checkbox\", \"props\": {\"checked\": false}, \"events\": {\"on_changed\": \"handler\"}}"
     }
   ],
+  "theme_tokens": {
+    "name_rule": "short name = theme.<Theme field>.<member> for metric groups (shapes / spacing / controls / motion), theme.<member> for color roles; the prefix column gives the group's prefix verbatim",
+    "usage": "a token name is a display path only; property fallbacks bind the member pointer, so renaming a token is a compile error rather than a stale string",
+    "groups": [
+      {
+        "owner": "ColorRoles",
+        "field": "roles",
+        "prefix": "theme",
+        "type": "Color",
+        "count": 38,
+        "tokens": [
+          "theme.primary",
+          "theme.on_primary",
+          "theme.primary_container",
+          "theme.on_primary_container",
+          "theme.secondary",
+          "theme.on_secondary",
+          "theme.secondary_container",
+          "theme.on_secondary_container",
+          "theme.tertiary",
+          "theme.on_tertiary",
+          "theme.tertiary_container",
+          "theme.on_tertiary_container",
+          "theme.error",
+          "theme.on_error",
+          "theme.error_container",
+          "theme.on_error_container",
+          "theme.surface",
+          "theme.surface_dim",
+          "theme.surface_bright",
+          "theme.surface_container_lowest",
+          "theme.surface_container_low",
+          "theme.surface_container",
+          "theme.surface_container_high",
+          "theme.surface_container_highest",
+          "theme.on_surface",
+          "theme.on_surface_variant",
+          "theme.surface_variant",
+          "theme.outline",
+          "theme.outline_variant",
+          "theme.inverse_surface",
+          "theme.inverse_on_surface",
+          "theme.inverse_primary",
+          "theme.scrim",
+          "theme.shadow",
+          "theme.surface_tint",
+          "theme.focus_ring",
+          "theme.hover",
+          "theme.pressed"
+        ]
+      },
+      {
+        "owner": "ShapeScale",
+        "field": "shapes",
+        "prefix": "theme.shapes",
+        "type": "float",
+        "count": 6,
+        "tokens": [
+          "theme.shapes.none",
+          "theme.shapes.extra_small",
+          "theme.shapes.small",
+          "theme.shapes.medium",
+          "theme.shapes.large",
+          "theme.shapes.extra_large"
+        ]
+      },
+      {
+        "owner": "SpacingScale",
+        "field": "spacing",
+        "prefix": "theme.spacing",
+        "type": "float",
+        "count": 7,
+        "tokens": [
+          "theme.spacing.none",
+          "theme.spacing.extra_small",
+          "theme.spacing.small",
+          "theme.spacing.medium",
+          "theme.spacing.large",
+          "theme.spacing.extra_large",
+          "theme.spacing.huge"
+        ]
+      },
+      {
+        "owner": "ControlMetrics",
+        "field": "controls",
+        "prefix": "theme.controls",
+        "type": "float",
+        "count": 12,
+        "tokens": [
+          "theme.controls.control_height",
+          "theme.controls.control_height_small",
+          "theme.controls.min_touch_target",
+          "theme.controls.menu_item_height",
+          "theme.controls.focus_ring_width",
+          "theme.controls.focus_ring_inset",
+          "theme.controls.indicator_size",
+          "theme.controls.scrollbar_thickness",
+          "theme.controls.separator_thickness",
+          "theme.controls.border_thickness",
+          "theme.controls.icon_default_size",
+          "theme.controls.content_padding"
+        ]
+      },
+      {
+        "owner": "MotionScale",
+        "field": "motion",
+        "prefix": "theme.motion",
+        "type": "Duration",
+        "count": 6,
+        "tokens": [
+          "theme.motion.none",
+          "theme.motion.extra_small",
+          "theme.motion.small",
+          "theme.motion.medium",
+          "theme.motion.large",
+          "theme.motion.extra_large"
+        ]
+      }
+    ]
+  },
+  "accessor_rules": {
+    "root": "the table key is the word root: table key, JSON key and accessor root agree",
+    "value_writer": "set_<key>(<bare value>) -> Props&   // exactly one per row, written on the XxxProps class",
+    "value_writer_parameter": "the parameter is the row's bare value type; passing form (by value or const reference) is written per control, so read the header for that detail",
+    "value_writer_string_conveniences": "extra (const std::string &) and (const char *) overloads appear only where the bare value is string-like, never for Color / float / enum rows",
+    "source_writer": "set_<key>(ReadOnlyState<T>) -> Props&   // exactly the rows whose entry carries source=true; rebinds the row to that source",
+    "writable_source_writer": "set_<key>(State<T>) -> Props&   // only where the field is State<T>; there the value writer above writes through the current source instead of replacing it",
+    "reader": "<key>() const -> T   // the row's fallback is the constant tier",
+    "reader_scoped": "<key>(const BuildContext &) const -> T   // the row's fallback is a live token or derived",
+    "reader_rule": "exactly one reader per row; the two shapes are mutually exclusive and picking the wrong one is a compile error, not a stale value",
+    "widget_side": "each widget publicly inherits its XxxProps class, so every writer and reader above is callable on the widget and returns the Props base reference; a few controls add widget-typed conveniences on top",
+    "bit_required": "required=true means the row's field is non-optional: clear(row) has no overload for it and the row always carries a value",
+    "bit_source": "source=true means the row's field is a reactive handle (ReadOnlyState<T> or State<T>); the bit is derived from the field shape and never written on the row",
+    "common_pieces": [
+      "clear(row)",
+      "rows()"
+    ],
+    "names_retired": [
+      "reset_<key>",
+      "has_<key>",
+      "set_<key>_source",
+      "<key>_source"
+    ],
+    "names_retired_scope": "retired for rows declared on the authoritative table; controls still on hand-written descriptors and the widget base's modifier plumbing keep their own *_source() names"
+  },
   "error_codes": [
     {
       "enum": "GeneralUnknown",

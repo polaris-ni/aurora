@@ -29,6 +29,15 @@ struct PropDescriptor {
     /// 与运行时实测值一致（数字仍是数字、颜色仍是 `[r,g,b,a]`），不退化成字符串。
     Json default_native;
     bool required = false;  ///< 是否必填
+
+    /// @brief 来源型位：该行字段是响应式句柄（`ReadOnlyState<T>` / `State<T>`），即有外部源可绑、
+    /// 也有「写当前源而不断绑」这条通道；值型行与派生行恒 false。
+    ///
+    /// 本位**只由属性表行的字段形状推导**（`PropRow::is_source()`），控件侧与工具侧都不手写 —— 它是
+    /// 「哪些属性能接 `State`」这句话在 schema 里的唯一载体，取代早先在行上另写一枚 `.source()` 旁注的
+    /// 形态（旁注恒等于字段形状，发它即冗余，理由见 `codespec/specification/04-widget.md` §2.5.1）。
+    /// 发射按既有稀疏布尔口径：仅在 true 时输出 `"source": true`，缺键即 false。
+    bool source = false;
     std::string note;  ///< 可选说明（人类/AI 可读）
 
     /// @brief 组：JSON Schema 约束字段（编译期零开销，仅 Schema 生成时读取）。
@@ -67,6 +76,16 @@ struct WidgetDescriptor {
     std::vector<std::string> allowed_child_types;  ///< 合法子类型（空 = 任意）
     std::vector<std::string> invariants;  ///< 控件级不变量描述
     std::vector<std::string> examples;  ///< 构造示例代码
+
+    /// @brief 组：载荷声明（可选，`payload_type` 为空时整组不输出）。
+    ///
+    /// 「载荷」指**经构造参数传入、但既不是属性键也没有写件**的那个值。现行唯一使用者是 `Provider<T>`
+    /// 系：注入的 `Theme` / `Locale` / `MediaQuery` 不在序列化输出里（`serialize_props` 不写它），也没有
+    /// `set_theme` 一类的名字，它只占构造式的第一个位置参数。此前 schema 只能靠 `examples` 的字面串表达
+    /// 这件事，消费侧要猜那个位置参数的类型与通道 —— 猜错就写出根本不存在的 `set_theme(...)`。两枚字段
+    /// 把「是什么类型」与「从哪进来」各发一格，`theme_tokens` 表里的 `field` 列再由类型名接上令牌组。
+    std::string payload_type;  ///< 载荷的 C++ 类型名（空 = 本控件没有构造参数载荷）
+    std::string payload_channel;  ///< 载荷的传入通道（构造参数 / 环境读取路径；仅在载荷非空时输出）
 };
 
 /// @brief 取 JSON 值的类型名（迁移自 nlohmann 的 `Value::type_name()`；`aurora::json::Value` 无该成员）。

@@ -10,9 +10,11 @@
 //   gen_api_tools aurora_api.json -> write the file directly, cross-platform (used by the CMake target aurora_api_json)
 //   gen_api_tools -               -> explicit stdout sentinel (used by tools/check/check_api_schema_sync.py)
 #include <fstream>
+#include <initializer_list>
 #include <map>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "api_schema.h"
@@ -39,6 +41,15 @@ auto known_enums() -> std::map<std::string, std::vector<std::string>> { return a
         for (const auto &v : it->second) {
             arr.push_back(v);
         }
+    }
+    return arr;
+}
+
+/// @brief 字符串列表 -> Json array（同 `enum_values_json` 的理由：`json::Value` 无 vector 隐式构造）。
+[[nodiscard]] auto string_array(std::initializer_list<std::string_view> items) -> au::Json {
+    au::Json arr = au::Json::array();
+    for (const auto &item : items) {
+        arr.push_back(item);
     }
     return arr;
 }
@@ -195,6 +206,86 @@ auto main(int argc, char **argv) -> int {
         state_patterns.push_back(p3);
     }
     api.set("state_patterns", state_patterns);
+
+    // ---- theme_tokens: machine-readable token vocabulary (non-entry block, one row per registered group) ----
+    // 数据源是各令牌组头里的「成员指针 -> 短名」登记表（aurora::theme_token_groups()），故本块与
+    // schema 里各条目的 default_expr 不可能各说各话：两处读的是同一份表。
+    au::Json theme_tokens = au::Json::object();
+    {
+        theme_tokens.set(
+            "name_rule",
+            "short name = theme.<Theme field>.<member> for metric groups (shapes / spacing / controls / "
+            "motion), theme.<member> for color roles; the prefix column gives the group's prefix verbatim");
+        theme_tokens.set(
+            "usage",
+            "a token name is a display path only; property fallbacks bind the member pointer, so renaming a "
+            "token is a compile error rather than a stale string");
+        au::Json groups = au::Json::array();
+        for (const auto &group : au::theme_token_groups()) {
+            au::Json row = au::Json::object();
+            row.set("owner", std::string{group.owner});
+            row.set("field", std::string{group.field});
+            row.set("prefix", std::string{group.prefix});
+            row.set("type", std::string{group.value_type});
+            au::Json tokens = au::Json::array();
+            for (const auto &name : group.tokens) {
+                tokens.push_back(std::string{name});
+            }
+            row.set("count", au::Json{static_cast<int>(group.tokens.size())});
+            row.set("tokens", std::move(tokens));
+            groups.push_back(std::move(row));
+        }
+        theme_tokens.set("groups", std::move(groups));
+    }
+    api.set("theme_tokens", theme_tokens);
+
+    // ---- accessor_rules: how a property key maps to public accessor names (non-entry block) ----
+    // 一次性的规则块，不随控件数增长：公共访问器名从不在 schema 条目里（实测 widgets[i] 只有 type /
+    // props / events / children_policy / examples），消费方按本块 + required + source 即可推全名。
+    // 逐条判据取自**已迁到权威表的 17 型**实测签名（`button.h` / `text.h` / `text_input.h` 等），未迁控件
+    // 不在本块的承诺范围内 —— 故 retired_scope 一行的措辞只收「表内行」，不把 `show.h` 一类残留具名件
+    // 说成已废止（说满即假，本块是给模型的裁决面而不是愿景）。
+    au::Json accessor_rules = au::Json::object();
+    {
+        accessor_rules.set("root", "the table key is the word root: table key, JSON key and accessor root agree");
+        accessor_rules.set("value_writer",
+                           "set_<key>(<bare value>) -> Props&   // exactly one per row, written on the XxxProps class");
+        accessor_rules.set("value_writer_parameter",
+                           "the parameter is the row's bare value type; passing form (by value or const reference) is "
+                           "written per control, so read the header for that detail");
+        accessor_rules.set("value_writer_string_conveniences",
+                           "extra (const std::string &) and (const char *) overloads appear only where the bare value "
+                           "is string-like, never for Color / float / enum rows");
+        accessor_rules.set("source_writer",
+                           "set_<key>(ReadOnlyState<T>) -> Props&   // exactly the rows whose entry carries "
+                           "source=true; rebinds the row to that source");
+        accessor_rules.set("writable_source_writer",
+                           "set_<key>(State<T>) -> Props&   // only where the field is State<T>; there the value "
+                           "writer above writes through the current source instead of replacing it");
+        accessor_rules.set("reader", "<key>() const -> T   // the row's fallback is the constant tier");
+        accessor_rules.set("reader_scoped",
+                           "<key>(const BuildContext &) const -> T   // the row's fallback is a live token or derived");
+        accessor_rules.set("reader_rule",
+                           "exactly one reader per row; the two shapes are mutually exclusive and picking the wrong "
+                           "one is a compile error, not a stale value");
+        accessor_rules.set("widget_side",
+                           "each widget publicly inherits its XxxProps class, so every writer and reader above is "
+                           "callable on the widget and returns the Props base reference; a few controls add "
+                           "widget-typed conveniences on top");
+        accessor_rules.set("bit_required",
+                           "required=true means the row's field is non-optional: clear(row) has no overload for it "
+                           "and the row always carries a value");
+        accessor_rules.set("bit_source",
+                           "source=true means the row's field is a reactive handle (ReadOnlyState<T> or State<T>); "
+                           "the bit is derived from the field shape and never written on the row");
+        accessor_rules.set("common_pieces", string_array({"clear(row)", "rows()"}));
+        accessor_rules.set("names_retired",
+                           string_array({"reset_<key>", "has_<key>", "set_<key>_source", "<key>_source"}));
+        accessor_rules.set("names_retired_scope",
+                           "retired for rows declared on the authoritative table; controls still on hand-written "
+                           "descriptors and the widget base's modifier plumbing keep their own *_source() names");
+    }
+    api.set("accessor_rules", accessor_rules);
 
     // Preserve the error_codes section generated by gen_error_codes so a full rewrite does not overwrite it.
     if (!to_stdout) {

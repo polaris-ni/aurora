@@ -1,7 +1,10 @@
 #pragma once
 
+#include <string>
+#include <string_view>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 #include "aurora/theming/color_roles.h"
 #include "aurora/theming/color_scheme.h"
@@ -180,6 +183,101 @@ struct Theme {
         return extensions.remove<T>();
     }
 };
+
+namespace detail {
+
+/// @brief 从成员指针类型反推其宿主令牌组（`theme_token_expr` 用，免调用方重复写组名）。
+/// @tparam Ptr 成员指针类型。
+template <typename Ptr>
+struct ThemeTokenOwner;
+
+/// @brief 数据成员指针档：宿主即指针的类。
+/// @tparam Class 宿主类（`ColorRoles` / 各度量组之一）。
+/// @tparam Value 字段类型。
+template <typename Class, typename Value>
+struct ThemeTokenOwner<Value Class::*> {
+    /// @brief 宿主令牌组类型。
+    /// 成员名 `X::type` 是标准库类型萃取的既定形态（与 std traits 组合时按此名查找），非本库命名自由度。
+    /// NOLINTNEXTLINE(readability-identifier-naming)
+    using type = Class;
+};
+
+}  // namespace detail
+
+/// @brief 一组主题令牌在机器可读面里的表达（`aurora_api.json` 顶层 `theme_tokens` 块的一行）。
+///
+/// 该结构只是**清单**，不参与求值：回落点仍走成员指针（`.fallback<&ColorRoles::primary>()`），
+/// 短名由各组头里的「成员指针 → 短名」对照表给出。把它单独发进 schema 的理由是消费侧
+/// （MCP / CLI / LSP / 生成器）此前只能从各控件条目的 `default_expr` 里**反推**合法令牌名，
+/// 既漏（无人引用的档不出现在任何条目里）又歧义（同一档在不同控件里被手写抄成两种引号形态）。
+///
+/// @note Thread: thread-safe (pure value type)
+/// @note Side-effects: none
+struct ThemeTokenGroup {
+    std::string_view owner;  ///< C++ 组类型名，如 `ColorRoles`。
+    std::string_view field;  ///< 该组在 `Theme` 里的字段名，如 `roles` / `shapes`。
+    std::string_view prefix;  ///< 短名前缀：色角色为 `theme`，度量组为 `theme.<field>`。
+    std::string_view value_type;  ///< 组内字段类型名，如 `Color` / `float` / `Duration`。
+    std::vector<std::string_view> tokens;  ///< 全名清单，按该组 `AURORA_TOKENS` 的登记序。
+};
+
+namespace detail {
+
+/// @brief 摊平一组的登记表成清单一行：只取短名，成员指针本身不进清单（它是编译期回落点，不是运行期键）。
+/// @tparam Group 令牌组类型（须有 `AURORA_TOKENS` 与 `token_name`）。
+/// @param owner 组类型名。
+/// @param field 该组在 `Theme` 里的字段名。
+/// @param prefix 短名前缀。
+/// @param value_type 组内字段类型名。
+/// @return 填好令牌全名的清单一行。
+template <typename Group>
+[[nodiscard]] inline auto theme_token_group_row(std::string_view owner, std::string_view field, std::string_view prefix,
+                                                std::string_view value_type) -> ThemeTokenGroup {
+    ThemeTokenGroup group{.owner = owner, .field = field, .prefix = prefix, .value_type = value_type, .tokens = {}};
+    for (const auto &[member, name] : Group::AURORA_TOKENS) {
+        static_cast<void>(member);
+        group.tokens.emplace_back(name);
+    }
+    return group;
+}
+
+}  // namespace detail
+
+/// @brief 五组已登记令牌的机器可读清单（`theme_tokens` 块的唯一数据源，逐组只读各头里的登记表）。
+///
+/// 覆盖面是**已登记**的五组：`ColorRoles` / `ShapeScale` / `SpacingScale` / `ControlMetrics` /
+/// `MotionScale`。`TypeScale` 与 `CsdRoles` 无登记表（不作属性回落点），`LayoutConventions` 是枚举组
+/// 而非标量档 —— 三者的排除理由见 `codespec/specification/07-environment-modifier.md` §5.1，
+/// 未登记的组若被拿来作回落点，编译期即由 `prop_token_registered` 报错，不靠清单兜。
+/// @return 每组一行、组内令牌按登记表序；每次调用现建（只在工具链发射期用，不在渲染路径）。
+[[nodiscard]] inline auto theme_token_groups() -> std::vector<ThemeTokenGroup> {
+    std::vector<ThemeTokenGroup> groups;
+    groups.reserve(5);
+    groups.push_back(detail::theme_token_group_row<ColorRoles>("ColorRoles", "roles", "theme", "Color"));
+    groups.push_back(detail::theme_token_group_row<ShapeScale>("ShapeScale", "shapes", "theme.shapes", "float"));
+    groups.push_back(detail::theme_token_group_row<SpacingScale>("SpacingScale", "spacing", "theme.spacing", "float"));
+    groups.push_back(
+        detail::theme_token_group_row<ControlMetrics>("ControlMetrics", "controls", "theme.controls", "float"));
+    groups.push_back(detail::theme_token_group_row<MotionScale>("MotionScale", "motion", "theme.motion", "Duration"));
+    return groups;
+}
+
+/// @brief 成员指针 → **带引号**的令牌显示串，与属性表活令牌行的 `default_expr` 逐字节同形。
+///
+/// 用途是给「没有属性表」的自描述条目（未迁控件的手写 `describe_static`）一条不写死令牌名的写法：
+/// 显示串由该组登记表反查，令牌改名或撤登记即编译红，而不是留一条 schema 里的陈旧串。
+/// 引号是本库 `default_expr` 的既有口径（`"theme.primary"`，串内含引号），故显示侧统一经本件给出，
+/// 不再由调用方手拼 `"\"...\""` —— 后者正是历史上同一档出现两种拼法的来源。
+/// @tparam MemberPtr 令牌成员指针（`&ColorRoles::primary` / `&ControlMetrics::border_thickness` 一类）。
+/// @return 形如 `"theme.primary"` 的显示串（含首尾双引号）。
+/// @note 未登记的成员指针编译红（该组成员名不在其登记表里时 `token_name` 回落空串）。
+template <auto MemberPtr>
+[[nodiscard]] inline auto theme_token_expr() -> std::string {
+    using Owner = detail::ThemeTokenOwner<decltype(MemberPtr)>::type;
+    constexpr std::string_view name = Owner::token_name(MemberPtr);
+    static_assert(!name.empty(), "theme token must be registered in its group table");
+    return std::string{'"'} + std::string{name} + '"';
+}
 
 namespace detail {
 
