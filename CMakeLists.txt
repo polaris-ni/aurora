@@ -63,8 +63,38 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 # MSVC：源码为 UTF-8（含中文注释），必须以 /utf-8 解析，否则在 CJK 代码页（936）下
 # 多字节序列被误读导致 C4819/C1020 等伪错误。GCC/Clang 默认按 UTF-8 解析，无需处理。
+#
+# /bigobj 同处、同 MSVC 门控：经典 COFF 头的段数字段是 16 位，一枚 obj 至多 65,535 段，
+# 超了就在 TU 编译末尾报 fatal error C1128 且不产出 obj（加了 /bigobj 后 cl 改写扩展 COFF obj：
+# 段数字段留 0xFFFF 哨兵、真数落在扩展 TOC 记录里，dumpbin 的文件类型自此是 EXTENDED COFF OBJECT）。
+# 触发面是 Debug 腿独有的组合：Debug 预设带 /Zi（CodeView 给每个函数另开调试段），本文件的
+# hybrid-Debug 块又把 aurora 抬到 /O2（内联展开出更多 COMDAT 组）；同档一并抬 /O2 的
+# freetype/harfbuzz 从不报这枚错，CI 的红只落在 aurora 这一枚 TU。
+#
+# 受害者是 `src/aurora/widget/serialization.cpp`：它 include 52 枚控件头，并在这一枚 TU 里落
+# 72 处控件工厂注册（其中 66 处经 `reg_default`，每处都要展开该型属性表的逐行编解码模板），
+# 段数随属性行数单调增长，属性面批量迁移把它推过了限。CI 侧的越限事实：`core (windows-msvc-debug)`
+# 自 run 42275224108（2026-11-06，图表族逐型入表那两批）起逐日红，报错落点逐字是
+# `src\aurora\widget\serialization.cpp(1,1): error C1128`，同日更早的 run 42232006953 该腿仍绿；
+# 同期三条 Windows 腿 msvc Release / mingw / clang-cl Debug 全绿——MinGW 侧同一枚 TU 实测只
+# 6,964 段（DWARF 不像 CodeView 那样逐函数开段），这解释了为什么这枚旗标只需挂在 MSVC 分支：
+# GCC 侧的同族上限由汇编器参数 `-Wa,-mbig-obj` 另处理，落点与口径见下方末段。
+#
+# 本机段数只用来定机制，不能替 CI 定年、也不能担保修复：同一枚 TU 在两种编译面上差一个量级。
+# 手抄单 TU 探针（不带 PCH）：`/O2 /Zi /MDd` 85,147 段并当场复现 C1128，同档去掉 /Zi 64,432 段
+# （限内、余量只剩 1,103 段），Release 档 `/O2 /MD /DNDEBUG` 59,969 段；MSBuild 真实构建面（PCH
+# 生效、/O2 + /Zi）加 /bigobj 后 dumpbin 报 13,548 段。两处编译旗标不同（`/Yu` 与否），差值未归因，
+# 故「CI 是否转绿」只能以推送后的 CI 为准。
+#
+# 为什么落在全局而非 `target_compile_options(aurora PRIVATE …)`：超限面是「把整族属性表实例化
+# 进一枚 TU 的翻译单元」，不止这一枚 .cpp——测试与工具侧同样 include 这些头，只钉库目标就是把
+# 修复面做得比故障面窄。代价仅 obj 的段数字段放宽：不改代码、不改 ABI、不作 usage
+# requirement 传播（装走的库与消费者无需带这枚旗标），lld-link 与 link.exe 都认 bigobj。
+# 同因先例见 `third_party/harfbuzz/CMakeLists.txt` 里为 hb-subset.cc 加的同一枚；MinGW 汇编器
+# 侧的对位旗标（`-Wa,-mbig-obj`）见 `cmake/AuroraUtils.cmake`，两枚的口径与实测记在
+# `codespec/BUILD_OPTIONS.md` §6 与 §8 编译器行。
 if (MSVC)
-    add_compile_options(/utf-8)
+    add_compile_options(/utf-8 /bigobj)
 endif ()
 
 # Emscripten：显式启用 C++ 异常。
