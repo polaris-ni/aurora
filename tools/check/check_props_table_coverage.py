@@ -307,9 +307,15 @@ def main():
         print("[FAIL] no Props class inherits AbstractProps -- the gate is spinning on an empty set "
               "(a migrated widget must be registered before this check can hold)")
         return 1
+    # The tail clause must follow the actual remainder: once every Props declaration in the library is
+    # table-backed, claiming "the rest still use public fields" would be a false statement printed as PASS.
+    pending = stats["declared"] - stats["migrated"]
+    tail = ("all Props declarations in the library are table-backed, no public-field aggregate is left "
+            "pending migration" if pending == 0 else
+            f"{stats['declared']} Props declarations in total, {pending} still use public fields "
+            "and are pending migration")
     print(f"[PASS] {stats['migrated']} migrated Props class(es), {stats['rows']} property row(s) fully "
-          f"covered ({stats['declared']} Props declarations in total; the rest still use public fields "
-          "and are pending migration)")
+          f"covered ({tail})")
     return 0
 
 

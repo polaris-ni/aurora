@@ -242,7 +242,7 @@ auto main(int argc, char **argv) -> int {
     // ---- accessor_rules: how a property key maps to public accessor names (non-entry block) ----
     // 一次性的规则块，不随控件数增长：公共访问器名从不在 schema 条目里（实测 widgets[i] 只有 type /
     // props / events / children_policy / examples），消费方按本块 + required + source 即可推全名。
-    // 逐条判据取自**已迁到权威表的 17 型**实测签名（`button.h` / `text.h` / `text_input.h` 等），未迁控件
+    // 逐条判据取自**已迁到权威表的 18 型**实测签名（`button.h` / `text.h` / `text_input.h` 等），未迁控件
     // 不在本块的承诺范围内 —— 故 retired_scope 一行的措辞只收「表内行」，不把 `show.h` 一类残留具名件
     // 说成已废止（说满即假，本块是给模型的裁决面而不是愿景）。
     au::Json accessor_rules = au::Json::object();
