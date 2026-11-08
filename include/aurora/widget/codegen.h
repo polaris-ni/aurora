@@ -34,23 +34,37 @@ enum class CodeStyle : std::uint8_t {
 /// @brief codegen 内部实现细节命名空间：类型能力判定与属性发射的辅助函数，仅由本文件公开入口调用，不构成稳定 API。
 namespace detail {
 
+/// @brief 类名之外还需要带一段 `au::` 下的子命名空间时，这段前缀是什么。
+///
+/// 在册类型里只有 `WebView` 不在 `aurora` 直属（它是 `aurora::webview::WebView`），而属性行自描述的
+/// 枚举类型名（`type_text()`）与聚合类名都在同一命名空间下声明，故类名、聚合名与枚举名共用这一枚
+/// 前缀；`Color` 这类基座类型名是 `aurora` 直属的，不走这条通路（值发射只处理枚举）。
+///
+/// @param type 序列化 type 名。
+/// @return `au::` 之后的子命名空间段（含尾随 `::`）；`aurora` 直属类型为空串。
+[[nodiscard]] constexpr auto cpp_namespace(std::string_view type) noexcept -> std::string_view {
+    return type == "WebView" ? std::string_view{"webview::"} : std::string_view{};
+}
+
 /// @brief 把序列化 type 名映射到 C++ 类名（部分控件类名与 type 名不同）。
 /// @param type 序列化 type 名。
-/// @return 对应 C++ 类名：仅 Image 映射为 ImageView，其余原样返回。
+/// @return 对应 C++ 类名（子命名空间类型带 `webview::` 前缀）：仅 Image 映射为 ImageView，其余原样返回。
 [[nodiscard]] inline auto cpp_class(std::string_view type) -> std::string {
+    const std::string ns{cpp_namespace(type)};
     if (type == "Image") {
-        return "ImageView";
+        return ns + "ImageView";
     }
-    return std::string{type};
+    return ns + std::string{type};
 }
 /// @brief 把序列化 type 名映射到其 Props 聚合类型名。
 /// @param type 序列化 type 名。
-/// @return 对应 Props 聚合类型名：Image 映射 ImageViewProps，其余拼接 Props 后缀。
+/// @return 对应 Props 聚合类型名（与类名同一段子命名空间）：Image 映射 ImageViewProps，其余拼接 Props 后缀。
 [[nodiscard]] inline auto cpp_props(std::string_view type) -> std::string {
+    const std::string ns{cpp_namespace(type)};
     if (type == "Image") {
-        return "ImageViewProps";
+        return ns + "ImageViewProps";
     }
-    return std::string{type} + std::string{"Props"};
+    return ns + std::string{type} + std::string{"Props"};
 }
 
 /// @brief 属性写入面只由 `set_<键名>()` 链式写件承担的控件类型（属性单一声明形态）。
@@ -61,23 +75,24 @@ namespace detail {
 /// 就把它的类型名加进这张表，同时删掉 `prop_target_table` 里为该类型登记的手写落点（链式形态下由
 /// 词根推出）。
 ///
-/// 这 17 型同时是**发射侧唯一认账的属性聚合**：其余 59 型里，`Stack`/`Spacer`/`TabBar`… 根本没有
-/// 聚合（臆造 `au::StackProps` 直接编译失败），`WebView` 有聚合（`WebViewProps` 是唯一剩下的公有字段
-/// 聚合，控件公开继承它）却不在任何一份发射名单里，故按「无聚合」档发 `au::WebView{…}`、其属性在表达
-/// 式两档静默省略（那是该档的既定能力边界）、在 StepByStep 告警省略——少报不误报（`w.url = ...` 其实
-/// 合法，但发射面不认这条通路），纳管与否待裁决。表达式风格对这一档类型只产出 `au::T{…}` 构造形、
-/// 属性留待 StepByStep 的构造后语句（见 specification/08-tooling.md §2.5 的风格能力表）。「有可装入
-/// 属性的聚合」与「聚合只可链式装入」在本形态下是同一件事：新聚合只能由权威表生成，生成即私有字段 +
-/// 链式写件，不再有「有聚合却仍可指定初始化」的中间态——`WebViewProps` 是唯一存量例外，而它进不了
-/// 表达式。这里曾经维护两份名单，而两份名单逐字相等：靠它们的差区分的分支因此恒不成立，判定面比机制
-/// 面窄了一档，故收成一份。
+/// 这 18 型同时是**发射侧唯一认账的属性聚合**：其余 58 型里，`Stack`/`Spacer`/`TabBar`… 根本没有
+/// 聚合（臆造 `au::StackProps` 直接编译失败），按「无聚合」档发 `au::T{…}`、其属性在表达式两档
+/// 静默省略（那是该档的既定能力边界）、在 StepByStep 告警省略——少报不误报。表达式风格对这一档类型
+/// 只产出 `au::T{…}` 构造形、属性留待 StepByStep 的构造后语句（见 specification/08-tooling.md §2.5
+/// 的风格能力表）。「有可装入属性的聚合」与「聚合只可链式装入」在本形态下是同一件事：新聚合只能由
+/// 权威表生成，生成即私有字段 + 链式写件，不再有「有聚合却仍可指定初始化」的中间态。这里曾经维护
+/// 两份名单，而两份名单逐字相等：靠它们的差区分的分支因此恒不成立，判定面比机制面窄了一档，故收成
+/// 一份。曾有的最后一个存量例外是 `WebView`：它有聚合（`WebViewProps`，公有字段 + 控件公开继承）却
+/// 不在任何一份发射名单里，属性因此按「无聚合」档整批发不出去——少报的那条通路其实合法。它已迁到
+/// 权威表（字段私有 + 逐行链式写件）并加进这张名单，存量例外清零。
 ///
 /// @param type 序列化 type 名。
 /// @return 该类型的属性是否只可经 `set_<键名>()` 链式写件装入（= 发射侧认账的属性聚合档）。
 [[nodiscard]] constexpr auto props_chain_writers(std::string_view type) noexcept -> bool {
-    constexpr std::array<std::string_view, 17> k_chain = {
-        "BarChart", "BottomNavBar",  "Button", "Column",       "Divider", "Grid",      "Image", "LazyRow",  "LineChart",
-        "PieChart", "PullToRefresh", "Row",    "ScatterChart", "Scroll",  "Sparkline", "Text",  "TextInput"};
+    constexpr std::array<std::string_view, 18> k_chain = {
+        "BarChart",     "BottomNavBar", "Button",    "Column",   "Divider",       "Grid",
+        "Image",        "LazyRow",      "LineChart", "PieChart", "PullToRefresh", "Row",
+        "ScatterChart", "Scroll",       "Sparkline", "Text",     "TextInput",     "WebView"};
     return std::ranges::find(k_chain, type) != k_chain.end();
 }
 
@@ -435,13 +450,14 @@ struct PropDescriptor {
         const char first = s.empty() ? '\0' : s.front();
         return std::isalpha(static_cast<unsigned char>(first)) != 0 || first == '_';
     };
+    const std::string ns{cpp_namespace(type)};
     for (const std::string &candidate : it->second.enum_values) {
         if (same_ignore_case(candidate, json_val)) {
-            return identifier_shaped(candidate) ? "au::" + it->second.cpp_type + "::" + candidate : std::string{};
+            return identifier_shaped(candidate) ? "au::" + ns + it->second.cpp_type + "::" + candidate : std::string{};
         }
     }
     // 列表里没有该取值：保留原样输出（交由类型体检暴露），但同样不发射非标识符形态。
-    return identifier_shaped(json_val) ? "au::" + it->second.cpp_type + "::" + json_val : std::string{};
+    return identifier_shaped(json_val) ? "au::" + ns + it->second.cpp_type + "::" + json_val : std::string{};
 }
 
 /// @brief JSON 属性名 → C++ 枚举类型名（用于 codegen 输出 `au::EnumType::Value`）。
@@ -863,7 +879,7 @@ struct PropEmit {
 /// @brief 生成一个节点的构造表达式（Fluent 与 DesignatedInit 共用，两风格同一条发射路径）。
 ///
 /// 形态选择（每条都必须是可编译的真实构造）：
-/// 1. 不在链式写件名单里的类型（`Stack`/`Spacer`/`TabBar`/`WebView`…）→ `au::T{}` 或初始化列表形
+/// 1. 不在链式写件名单里的类型（`Stack`/`Spacer`/`TabBar`…）→ `au::T{}` 或初始化列表形
 ///    `au::T{ 子项 }`；属性无处安放（见 `props_chain_writers` 的说明与 specification/08-tooling.md §2.5）。
 /// 2. 无子节点 → `au::T(au::TProps().set_x(…))`。
 /// 3. 子节点是构造首参的容器（`kids_first_ctor`）→ `au::T({ 子项 }, au::TProps().set_x(…))`。
@@ -932,11 +948,10 @@ struct PropEmit {
 
 /// @brief 生成 DesignatedInit 形式（indent 为缩进层级）：与 Fluent **逐字节相同**的别名入口。
 ///
-/// 指定初始化器要求 `*Props` 的公有同名成员，而属性面全量迁到链式写件后，17 型聚合的字段一律私有
-/// （`au::ButtonProps{ .label = "OK" }` 编译红）；其余 59 型不在发射名单内，表达式压根不给它们装属性
-/// （唯一剩下的公有字段聚合 `WebViewProps` 也在这 59 型里，它的属性按能力边界省略）。故没有一条产物
-/// 再发设计符。保留这个入口只为 CLI `--style di`、MCP 与 Inspector 的 `style=2` 不破约；itest_to_code
-/// 逐字节钉住两风格同产物，别名一旦悄悄分叉即红。
+/// 指定初始化器要求 `*Props` 的公有同名成员，而属性面全量迁到链式写件后，18 型聚合的字段一律私有
+/// （`au::ButtonProps{ .label = "OK" }` 编译红）；其余 58 型不在发射名单内，表达式压根不给它们装属性
+/// （按能力边界省略）。故没有一条产物再发设计符。保留这个入口只为 CLI `--style di`、MCP 与 Inspector
+/// 的 `style=2` 不破约；itest_to_code 逐字节钉住两风格同产物，别名一旦悄悄分叉即红。
 /// @param node 子树快照 JSON。
 /// @param indent 缩进层级（一级 4 空格）。
 /// @return 与 Fluent 相同的构造表达式串。
