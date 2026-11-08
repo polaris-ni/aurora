@@ -193,6 +193,7 @@
 - **等的时候谁来泵**用 `tests/framework/net_wait.h`：宿主驱动形态取 `HostDriven` + `pump_once` / `drive_until` / `pump_idle`，引擎驱动形态取 `EngineGuard`（析构把常驻线程、投递接缝与驱动方开关一并交回缺省态，见 §3.1「用例不得依赖进程隔离兜住全局副作用」）。同一枚事件源不得由引擎与宿主同时等待（[`06-app-platform.md`](specification/06-app-platform.md) §8.8.4 的互斥口径）。
 - **三类替身各司其职**：`tests/framework/fake_engine.h` 的 `FakeEngine` 只管**时间**（脚本化到期任务），`tests/framework/scripted_peer.h` 的 `ScriptedPeer` 只管**对端字节**，`net_wait.h` 只管**就绪泵**；`FakeEngineScope` 安装替身时钟时同步将 `run_pending` 挂进泵尾巴，否则 `Engine::post` 的立即任务（名字解析、竞速交错）在脚本化时钟下永不推进，红成「超时」而不是「忘了跑」。
 - **零出站**：网络用例只连回环，未监听的端口经「绑定即关闭」取得，并对端做回环校验；用例必须在无出站网络的 CI 上跑通。
+- **竞态类缺陷不得只钉行为计数**：无锁状态下「恰好恢复一次」「端口仍是旧值」这类行为判据仍可能偶然全绿，绿不是修好的证据。验收须以消毒器落盘报告正文 + 测试退出码的组合为准，并真注入一次变异看它转红；判据形态见 [`specification/08-tooling.md`](specification/08-tooling.md) §8.2「线程消毒定点判据」。
 
 ## 4 元数据与可观测
 

@@ -39,7 +39,13 @@
 #                    `utest_inspector_server` 按 `AURORA_BUILD_INSPECTOR_SERVER` 整文件降级 SKIP、
 #                    `utest_net_tls` 按 `Engine::capabilities().tls` 大半 SKIP——关一场就少一场覆盖，
 #                    而这场覆盖没有别的作业补得上。开关串集中在该动作的注释里，改一处即全流水线同步。
+#                    4t 的 tsan 定点作业是唯一例外：只跑四个纯网络竞态用例，实证基线就在
+#                    不含该前缀的配置下取得，装配它会扩大插桩面与第三方噪声，削弱判据信噪比。
 #   4. asan        — AURORA_ENABLE_ASAN=ON（AddressSanitizer + UBSan）跑全量 ctest。
+#  4t. tsan        — 全局编译标志注入 -fsanitize=thread，只跑四个网络用例的竞态定点红线
+#                    （判定看 TSan 落盘报告 + ctest 退出码）。只在 PR 与 master(+main)
+#                    推送跑，普通分支 push / 每周定时 / 手动触发都不跑——全量插桩冷构建
+#                    约二十分钟，不该每次分支推送都付一遍。
 #   5. coverage    — AURORA_ENABLE_COVERAGE=ON 的 `coverage` 聚合目标（内含 ctest + gcov 摘要）。
 #   6. wasm        — emcmake + AURORA_BACKEND_WASM=ON，构建库与测试 runner 并跑 ctest
 #                    （Emscripten 无线程/子进程的能力用例以 SKIP 计入，见 tests/framework/assertions.h）。
@@ -87,14 +93,14 @@
 #   （口径与逐作业实测证据见 codespec/BUILD_OPTIONS.md §4.7）。configure 期的
 #   `aurora_find_clang_format` 因此可能一个候选都挑不中，`format` / `format-check` 目标不生成、
 #   `generate_error_codes` 换不到可用格式化器，只留一行 warning 静默降级。处置：凡跑 configure 的 Linux 作业
-#   都引用该复合动作（core / backends 的 Linux 矩阵项、toggles、asan、coverage、wasm 及其
+#   都引用该复合动作（core / backends 的 Linux 矩阵项、toggles、asan、tsan、coverage、wasm 及其
 #   lint-wasm、install-consumer、fmt），动作里装完立刻用与探针同形态的
 #   `--dump-config --style=file:<仓库根绝对路径>` 自证；job 8 / 8w 的 clang-tidy 步骤在同一次 apt 里多带
 #   clang-format-22，不重复 `apt-get update`。Windows / macOS 未纳入：无 apt，且这两侧从未因
 #   该探测红过。
 #
 # 编译缓存（ccache-action）：core（Linux/macOS/MinGW/clang-cl）、backends（Linux/macOS）、
-#   toggles、asan、coverage、install 各 job 接入，key 按 job/矩阵名分桶；
+#   toggles、asan、tsan、coverage、install 各 job 接入，key 按 job/矩阵名分桶；
 #   口径（SLOPPINESS / BASEDIR / NOHASHDIR / 压缩）统一由 cmake/AuroraCcache.cmake
 #   经编译器启动器注入，与本地构建共享同一缓存语义。windows-msvc 两 job 走默认
 #   VS 生成器——CMake 仅在 Makefile/Ninja 生成器实现编译器启动器，VS 生成器下
@@ -963,6 +969,60 @@ jobs:
         # 归后续增量（口径见 08-tooling §8.2「CI 作业口径」）。内核自测 utest_e2e_harness
         # 只用 HeadlessSurface，随全量用例照常执行。
         run: xvfb-run -a ctest --test-dir build --output-on-failure -C Release -LE e2e -j "$(nproc)"
+
+  # ---------------------------------------------------------------------------
+  # 4t. ThreadSanitizer 定点竞态红线（网络并发四例）
+  # ---------------------------------------------------------------------------
+  tsan:
+    name: tsan (ubuntu-gcc, targeted)
+    runs-on: ubuntu-26.04
+    timeout-minutes: 120
+    needs: gate
+    # 只在 PR 与 master(+main) 推送跑，普通分支 push / 每周定时 / 手动触发都不跑：
+    # 全量插桩冷构建约二十分钟，不该每次分支推送都付一遍。
+    if: ${{ !cancelled() && needs.gate.outputs.dup != 'true' && (github.event_name == 'pull_request' || (github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'))) }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup clang-format (repo-parseable)
+        uses: ./.github/actions/setup-clang-format
+
+      - name: Setup ccache
+        uses: hendrikmuhs/ccache-action@v1.2.24
+        with:
+          key: tsan-ubuntu-gcc
+
+      # 项目无线程消毒开关：C 与 C++ 两侧同时注入（third_party 的 C 库漏插桩会漏报）；
+      # *_FLAGS_RELEASE 必须覆盖 Release 缺省的 -O3，否则竞态时序被优化改写；关 PCH 避免
+      # 预编译头成为未插桩漏网面。不装配网络能力公共前缀：四个用例的实证基线就在不含
+      # 该前缀的配置下取得，装配它会扩大插桩面与第三方噪声，削弱判据的信噪比。
+      - name: Configure
+        run: >-
+          cmake -S . -B build-tsan -G Ninja
+          -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_C_FLAGS='-fsanitize=thread -fno-omit-frame-pointer -g'
+          -DCMAKE_CXX_FLAGS='-fsanitize=thread -fno-omit-frame-pointer -g'
+          -DCMAKE_C_FLAGS_RELEASE='-O1 -g -DNDEBUG'
+          -DCMAKE_CXX_FLAGS_RELEASE='-O1 -g -DNDEBUG'
+          -DCMAKE_EXE_LINKER_FLAGS='-fsanitize=thread'
+          -DCMAKE_SHARED_LINKER_FLAGS='-fsanitize=thread'
+          -DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON
+          -DAURORA_ENABLE_ASAN=OFF -DAURORA_ENABLE_COVERAGE=OFF
+
+      - name: Build
+        run: cmake --build build-tsan --target aurora_test_runner --parallel
+
+      - name: ccache stats
+        run: ccache --show-stats --verbose || ccache --show-stats
+
+      # 判定同时看 ctest 退出码与 log_path 落盘报告：竞态是 WARNING 级，不令断言失败却
+      # 令进程退出码非零，且 ctest 不回显通过用例的 stderr，只读测试日志会零报告假绿。
+      # 报告目录按本次运行隔离，脚本开头先清残留；绝不使用 exitcode=0 洗红。
+      - name: Test (targeted race gates)
+        env:
+          AURORA_TSAN_REPORT_DIR: ${{ runner.temp }}/aurora-tsan
+        run: bash tools/check/tsan_gate.sh build-tsan
 
   # ---------------------------------------------------------------------------
   # 5. 行覆盖率：coverage 聚合目标自带 ctest + gcov 终端摘要

@@ -363,6 +363,7 @@ cmake --build build
 - 覆盖率需覆盖测试目标（大量 widget 是 header-only，仅在测试编译单元中被编译，否则覆盖率严重偏低）。
 - 插桩构建（`-O0` 全量插桩）退出前写 profile 较慢：关闭窗口后进程可能需数秒至十余秒才退出，属正常现象。
 - **`AURORA_ENABLE_WASM_PTHREADS` 的注入位置在根 `CMakeLists.txt`**（与 `-fexceptions`、ASan 的 CRT 前置决策同处），而非 `AuroraBackends.cmake`：`add_subdirectory(third_party/*)` 建立子目录时对 `CMAKE_C_FLAGS` / `CMAKE_CXX_FLAGS` 取**快照**，而 `AuroraBackends.cmake` 晚于它 include——在那里追加只会让库自身带上 `-pthread`，freetype/harfbuzz 的 `.o` 缺 atomics/bulk-memory 特性，链接期报 `wasm-ld: --shared-memory is disallowed by harfbuzz.cc.o`（实测）。同因，标志也不能只挂在 `aurora` 目标的 `PUBLIC` 选项上。
+- **没有 `AURORA_ENABLE_TSAN`**：线程消毒不设项目开关，CI 的竞态定点红线直接以全局编译标志注入——`CMAKE_C_FLAGS` 与 `CMAKE_CXX_FLAGS` 同时给 `-fsanitize=thread -fno-omit-frame-pointer -g`（C 侧不能省，third_party 含未插桩的 C 库会漏报/误报），`CMAKE_C_FLAGS_RELEASE` / `CMAKE_CXX_FLAGS_RELEASE` 给 `-O1 -g -DNDEBUG` 覆盖 Release 缺省的 `-O3`（否则竞态时序被优化改写），两类链接器标志同给 `-fsanitize=thread`，并置 `CMAKE_DISABLE_PRECOMPILE_HEADERS=ON`。不新增开关的理由：TSan 与 ASan / 覆盖率三套运行时互斥，且这套注入参数已在普查与定点门禁中逐字验证；若做成选项，须同步改动选项注册、平台互斥分支与本文档的开关表，并重新证明「开关注入」与「全局注入」等价，收益只是把一条 CI 命令搬进 CMake。逐项参数与判据见 [`specification/08-tooling.md`](specification/08-tooling.md) §8.2「线程消毒定点判据」。
 
 覆盖率摘要用法（GCC 与 Clang 工具链相同命令）：
 
