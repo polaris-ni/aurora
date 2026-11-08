@@ -4303,7 +4303,8 @@
           "name": "value",
           "type": "string",
           "default": "",
-          "note": "Initial text"
+          "required": true,
+          "note": "Text value"
         },
         {
           "name": "placeholder",
@@ -4334,18 +4335,14 @@
             "right": 12.0,
             "bottom": 12.0
           },
-          "note": "Padding"
+          "note": "Padding",
+          "minimum": "0"
         },
         {
           "name": "cursor_color",
           "type": "Color",
-          "default": [
-            0,
-            0,
-            0,
-            255
-          ],
-          "note": "Cursor color"
+          "note": "Cursor color (follows theme on_surface when unset)",
+          "default_expr": "\"theme.on_surface\""
         },
         {
           "name": "enabled",
@@ -4356,100 +4353,80 @@
         {
           "name": "text_color",
           "type": "Color",
-          "default": [
-            20,
-            20,
-            20,
-            255
-          ],
-          "note": "Text color"
+          "note": "Text color (follows theme on_surface when unset)",
+          "default_expr": "\"theme.on_surface\""
         },
         {
           "name": "placeholder_color",
           "type": "Color",
-          "default": [
-            150,
-            150,
-            150,
-            255
-          ],
-          "note": "Placeholder text color"
+          "note": "Placeholder text color (follows theme on_surface_variant when unset)",
+          "default_expr": "\"theme.on_surface_variant\""
         },
         {
           "name": "background",
           "type": "Color",
-          "default": [
-            240,
-            240,
-            240,
-            255
-          ],
-          "note": "Background color"
+          "note": "Background color (follows theme surface_container when unset)",
+          "default_expr": "\"theme.surface_container\""
         },
         {
           "name": "focused_background",
           "type": "Color",
-          "default": [
-            245,
-            248,
-            255,
-            255
-          ],
-          "note": "Focused background color"
+          "note": "Focused background color (follows theme surface_bright when unset)",
+          "default_expr": "\"theme.surface_bright\""
         },
         {
           "name": "border_color",
           "type": "Color",
-          "default": [
-            120,
-            120,
-            120,
-            255
-          ],
-          "note": "Border color"
+          "note": "Border color (follows theme outline when unset)",
+          "default_expr": "\"theme.outline\""
         },
         {
           "name": "focused_border_color",
           "type": "Color",
-          "note": "Focused border color (defaults to theme primary)",
-          "default_expr": "theme.primary"
+          "note": "Focused border color (follows theme primary when unset)",
+          "default_expr": "\"theme.primary\""
         },
         {
           "name": "border_width",
           "type": "float",
-          "default": 1.0,
           "note": "Border width (dp); 0 = no border",
-          "minimum": "0"
+          "minimum": "0",
+          "default_expr": "\"theme.controls.border_thickness\""
         },
         {
           "name": "selection_color",
           "type": "Color",
-          "default": [
-            80,
-            120,
-            220,
-            90
-          ],
-          "note": "Selection highlight color"
+          "note": "Selection highlight color (follows theme primary when unset)",
+          "default_expr": "auto"
         },
         {
           "name": "max_length",
           "type": "int",
+          "default": 0,
           "note": "Max length (code points); 0 = unlimited",
-          "minimum": "0",
-          "default_expr": "0"
+          "minimum": "0"
         },
         {
           "name": "read_only",
           "type": "bool",
-          "note": "Read-only (selectable and copyable, not editable)",
-          "default_expr": "false"
+          "default": false,
+          "note": "Read-only (selectable and copyable, not editable)"
         },
         {
           "name": "obscure_text",
           "type": "bool",
-          "note": "Password masked display",
-          "default_expr": "false"
+          "default": false,
+          "note": "Password masked display"
+        },
+        {
+          "name": "direction",
+          "type": "TextDirection",
+          "note": "Text direction (auto = inherit from environment)",
+          "enum": [
+            "LTR",
+            "RTL"
+          ],
+          "default_expr": "auto"
         },
         {
           "name": "width",
@@ -4479,7 +4456,8 @@
       ],
       "children_policy": "none",
       "examples": [
-        "au::TextInput().set_placeholder(\"Enter name\")"
+        "au::TextInput(au::TextInputProps().set_placeholder(\"Enter name\"))",
+        "au::TextInput(au::TextInputProps().set_max_length(11U).set_obscure_text(true))"
       ]
     },
     {

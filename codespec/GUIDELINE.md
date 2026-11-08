@@ -1369,7 +1369,7 @@ au::Scene build_ui() {
     return au::Column{
         au::Text(au::TextProps().set_content("订单总额")),
         au::Button{au::ButtonProps().set_label("提交")},
-        au::TextInput{au::TextInputProps{ .value = "abc", .placeholder = "请输入" }},
+        au::TextInput{au::TextInputProps().set_value("abc").set_placeholder("请输入")},
         au::Slider{volume},
         au::Checkbox{agreed},
     };
@@ -1629,7 +1629,7 @@ auto drive = au::effect([&]() -> void {
 
 using namespace au;
 
-au::TextInput field{au::TextInputProps{.placeholder = "请输入姓名"}};
+au::TextInput field{au::TextInputProps().set_placeholder("请输入姓名")};
 field.on_changed([](const std::string &s) -> void { /* 只收到已上屏文本 */ });
 ```
 
