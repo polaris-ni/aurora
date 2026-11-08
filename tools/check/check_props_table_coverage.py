@@ -11,9 +11,11 @@
 #   C2  词根对应：`x_row()` ↔ `prop_row<&C::x_>("x")` ↔ 私有字段 `x_` ↔ 读件 `x` ↔ 写件 `set_x`
 #       —— 词根、JSON 键名、字段名三者必须字面相等（「词根 = 属性键名」是本口径的地基）。
 #   C3  回落二选一：每行必须命中 `.fallback(...)` / `.fallback<...>()` 或 `.required()` 之一，
-#       都不写即红（不给回落点正是本轮要消灭的分叉），两者都写亦红。
+#       都不写即红（不给回落点正是本轮要消灭的分叉），两者都写亦红。回落点的合法拼法只有机制层
+#       那三件重载对应的两种（`.fallback<&Scale::member>()` 令牌档 / `.fallback(&Owner::provider)`
+#       提供者档）：给裸值的实参没有对应重载，编译红即判红；写法不正的实参同样判红。
 #   C4  读面每行恰一件：由该行回落点形态唯一决定读件形状 ——
-#       常量档（值形态 / 无 ctx 的库内默认提供者）与必填行 ⇒ 必须有 `x()` 且不得有 `x(ctx)`；
+#       常量档（无 ctx 的库内默认提供者）与必填行 ⇒ 必须有 `x()` 且不得有 `x(ctx)`；
 #       作用域依赖档（活令牌档 `.fallback<&Scale::m>()` 与派生档：提供者形参含 `BuildContext`）
 #       ⇒ 必须有 `x(ctx)` 且不得有无参 `x()`。两个方向的漏写与多写各判一次红。
 #   C5  写面转调对号：每行至少一枚 `set_x`；体内只允许 `assign(x_row(), ...)` / `rebind(x_row(), ...)`
@@ -123,16 +125,31 @@ def check_props_class(rel, class_name, body, members, fields, findings, stats):
     for root, row in rows.items():
         expr = row["body"]
         has_token = bool(re.search(r"\.fallback\s*<", expr))
+        has_paren = bool(re.search(r"\.fallback\s*\(", expr))
         has_provider = re.search(r"\.fallback\s*\(\s*&\s*\w+::(\w+)\s*\)", expr)
-        has_value = bool(re.search(r"\.fallback\s*\((?!\s*&)", expr))
+        # 值字面量：机制层三件回落入口（`fallback<auto TokenPtr>` / `fallback(Bare (*)())` /
+        # `fallback(Bare (*)(const Owner &, const BuildContext &))`）没有一件收值，编译直接红。
+        has_literal = bool(re.search(r'\.fallback\s*\(\s*(?:[-+]?[0-9]|["{]|true\b|false\b|nullptr\b)', expr))
         has_required = bool(re.search(r"\.required\s*\(", expr))
-        forms = sum([has_token, bool(has_provider), has_value])
-        if forms == 0 and not has_required:
+        forms = sum([has_token, bool(has_provider)])
+        if forms == 0 and not has_required and not has_paren:
             findings.append(f"{rel}:{row['line']}: [C3] {class_name}: row `{root}` declares neither "
                             "`.fallback(...)` nor `.required()`")
         if forms and has_required:
             findings.append(f"{rel}:{row['line']}: [C3] {class_name}: row `{root}` declares both a fallback "
                             "and `.required()`")
+        # 判定面不得窄于机制面：曾经这里把 `.fallback(<裸值>)` 认作一档合法的「值形态常量档」，还顺着
+        # C4 要求它配无参读件——而机制层根本没有收值的重载，门禁绿、编译红。裸值与写法不正的实参
+        # 各判一次红（全库 133 处回落点实测只有 23 枚令牌档 / 110 枚提供者档两种拼法）。
+        if has_paren and not has_provider:
+            if has_literal:
+                findings.append(f"{rel}:{row['line']}: [C3] {class_name}: row `{root}` passes a value literal to "
+                                "`.fallback(...)`; the mechanism layer has no overload taking a value -- "
+                                "use `.fallback<&Scale::member>()`, `.fallback(&Owner::provider)`, or `.required()`")
+            else:
+                findings.append(f"{rel}:{row['line']}: [C3] {class_name}: row `{root}` writes `.fallback(...)` whose "
+                                "argument is not the canonical `&Owner::provider` spelling -- the two provider "
+                                "overloads are selected by their signature, so the call site must name the owner")
         if re.search(r"\.source\s*\(", expr):
             findings.append(f"{rel}:{row['line']}: [C7] {class_name}: row `{root}` writes a `.source(...)` "
                             "side-note; source-ness is derived from the field shape")
@@ -144,14 +161,13 @@ def check_props_class(rel, class_name, body, members, fields, findings, stats):
             provider = providers.get(has_provider.group(1))
             form = "provider"
             scoped = None if provider is None else provider.has_ctx_param()
-        elif has_value:
-            scoped, form = False, "value"
         elif has_required:
             scoped, form = False, "required"
         row["scoped"] = scoped
         row["form"] = form
-        # C10 只钉派生档（带 ctx 的提供者）：活令牌档由令牌反查表出 default_expr，
-        # 值形态与库内默认提供者可直接经同一 codec 格式化，均不需要显示串。显示串两种写法皆合法：
+        # C10 只钉派生档（带 ctx 的提供者）：活令牌档由令牌反查表出 default_expr，无 ctx 的库内默认
+        # 提供者可直接经同一 codec 格式化，这两档都不必写显示串；带 ctx 的派生提供者没有实例可读默认值，
+        # 必须写。显示串两种写法皆合法：
         # `.shows(<串>)` 给非令牌派生（`auto` / `none` 一类），`.shows_token<&X::y>()` 给只读已登记
         # 令牌的派生（名由登记表反查、引号发射时补）——判据认「有显示串」，不认它的来源写法。
         if form == "provider" and scoped is True and not re.search(
