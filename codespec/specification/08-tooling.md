@@ -155,19 +155,19 @@ enum class CodeStyle : std::uint8_t { Fluent, StepByStep, DesignatedInit };   //
 
 | 枚举值 | 生成形态 |
 |:---|:---|
-| `Fluent`（默认） | 扁平容器 + `au::Type(au::TypeProps{ … })` 叶形式（多子容器直接罗列子项） |
-| `StepByStep` | `auto w = au::Type(au::TypeProps{}); w.prop = val;` 分步赋值形式 |
-| `DesignatedInit` | 统一 `au::Type(au::TypeProps{ .子节点槽, .prop = val })` 指定初始化器形式（仅 `*Props` 聚合支持） |
+| `Fluent`（默认） | 链式构造表达式：叶控件 `au::Type(au::TypeProps().set_key(值)…)`，子节点是构造首参的容器 `au::Column({子项}, au::ColumnProps()…)`，不在名单内的类型 `au::Type{子项}` / `au::Type{}` |
+| `StepByStep` | `auto w = au::Type{…}; w.set_key(值);`（或 `w.key = 值;`）分步赋值形式，唯一**完整**承载全部落点的风格 |
+| `DesignatedInit` | **`Fluent` 的逐字节别名**，不另开发射路径。指定初始化器要求 `*Props` 的公有同名成员，而属性迁到链式形态后 17 型字段一律私有（`au::ButtonProps{ .label = "OK" }` 编译红）、其余 59 型不在发射名单内（属性按能力边界省略，见下表）—— 没有一条产物再发设计符。枚值保留只为 CLI `--style di` / MCP / Inspector 的 `style=2` 不破约，`itest_to_code` 逐字节钉住两风格同产物 |
 
-**风格能力表**（三种风格共享同一条属性发射管线，差别只在「能否承载某一类落点」）：
+**风格能力表**（`Fluent` 与 `DesignatedInit` 是同一条构造表达式管线的两个名字，`StepByStep` 另走语句管线；差别只在「能否承载某一类落点」）：
 
 | 属性类别 | Fluent / DesignatedInit | StepByStep |
 |:---|:---|:---|
-| `*Props` 聚合的顶层同名成员（未迁的公开继承类型） | ✅ 进指定初始化器 | ✅ `w.key = 值` |
-| 已迁到链式形态的 `*Props`（`props_chain_writers` 集合内，字段私有） | ✅ 改发 `au::Type(au::TypeProps().set_key(值)…)`；子节点是构造首参的容器发 `au::Column({子项}, au::ColumnProps()…)` | ✅ `w.set_key(值)` |
-| 基类属性（`width`/`height`/`show`/非 Text 的 `overflow`/a11y 三键） | ❌ 聚合无同名成员，一律省略 | ✅ 链式 setter / 公有成员 / `set_*()` |
-| 嵌套成员路径（成员为结构体、需逐子键写入的落点） | ❌ GCC 的 C++ 指定初始化器不支持嵌套设计符 | ✅ `w.成员.子键 = 值;` |
-| setter-only 落点（`Stack.fit`、`Skeleton` 的色 / 高亮 / 时长三键、`TitleBar` 的四键…） | ❌ protected 字段不能在类外赋值 | ✅ `w.set_duration(1.5);` |
+| 链式形态 `*Props` 的自有属性（`props_chain_writers` 的 17 型，字段私有、公共面只有 `set_<键>`） | ✅ 发 `au::Type(au::TypeProps().set_key(值)…)`；子节点是构造首参的容器发 `au::Column({子项}, au::ColumnProps()…)` | ✅ `w.set_key(值)` |
+| 不在链式写件名单内的类型（其余 59 型）的自有属性 | ❌ 没有能装入属性的构造入口，只发 `au::T{}` / `au::T{子项}`（臆造 `au::StackProps` 会编译失败） | ❌ 字段是 protected + 访问器，同名赋值编译不过，故**未登记落点的键一律省略并告警**（唯一例外是 `WebView`：它有公有字段聚合、`w.url = 值` 其实合法，但发射面没登记这条通路，同样省略） |
+| 基类属性（`width`/`height`/`show`/非 Text 的 `overflow`/a11y 三键） | ❌ 不是 `*Props` 成员，构造表达式无从安放，一律省略 | ✅ 链式 setter / 公有成员 / `set_*()` |
+| 嵌套成员路径（成员为结构体、需逐子键写入的落点） | ❌ 构造表达式承载不了「逐子键写入」这件事 | ✅ `w.成员.子键 = 值;` |
+| setter-only 落点（`Stack.fit`、`Skeleton` 的色 / 高亮 / 时长三键、`TitleBar` 的四键…） | ❌ 落点所属类型都在 17 型之外，表达式片段里没有这种调用 | ✅ `w.set_duration(1.5);` |
 
 ### 2.5.1 发射管线：一切落点须可核对
 
@@ -175,8 +175,8 @@ enum class CodeStyle : std::uint8_t { Fluent, StepByStep, DesignatedInit };   //
 
 1. **取值形态分派**（`emit_prop_value`）：`bool` / `int` / `float` / `double` / `string` / `LocalizedString`（字符串形态命中 string 分支）/ `Color`（`[r,g,b,a]`）/ `Length`（`["px",N]`、`["percent",N]`、`{"value","unit"}` 旧格式、`"auto"`/`"fill"`，以及 schema `props` 表 `default` 里那种**裸数字**——按 px 语义包成 `au::px(N)`，因为 `Length` 不可由 `float` 隐式转换）/ `EdgeInsets` / 枚举（含 `font_weight`、`text_decoration` 专用分支）。产物一律 `au::` 限定，使代码在任意命名空间可编译。
 2. **枚举还原优先走自描述**（`descriptor_enum_expression`）：`props[].type` 给 C++ 枚举类型名、`props[].enum` 给合法取值名，取值按列表**忽略大小写规范化**（`"center"` → `au::TextAlign::Center`）。这消掉了旧登记表的两类错误：同名键跨类型的歧义（`fit`/`orientation`）与大小写不符声明的取值（`au::Orientation::horizontal`）。列表里没有该取值时保留原样输出，交由产物编译体检暴露。取值名不是合法标识符时（`FontWeight` 的 `"400"`，落点 `Font::weight` 本就是 int）不拼枚举项名。自描述未给取值集的类型仍回落 `enum_type_for_key` 键名登记表。
-3. **声明序**：指定初始化器必须按 `*Props` 的成员**声明序**书写（乱序 GCC 直接报 `designator order … does not match declaration order`），而快照 JSON 的键是字典序，故发射前按 `props` 表的数组下标（即声明序）稳定排序；子节点槽排最前。StepByStep 无此约束，但沿用同一顺序便于两风格逐行对照。
-4. **落点换算**：`prop_target` 登记表给出「键 → 成员路径 / 嵌套路径 / setter 名」，未登记时默认为同名成员；基类键走 `base_target`。`no_write_path` 显式登记「确认无写入通道」的键（`Scroll.offset`/`LazyRow.offset` 是运行态、`Image.image_width`/`image_height` 是解码派生值、`Skeleton.width`/`height` 需成对的 `set_size()`），`is_base_key` 则处理**同名遮蔽**：`Text` 的 `overflow`、`Skeleton` 的 `width`/`height`、`TitleBar` 的 `height` 都是控件自己的键（`serialize_props` 覆写了基类写入），不得按基类 `Length`/`OverflowStrategy` 发射。
+3. **表序**：链式写件续在同一个 `TProps()` 之后，形态本身**没有**顺序约束（曾有的是指定初始化器的「乱序 GCC 直接报 `designator order … does not match declaration order`」，该判据随指定初始化器一并退出）。发射前仍按 `props` 表的数组下标（即权威表的点名序）稳定排序，为的是产物与 schema、描述符逐行可对照 —— 快照 JSON 的键是字典序，不排就会漂。StepByStep 的语句序无约束，沿用同一顺序便于两风格逐行对照。
+4. **落点换算**：链式形态的 17 型不进登记表 —— 词根与序列化键同名，落点直接由键名推出 `set_<键>`（这是读面词根规则在发射侧的兑现）。其余键查 `prop_target` 登记表得「成员路径 / 嵌套路径 / setter 名」，基类键走 `base_target`。**表外键的查表默认（同名直接赋值）只是回退值**，两条发射路径都在取落点之前把它滤掉（表达式问 `expressible`、语句问 `statement_assignable`），所以当前没有产物走到赋值那一支；它保留是给「登记表新增一档落点」留的默认，不是「同名公有成员可直写」的承诺。`no_write_path` 显式登记「确认无写入通道」的键（`Scroll.offset`/`LazyRow.offset` 是运行态、`Image.image_width`/`image_height` 是解码派生值、`Skeleton.width`/`height` 需成对的 `set_size()`），`is_base_key` 则处理**同名遮蔽**：`Text` 的 `overflow`、`Skeleton` 的 `width`/`height`、`TitleBar` 的 `height` 都是控件自己的键（`serialize_props` 覆写了基类写入），不得按基类 `Length`/`OverflowStrategy` 发射。
 
 ### 2.5.2 能力边界：宁缺不伪
 
@@ -184,12 +184,22 @@ enum class CodeStyle : std::uint8_t { Fluent, StepByStep, DesignatedInit };   //
 
 - **类型没有通用构造入口**（`is_bespoke_ctor`，21 项）：位置参数构造（`Badge(count, child)`、`Drawer(content, panel, side, width)`、`Splitter`、`TabBar`、`PageView`、`Show`、`Timer`、`VideoPlayer`…）、类模板需实参（`Provider`/`Repeater`/`ReorderableList` 及其三个 `*Provider` 别名）、不在 `aurora` 命名空间下（`BreakpointBuilder`）、或子项本就惰性构建（`LazyRow`，`children_policy = "virtual"`）。对它们只生成空构造，**告警丢弃子节点**——硬编位置参数实参等于臆造 API。
 - **连空构造都不存在**（`is_unconstructible`，8 项：`BreakpointBuilder`/`Hero`/`LocaleProvider`/`MediaQueryProvider`/`Provider`/`ReorderableList`/`Repeater`/`ThemeProvider`）：产物按真实类型名发射 `au::T{}` 并告警点名「须手工补构造实参」，不改写成别的控件（替换比报错更难发现）。
-- **字段为 protected 且未登记 setter** 的类型（`Slider`/`Checkbox`/`Chip`/`Popup`…）：StepByStep 省略该属性并告警。全量类型体检（73 类型 × 550 条默认属性）中，StepByStep 发射 342 条、告警省略 208 条；把 208 条补齐需要逐类型登记真实 setter，属可选增强，不影响产物可编译性。
+- **字段为 protected 且未登记 setter** 的类型（`Slider`/`Checkbox`/`Chip`/`Popup`…）：StepByStep 省略该属性并告警。全量类型体检（73 类型 × 550 条默认属性，**属性面批量迁移前的读数，本批未重跑**）中，StepByStep 发射 342 条、告警省略 208 条；把 208 条补齐需要逐类型登记真实 setter，属可选增强，不影响产物可编译性。
 - **取值形态无法还原**（如枚举属性给了数字、或命中 `Image`/`FlexWeight`/`Flex`/`Json` 这 4 类无专用分支的形态）：告警省略，不再静默。
 
-多子扁平容器（`Column` / `Row` / `Stack` / `Grid` / `Scroll` / `Card`）走免 `Props` 包裹的罗列形式。
+表达式风格的构造形由 `emit_node` 决定，**每条分支都必须是可编译的真实构造**（在册 76 型的实测落点见末列）：
 
-**产物可编译性的验证口径**：`tests/integration/itest_to_code.cpp`（26 例）锁形态；「73 类型 × 3 风格」全量矩阵与真实 UI 树 fixture（`tests/fixtures/ai_compat/`）逐条 `g++ -fsyntax-only` 体检锁可编译性——当前矩阵为 fluent 65/73、di 65/73、step 65/73，缺的 8 项恰是上述 `is_unconstructible` 名单；真实 fixture 的 11 棵树 × 3 风格产物 33/33 全通过。矩阵须按**每类型一座独立 TU**编译：把 73 份产物拼进单座大 TU（省时但）会被 GCC 的级联报错污染——一处失败即波及后续命名空间，实测把 65/73 误报成 50/73、18/73，归属不可信。
+| 分支 | 判据 | 发射形态 | 落点 |
+|:---|:---|:---|---:|
+| 1 | 不在链式写件名单内（`!props_chain_writers`，含无聚合的 58 型与 `WebView`） | `au::T{}` / `au::T{ 子项 }` | 59 型 |
+| 2 | 有链式写件、本节点无子节点 | `au::T(au::TProps().set_x(…))` | 12 型 |
+| 3 | 子节点是构造首参的容器（`kids_first_ctor`：`Column`/`Row`/`Grid`） | `au::T({ 子项 }, au::TProps().set_x(…))`，无属性时免 `Props` 形参 | 3 型 |
+| 3b | 子节点是构造首参的单子容器（`single_child_first_ctor`：`Scroll`/`PullToRefresh`） | `au::T(子节点, au::TProps().set_x(…))`，无属性时 `au::T(子节点)` | 2 型 |
+| 4 | 有子节点却两者皆非 | 告警丢弃子节点，只发 `au::T(au::TProps()…)` | 0 型 |
+
+本表曾有第六条「免 `Props` 包裹的多子扁平容器」（判据 `is_flat_container`，名单 `Column`/`Row`/`Stack`/`Grid`/`Scroll`/`Card`）与第七条「`*Props` 里仍带 `.children` 成员的聚合容器」兜底发射 `.children = { 子项 }`。两档现都已删除：前者的六型里四型改走 3/3b、`Stack` 走 1、`Card` 在库里根本没有这个类型；后者的产物在字段私有化之后编译红。分支 4 因此是**给「新增容器却忘了登记构造槽」预留的守卫**，不是当前任何一种控件的形态。
+
+**产物可编译性的验证口径**：`tests/integration/itest_to_code.cpp`（29 例）锁形态，其中「DesignatedInit 与 Fluent 逐字节相同」「子节点槽守卫产物仍可编译」两例钉住本节上面的别名裁决与分支 4。另有全量「类型 × 3 风格」产物逐条 `g++ -fsyntax-only` 体检与真实 UI 树 fixture（`tests/fixtures/ai_compat/`）锁可编译性 —— **该矩阵的名单与读数取自属性面批量迁移之前（73 型 × 3 风格：fluent 65/73、di 65/73、step 65/73，缺的 8 项恰是 `is_unconstructible` 名单；fixture 11 棵树 × 3 风格产物 33/33 全通过），本批未重跑**，schema 现为 76 型，故三个数字都是过期读数，只作方法留档；迁移后 `di` 档与 `fluent` 档由同一条发射路径产出，逐字节相同属构造上的事实（由 `itest_to_code` 的样本断言背书），不是重跑矩阵的实测。矩阵须按**每类型一座独立 TU**编译：把全部产物拼进单座大 TU（省时但）会被 GCC 的级联报错污染——一处失败即波及后续命名空间，实测把 65/73 误报成 50/73、18/73，归属不可信。
 
 ```cpp
 std::string code = au::serialization::to_code(json, au::serialization::CodeStyle::Fluent);
@@ -326,7 +336,7 @@ server.stop();        // 停止并 join 工作线程
 | POST | `/api/patch` | **最小属性补丁**：请求体为 JSON **数组**，每项 `{path, value}`，`path` 形如 `/1/content`（最后一段是属性名，其余为索引路径，根为空）。一次请求批量回写，交由 `Inspector::apply_patch`；非数组返回 400，属性写失败返回 400 并带原因。**只覆盖属性**，结构性增删无法表达（见 `trees_differ_structurally`） |
 | GET | `/api/components` | 全部已注册组件 schema 列表 |
 | GET | `/api/yaml` | 当前 widget 树的 YAML 格式字符串 |
-| POST | `/api/to_code` | UI 树 → C++ 代码。请求体可含 `style` 参数：`0`=Fluent、`1`=StepByStep、`2`=DesignatedInit；`style` 存在但非整数返回 400，越界整数回退 Fluent |
+| POST | `/api/to_code` | UI 树 → C++ 代码。请求体可含 `style` 参数：`0`=Fluent、`1`=StepByStep、`2`=DesignatedInit（`0` 的别名，产物逐字节相同，见 §2.5）；`style` 存在但非整数返回 400，越界整数回退 Fluent |
 | POST | `/api/input/{click\|scroll\|drag\|text\|pointer}` | 交互模拟：以 `path` 命中的控件为派发根与坐标原点合成事件，经 `EventDispatcher` 走真实命中测试 + 冒泡派发。请求体须为对象且 `path` 为字符串（空串=树根）；`scroll`/`drag` 另取数值 `dx`/`dy`（缺省 0；drag 为目标中心起算的拖拽位移），`text` 另取字符串 `text`，`pointer` 另取字符串 `phase`（`press`\|`move`\|`release`，必填）与可选数值 `x`/`y`（控件本地 dp，缺省为该控件中心）——单步派发一个指针动作，供调用方自行合成跨子区域的连续拖拽。前四种为**目标式**（指针取控件中心），`pointer` 为**坐标式**。经主线程 marshal 执行，成功返回 `{status:"ok", action, widget_path}`；路径不存在 404、目标存在但不可派发 400、字段类型不符 400、方法非 POST 405 |
 | GET | `/api/find` | 按 key/type/text 定位控件：`?key=<Node::set_id 标识>&type=<type_name>&text=<文本>`，至少给一个参数（否则 400），多参数 AND。返回 `{matches:[{path, type, id}], count}`——`path` 为索引路径（根为空串），与 `/api/widget/{path}`、`/api/input/*` 同口径，可直接喂给寻址端点；`text` 比对文本类属性启发式（`content\|text\|label\|value\|hint\|placeholder`，与 `TestController::find_by_text` 同源）。遍历走 `child_nodes()` 原存储 const 引用（不构造 `Node` 副本，活树安全）；虚拟化容器（不覆写 `child_nodes()`）的子树不可见（与 `find_node_by_path` 同限：宁可少报、不可错报）。零命中回 200 + 空 `matches`（非错误，由调用方裁决）；方法非 GET 回 405。query 值一律先按 RFC 3986 百分号解码再比对（`%20` → 空格、UTF-8 字节序列 → 中文标签，`+` 保持字面量），故含空格/非 ASCII 的 `label` 可直接经 URL 编码定位；畸形百分号（`%zz`、尾部孤立 `%`）按字面量保留，不升级成错误响应 |
 | GET | `/api/network` | 进程级网络活动快照（`InspectorJson` 面呈现、最新在前）。查询参数：`limit`（0 = 全部，非负整数）、`host`（精确、ASCII 大小写不敏感、空串 400）、`status`（整数 0..65535）；**先过滤再取 `limit`**，`limit` 不影响 `dropped` / `truncated`。非法参数 400；返回 `{available, count, dropped, truncated, entries}`；Release 回 `{available:false, reason:"AURORA_ENABLE_DEBUG not enabled"}`（200） |
@@ -495,7 +505,7 @@ aurora_cli validate <tree.json>               # 校验 UI 树 JSON，输出诊�
 aurora_cli snapshot <tree.json> [-w W] [-h H] # 输出逻辑快照 JSON
 aurora_cli render <tree.json> [-w W] [-h H] [-o out.png]  # 离屏渲染为 PNG
 aurora_cli preview <tree.json> [-w W] [-h H]  # 快速预览 UI（启动临时窗口；无显示后端回退无头渲染一帧退出）
-aurora_cli to-code <tree.json> [--style fluent|step|di]   # UI 树 → C++ 代码
+aurora_cli to-code <tree.json> [--style fluent|step|di]   # UI 树 → C++ 代码（di 是 fluent 的逐字节别名，见 §2.5）
 aurora_cli to-yaml <tree.json>                            # UI 树 → YAML 格式
 aurora_cli schema                             # 输出运行时重建的 API 骨架（非仓库内 aurora_api.json）
 aurora_cli --help    (-h 仅根层)               # 显示用法帮助（每一层都可用，如 `render --help`）
