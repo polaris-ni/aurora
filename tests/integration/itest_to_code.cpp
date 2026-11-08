@@ -2,7 +2,8 @@
 /// 目标单元: include/aurora/widget/codegen.h
 /// 测试说明: 覆盖 to_code 三风格代码生成（Fluent / DesignatedInit / StepByStep）——
 ///           容器/叶形式、属性落点换算（基类属性/嵌套路径/setter-only/同名遮蔽键）、`au::` 限定与字面量形态、
-///           指定初始化器按 `*Props` 声明序与枚举取值按自描述规范化，以及「无公开写入路径即省略」的能力边界
+///           链式写件按权威表点名序与枚举取值按自描述规范化、DesignatedInit 与 Fluent 同产物的别名判据，
+///           以及「无公开写入路径 / 无构造槽即省略」的能力边界
 /// 覆盖说明: 输入为 to_json 同构的 {type, props, children} 结构快照
 ///           产物可编译性由本文件的形态断言 + 全量类型体检（见 specification/08-tooling.md §2.5）共同锁定
 
@@ -99,12 +100,12 @@ AURORA_TEST_CASE(codegen_fluent_pull_to_refresh_child_leads_and_props_chain) {
 AURORA_TEST_CASE(codegen_designated_init_and_step_by_step_styles) {
     au::Json node = make_node("Column", au::Json::object(), testing::json_arr({make_button("OK")}));
 
-    // 指定初始化器只对**仍是聚合**的 `*Props` 合法：控件类本身是非聚合类型，`au::Button{.label=...}` 编译不过；
-    // 已迁移的 `Button` 与 `Column` 连 `*Props` 都不可设计（字段私有），故 DesignatedInit 对它们同样
-    // 发链式形：容器子项走构造首参，属性续在 `TProps()` 之后。
+    // DesignatedInit 是 Fluent 的别名：指定初始化器要求 `*Props` 的公有同名成员，而 17 型聚合字段全私有、
+    // 其余 59 型不在发射名单内（属性按能力边界省略），故没有一条产物再发设计符。容器子项走构造首参，
+    // 属性续在 `TProps()` 之后。
     const std::string di = to_code(node, CodeStyle::DesignatedInit);
     AURORA_TEST_CHECK_MSG(di.find("au::Column{") != std::string::npos,
-                          "codegen: DesignatedInit puts container children in the init list");
+                          "codegen: DesignatedInit (the Fluent alias) puts container children in the init list");
     AURORA_TEST_CHECK_MSG(di.find("ColumnProps") == std::string::npos,
                           "codegen: DesignatedInit no longer routes containers through a Props aggregate");
     AURORA_TEST_CHECK_MSG(di.find("au::Button(au::ButtonProps().set_label(\"OK\"))") != std::string::npos,
@@ -126,6 +127,45 @@ AURORA_TEST_CASE(codegen_designated_init_and_step_by_step_styles) {
 
     // 默认风格等价于 Fluent。
     AURORA_TEST_CHECK_MSG(to_code(node) == to_code(node, CodeStyle::Fluent), "codegen: default style == Fluent");
+}
+
+AURORA_TEST_CASE(codegen_designated_init_is_the_fluent_alias) {
+    // DesignatedInit 只是别名，不是另一种形态：枚举值留着是给 CLI `--style di`、MCP 与 Inspector 的
+    // `style=2` 留兼容。逐字节钉住「同产物」——别名哪天悄悄分叉，这条先红。样本覆盖四条实际可达的
+    // 发射分支（无聚合 / 无子节点 / 子项首参 / 单子首参）与嵌套一层。
+    const std::vector<au::Json> samples = {
+        make_node("Column", au::Json::object(), testing::json_arr({make_button("OK")})),
+        make_node("Column", testing::json_obj({{"gap", 8.0F}}), testing::json_arr({make_button("OK")})),
+        make_node("Column", testing::json_obj({{"gap", 8.0F}}),
+                  testing::json_arr({make_node("Row", au::Json::object(), testing::json_arr({make_button("In")}))})),
+        make_text(testing::json_obj({{"content", "Hi"}, {"font_size", 16.0F}, {"text_align", "center"}})),
+        make_node("Stack", au::Json::object(), testing::json_arr({make_button("OK")})),
+        make_node("PullToRefresh", testing::json_obj({{"threshold", 40.0F}}), testing::json_arr({make_button("OK")})),
+        make_node("Divider", testing::json_obj({{"orientation", "vertical"}})),
+    };
+    for (const auto &node : samples) {
+        AURORA_TEST_CHECK_MSG(to_code(node) == to_code(node, CodeStyle::DesignatedInit),
+                              "codegen alias: DesignatedInit output is byte-identical to Fluent");
+    }
+}
+
+AURORA_TEST_CASE(codegen_child_slot_guard_keeps_output_compilable) {
+    // 兜底分支曾经发 `au::T(au::TProps{ …, .children = { 子项 } })`：链式形态的字段私有，那条产物编译红。
+    // 现在没有构造槽的类型按「宁缺不伪」告警丢弃子节点，属性照旧经链式写件装入。
+    // 真实快照不会给 Button 挂子节点，手改 JSON 或外部模型产出的快照会——生成器对它也不许发编译不过的形。
+    const au::Json odd =
+        make_node("Button", testing::json_obj({{"label", "OK"}}), testing::json_arr({make_button("Inner")}));
+    for (const CodeStyle style : {CodeStyle::Fluent, CodeStyle::DesignatedInit}) {
+        const std::string code = to_code(odd, style);
+        AURORA_TEST_CHECK_MSG(code.find(".children") == std::string::npos,
+                              "child slot guard: no `.children` designator reaches a Props aggregate");
+        AURORA_TEST_CHECK_MSG(code.find("au::ButtonProps{") == std::string::npos,
+                              "child slot guard: no designated initializer for a chain-form Props");
+        AURORA_TEST_CHECK_MSG(code.find("Inner") == std::string::npos,
+                              "child slot guard: the child without a construction slot is dropped");
+        AURORA_TEST_CHECK_MSG(code.find(".set_label(\"OK\")") != std::string::npos,
+                              "child slot guard: the scalar writer still carries the label");
+    }
 }
 
 AURORA_TEST_CASE(codegen_scalar_props_string_bool_float_int) {
@@ -484,9 +524,9 @@ AURORA_TEST_CASE(codegen_from_widget_snapshot_compiles_shape) {
     AURORA_TEST_CHECK_MSG(code.find(".set_content(\"Hi\")") != std::string::npos, "widget overload keeps content");
 }
 
-AURORA_TEST_CASE(codegen_designated_initializers_follow_declaration_order) {
-    // GCC 的 C++ 指定初始化器必须按成员**声明序**书写，而快照 JSON 的键序无字典序保证（插入序即存储序）。
-    // 属性顺序取自 `describe` 的 `props` 表（即 `*Props` 的声明序），乱序产物直接编译失败。
+AURORA_TEST_CASE(codegen_props_writers_follow_table_order) {
+    // 链式写件之间没有顺序约束（指定初始化器才有：乱序 GCC 直接报错），这里仍钉住权威表的点名序，
+    // 为的是产物与 schema、描述符能逐行对照；快照 JSON 的键序无从保证，乱序发射会让两份产物对不上。
     // Button 已迁到链式发射，形态换了但顺序判据不变 —— 仍是那张权威表的点名序。
     const au::Json props = testing::json_obj(
         {{"enabled", au::Json{false}},
@@ -500,8 +540,8 @@ AURORA_TEST_CASE(codegen_designated_initializers_follow_declaration_order) {
     std::size_t prev = 0;
     for (const std::string &needle : order) {
         const std::size_t at = di.find(needle);
-        AURORA_TEST_CHECK_MSG(at != std::string::npos, std::string("declaration order: ") + needle + " present");
-        AURORA_TEST_CHECK_MSG(at > prev, std::string("declaration order: ") + needle + " follows its predecessor");
+        AURORA_TEST_CHECK_MSG(at != std::string::npos, std::string("table order: ") + needle + " present");
+        AURORA_TEST_CHECK_MSG(at > prev, std::string("table order: ") + needle + " follows its predecessor");
         prev = at;
     }
     // 子节点排在所有标量属性之前：子项是容器构造的首参（`au::Column(子项, Props)`）。
@@ -509,7 +549,7 @@ AURORA_TEST_CASE(codegen_designated_initializers_follow_declaration_order) {
         to_code(make_node("Column", testing::json_obj({{"gap", 8.0F}}), testing::json_arr({make_button("OK")})),
                 CodeStyle::DesignatedInit);
     AURORA_TEST_CHECK_MSG(container.find("au::Column(") < container.find(".set_gap"),
-                          "declaration order: children argument precedes scalar writers");
+                          "table order: children argument precedes scalar writers");
 }
 
 AURORA_TEST_CASE(codegen_enum_values_canonicalized_from_self_description) {
