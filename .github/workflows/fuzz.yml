@@ -1,0 +1,70 @@
+name: Fuzz targets
+
+on:
+  schedule:
+    - cron: "23 5 * * 1"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "tests/fuzz/**"
+      - "cmake/AuroraFuzz.cmake"
+      - "tools/check/fuzz_gate.sh"
+      - "tools/check/check_workflow_yaml.py"
+      - ".github/workflows/fuzz.yml"
+
+permissions:
+  contents: read
+
+# This workflow is deliberately separate from ci.yml. ci.yml owns the full
+# 18-job gate matrix and its four fixed exits (push / PR / weekly / manual);
+# adding a job there would change that matrix and need a change proposal.
+# The fuzz targets are EXCLUDE_FROM_ALL, need a Clang-only runtime and a
+# dedicated build directory, and are not registered as CTest cases.
+jobs:
+  fuzz:
+    name: libFuzzer short sessions (ubuntu-clang)
+    runs-on: ubuntu-26.04
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Clang and Ninja
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y clang lld ninja-build
+
+      - name: Configure independent Clang build
+        run: |
+          cmake -S . -B build-fuzz -G Ninja \
+            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_CXX_COMPILER=clang++ \
+            -DAURORA_BUILD_FUZZ=ON \
+            -DAURORA_BUILD_TESTS=OFF \
+            -DAURORA_BUILD_DEMOS=OFF \
+            -DAURORA_BUILD_DOCS=OFF \
+            -DAURORA_ENABLE_ASAN=OFF \
+            -DAURORA_ENABLE_COVERAGE=OFF \
+            -DAURORA_ENABLE_CLANG_TIDY=OFF \
+            -DAURORA_ENABLE_CLANG_FORMAT=OFF \
+            -DAURORA_ENABLE_LLD=OFF \
+            -DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON
+
+      - name: Build fuzz targets
+        run: cmake --build build-fuzz --target aurora_fuzz -j "$(nproc)"
+
+      - name: Verify workflow YAML scalar hazards
+        run: python3 tools/check/check_workflow_yaml.py --root .
+
+      - name: Run fuzz gate
+        env:
+          AURORA_FUZZ_ARTIFACT_DIR: ${{ runner.temp }}/fuzz-artifacts
+        run: bash tools/check/fuzz_gate.sh build-fuzz 90
+
+      - name: Upload fuzz logs and crash inputs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuzz-report
+          path: ${{ runner.temp }}/fuzz-artifacts
+          if-no-files-found: warn

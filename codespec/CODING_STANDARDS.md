@@ -141,11 +141,13 @@
 | `TEST-R5` | 公共头覆盖 | 每个公共单元头须被某测试显式声明为目标单元，或在该测试中直接 `#include`、其符号在 `tests/` 全树被引用 | 是 |
 | `TEST-R6` | 注册完整性 | `runner --list` 输出的**用例级**集合必须与测试源中注册的用例集合一致；含「`TEST_P` 漏 `INSTANTIATE` → 用例静默不运行」检测 | 是（CTest `registry_integrity`，由 `tools/check/check_test_registry.py` 承担） |
 | `TEST-R7` | 并行安全 | 测试体系禁止新增 `RUN_SERIAL`（CMake 编排与测试源一并扫描）；并行模型为 CTest 进程隔离 + 框架用例边界资源虚拟化，申请串行须登记脚本内 `TEST_R7_WHITELIST` 并注明根因 | 是 |
-| `TEST-R8` | 命名纪律 | 目录定类型 + 前缀强制——`tests/unit/` 一律 `utest_`、`tests/integration/` 一律 `itest_`、`tests/e2e/` 一律 `etest_`；`tests/` 下的子目录须落在已知类型目录（`unit` / `integration` / `e2e`）或设施目录（`framework` / `support` / `fixtures` / `golden`）白名单内，测试 TU 不得游离在外；**Suite 强制等于文件 stem、不可自定义**（`__FILE__` 推导，自定义套件宏禁止） | 是 |
+| `TEST-R8` | 命名纪律 | 目录定类型 + 前缀强制——`tests/unit/` 一律 `utest_`、`tests/integration/` 一律 `itest_`、`tests/e2e/` 一律 `etest_`；`tests/` 下的子目录须落在已知类型目录（`unit` / `integration` / `e2e`）或设施目录（`framework` / `support` / `fixtures` / `golden` / `fuzz`）白名单内，测试 TU 不得游离在外；**Suite 强制等于文件 stem、不可自定义**（`__FILE__` 推导，自定义套件宏禁止） | 是 |
 | `TEST-R9` | 禁止 using-directive | 测试代码禁止 `using namespace`（函数体内亦然）；using 声明 / 命名空间别名须置于使用点之前的作用域内 | 是（脚本） |
 | `TEST-R10` | 禁止 catch-all（跨域） | 单个测试跨 ≥3 个模块域视为 catch-all；因被测主模块自身依赖面广（如测 `Widget` 必带 layout/render/event/navigation）的跨域**不视为违规、不强行拆分**，基线 **20**、只看增量，趋势由守门脚本输出、不在本文档硬编码以免随重构漂移 | 否（趋势指标） |
 
 其中 `TEST-R1` / `TEST-R2` / `TEST-R4` / `TEST-R5` / `TEST-R7` / `TEST-R8` / `TEST-R9` 由 `tools/check/check_code_doc_sync.py` 在 CTest 的 `code_doc_sync` 用例守门（只做确定性判定、存量豁免走白名单、只拦增量）；`TEST-R6` 由 `tools/check/check_test_registry.py` 在 CTest 的 `registry_integrity` 用例守门；`TEST-R3` 靠评审与审计，`TEST-R10` 只作趋势指标，均不纳入守门。
+
+> `tests/fuzz/` 登记为设施目录（第五项）：其中的模糊测试目标不是 CTest 用例，故不受 `TEST-R1` 三行块与类型目录前缀约束；`TEST-R7`（禁 `RUN_SERIAL`）、`TEST-R9`（禁 `using namespace`）、临时文件与字符串字面量门禁仍照常适用。有效性自证目标故意含内存与未定义行为缺陷，只在 Clang 独立构建里编译，不得链进产品库或常规测试 runner。
 
 > 命名消歧：文档交叉引用门禁 `tools/check/check_codespec_xref.py` 另有一套 `R1`–`R5`（链接可达 / 章节号格式 / 反引号路径 / 特性表落点），与本文 `TEST-RN` 无关，勿混用。
 

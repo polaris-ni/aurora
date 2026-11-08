@@ -66,8 +66,8 @@ TEST_R7_WHITELIST = {}
 # ---- TEST-R8 目录白名单：目录定类型 + 强制前缀 -----------------------------
 # 类型目录：其中的 *.cpp 一律是测试 TU，且必须带对应前缀（Suite 恒等于文件 stem）。
 TEST_TYPE_DIRS = (("unit", "utest_"), ("integration", "itest_"), ("e2e", "etest_"))
-# 设施目录：框架 / 支撑 / 基准 / 夹具，非类型目录，不受前缀约束。
-TEST_FACILITY_DIRS = ("framework", "support", "fixtures", "golden")
+# 设施目录：框架 / 支撑 / 基准 / 夹具 / 覆盖引导模糊测试，非类型目录，不受前缀约束。
+TEST_FACILITY_DIRS = ("framework", "support", "fixtures", "golden", "fuzz")
 
 # TEST-R10 趋势基线：跨 ≥3 模块域的测试文件（catch-all 反模式）允许存量上限。
 CATCH_ALL_BASELINE = 20

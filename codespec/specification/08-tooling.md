@@ -808,6 +808,8 @@ CI 默认范围，由真机或本地会话 opt-in。另有两点硬约束：CI �
 
 **线程消毒定点判据**（`tools/check/tsan_gate.sh`，作业 4t）：判定必须同时看 ctest 退出码与 `TSAN_OPTIONS` 的 `log_path` 落盘报告正文，任一非零即红。三条假绿陷阱须同时防住——① data race 是 `WARNING` 级，不令断言失败却令进程退出码非零，只看 `[ RUN ]/[ OK ]` 会误判成测试逻辑挂了；② TSan 默认写 stderr，而 ctest 不回显通过用例的输出，`--output-log` 里命中数恒为零，不用 `log_path` 落盘就是零报告假绿；③ `halt_on_error=1` 也不保证非零退出。另两条纪律：每轮开头先清 `report.*` 残留，否则上轮报告被重复计数；`TSAN_OPTIONS` 绝不可含 `exitcode=0`——那是把红洗成绿的开关，只出现在变异自证里。`ignore_noninstrumented_modules=1` 用于抑制第三方未插桩库（glib / gio / dconf）内部噪声，实测该开关不掩盖本库竞态。项目无对应 CMake 开关，注入参数见 [`BUILD_OPTIONS.md`](../BUILD_OPTIONS.md) §4。
 
+**覆盖引导模糊测试短跑判据**（`tools/check/fuzz_gate.sh`，独立 `.github/workflows/fuzz.yml`）：五个正式目标覆盖 URI list 往返、JSON 的 DOM 与 SAX 出口、HTTP 响应头与分块装配、WebSocket 解帧、内置 BMP 解码，各跑九十秒、输入长度上限四千零九十六字节；语料只入初始种子，每轮复制进临时目录，避免演化单元写回仓库。判定次序是**先让有效性自证转红**：`fuzz_effectiveness` 故意含一处有符号溢出与一处越界读，必须产生崩溃输入与消毒报告，否则说明 `UBSAN_OPTIONS=halt_on_error=1` 或插桩没接上，其余五个目标的零发现全部无效、作业整体失败。随后每个正式目标同时看退出码、崩溃输入文件、日志中的消毒报告正文与 `Done N runs` 正常收尾行；缺收尾行本身就是红信号（崩溃路径不打印它），通过用例的输出不会自动回显到作业日志，故日志须落盘后逐条 grep。每轮开头先清上轮残留。零发现只对内存错误与未定义行为成立，语义类缺陷（如合法解析出危险路径）不在此覆盖内；BMP 目标在头部校验即拒绝绝大多数输入，边覆盖显著偏低，其零发现置信度须打折。PNG / GIF / WebP 与 JPEG 走第三方解码器，归版本治理而非本仓模糊测试。
+
 另三条边界结论：wgpu（`AURORA_BACKEND_GPU_WGPU`，需 Rust 工具链与真机 GPU）不进任何 CI 默认作业，
 由真机探针（§7.5）与本地会话 opt-in；wasm 作业的 E2E 在 CMake 层即排除（`AURORA_BUILD_E2E` 在
 Emscripten 下强制不纳入）；install-consumer 作业只验证 `find_package` / 静态链接 / feature 宏导出
