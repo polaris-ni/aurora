@@ -3,8 +3,8 @@
 # check_no_optional_in_public_signature.py - 可空态不外泄门禁
 # ----------------------------------------------------------------------------
 # Spec: 属性单一声明口径第 2 条末段与第 9 条 —— 「每个属性行必须给回落点，全部非必填字段
-#   随之可空——值型 `std::optional<T>`、来源型 `std::optional<ReadOnlyState<T>>`；
-#   **公共签名一律裸 T / 裸句柄，`std::optional` 不再外泄**」。
+#   随之可空——值型 `std::optional<T>`、来源型 `std::optional<ReadOnlyState<T>>`（可写来源同形：
+#   `std::optional<State<T>>`）；**公共签名一律裸 T / 裸句柄，`std::optional` 不再外泄**」。
 #   这条把「optional 只活在存储层」变成机械判据，顺带拦住 `ReadOnlyState<std::optional<T>>`
 #   这一类双重空态（现状 `ReadOnlyState` 的旧包装形态，迁移后必须归零）。
 #
@@ -19,9 +19,12 @@
 #
 # 四条判据（编号进违例文案，便于变异自证逐条对号）：
 #   O1 公共签名（参数或返回值）里出现 `std::optional` 即红。
-#   O2 句柄作读面：`ReadOnlyState<...>` 出现在**返回值**里即红——句柄只许作为换源写件的参数
-#      进公共面（`set_label(ReadOnlyState<LocalizedString>)`），来源型的读面由框架订阅，不发句柄。
-#   O3 双重空态：`ReadOnlyState<std::optional<T>>` / `std::optional<ReadOnlyState<T>>` 嵌套即红
+#   O2 句柄作读面：句柄形状（只读 `ReadOnlyState<...>` / 可写 `State<...>`，与机制层
+#      `PropIsHandle` 的两条特化同口径）出现在**返回值**里即红——句柄只许作为换源写件的参数
+#      进公共面（`set_label(ReadOnlyState<LocalizedString>)`、`set_value(State<std::string>)`），
+#      来源型的读面由框架订阅，不发句柄。
+#   O3 双重空态：`ReadOnlyState<std::optional<T>>` / `std::optional<ReadOnlyState<T>>`，
+#      以及可写来源的同形嵌套 `State<std::optional<T>>` / `std::optional<State<T>>`，任一即红
 #      （单独出文案，因为它是第 2 条点名的现状形态，修法与其他 O1 不同：拆成裸句柄 + 未表态位）。
 #   O4 机制类型不外泄：`PropRow<...>` 只允许作为 `*_row()` 的返回值出现；进参数表或进其他
 #      成员的返回值即红（表行对象是机制层的中间形态，用户经它选行等于绕过逐属性具名件）。
@@ -42,10 +45,12 @@ import sys
 import props_scan
 
 OPTIONAL_RE = re.compile(r"\bstd::optional\s*<")
-HANDLE_RE = re.compile(r"\bReadOnlyState\s*<")
+# 句柄形状与属性面门禁同源：只读来源 `ReadOnlyState<T>` 与可写来源 `State<T>` 同判。
+HANDLE_RE = props_scan.SOURCE_HANDLE_RE
 ROW_RE = re.compile(r"\bPropRow\s*<")
 # 双重空态的两种嵌套方向（第 2 条点名的现状形态）。
-NESTED_RE = re.compile(r"\bReadOnlyState\s*<\s*(?:std\s*::\s*)?optional\b|\boptional\s*<\s*ReadOnlyState\b")
+NESTED_RE = re.compile(r"\b(?:ReadOnlyState|State)\s*<\s*(?:std\s*::\s*)?optional\b"
+                       r"|\boptional\s*<\s*(?:ReadOnlyState|State)\b")
 
 # 非属性接口的可空豁免登记表：键为 `类名::函数名`，值为理由（必须写明为何本就承载可空语义）。
 # 现状为空——已迁移属性面里没有任何合法的可空签名；日后若某枚控件的**非属性**公共件需要
@@ -63,8 +68,8 @@ def check_member(rel, class_name, member, findings, stats):
     is_row = member.name.endswith("_row")
     if NESTED_RE.search(ret) or NESTED_RE.search(params):
         findings.append(f"{rel}:{member.line}: [O3] {class_name}::{member.name}: doubly-emptied wrapper in a "
-                        "public signature -- a handle row is `ReadOnlyState<T>` bare, emptiness lives in the "
-                        "stated bit, not in a nested optional")
+                        "public signature -- a handle row is `State<T>` / `ReadOnlyState<T>` bare, emptiness "
+                        "lives in the stated bit, not in a nested optional")
         return
     for where, text in (("parameter", params), ("return type", ret)):
         if OPTIONAL_RE.search(text):
@@ -72,8 +77,9 @@ def check_member(rel, class_name, member, findings, stats):
                             f"the {where} -- public signatures take bare T; optionality is the storage layer's "
                             "business (the stated bit answers `present(row)`)")
     if HANDLE_RE.search(ret) and not is_row:
-        findings.append(f"{rel}:{member.line}: [O2] {class_name}::{member.name}: returns a `ReadOnlyState` "
-                        "handle -- handles enter the public face only as a re-source writer's argument")
+        findings.append(f"{rel}:{member.line}: [O2] {class_name}::{member.name}: returns a `State` / "
+                        "`ReadOnlyState` handle -- handles enter the public face only as a re-source writer's "
+                        "argument")
     if ROW_RE.search(ret) and not is_row:
         findings.append(f"{rel}:{member.line}: [O4] {class_name}::{member.name}: returns a `PropRow` outside a "
                         "row accessor -- callers select rows by property name, never by row object")

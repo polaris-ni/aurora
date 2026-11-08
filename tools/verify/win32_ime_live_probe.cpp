@@ -160,7 +160,7 @@ struct ProbeUi {
 
 [[nodiscard]] auto build_ui() -> ProbeUi {
     // CJK-LITERAL: cjk-fixture - Han placeholder painted in the live window as a visual baseline for IME typing
-    auto input = std::make_shared<aurora::TextInput>(aurora::TextInputProps{.value = "", .placeholder = "请键入"});
+    auto input = std::make_shared<aurora::TextInput>(aurora::TextInputProps().set_value("").set_placeholder("请键入"));
     // Node 拷贝即共享（`shared_ptr<Widget>` 语义），故树内节点与本指针是同一个 TextInput。
     return ProbeUi{.root = aurora::Node{std::static_pointer_cast<aurora::Widget>(input)}, .input = std::move(input)};
 }

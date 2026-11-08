@@ -1,206 +1,587 @@
 #pragma once
 
 #include <algorithm>
+#include <cstddef>
+#include <functional>
 #include <optional>
 #include <string>
+#include <utility>
 
 #include "aurora/app/clipboard.h"
 #include "aurora/core/accessibility.h"
+#include "aurora/core/color.h"
 #include "aurora/core/diagnostics.h"
 #include "aurora/core/directionality.h"
 #include "aurora/core/types.h"
 #include "aurora/core/utf8.h"
+#include "aurora/environment/build_context.h"  // 带上下文的读件需完整类型以解主题作用域
 #include "aurora/event/event.h"
 #include "aurora/event/keycode.h"
 #include "aurora/render/font_engine.h"
 #include "aurora/render/painter.h"
 #include "aurora/state/state.h"
-#include "aurora/theming/theme_scope.h"
+#include "aurora/theming/color_roles.h"  // 活令牌回落点：roles.on_surface / on_surface_variant / outline ...
+#include "aurora/theming/control_metrics.h"  // 活令牌回落点：controls.border_thickness
+#include "aurora/theming/theme_scope.h"  // inherit_theme
+#include "aurora/widget/props.h"
 #include "aurora/widget/widget.h"
 
 namespace aurora {
 
-/// @brief TextInput 属性（聚合）。
-struct TextInputProps {
-    std::string value;  ///< 初始文本
-    std::string placeholder;  ///< 空值占位提示
-    float font_size = 14.0F;  ///< 字号（点）
+/// @brief TextInput 的属性权威表：19 行，键名、私有字段、脏档位、约束与回落点只在行里声明一次。
+///
+/// 本型是属性单一声明面里唯一带**可写来源行**的控件：`value` 的字段是 `State<std::string>` 而不是
+/// `ReadOnlyState<std::string>`，因为输入框本体就是这段文本的编辑者——逐字符写回落进**当前来源的
+/// 现值**（源不换、句柄不重绑），调用方那只 `State<std::string>` 上的其它订阅照常收到每一轮。换源
+/// 仍只有同名写件的句柄重载一条通道，其余来源行「装值即换入自有常量源」的口径在这里不适用。
+///
+/// 三态语义与其余已迁型一致：
+/// - **必填行**（`value`）：字段本身就是生效值，不可撤表态；
+/// - **可空行**（其余 18）：未表态时取该行回落点，表态后不再跟随；撤表态走公共面上唯一的 `clear(row)`；
+/// - **来源行**（`value`）：公共面上没有 `value_source()` 这类句柄读件，来源位由字段形状推导。
+///
+/// 回落点三档在本表里同时在场：
+/// - 活令牌档（`cursor_color` / `text_color` / `placeholder_color` / `background` /
+///   `focused_background` / `border_color` / `focused_border_color` / `selection_color` 之外的
+///   `border_width`）：随作用域换肤或切风格档而变，读件带 `BuildContext`；
+/// - 常量档（`placeholder` / `font_size` / `corner_radius` / `padding` / `enabled` / `max_length` /
+///   `read_only` / `obscure_text` / `direction`）：全库唯一基线，读件无参；
+/// - 派生档（`selection_color`）：回落点由当前作用域的 `roles.primary` 调出半透明高亮，读件带
+///   `BuildContext`，schema 里的默认值只能是以 `.shows()` 给出的显示串。
+///
+/// `direction` 的「继承」语义留在表外（与 `Text` 同口径）：本行回落基线是 `LTR`（读件无参），控件
+/// 判定生效方向时先问表态位 `present(direction_row())`——未表态即走 `Environment` / 进程级继承，
+/// 与迁移前的 `std::optional<TextDirection>` 空态等价。
+///
+/// @note Thread: main-thread only
+/// @note Side-effects: 写入经宿主链接位标脏并重建订阅；未挂载时是纯 DTO
+class TextInputProps : public AbstractProps<TextInputProps> {
+  public:
+    // ---- 权威表：参数顺序即 schema 顺序 ----
+
+    /// @brief 必填可写来源件：输入框文本。变更同时影响度量与绘制 ⇒ 布局 + 绘制两档都打。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto value_row() {
+        return prop_row<&TextInputProps::value_>("value").layout().paint().required().note("Text value");
+    }
+
+    /// @brief 可空值件：空值时的占位提示（同时充当无障碍名称）。参与度量 ⇒ 布局档。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto placeholder_row() {
+        return prop_row<&TextInputProps::placeholder_>("placeholder")
+            .layout()
+            .paint()
+            .fallback(&TextInputProps::placeholder_default)
+            .note("Placeholder shown when empty");
+    }
+
+    /// @brief 可空值件：字号（pt）。参与度量 ⇒ 布局档；下界 0。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto font_size_row() {
+        return prop_row<&TextInputProps::font_size_>("font_size")
+            .layout()
+            .paint()
+            .bounds("0")
+            .fallback(&TextInputProps::font_size_default)
+            .note("Font size (pt)");
+    }
+
+    /// @brief 可空值件：圆角半径（dp）；0 = 直角。只改背景与裁剪形状，不改度量 ⇒ 绘制档。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto corner_radius_row() {
+        return prop_row<&TextInputProps::corner_radius_>("corner_radius")
+            .paint()
+            .bounds("0")
+            .fallback(&TextInputProps::corner_radius_default)
+            .note("Corner radius (dp)");
+    }
+
+    /// @brief 可空值件：文本与边框之间的内边距。参与度量 ⇒ 布局档。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto padding_row() {
+        return prop_row<&TextInputProps::padding_>("padding")
+            .layout()
+            .paint()
+            .bounds("0")
+            .fallback(&TextInputProps::padding_default)
+            .note("Padding");
+    }
+
+    /// @brief 可空值件：光标色。未表态时取主题 `roles.on_surface`，换肤即随动。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto cursor_color_row() {
+        return prop_row<&TextInputProps::cursor_color_>("cursor_color")
+            .paint()
+            .fallback<&ColorRoles::on_surface>()
+            .note("Cursor color (follows theme on_surface when unset)");
+    }
+
+    /// @brief 可空值件：是否可编辑。禁用态只降级绘制并忽略输入，不改度量 ⇒ 绘制档。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto enabled_row() {
+        return prop_row<&TextInputProps::enabled_>("enabled")
+            .paint()
+            .fallback(&TextInputProps::enabled_default)
+            .note("Editable");
+    }
+
+    /// @brief 可空值件：文本色。未表态时取主题 `roles.on_surface`。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto text_color_row() {
+        return prop_row<&TextInputProps::text_color_>("text_color")
+            .paint()
+            .fallback<&ColorRoles::on_surface>()
+            .note("Text color (follows theme on_surface when unset)");
+    }
+
+    /// @brief 可空值件：占位提示色。未表态时取主题 `roles.on_surface_variant`。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto placeholder_color_row() {
+        return prop_row<&TextInputProps::placeholder_color_>("placeholder_color")
+            .paint()
+            .fallback<&ColorRoles::on_surface_variant>()
+            .note("Placeholder text color (follows theme on_surface_variant when unset)");
+    }
+
+    /// @brief 可空值件：常态背景色。未表态时取主题 `roles.surface_container`。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto background_row() {
+        return prop_row<&TextInputProps::background_>("background")
+            .paint()
+            .fallback<&ColorRoles::surface_container>()
+            .note("Background color (follows theme surface_container when unset)");
+    }
+
+    /// @brief 可空值件：聚焦态背景色。未表态时取主题 `roles.surface_bright`。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto focused_background_row() {
+        return prop_row<&TextInputProps::focused_background_>("focused_background")
+            .paint()
+            .fallback<&ColorRoles::surface_bright>()
+            .note("Focused background color (follows theme surface_bright when unset)");
+    }
+
+    /// @brief 可空值件：常态边框色。未表态时取主题 `roles.outline`。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto border_color_row() {
+        return prop_row<&TextInputProps::border_color_>("border_color")
+            .paint()
+            .fallback<&ColorRoles::outline>()
+            .note("Border color (follows theme outline when unset)");
+    }
+
+    /// @brief 可空值件：聚焦态边框色。未表态时取主题 `roles.primary`（Fluent 式聚焦提示）。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto focused_border_color_row() {
+        return prop_row<&TextInputProps::focused_border_color_>("focused_border_color")
+            .paint()
+            .fallback<&ColorRoles::primary>()
+            .note("Focused border color (follows theme primary when unset)");
+    }
+
+    /// @brief 可空值件：边框线宽（dp）；0 = 不描边。未表态时取主题 `controls.border_thickness`。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto border_width_row() {
+        return prop_row<&TextInputProps::border_width_>("border_width")
+            .paint()
+            .bounds("0")
+            .fallback<&ControlMetrics::border_thickness>()
+            .note("Border width (dp); 0 = no border");
+    }
+
+    /// @brief 可空值件：选区高亮色。派生档由当前作用域主色调得半透明高亮 ⇒ 默认值只能是显示串。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto selection_color_row() {
+        return prop_row<&TextInputProps::selection_color_>("selection_color")
+            .paint()
+            .fallback(&TextInputProps::selection_color_default)
+            .shows("auto")
+            .note("Selection highlight color (follows theme primary when unset)");
+    }
+
+    /// @brief 可空值件：最大长度（码点，0 = 不限）。只约束后续编辑，不改变已有画面 ⇒ 无脏档。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto max_length_row() {
+        return prop_row<&TextInputProps::max_length_>("max_length")
+            .bounds("0")
+            .fallback(&TextInputProps::max_length_default)
+            .note("Max length (code points); 0 = unlimited");
+    }
+
+    /// @brief 可空值件：只读位（可选择/复制、不可编辑）。纯行为门，不改画面 ⇒ 无脏档。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto read_only_row() {
+        return prop_row<&TextInputProps::read_only_>("read_only")
+            .fallback(&TextInputProps::read_only_default)
+            .note("Read-only (selectable and copyable, not editable)");
+    }
+
+    /// @brief 可空值件：密码掩码显示。实显串随之改变 ⇒ 布局 + 绘制两档。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto obscure_text_row() {
+        return prop_row<&TextInputProps::obscure_text_>("obscure_text")
+            .layout()
+            .paint()
+            .fallback(&TextInputProps::obscure_text_default)
+            .note("Password masked display");
+    }
+
+    /// @brief 可空值件：书写方向。回落基线只是读件取值，是否继承另看表态位（见类注释）。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto direction_row() {
+        return prop_row<&TextInputProps::direction_>("direction")
+            .layout()
+            .paint()
+            .fallback(&TextInputProps::direction_default)
+            .shows("auto")
+            .note("Text direction (auto = inherit from environment)");
+    }
+
+    /// @brief 权威表本体：本控件全部属性行的元组。
+    /// @return 按声明顺序排列的行元组（发射面与序列化面都遍历它）。
+    [[nodiscard]] static constexpr auto rows() {
+        return make_prop_rows(value_row(), placeholder_row(), font_size_row(), corner_radius_row(), padding_row(),
+                              cursor_color_row(), enabled_row(), text_color_row(), placeholder_color_row(),
+                              background_row(), focused_background_row(), border_color_row(),
+                              focused_border_color_row(), border_width_row(), selection_color_row(), max_length_row(),
+                              read_only_row(), obscure_text_row(), direction_row());
+    }
+
+    // ---- 读面：每行恰一件，形态由该行回落点决定 ----
+
+    /// @brief 当前文本值（必填可写来源件：无参读件）。
+    /// @return 文本的 UTF-8 副本（不含组合期 preedit）。
+    [[nodiscard]] auto value() const -> std::string { return get(value_row()); }
+
+    /// @brief 当前生效占位提示。
+    /// @return 占位文本；未表态时为空串。
+    [[nodiscard]] auto placeholder() const -> std::string { return stated(placeholder_row()); }
+
+    /// @brief 当前生效字号（pt）：常量档回落点不随作用域变 ⇒ 无参读件。
+    /// @return 字号（pt）。
+    [[nodiscard]] auto font_size() const -> float { return stated(font_size_row()); }
+
+    /// @brief 当前生效圆角半径（dp）。
+    /// @return 半径；0 = 直角。
+    [[nodiscard]] auto corner_radius() const -> float { return stated(corner_radius_row()); }
+
+    /// @brief 当前生效内边距。
+    /// @return 四边内边距。
+    [[nodiscard]] auto padding() const -> EdgeInsets { return stated(padding_row()); }
+
+    /// @brief 当前作用域下生效的光标色。
+    /// @param ctx 构建上下文：未表态时据此解主题 `roles.on_surface`。
+    /// @return 生效光标色。
+    [[nodiscard]] auto cursor_color(const BuildContext &ctx) const -> Color { return resolve(cursor_color_row(), ctx); }
+
+    /// @brief 当前是否可编辑。
+    /// @return 生效的启用位。
+    [[nodiscard]] auto enabled() const -> bool { return stated(enabled_row()); }
+
+    /// @brief 当前作用域下生效的文本色。
+    /// @param ctx 构建上下文：未表态时据此解主题 `roles.on_surface`。
+    /// @return 生效文本色。
+    [[nodiscard]] auto text_color(const BuildContext &ctx) const -> Color { return resolve(text_color_row(), ctx); }
+
+    /// @brief 当前作用域下生效的占位提示色。
+    /// @param ctx 构建上下文：未表态时据此解主题 `roles.on_surface_variant`。
+    /// @return 生效占位色。
+    [[nodiscard]] auto placeholder_color(const BuildContext &ctx) const -> Color {
+        return resolve(placeholder_color_row(), ctx);
+    }
+
+    /// @brief 当前作用域下生效的常态背景色。
+    /// @param ctx 构建上下文：未表态时据此解主题 `roles.surface_container`。
+    /// @return 生效背景色。
+    [[nodiscard]] auto background(const BuildContext &ctx) const -> Color { return resolve(background_row(), ctx); }
+
+    /// @brief 当前作用域下生效的聚焦态背景色。
+    /// @param ctx 构建上下文：未表态时据此解主题 `roles.surface_bright`。
+    /// @return 生效聚焦背景色。
+    [[nodiscard]] auto focused_background(const BuildContext &ctx) const -> Color {
+        return resolve(focused_background_row(), ctx);
+    }
+
+    /// @brief 当前作用域下生效的常态边框色。
+    /// @param ctx 构建上下文：未表态时据此解主题 `roles.outline`。
+    /// @return 生效边框色。
+    [[nodiscard]] auto border_color(const BuildContext &ctx) const -> Color { return resolve(border_color_row(), ctx); }
+
+    /// @brief 当前作用域下生效的聚焦态边框色。
+    /// @param ctx 构建上下文：未表态时据此解主题 `roles.primary`。
+    /// @return 生效聚焦边框色。
+    [[nodiscard]] auto focused_border_color(const BuildContext &ctx) const -> Color {
+        return resolve(focused_border_color_row(), ctx);
+    }
+
+    /// @brief 当前作用域下生效的边框线宽（dp）。
+    /// @param ctx 构建上下文：未表态时据此解主题 `controls.border_thickness`。
+    /// @return 生效线宽；0 = 不描边。
+    [[nodiscard]] auto border_width(const BuildContext &ctx) const -> float { return resolve(border_width_row(), ctx); }
+
+    /// @brief 当前作用域下生效的选区高亮色。
+    /// @param ctx 构建上下文：未表态时据当前作用域主色调出半透明高亮。
+    /// @return 生效选区色。
+    [[nodiscard]] auto selection_color(const BuildContext &ctx) const -> Color {
+        return resolve(selection_color_row(), ctx);
+    }
+
+    /// @brief 当前生效长度上限（码点计数）。
+    /// @return 上限；0 = 不限。
+    [[nodiscard]] auto max_length() const -> std::size_t { return stated(max_length_row()); }
+
+    /// @brief 当前是否处于只读态。
+    /// @return true = 只读（可选择/复制，不可编辑）。
+    [[nodiscard]] auto read_only() const -> bool { return stated(read_only_row()); }
+
+    /// @brief 当前是否掩码显示。
+    /// @return true = 密码掩码（实显为等长 • 串，值不变）。
+    [[nodiscard]] auto obscure_text() const -> bool { return stated(obscure_text_row()); }
+
+    /// @brief 当前方向表态值；是否继承环境另由 `present(direction_row())` 判定（见类注释）。
+    /// @return 表态的方向；未表态时为回落基线 `LTR`。
+    [[nodiscard]] auto direction() const -> TextDirection { return stated(direction_row()); }
+
+    // ---- 写面：同名重载区分「装入值」与「换源」，档位仍由行决定 ----
+
+    /// @brief 写入文本值（可写来源件：落进**当前来源的现值**，不换源、不重绑）。
+    /// @param value 新的 UTF-8 文本；同值写入短路（不标脏、不发轮次）。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_value(const std::string &value) -> TextInputProps & { return assign(value_row(), value); }
+
+    /// @brief 写入文本值（C 字符串通道：消除字面量在值形参与句柄形参之间的重载歧义）。
+    /// @param value 新的 UTF-8 文本；nullptr 按空串处理。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_value(const char *value) -> TextInputProps & {
+        return set_value(value != nullptr ? std::string{value} : std::string{});
+    }
+
+    /// @brief 换绑文本来源（响应式换源：本控件与外部 `State` 从此共用同一来源）。
+    ///
+    /// 本库第一枚双向绑定：控件本体的逐字符编辑落进换入的那只来源，外部同一只句柄上的其它订阅
+    /// 照常收到每一轮 —— 可写来源行只接受 `State`（不接受 `ReadOnlyState`），因为本控件要写回去。
+    /// @param source 新的可写句柄来源。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_value(State<std::string> source) -> TextInputProps & { return rebind(value_row(), std::move(source)); }
+
+    /// @brief 装入占位提示。
+    /// @param value 空值时显示的文本（也充当无障碍名称）。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_placeholder(const std::string &value) -> TextInputProps & { return assign(placeholder_row(), value); }
+
+    /// @brief 装入字号（pt）。
+    /// @param value 新字号；<= 0 时绘制/度量按 14pt 兜底（见 `TextInput::effective_font_size`）。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_font_size(float value) -> TextInputProps & { return assign(font_size_row(), value); }
+
+    /// @brief 装入圆角半径（dp）；0 是「显式要直角」，与「未表态」不是同一件事。
+    /// @param value 新半径。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_corner_radius(float value) -> TextInputProps & { return assign(corner_radius_row(), value); }
+
+    /// @brief 装入内边距。
+    /// @param value 新的四边内边距。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_padding(EdgeInsets value) -> TextInputProps & { return assign(padding_row(), value); }
+
+    /// @brief 装入光标色常量值（表态即脱离主题 `roles.on_surface`）。
+    /// @param value 新光标色。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_cursor_color(Color value) -> TextInputProps & { return assign(cursor_color_row(), value); }
+
+    /// @brief 装入启用位；false = 禁用（忽略指针/键盘输入，无障碍状态并入只读）。
+    /// @param value 新的启用位。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_enabled(bool value) -> TextInputProps & { return assign(enabled_row(), value); }
+
+    /// @brief 装入文本色（表态即脱离主题 `roles.on_surface`）。
+    /// @param value 新文本色。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_text_color(Color value) -> TextInputProps & { return assign(text_color_row(), value); }
+
+    /// @brief 装入占位提示色（表态即脱离主题 `roles.on_surface_variant`）。
+    /// @param value 新占位色。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_placeholder_color(Color value) -> TextInputProps & { return assign(placeholder_color_row(), value); }
+
+    /// @brief 装入常态背景色（表态即脱离主题 `roles.surface_container`）。
+    /// @param value 新背景色。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_background(Color value) -> TextInputProps & { return assign(background_row(), value); }
+
+    /// @brief 装入聚焦态背景色（表态即脱离主题 `roles.surface_bright`）。
+    /// @param value 新聚焦背景色。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_focused_background(Color value) -> TextInputProps & { return assign(focused_background_row(), value); }
+
+    /// @brief 装入常态边框色（表态即脱离主题 `roles.outline`）。
+    /// @param value 新边框色。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_border_color(Color value) -> TextInputProps & { return assign(border_color_row(), value); }
+
+    /// @brief 装入聚焦态边框色（表态即脱离主题 `roles.primary`）。
+    /// @param value 新聚焦边框色。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_focused_border_color(Color value) -> TextInputProps & { return assign(focused_border_color_row(), value); }
+
+    /// @brief 装入边框线宽（dp）；0 = 不描边；表态即脱离主题 `controls.border_thickness`。
+    /// @param value 新线宽；不再夹取负值（负线宽按「不描边」绘制处理）。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_border_width(float value) -> TextInputProps & { return assign(border_width_row(), value); }
+
+    /// @brief 装入选区高亮色（表态即脱离「主色半透明」派生回落）。
+    /// @param value 新选区色。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_selection_color(Color value) -> TextInputProps & { return assign(selection_color_row(), value); }
+
+    /// @brief 装入长度上限（码点计数，0 = 不限）。键盘输入、粘贴与无障碍替换共用同一截断口径。
+    /// @param value 码点数上限。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_max_length(std::size_t value) -> TextInputProps & { return assign(max_length_row(), value); }
+
+    /// @brief 装入只读位；只读态可选择/复制但不可编辑（对标 Qt QLineEdit::readOnly）。
+    /// @param value true = 只读（光标与选区仍可移动）。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_read_only(bool value) -> TextInputProps & { return assign(read_only_row(), value); }
+
+    /// @brief 装入密码掩码位；显示为 •，值不变（对标 Flutter obscureText）。
+    /// @param value true = 掩码显示（命中/选区按逐字符对应的掩码串定位）。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_obscure_text(bool value) -> TextInputProps & { return assign(obscure_text_row(), value); }
+
+    /// @brief 装入书写方向（表态即覆盖 `Environment` 与进程级来源）。
+    /// @param value 新方向；RTL 时光标/命中走逻辑↔视觉镜像、方向键反转。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_direction(TextDirection value) -> TextInputProps & { return assign(direction_row(), value); }
+
+    // ---- 回落点提供者：常量档与派生档的唯一基线（同族互读只经读件） ----
+
+    /// @brief 占位提示回落基线。
+    /// @return 空串（无占位）。
+    [[nodiscard]] static auto placeholder_default() -> std::string { return {}; }
+
+    /// @brief 字号回落基线（pt）。
+    /// @return 14.0F。
+    [[nodiscard]] static auto font_size_default() -> float { return 14.0F; }
+
+    /// @brief 圆角回落基线。
+    /// @return 0.0F（直角）。
+    [[nodiscard]] static auto corner_radius_default() -> float { return 0.0F; }
+
+    /// @brief 内边距回落基线：四边同为 12dp（复现令牌层落地前的字段初值）。
+    /// @return 四边 12dp 的内边距。
+    [[nodiscard]] static auto padding_default() -> EdgeInsets {
+        return EdgeInsets{.left = 12.0F, .top = 12.0F, .right = 12.0F, .bottom = 12.0F};
+    }
+
+    /// @brief 启用位回落基线。
+    /// @return true（可编辑）。
+    [[nodiscard]] static auto enabled_default() -> bool { return true; }
+
+    /// @brief 长度上限回落基线。
+    /// @return 0（不限）。
+    [[nodiscard]] static auto max_length_default() -> std::size_t { return 0U; }
+
+    /// @brief 只读位回落基线。
+    /// @return false（可编辑）。
+    [[nodiscard]] static auto read_only_default() -> bool { return false; }
+
+    /// @brief 掩码位回落基线。
+    /// @return false（明文显示）。
+    [[nodiscard]] static auto obscure_text_default() -> bool { return false; }
+
+    /// @brief 方向回落基线：仅作读件取值，继承语义由表态位判定（见类注释）。
+    /// @return `TextDirection::LTR`。
+    [[nodiscard]] static auto direction_default() -> TextDirection { return TextDirection::LTR; }
+
+    /// @brief 选区高亮色回落点（派生档）：取当前作用域主色、压到迁移前那枚字面量的透明度档。
+    /// @param self 本属性对象（本回落点不读同族他行，形参由派生档签名固定）。
+    /// @param ctx 构建上下文：提供主题作用域。
+    /// @return 主色的 alpha = 90/255 版本（与迁移前 `{80,120,220,90}` 同透明度档、同「随主色」语义）。
+    [[nodiscard]] static auto selection_color_default(const TextInputProps &self, const BuildContext &ctx) -> Color {
+        (void)self;
+        return inherit_theme(ctx).roles.primary.with_alpha(90);
+    }
+
+  private:
+    State<std::string> value_;  ///< 文本来源（必填 ⇒ 裸句柄；可写 ⇒ 编辑落进当前源）
+    std::optional<std::string> placeholder_;  ///< 占位提示表态位
+    std::optional<float> font_size_;  ///< 字号表态位（pt）
+    std::optional<float> corner_radius_;  ///< 圆角半径表态位（dp）
+    std::optional<EdgeInsets> padding_;  ///< 内边距表态位
+    std::optional<Color> cursor_color_;  ///< 光标色表态位
+    std::optional<bool> enabled_;  ///< 启用位表态位
+    std::optional<Color> text_color_;  ///< 文本色表态位
+    std::optional<Color> placeholder_color_;  ///< 占位色表态位
+    std::optional<Color> background_;  ///< 常态背景色表态位
+    std::optional<Color> focused_background_;  ///< 聚焦背景色表态位
+    std::optional<Color> border_color_;  ///< 常态边框色表态位
+    std::optional<Color> focused_border_color_;  ///< 聚焦边框色表态位
+    std::optional<float> border_width_;  ///< 边框线宽表态位（dp）
+    std::optional<Color> selection_color_;  ///< 选区高亮色表态位
+    std::optional<std::size_t> max_length_;  ///< 长度上限表态位（码点）
+    std::optional<bool> read_only_;  ///< 只读位表态位
+    std::optional<bool> obscure_text_;  ///< 掩码位表态位
+    std::optional<TextDirection> direction_;  ///< 书写方向表态位
+
+    friend class AbstractProps<TextInputProps>;
 };
 
 /// @brief 文本输入框（叶控件）：绘制边框 + 文本（值或占位）+ 光标。
 ///
 /// - 点击经 `FocusManager::request_focus` 获焦（触发 `on_focus_change` 重绘聚焦态）。
 /// - 聚焦后接收 `onTextInput` 追加字符、`onKeyEvent` 退格（Delete/Backspace）。
-/// - 值为 `State<std::string>`，变化触发重绘；headless 下静态渲染当前文本/占位。
+/// - 值是 `State<std::string>`（可写来源行），变化触发重绘；headless 下静态渲染当前文本/占位。
 /// - 焦点全局协调由 `FocusManager` 负责（Tab 序、焦点派发），见 `aurora/event/focus.h`。
 ///
+/// 属性一律经 `TextInputProps` 的读写件访问（本类公有继承它，故 `box.set_max_length(8U)` 与
+/// `box.max_length()` 都直接可用）；`au::TextInput(au::TextInputProps().set_placeholder("Name"))`
+/// 与逐个 `set_*` 等价。
+///
 /// 可定制性（对标 Qt QLineEdit / Flutter TextField）：
-/// - 颜色：文本/占位/背景/聚焦背景/边框/聚焦边框（缺省跟随主题 primary）/选区高亮；
+/// - 颜色：文本/占位/背景/聚焦背景/边框/聚焦边框（缺省跟随主题对应角色）/选区高亮；
 /// - 行为：`max_length` 限长（码点计数）、`read_only` 只读（可选可复制不可编辑）、
 /// `obscure_text` 密码掩码显示；
 /// - 回调：`on_changed`（每次编辑）与 `on_submit`（Enter 提交）。
 /// - 窄盒长文本：内容（选区/组合串/正文/光标）裁进自身盒，水平视口随光标自动滚动
 ///   （`ensure_caret_visible`），不会画到相邻控件上。
 ///
-/// 继承扩展点（protected 虚函数）：`paint_frame`（背景+边框）；内部状态（选区/光标）
+/// 继承扩展点（protected 虚函数）：`paint_frame`（背景+边框）；内部状态（选区/光标/组合串）
 /// 为 protected，子类可直接复用。
 /// @note Thread: main-thread only
 /// @note Rebuildable: yes, via from_json
 ///
-class TextInput : public LeafWidget {
+class TextInput : public LeafWidget, public TextInputProps {
   public:
-    /// @brief 默认构造：空文本、无占位提示，字号 14pt / 内边距 12dp / 内置默认配色。
-    TextInput() = default;
-    /// @brief 以属性聚合构造：仅设占位提示、字号与初始文本，其余属性保持默认。
-    /// @param props 属性聚合：`placeholder` 空值占位提示，`font_size` 字号（点），
-    ///        `value` 写入 reactive 值 `value_`。
-    explicit TextInput(const TextInputProps &props)
-        : value_(props.value), placeholder_(props.placeholder), font_size_(props.font_size) {}
+    /// @brief 默认构造：各行未表态，生效值即该行回落点（空文本、无占位、14pt、四边 12dp、跟随主题）。
+    TextInput() { bind(*this); }
 
-    /// @brief 设置初始值（链式）。
-    /// @param v 新文本（UTF-8），整体替换 `value_` 并发出 `ValueChanged` 无障碍事件。
+    /// @brief 配置块构造：整体接管 `TextInputProps` 各行表态位。
+    /// @param props 属性对象（链式写件产出的对象），移入本对象基类子对象。
+    explicit TextInput(TextInputProps props) : TextInputProps(std::move(props)) { bind(*this); }
+
+    /// @brief 把属性面的同名读件带回重载集。
+    ///
+    /// 控件侧 `set_value(...)` 覆写要发无障碍事件，与属性面同名写件共存，显式 `using` 把属性面
+    /// 的句柄重载带回本类重载集（否则 `set_value(State<std::string>)` 在控件上不可见）。
+    using TextInputProps::set_value;
+
+    /// @brief 写入文本值（链式）：属性面写入之后补一次 ValueChanged 无障碍事件。
+    ///
+    /// 外部整体赋值就是「值变了」这一语义事件（迁移前行为，读屏与单测都依赖它）；控件内部的编辑
+    /// 路径（键入 / 粘贴 / 删除 / 无障碍替换）不经本件，改由 `notify_changed()` 统一上报，故不双发。
+    /// @param v 新的 UTF-8 文本。
     /// @return 本控件引用（`*this`），支持链式调用。
     auto set_value(const std::string &v) -> TextInput & {
-        value_ = v;
+        TextInputProps::set_value(v);
         notify_accessibility_event(AccessibilityEvent{.kind = AccessibilityEventKind::ValueChanged, .target = this});
         return *this;
     }
-    /// @brief 设置占位提示（链式）。
-    /// @param p 空值时显示的占位文本（也充当无障碍名称）。
-    /// @return 本控件引用（`*this`），支持链式调用。
-    auto set_placeholder(const std::string &p) -> TextInput & {
-        placeholder_ = p;
-        return *this;
-    }
-    /// @brief 设置字号（链式）。
-    /// @param s 字号（点）；非正时绘制/测量按 14pt 兜底。
-    /// @return 本控件引用（`*this`），支持链式调用。
-    auto font_size(float s) -> TextInput & {
-        font_size_ = s;
-        return *this;
-    }
-    /// @brief 设置圆角半径（链式）。
-    /// @param r 圆角半径（dp）；> 0 时背景与边框改画圆角。
-    /// @return 本控件引用（`*this`），支持链式调用。
-    auto set_corner_radius(float r) -> TextInput & {
-        corner_radius_ = r;
-        return *this;
-    }
-    /// @brief 设置内边距（链式）。
-    /// @param e 文本与边框之间的内边距。
-    /// @return 本控件引用（`*this`），支持链式调用。
-    auto set_padding(EdgeInsets e) -> TextInput & {
-        padding_ = e;
-        return *this;
-    }
-    /// @brief 设置光标颜色（链式）。
-    /// @param c 聚焦时光标竖条的填充色。
-    /// @return 本控件引用（`*this`），支持链式调用。
-    auto set_cursor_color(Color c) -> TextInput & {
-        cursor_color_ = c;
-        return *this;
-    }
-    /// @brief 设置是否启用（链式）；禁用态降级绘制并忽略输入。
-    /// @param v false = 禁用：忽略指针/键盘输入，无障碍状态并入只读。
-    /// @return 本控件引用（`*this`），支持链式调用。
-    auto set_enabled(bool v) -> TextInput & {
-        enabled_ = v;
-        return *this;
-    }
 
-    /// @brief 设置文本颜色（链式）。
-    /// @param c 非空且非占位态的文本绘制色。
-    /// @return 本控件引用（`*this`），支持链式调用。
-    auto set_text_color(Color c) -> TextInput & {
-        text_color_ = c;
-        return *this;
-    }
-    /// @brief 设置占位提示颜色（链式）。
-    /// @param c 空值态占位文本的绘制色。
-    /// @return 本控件引用（`*this`），支持链式调用。
-    auto set_placeholder_color(Color c) -> TextInput & {
-        placeholder_color_ = c;
-        return *this;
-    }
-    /// @brief 设置背景色（链式）。
-    /// @param c 常态（未聚焦、未禁用）背景色。
-    /// @return 本控件引用（`*this`），支持链式调用。
-    auto set_background(Color c) -> TextInput & {
-        background_ = c;
-        return *this;
-    }
-    /// @brief 设置聚焦态背景色（链式）。
-    /// @param c 获焦时替换 `background_` 绘制的背景色。
-    /// @return 本控件引用（`*this`），支持链式调用。
-    auto set_focused_background(Color c) -> TextInput & {
-        focused_background_ = c;
-        return *this;
-    }
-    /// @brief 设置边框色（链式）。
-    /// @param c 常态边框描边色。
-    /// @return 本控件引用（`*this`），支持链式调用。
-    auto set_border_color(Color c) -> TextInput & {
-        border_color_ = c;
-        return *this;
-    }
-    /// @brief 设置聚焦态边框色（链式）。不调用则跟随主题 `Theme::primary`。
-    /// @param c 获焦时边框色；同时聚焦态线宽至少加粗到 1.5dp（Fluent 式聚焦提示）。
-    /// @return 本控件引用（`*this`），支持链式调用。
-    auto set_focused_border_color(Color c) -> TextInput & {
-        focused_border_color_ = c;
-        return *this;
-    }
-    /// @brief 设置边框线宽 dp（链式；0 = 不描边）。
-    /// @param w 线宽（dp）；负值回退为 1，0 表示只填背景不描边。
-    /// @return 本控件引用（`*this`），支持链式调用。
-    auto set_border_width(float w) -> TextInput & {
-        border_width_ = w >= 0.0F ? w : 1.0F;
-        return *this;
-    }
-    /// @brief 设置选区高亮色（链式）。
-    /// @param c 选区底色矩形填充色（含头含尾模型下覆盖端点字符）。
-    /// @return 本控件引用（`*this`），支持链式调用。
-    auto set_selection_color(Color c) -> TextInput & {
-        selection_color_ = c;
-        return *this;
-    }
-    /// @brief 设置最大长度（链式；码点计数，0 = 不限）。超出部分的输入/粘贴被截断。
-    /// @param n 码点数上限；键盘输入、粘贴与无障碍替换共用同一截断口径。
-    /// @return 本控件引用（`*this`），支持链式调用。
-    auto set_max_length(std::size_t n) -> TextInput & {
-        max_length_ = n;
-        return *this;
-    }
-    /// @brief 设置只读（链式）；只读态可选择/复制但不可编辑（对标 Qt QLineEdit::readOnly）。
-    /// @param v true = 只读：键盘/粘贴/无障碍编辑被忽略，光标与选区仍可移动。
-    /// @return 本控件引用（`*this`），支持链式调用。
-    auto set_read_only(bool v) -> TextInput & {
-        read_only_ = v;
-        return *this;
-    }
-    /// @brief 是否处于只读态。
-    /// @return true = 只读（可选择/复制，不可编辑）。
-    [[nodiscard]] auto read_only() const -> bool { return read_only_; }
-    /// @brief 设置密码掩码显示（链式）；显示为 •，值不变（对标 Flutter obscureText）。
-    /// @param v true = 掩码显示（命中/选区按逐字符对应的掩码串定位）。
-    /// @return 本控件引用（`*this`），支持链式调用。
-    auto set_obscure_text(bool v) -> TextInput & {
-        obscure_ = v;
-        return *this;
-    }
-    /// @brief 设置书写方向（链式）。nullopt = 继承环境（`Directionality` 注入/进程级），
-    ///        与 Text::direction 语义一致。RTL 时光标/命中走逻辑↔视觉镜像（逻辑首字符在右缘）、
-    ///        方向键反转（ArrowLeft = 逻辑前进）。
-    /// @param d 显式方向；设置后置脏重绘。
-    /// @return 本控件引用（`*this`），支持链式调用。
-    auto set_direction(std::optional<TextDirection> d) -> TextInput & {
-        direction_ = d;
-        mark_needs_paint();
-        return *this;
-    }
-    /// @brief 显式方向（nullopt = 继承环境）。
-    /// @return 设置的显式方向；生效方向（含环境继承结果）见布局期缓存的 `cached_direction_`。
-    [[nodiscard]] auto direction() const -> std::optional<TextDirection> { return direction_; }
+    /// @brief 运行时可查询的默认属性值（属性表的单一事实来源）。
+    /// @return 一份缺省构造的 `TextInputProps`：各行未表态，生效值即该行回落点。
+    [[nodiscard]] static auto defaults() -> TextInputProps { return {}; }
+
     /// @brief 设置变化回调（链式）；每次用户编辑（输入/退格/剪切/粘贴）后触发。
     /// @param cb 回调，收参为编辑后的最新文本（UTF-8）。
     /// @return 本控件引用（`*this`），支持链式调用。
@@ -208,6 +589,7 @@ class TextInput : public LeafWidget {
         on_changed_ = std::move(cb);
         return *this;
     }
+
     /// @brief 设置提交回调（链式）；Enter 键触发。
     /// @param cb 回调，收参为提交时的当前文本（UTF-8）。
     /// @return 本控件引用（`*this`），支持链式调用。
@@ -216,9 +598,10 @@ class TextInput : public LeafWidget {
         return *this;
     }
 
-    /// @brief 登记响应式信号：文本值 `value_` 变化经信号驱动重绘。
+    /// @brief 登记响应式信号：全部来源行经机制层采集（本表即 `value` 一枚可写来源行）。
     /// @param out 输出参数：追加本控件依赖的信号视图指针。
-    auto collect_signals(StateSink &out) -> void override { out.push(value_); }
+    auto collect_signals(StateSink &out) -> void override { collect_prop_sources(out); }
+
     /// @brief 类型名（注册 / 诊断 / Inspector 通道）。
     /// @return "TextInput"。
     [[nodiscard]] auto type_name() const -> const char * override { return "TextInput"; }
@@ -229,22 +612,22 @@ class TextInput : public LeafWidget {
     /// @return 按当前盒尺寸与字体度量算出的基线距离（恒有值）。
     [[nodiscard]] auto baseline_distance([[maybe_unused]] const BuildContext &ctx) const
         -> std::optional<float> override {
-        const float fs = font_size_ > 0.0F ? font_size_ : 14.0F;
-        const Font f{.size_pt = fs};
+        const Font f{.size_pt = effective_font_size()};
         const float th = render::FontEngine::measure_height(f);
-        return padding_.top + ((size().height - padding_.top - padding_.bottom - th) * 0.5F) +
+        const EdgeInsets pad = padding();
+        return pad.top + ((size().height - pad.top - pad.bottom - th) * 0.5F) +
                render::FontEngine::measure_ascent(f);  // 末项加真实字体 ascent，得到内容盒顶 → 基线距离。
     }
 
     /// @brief 无障碍名称：无宿主覆写时以占位提示充当（编辑框的屏幕阅读器惯例）。
     /// @return 占位提示文本（UTF-8；未设置占位时为空串）。
     /// @note Side-effects: pure
-    [[nodiscard]] auto accessibility_label() const -> std::string override { return placeholder_; }
+    [[nodiscard]] auto accessibility_label() const -> std::string override { return placeholder(); }
 
     /// @brief 无障碍值：取当前编辑内容（`value()`）。
     /// @return 当前文本；组合态含光标处的 preedit（与绘制显示一致）。
     /// @note Side-effects: reads state
-    [[nodiscard]] auto accessibility_value() const -> std::string override { return composed_text(value_.get()); }
+    [[nodiscard]] auto accessibility_value() const -> std::string override { return composed_text(value()); }
 
     // ---- 无障碍语义：状态 + TextPattern 支撑的四组文本钩子 + Value 动作 ----
 
@@ -253,25 +636,25 @@ class TextInput : public LeafWidget {
     /// @note Side-effects: reads state
     [[nodiscard]] auto accessibility_state() const -> AccessibilityState override {
         AccessibilityState s = Widget::accessibility_state();  // 先取基类通用状态，再覆写输入框特有字段。
-        s.read_only = read_only_ || !enabled_;
-        s.disabled = !enabled_;
-        s.password = obscure_;
+        s.read_only = read_only() || !enabled();
+        s.disabled = !enabled();
+        s.password = obscure_text();
         s.multiline = false;  // 单行输入框（UIA Edit；多行控件覆写为 true → Document）
         return s;
     }
 
-    /// @brief 无障碍文本全文（UTF-8）：`value_` 本体，**不含**组合期 preedit
+    /// @brief 无障碍文本全文（UTF-8）：文本来源的现值，**不含**组合期 preedit
     ///        （组合中文本属未确定态，读屏读 value 即可）。
     /// @return 全文的 UTF-8 视图（空文本时为空串）。
-    /// @note 返回视图指向 `value_` 的存量字符串：控件存活期间有效。
+    /// @note 返回视图指向来源的存量字符串：控件存活期间有效。
     /// @note Side-effects: reads state
-    [[nodiscard]] auto accessibility_text() const -> std::string_view override { return value_.get(); }
+    [[nodiscard]] auto accessibility_text() const -> std::string_view override { return value_ref(); }
 
     /// @brief 无障碍选区：内部「含头含尾码点下标」模型 → UTF-8 字节半开区间 `[start, end)`。
     /// @return 选区字节区间；无选区时 start == end（光标位置），恒有值。
     /// @note Side-effects: reads state
     [[nodiscard]] auto accessibility_selection() const -> std::optional<AccessibilityTextSelection> override {
-        const std::string &v = value_.get();
+        const std::string &v = value_ref();
         AccessibilityTextSelection sel;  // 待填的 UTF-8 字节半开区间；无选区时两端重合于光标。
         if (has_selection()) {
             const std::size_t a = std::min(sel_start_, sel_end_);
@@ -291,7 +674,7 @@ class TextInput : public LeafWidget {
     /// @param end 半开区间终点（等于 start = 清空选区、光标落位）。
     /// @note Side-effects: mutates selection state
     auto accessibility_set_selection(std::size_t start, std::size_t end) -> void override {
-        const std::string &v = value_.get();
+        const std::string &v = value_ref();
         const std::size_t b0 = byte_to_cp(v, std::min(start, v.size()));
         const std::size_t b1 = byte_to_cp(v, std::min(end, v.size()));
         const std::size_t a = std::min(b0, b1);
@@ -317,7 +700,7 @@ class TextInput : public LeafWidget {
     ///       几何断言只能靠真机探针（`tools/verify/win32_ua_live_probe`）。
     /// @note Side-effects: reads layout/state
     [[nodiscard]] auto accessibility_char_bounds(std::size_t utf8_index) const -> std::optional<Rect> override {
-        const std::string &v = value_.get();
+        const std::string &v = value_ref();
         if (utf8_index >= v.size()) {
             return std::nullopt;
         }
@@ -325,8 +708,7 @@ class TextInput : public LeafWidget {
         if (box.size.width <= 0.0F || box.size.height <= 0.0F) {
             return std::nullopt;
         }
-        const float fs = font_size_ > 0.0F ? font_size_ : 14.0F;
-        const Font f{.size_pt = fs};
+        const Font f{.size_pt = effective_font_size()};
         if (!v.empty() && render::FontEngine::measure_width(v, f) <= 0.0F) {
             return std::nullopt;  // 无可用字体：度量不可用，交由真机验证
         }
@@ -338,7 +720,7 @@ class TextInput : public LeafWidget {
         const float x0 = render::FontEngine::caret_x(v, cp, f, layout_opts());
         const float x1 = render::FontEngine::caret_x(v, cp + 1, f, layout_opts());
         const float th = render::FontEngine::measure_height(f);
-        return Rect{.origin = Point{.x = tx + x0, .y = box.origin.y + padding_.top},
+        return Rect{.origin = Point{.x = tx + x0, .y = box.origin.y + padding().top},
                     .size = Size{.width = std::max(0.0F, x1 - x0), .height = th}};
     }
 
@@ -347,22 +729,23 @@ class TextInput : public LeafWidget {
     /// @param start 替换区间起点（UTF-8 字节偏移，越界夹紧）。
     /// @param end 替换区间终点（半开；小于 start 时按 start 收敛）。
     /// @param utf8 新文本（UTF-8）；超过 `max_length` 剩余额度按码点截断。
-    /// @note Side-effects: mutates state（写回 `value_`，触发 `on_changed` 与 ValueChanged 事件）
+    /// @note Side-effects: mutates state（写回文本来源，触发 `on_changed` 与 ValueChanged 事件）
     auto accessibility_replace_text(std::size_t start, std::size_t end, std::string_view utf8) -> void override {
-        if (read_only_ || !enabled_) {
+        if (read_only() || !enabled()) {
             return;
         }
-        const std::string v = value_.get();
+        const std::string v = value();
         const std::size_t a = std::min(start, v.size());
         const std::size_t b = std::clamp(end, a, v.size());
         std::string next = v.substr(0, a);
         next.append(utf8);
         next.append(v, b, std::string::npos);
-        if (max_length_ > 0 && cp_count(next) > max_length_) {
-            next = cp_slice(next, 0, max_length_);  // 限长按码点截断（与键盘输入同口径）
+        const std::size_t limit = max_length();
+        if (limit > 0 && cp_count(next) > limit) {
+            next = cp_slice(next, 0, limit);  // 限长按码点截断（与键盘输入同口径）
         }
-        value_ = std::move(next);
-        const std::size_t caret_cp = byte_to_cp(value_.get(), std::min(a + utf8.size(), value_.get().size()));
+        TextInputProps::set_value(std::move(next));
+        const std::size_t caret_cp = byte_to_cp(value_ref(), std::min(a + utf8.size(), value_ref().size()));
         caret_ = caret_cp;
         sel_start_ = caret_cp;
         sel_end_ = AURORA_NO_SEL;
@@ -370,7 +753,7 @@ class TextInput : public LeafWidget {
         mark_needs_layout();
         mark_needs_paint();
         if (on_changed_) {
-            on_changed_(value_.get());
+            on_changed_(value_ref());
         }
         notify_accessibility_event(AccessibilityEvent{.kind = AccessibilityEventKind::ValueChanged, .target = this});
     }
@@ -382,7 +765,7 @@ class TextInput : public LeafWidget {
     /// @note Side-effects: mutates state
     auto perform_accessibility_action(const AccessibilityActionRequest &req) -> bool override {
         if (req.action == AccessibilityAction::Value) {
-            accessibility_replace_text(0, value_.get().size(), req.text);
+            accessibility_replace_text(0, value_ref().size(), req.text);
             return true;
         }
         return Widget::perform_accessibility_action(req);
@@ -405,258 +788,35 @@ class TextInput : public LeafWidget {
     /// @note Side-effects: pure
     [[nodiscard]] auto wants_navigation_keys() const -> bool override { return true; }
 
-    /// @brief 运行时自描述（规格附录 B）。
-    /// @return 属性表（与链式 setter 同名同缺省）、事件表与示例齐备的 `WidgetDescriptor`。
+    /// @brief 运行时自描述（规格附录 B）：属性项全部由权威表发射，控件只补自己的事实。
+    /// @return 名为 "TextInput" 的描述表：`properties` 按 `rows()` 点名顺序，事件含三枚回调，无子节点。
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
-        return WidgetDescriptor{
-            .name = "TextInput",
-            .properties =
-                {
-                    {.name = "value",
-                     .type = "string",
-                     .default_value = "\"\"",
-                     .required = false,
-                     .note = "Initial text",
-                     .json_type = "string"},
-                    {.name = "placeholder",
-                     .type = "string",
-                     .default_value = "\"\"",
-                     .required = false,
-                     .note = "Placeholder shown when empty",
-                     .json_type = "string"},
-                    {.name = "font_size",
-                     .type = "float",
-                     .default_value = "14.0",
-                     .required = false,
-                     .note = "Font size (pt)",
-                     .json_type = "number",
-                     .enum_values = {},
-                     .min_value = "0"},
-                    {.name = "corner_radius",
-                     .type = "float",
-                     .default_value = "0.0",
-                     .required = false,
-                     .note = "Corner radius (dp)",
-                     .json_type = "number",
-                     .enum_values = {},
-                     .min_value = "0"},
-                    {.name = "padding",
-                     .type = "EdgeInsets",
-                     .default_value = "{12,12,12,12}",
-                     .required = false,
-                     .note = "Padding",
-                     .json_type = "object"},
-                    {.name = "cursor_color",
-                     .type = "Color",
-                     .default_value = "Color::black()",
-                     .required = false,
-                     .note = "Cursor color",
-                     .json_type = "array"},
-                    {.name = "enabled",
-                     .type = "bool",
-                     .default_value = "true",
-                     .required = false,
-                     .note = "Editable",
-                     .json_type = "boolean"},
-                    {.name = "text_color",
-                     .type = "Color",
-                     .default_value = "{20,20,20,255}",
-                     .required = false,
-                     .note = "Text color",
-                     .json_type = "array"},
-                    {.name = "placeholder_color",
-                     .type = "Color",
-                     .default_value = "{150,150,150,255}",
-                     .required = false,
-                     .note = "Placeholder text color",
-                     .json_type = "array"},
-                    {.name = "background",
-                     .type = "Color",
-                     .default_value = "{240,240,240,255}",
-                     .required = false,
-                     .note = "Background color",
-                     .json_type = "array"},
-                    {.name = "focused_background",
-                     .type = "Color",
-                     .default_value = "{245,248,255,255}",
-                     .required = false,
-                     .note = "Focused background color",
-                     .json_type = "array"},
-                    {.name = "border_color",
-                     .type = "Color",
-                     .default_value = "{120,120,120,255}",
-                     .required = false,
-                     .note = "Border color",
-                     .json_type = "array"},
-                    {.name = "focused_border_color",
-                     .type = "Color",
-                     .default_value = "theme.primary",
-                     .required = false,
-                     .note = "Focused border color (defaults to theme primary)",
-                     .json_type = "array"},
-                    {.name = "border_width",
-                     .type = "float",
-                     .default_value = "1.0",
-                     .required = false,
-                     .note = "Border width (dp); 0 = no border",
-                     .json_type = "number",
-                     .enum_values = {},
-                     .min_value = "0"},
-                    {.name = "selection_color",
-                     .type = "Color",
-                     .default_value = "{80,120,220,90}",
-                     .required = false,
-                     .note = "Selection highlight color",
-                     .json_type = "array"},
-                    {.name = "max_length",
-                     .type = "int",
-                     .default_value = "0",
-                     .required = false,
-                     .note = "Max length (code points); 0 = unlimited",
-                     .json_type = "integer",
-                     .enum_values = {},
-                     .min_value = "0"},
-                    {.name = "read_only",
-                     .type = "bool",
-                     .default_value = "false",
-                     .required = false,
-                     .note = "Read-only (selectable and copyable, not editable)",
-                     .json_type = "boolean"},
-                    {.name = "obscure_text",
-                     .type = "bool",
-                     .default_value = "false",
-                     .required = false,
-                     .note = "Password masked display",
-                     .json_type = "boolean"},
-                    {.name = "width",
-                     .type = "Length",
-                     .default_value = "auto",
-                     .required = false,
-                     .note = "",
-                     .json_type = "array"},
-                    {.name = "height",
-                     .type = "Length",
-                     .default_value = "auto",
-                     .required = false,
-                     .note = "",
-                     .json_type = "array"},
-                    {.name = "show",
-                     .type = "bool",
-                     .default_value = "true",
-                     .required = false,
-                     .note = "",
-                     .json_type = "boolean"},
-                },
-            .events = {"on_focus_change", "on_changed", "on_submit"},
-            .children_policy = "none",
-            .examples = {"au::TextInput().set_placeholder(\"Enter name\")"},
-        };
+        auto descriptor = props_descriptor("TextInput");
+        descriptor.events = {"on_focus_change", "on_changed", "on_submit"};
+        descriptor.children_policy = "none";
+        descriptor.examples = {"au::TextInput(au::TextInputProps().set_placeholder(\"Enter name\"))",
+                               "au::TextInput(au::TextInputProps().set_max_length(11U).set_obscure_text(true))"};
+        return descriptor;
     }
+
     /// @brief 实例侧自描述：直接转发静态 `describe_static()`（属性表与实例状态无关）。
     /// @return 与 `describe_static()` 相同的描述符。
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
-    /// @brief 序列化属性：导出文本/占位/字号/圆角/内边距/光标与各状态色等输入框字段；
-    ///        聚焦边框色与方向仅在显式设置时写出（保留「跟随主题 / 继承环境」语义），
-    ///        max_length / read_only / obscure_text 仅在生效时写出。
-    /// @param props 目标 JSON 对象（基类先写通用布局字段）。
+    /// @brief 序列化属性：先由基类写通用布局字段，再按权威表逐行写出（未表态的行不产生键）。
+    /// @param props 目标 JSON 对象。
     auto serialize_props(Json &props) const -> void override {
-        Widget::serialize_props(props);  // 先由基类写入通用布局字段（width/height/show 等）。
-        props.set("value", value_.get());
-        props.set("placeholder", placeholder_);
-        props.set("font_size", font_size_);
-        props.set("corner_radius", corner_radius_);
-        props.set("padding", edge_insets_to_json(padding_));
-        props.set("cursor_color", color_to_json(cursor_color_));
-        props.set("enabled", Json{enabled_});
-        props.set("text_color", color_to_json(text_color_));
-        props.set("placeholder_color", color_to_json(placeholder_color_));
-        props.set("background", color_to_json(background_));
-        props.set("focused_background", color_to_json(focused_background_));
-        props.set("border_color", color_to_json(border_color_));
-        if (focused_border_color_.has_value()) {
-            props.set("focused_border_color",
-                      color_to_json(*focused_border_color_));  // 未设置不输出：保留「跟随主题」语义
-        }
-        props.set("border_width", border_width_);
-        props.set("selection_color", color_to_json(selection_color_));
-        if (direction_.has_value()) {  // 未设置不输出：保留「继承环境」语义
-            props.set("direction", *direction_ == TextDirection::RTL ? "RTL" : "LTR");
-        }
-        if (max_length_ > 0) {
-            props.set("max_length", max_length_);
-        }
-        if (read_only_) {
-            props.set("read_only", Json{read_only_});
-        }
-        if (obscure_) {
-            props.set("obscure_text", Json{obscure_});
-        }
+        Widget::serialize_props(props);
+        props_serialize(props);
     }
 
     /// @brief 反序列化属性（Factory `from_json` 重建通道）：键与 `serialize_props` 同名，
-    ///        缺键保持当前值（「未设置 = 跟随主题/继承环境」语义得以保留）。
-    /// @param props 外部传入的属性 JSON 对象。
+    ///        缺键保持现值；`value` 是可写来源行，故写进**当前源**而不换绑，外部绑定照常保住。
+    /// @note 非法值一律不写入：可空行撤表态（生效值退回该行回落点）并经 Diagnostics 上报。
+    /// @param props 源 JSON 对象。
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
-        if (props.contains("value")) {
-            value_ = props.at("value")->as_or<std::string>("");
-        }
-        if (props.contains("placeholder")) {
-            placeholder_ = props.at("placeholder")->as_or<std::string>("");
-        }
-        if (props.contains("font_size")) {
-            font_size_ = props.at("font_size")->as_or<float>(0.0F);
-        }
-        if (props.contains("corner_radius")) {
-            corner_radius_ = props.at("corner_radius")->as_or<float>(0.0F);
-        }
-        if (props.contains("padding")) {
-            padding_ = json_to_edge_insets(*props.at("padding"));
-        }
-        if (props.contains("cursor_color")) {
-            cursor_color_ = json_to_color(*props.at("cursor_color"));
-        }
-        if (props.contains("enabled")) {
-            enabled_ = props.at("enabled")->as_or<bool>(false);
-        }
-        if (props.contains("text_color")) {
-            text_color_ = json_to_color(*props.at("text_color"));
-        }
-        if (props.contains("placeholder_color")) {
-            placeholder_color_ = json_to_color(*props.at("placeholder_color"));
-        }
-        if (props.contains("background")) {
-            background_ = json_to_color(*props.at("background"));
-        }
-        if (props.contains("focused_background")) {
-            focused_background_ = json_to_color(*props.at("focused_background"));
-        }
-        if (props.contains("border_color")) {
-            border_color_ = json_to_color(*props.at("border_color"));
-        }
-        if (props.contains("focused_border_color")) {
-            focused_border_color_ = json_to_color(*props.at("focused_border_color"));
-        }
-        if (props.contains("border_width")) {
-            border_width_ = props.at("border_width")->as_or<float>(0.0F);
-        }
-        if (props.contains("selection_color")) {
-            selection_color_ = json_to_color(*props.at("selection_color"));
-        }
-        if (props.contains("max_length")) {
-            max_length_ = props.at("max_length")->as_or<std::size_t>(0);
-        }
-        if (props.contains("read_only")) {
-            read_only_ = props.at("read_only")->as_or<bool>(false);
-        }
-        if (props.contains("obscure_text")) {
-            obscure_ = props.at("obscure_text")->as_or<bool>(false);
-        }
-        if (props.contains("direction") && props.at("direction")->is_string()) {
-            direction_ =
-                props.at("direction")->as_or<std::string>("") == "RTL" ? TextDirection::RTL : TextDirection::LTR;
-        }
+        props_deserialize(props);
     }
 
     /// @brief 指针交互：Press 定位光标/选区锚点并请求焦点，Move 拖拽扩选（含头含尾），
@@ -664,7 +824,7 @@ class TextInput : public LeafWidget {
     ///        禁用态不响应任何指针交互；基类的 activate/长按计时行为保留。
     /// @param e 鼠标事件（本地坐标；消费时置 `is_handled`）。
     auto on_pointer_event(MouseEvent &e) -> void override {
-        if (!enabled_) {
+        if (!enabled()) {
             return;  // 禁用态不响应任何指针交互
         }
         // 保留基类行为：activate / 长按计时（命中即消费）。
@@ -672,7 +832,7 @@ class TextInput : public LeafWidget {
 
         // 命中测试与实绘同源：掩码态下按掩码串定位（逐字符一一对应，码点下标一致）。
         const std::string v = display_value();
-        const Font f{.size_pt = font_size_ > 0.0F ? font_size_ : 14.0F};
+        const Font f{.size_pt = effective_font_size()};
         const render::TextLayoutOpts opts = layout_opts();
         // 文本空间横坐标：本地 x 先扣掉「自然原点 + 视口」偏移，命中与实绘同源。
         const float text_w = render::FontEngine::measure_width(v, f, opts);
@@ -707,11 +867,11 @@ class TextInput : public LeafWidget {
     ///        非 Down、未聚焦或禁用态直接放行。
     /// @param e 键盘事件（消费时置 `is_handled`）。
     auto on_key_event(KeyEvent &e) -> void override {  // NOLINT
-        if (!enabled_ || !is_focused() || e.action != KeyAction::Down) {
+        if (!enabled() || !is_focused() || e.action != KeyAction::Down) {
             return;
         }
-        const std::string &v = value_.get();
-        const Font f{.size_pt = font_size_ > 0.0F ? font_size_ : 14.0F};
+        const std::string &v = value_ref();
+        const Font f{.size_pt = effective_font_size()};
         const bool shift = (e.modifiers & ModifierKey::Shift) != 0u;  // NOLINT
         const bool ctrl = (e.modifiers & ModifierKey::Control) != 0u;  // NOLINT
         const size_t n = cp_count(v);
@@ -750,7 +910,7 @@ class TextInput : public LeafWidget {
                                       "TextInput::on_key_event", copied.error().code);
                 }
                 // 复制没成就不删：剪切删了便无处可粘，宁可让选区留在原地等用户重试。
-                if (!read_only_ && copied) {
+                if (!read_only() && copied) {
                     delete_selection();
                     notify_changed();
                     mark_needs_paint();
@@ -761,7 +921,7 @@ class TextInput : public LeafWidget {
         }
         // Ctrl+V: 粘贴（只读态忽略；超出 max_length 部分截断）
         if (ctrl && e.key == static_cast<int>(KeyCode::V)) {
-            if (read_only_) {
+            if (read_only()) {
                 e.is_handled = true;
                 return;
             }
@@ -777,12 +937,12 @@ class TextInput : public LeafWidget {
                 if (sel_end_ != AURORA_NO_SEL) {
                     delete_selection();
                 }
-                if (max_length_ > 0) {
-                    const size_t room = max_length_ > cp_count(value_.get()) ? max_length_ - cp_count(value_.get()) : 0;
+                if (max_length() > 0) {
+                    const size_t room = max_length() > cp_count(value_ref()) ? max_length() - cp_count(value_ref()) : 0;
                     clip = cp_slice(clip, 0, room);  // 限长：仅插入剩余额度内的码点
                 }
 
-                std::string pv = value_.get();
+                std::string pv = value_ref();
                 size_t pi = 0;
                 size_t pcp = 0;
                 while (pi < pv.size() && pcp < caret_) {
@@ -790,7 +950,7 @@ class TextInput : public LeafWidget {
                     ++pcp;
                 }
                 pv.insert(pi, clip);
-                value_ = pv;
+                TextInputProps::set_value(pv);
                 caret_ += cp_count(clip);
                 sel_start_ = caret_;
                 sel_end_ = AURORA_NO_SEL;
@@ -804,7 +964,7 @@ class TextInput : public LeafWidget {
         // Enter: 提交回调（对标 Qt returnPressed / Flutter onSubmitted）
         if (e.key == static_cast<int>(KeyCode::Enter)) {
             if (on_submit_) {
-                on_submit_(value_.get());
+                on_submit_(value_ref());
             }
             e.is_handled = true;
             return;
@@ -874,7 +1034,7 @@ class TextInput : public LeafWidget {
         }
 
         if (e.key == static_cast<int>(KeyCode::Backspace)) {
-            if (read_only_) {
+            if (read_only()) {
                 e.is_handled = true;
                 return;
             }
@@ -906,10 +1066,10 @@ class TextInput : public LeafWidget {
     /// @brief 字符输入：启用且聚焦时走统一插入路径 `insert_at_caret`（选区替换 + 限长）。
     /// @param e 输入事件（禁用/未聚焦放行；只读态吞掉不落字；落字即消费）。
     auto on_text_input(TextInputEvent &e) -> void override {
-        if (!enabled_ || !is_focused()) {
+        if (!enabled() || !is_focused()) {
             return;
         }
-        if (read_only_) {
+        if (read_only()) {
             e.is_handled = true;  // 只读态吞掉输入不落字
             return;
         }
@@ -927,11 +1087,11 @@ class TextInput : public LeafWidget {
     /// @param e 组合事件：`committed` 上屏文本、`preedit` 未上屏串及其光标/选区下标。
     auto on_text_composition(TextCompositionEvent &e) -> void override {
         // 与 `on_text_input` 完全同构：禁用/未聚焦 → 不消费；只读 → 消费但不落地。
-        if (!enabled_ || !is_focused()) {
+        if (!enabled() || !is_focused()) {
             return;
         }
         e.is_handled = true;
-        if (read_only_) {
+        if (read_only()) {
             return;  // 只读：不落字也不显示 preedit
         }
         if (!e.committed.empty()) {
@@ -961,23 +1121,24 @@ class TextInput : public LeafWidget {
         if (box.size.width <= 0.0F || box.size.height <= 0.0F) {
             return box;
         }
-        const float fs = font_size_ > 0.0F ? font_size_ : 14.0F;
+        const float fs = effective_font_size();
         const Font f{.size_pt = fs};
-        const bool empty = value_.get().empty() && !is_composing();
-        const std::string shown = composed_text(empty ? placeholder_ : display_value());
+        const bool empty = value_ref().empty() && !is_composing();
+        const std::string shown = composed_text(empty ? placeholder() : display_value());
         const float th = render::FontEngine::measure_height(f);
         const render::TextLayoutOpts opts = layout_opts();
         const float text_w = render::FontEngine::measure_width(shown, f, opts);
         const float area_w = text_area_width(box.size.width);
         const float tx = box.origin.x + text_origin_offset(text_w, area_w);
-        const float ty = box.origin.y + padding_.top + ((box.size.height - padding_.top - padding_.bottom - th) * 0.5F);
+        const float ty =
+            box.origin.y + padding().top + ((box.size.height - padding().top - padding().bottom - th) * 0.5F);
         const size_t ci = composed_index(caret_) + preedit_cursor_;
         const float cx = tx + render::FontEngine::caret_x(shown, ci, f, opts);
         return Rect{.origin = Point{.x = cx, .y = ty}, .size = Size{.width = 0.0F, .height = th}};
     }
 
     /// @brief 当前预编辑串（组合中的未上屏文本）；无组合时为空串。
-    /// @return preedit 的 UTF-8 副本（不进 `value_`，仅绘制/测量期可见）。
+    /// @return preedit 的 UTF-8 副本（不进 `value` 行，仅绘制/测量期可见）。
     [[nodiscard]] auto preedit() const -> std::string { return preedit_; }
 
     /// @brief 是否处于组合态（preedit 非空）。
@@ -987,10 +1148,6 @@ class TextInput : public LeafWidget {
     /// @brief 组合光标在 preedit 内的码点下标（候选插入点）。
     /// @return 下标（更新时已夹紧到 preedit 码点数）。
     [[nodiscard]] auto composition_cursor() const -> std::size_t { return preedit_cursor_; }
-
-    /// @brief 当前文本值（只读，供测试 / 外部读取）。
-    /// @return `value_` 的 UTF-8 副本（不含 preedit）。
-    [[nodiscard]] auto value() const -> std::string { return value_.get(); }
 
     /// @brief 是否有活动选区（无选区时 sel_end_ == AURORA_NO_SEL）。
     /// @return true = 存在含头含尾选区；false = 仅光标（无字符被选中）。
@@ -1004,10 +1161,26 @@ class TextInput : public LeafWidget {
         }
         const size_t a = std::min(sel_start_, sel_end_);
         const size_t b = std::max(sel_start_, sel_end_);
-        return cp_slice(value_.get(), a, b - a + 1);  // 含尾计数
+        return cp_slice(value_ref(), a, b - a + 1);  // 含尾计数
     }
 
   protected:
+    // ---- 内部读件：属性面上的行读件在控件侧的取用形态 ----
+
+    /// @brief 文本来源的现值引用（可写来源行的读视图，避开逐处拷贝）。
+    ///
+    /// 引用由来源节点持有、与 `value` 行同源，故在控件存活期间有效；编辑路径写回的正是这一份存储，
+    /// 外部那只 `State<std::string>` 读到的也是它（双向绑定的物理依据）。
+    /// @return 当前文本的常引用（不含组合期 preedit）。
+    [[nodiscard]] auto value_ref() const -> const std::string & { return read(value_row()).get(); }
+
+    /// @brief 有效字号（pt）：非正值降级为该行回落基线，供绘制/度量/命中共用。
+    /// @return 严格为正的字号（pt）。
+    [[nodiscard]] auto effective_font_size() const -> float {
+        const float fs = font_size();
+        return fs > 0.0F ? fs : TextInputProps::font_size_default();
+    }
+
     // ---- 继承扩展点 ----
 
     /// @brief 生效布局选项：direction 取缓存方向（布局期解析），nullopt 时保持默认
@@ -1023,7 +1196,7 @@ class TextInput : public LeafWidget {
     /// @param box_w 控件盒宽（dp）。
     /// @return 可用于排版文本的宽度（≥ 0）。
     [[nodiscard]] auto text_area_width(float box_w) const -> float {
-        return std::max(0.0F, box_w - padding_.left - padding_.right);
+        return std::max(0.0F, box_w - padding().left - padding().right);
     }
 
     /// @brief 文本自然原点的盒内偏移（左内边距 + RTL 右对齐 − 水平视口）。
@@ -1034,7 +1207,7 @@ class TextInput : public LeafWidget {
     /// @return 相对控件盒左沿的偏移；RTL 未超宽时额外右对齐，超宽时由视口夹取。
     [[nodiscard]] auto text_origin_offset(float text_w, float area_w) const -> float {
         const float align = (cached_direction_ == TextDirection::RTL) ? std::max(0.0F, area_w - text_w) : 0.0F;
-        return padding_.left + align - std::clamp(view_x_, 0.0F, std::max(0.0F, text_w - area_w));
+        return padding().left + align - std::clamp(view_x_, 0.0F, std::max(0.0F, text_w - area_w));
     }
 
     /// @brief 把水平视口推到「光标可见」：光标左缘越出左界则回卷到光标处，
@@ -1049,7 +1222,7 @@ class TextInput : public LeafWidget {
     /// @param box_w 即将生效的控件盒宽（dp）。
     /// @note Side-effects: 可能写 `view_x_` 并标脏
     auto ensure_caret_visible_for(float box_w) -> void {
-        const Font f{.size_pt = font_size_ > 0.0F ? font_size_ : 14.0F};
+        const Font f{.size_pt = effective_font_size()};
         const std::string shown = composed_text(display_value());
         const float text_w = render::FontEngine::measure_width(shown, f, layout_opts());
         const float area_w = text_area_width(box_w);
@@ -1076,12 +1249,13 @@ class TextInput : public LeafWidget {
     auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
         // 缓存生效方向：事件路径（on_pointer_event/on_key_event）拿不到 BuildContext，
         // 与 Text 缓存 resolved_text 同模式——布局期解析一次，事件/绘制共用。
-        cached_direction_ = direction_.has_value() ? direction_ : explicit_text_direction(ctx);
-        const float fs = font_size_ > 0.0F ? font_size_ : 14.0F;
+        cached_direction_ =
+            present(direction_row()) ? std::optional<TextDirection>{direction()} : explicit_text_direction(ctx);
+        const float fs = effective_font_size();
         const Font f{.size_pt = fs};
-        const std::string shown = composed_text(value_.get().empty() ? placeholder_ : display_value());
-        const float tw = render::FontEngine::measure_width(shown, f) + padding_.left + padding_.right;
-        const float h = render::FontEngine::measure_height(f) + padding_.top + padding_.bottom;
+        const std::string shown = composed_text(value_ref().empty() ? placeholder() : display_value());
+        const float tw = render::FontEngine::measure_width(shown, f) + padding().left + padding().right;
+        const float h = render::FontEngine::measure_height(f) + padding().top + padding().bottom;
         const float w = (c.max.width != Size::infinity().width) ? c.max.width : tw;
         const Size sz = c.constrain(Size{.width = w, .height = h});
         // 盒宽变化（含收窄）后光标可能落到视口外：布局期即回卷，绘制不会出现「光标失踪」。
@@ -1090,30 +1264,30 @@ class TextInput : public LeafWidget {
     }
 
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
-        const float fs = font_size_ > 0.0F ? font_size_ : 14.0F;
+        const float fs = effective_font_size();
         const Font f{.size_pt = fs};
-        const bool disabled = !enabled_;
+        const bool disabled = !enabled();
 
         paint_frame(p, bounds, ctx);
         // 内容（选区 / 组合串 / 正文 / 光标）一律裁进自身盒：窄盒里的长文本不得画到邻居身上。
         // 圆角盒走圆角裁剪，与 `paint_frame` 的圆角外观一致。
-        const bool rounded_clip = corner_radius_ > 0.0F;
+        const bool rounded_clip = corner_radius() > 0.0F;
         if (rounded_clip) {
-            p.push_clip_rounded(bounds, corner_radius_);
+            p.push_clip_rounded(bounds, corner_radius());
         } else {
             p.push_clip(bounds);
         }
 
-        const bool empty = value_.get().empty() && !is_composing();
-        const std::string shown = composed_text(empty ? placeholder_ : display_value());
+        const bool empty = value_ref().empty() && !is_composing();
+        const std::string shown = composed_text(empty ? placeholder() : display_value());
         const Color text_col = [&] {  // NOLINT
             if (disabled) {
                 return Color{150, 150, 152, 255};
             }
             if (empty) {
-                return placeholder_color_;
+                return placeholder_color(ctx);
             }
-            return text_color_;
+            return text_color(ctx);
         }();
         // 文本原点 = 自然原点（左内边距；RTL 未超宽时右对齐到右内边距）+ 生效水平视口。
         // 视口只由 `ensure_caret_visible()` 推进；绘制侧仅按当前文本宽度夹取，不写状态，
@@ -1123,7 +1297,7 @@ class TextInput : public LeafWidget {
         const float tx = bounds.origin.x + text_origin_offset(text_w, area_w);
         const float th = render::FontEngine::measure_height(f);
         const float ty =
-            bounds.origin.y + padding_.top + ((bounds.size.height - padding_.top - padding_.bottom - th) * 0.5F);
+            bounds.origin.y + padding().top + ((bounds.size.height - padding().top - padding().bottom - th) * 0.5F);
 
         // 选区高亮（含头含尾模型）：无选区不画；端点字符（含行尾/行首）始终计入。
         // 组合期间 `shown` 含 preedit，故下标须经 `composed_index` 映射，否则高亮整体错位。
@@ -1134,7 +1308,7 @@ class TextInput : public LeafWidget {
             const float x0 = tx + render::FontEngine::caret_x(shown, a, f, opts);
             const float x1 = tx + render::FontEngine::caret_x(shown, b + 1, f, opts);  // 含尾：+1
             p.fill_rect(Rect{.origin = Point{.x = x0, .y = ty}, .size = Size{.width = x1 - x0, .height = th}},
-                        selection_color_);
+                        selection_color(ctx));
         }
 
         // 组合态：preedit 内选区高亮 + 整段下划线
@@ -1143,7 +1317,7 @@ class TextInput : public LeafWidget {
         }
 
         p.draw_text(Rect{.origin = Point{.x = tx, .y = ty},
-                         .size = Size{.width = bounds.size.width - padding_.left - padding_.right, .height = th}},
+                         .size = Size{.width = bounds.size.width - padding().left - padding().right, .height = th}},
                     shown, f, text_col);
 
         // 光标（仅非占位文本、聚焦且未禁用时显示）；组合时光标落在 preedit 内的候选插入点并加粗。
@@ -1152,7 +1326,7 @@ class TextInput : public LeafWidget {
             const float cx = tx + render::FontEngine::caret_x(shown, ci, f, layout_opts());
             p.fill_rect(Rect{.origin = Point{.x = cx, .y = ty},
                              .size = Size{.width = is_composing() ? 2.0F : 1.5F, .height = th}},
-                        cursor_color_);
+                        cursor_color(ctx));
         }
         p.pop_clip();
     }
@@ -1162,26 +1336,26 @@ class TextInput : public LeafWidget {
     /// @param bounds 控件盒（窗口逻辑 dp）：填充与描边均画在此盒上。
     /// @param ctx 构建上下文：聚焦且未显式设置边框色时，从中取 `Theme::primary` 作缺省色。
     virtual auto paint_frame(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void {
-        const bool disabled = !enabled_;
+        const bool disabled = !enabled();
         const Color bg = [&] {  // NOLINT
             if (disabled) {
                 return Color{225, 225, 225, 255};
             }
             if (is_focused()) {
-                return focused_background_;
+                return focused_background(ctx);
             }
-            return background_;
+            return background(ctx);
         }();
-        Color border = disabled ? Color{180, 180, 180, 255} : border_color_;
-        float bw = border_width_;
+        Color border = disabled ? Color{180, 180, 180, 255} : border_color(ctx);
+        float bw = border_width(ctx);
         if (!disabled && is_focused()) {
-            border = focused_border_color_.value_or(inherit_theme(ctx).roles.primary);
+            border = focused_border_color(ctx);
             bw = std::max(bw, 1.5F);  // 聚焦态边框加粗（Fluent 式聚焦提示）
         }
-        if (corner_radius_ > 0.0F) {
-            p.fill_rounded_rect(bounds, corner_radius_, bg);
+        if (corner_radius() > 0.0F) {
+            p.fill_rounded_rect(bounds, corner_radius(), bg);
             if (bw > 0.0F) {
-                p.draw_rounded_border(bounds, corner_radius_, bw, border);
+                p.draw_rounded_border(bounds, corner_radius(), bw, border);
             }
         } else {
             p.fill_rect(bounds, bg);
@@ -1192,13 +1366,13 @@ class TextInput : public LeafWidget {
     }
 
     /// @brief 实显文本：掩码态返回等长 • 串（逐码点一一对应），否则返回原值。
-    /// @return 掩码态为逐码点一个 •（每字符 3 字节）的显示串；非掩码态为 `value_` 的副本。
+    /// @return 掩码态为逐码点一个 •（每字符 3 字节）的显示串；非掩码态为文本现值的副本。
     [[nodiscard]] auto display_value() const -> std::string {
-        if (!obscure_) {
-            return value_.get();
+        if (!obscure_text()) {
+            return value_ref();
         }
         std::string out;
-        const size_t n = cp_count(value_.get());
+        const size_t n = cp_count(value_ref());
         out.reserve(n * 3);
         for (size_t i = 0; i < n; ++i) {
             out += "\u2022";
@@ -1210,7 +1384,7 @@ class TextInput : public LeafWidget {
     ///
     /// 普通文本输入与 IME 上屏（`TextCompositionEvent::committed`）共用此路径，保证限长/选区
     /// 语义一致。`text` 为空时为空操作。
-    /// @param text 待插入文本（UTF-8）：先替换现有选区；超出 `max_length_` 剩余额度时按码点截断，
+    /// @param text 待插入文本（UTF-8）：先替换现有选区；超出 `max_length` 行剩余额度时按码点截断，
     ///        截断后为空则不落字。
     auto insert_at_caret(const std::string &text) -> void {
         if (text.empty()) {
@@ -1220,14 +1394,14 @@ class TextInput : public LeafWidget {
             delete_selection();  // 选区替换
         }
         std::string ins = text;
-        if (max_length_ > 0) {
-            const size_t room = max_length_ > cp_count(value_.get()) ? max_length_ - cp_count(value_.get()) : 0;
+        if (max_length() > 0) {
+            const size_t room = max_length() > cp_count(value_ref()) ? max_length() - cp_count(value_ref()) : 0;
             ins = cp_slice(ins, 0, room);  // 限长：仅插入剩余额度内的码点
             if (ins.empty()) {
                 return;
             }
         }
-        std::string v = value_.get();
+        std::string v = value_ref();
         size_t i = 0;
         size_t cp = 0;
         while (i < v.size() && cp < caret_) {
@@ -1235,7 +1409,7 @@ class TextInput : public LeafWidget {
             ++cp;
         }
         v.insert(i, ins);
-        value_ = v;
+        TextInputProps::set_value(v);
         caret_ += cp_count(ins);
         sel_start_ = caret_;
         sel_end_ = AURORA_NO_SEL;
@@ -1247,7 +1421,7 @@ class TextInput : public LeafWidget {
     /// @brief 组合显示串：把 preedit 插到 `base` 的光标处（`base` 可为掩码后的显示值）。
     ///
     /// 绘制与测量一律走此串，故 preedit 与既有文本共用一套 `caret_x` 度量，天然支持中文混排。
-    /// @param base 底衬显示文本（可为 `value_`、掩码后的显示值或占位串）。
+    /// @param base 底衬显示文本（可为文本现值、掩码后的显示值或占位串）。
     /// @return 把 preedit 插入 `base` 第 `caret_` 个码点处得到的串（`caret_` 越界夹紧到串尾）；
     ///         `preedit_` 为空时原样返回 `base`。
     [[nodiscard]] auto composed_text(const std::string &base) const -> std::string {
@@ -1315,36 +1489,17 @@ class TextInput : public LeafWidget {
     /// 所有编辑路径（插入 / 粘贴 / 删除 / 退格）都收口于此，故无障碍上报放在这里而非逐处补。
     auto notify_changed() const -> void {
         if (on_changed_) {
-            on_changed_(value_.get());
+            on_changed_(value_ref());
         }
         notify_accessibility_event(AccessibilityEvent{.kind = AccessibilityEventKind::ValueChanged, .target = this});
     }
 
     // NOLINTBEGIN(*-non-private-member-variables-in-classes)
-    State<std::string> value_;
-    std::string placeholder_;
-    float font_size_ = 14.0F;
-    float corner_radius_ = 0.0F;  ///< 圆角半径（dp），>0 时背景与圆角裁剪
-    EdgeInsets padding_ =
-        EdgeInsets{.left = 12.0F, .top = 12.0F, .right = 12.0F, .bottom = 12.0F};  ///< 文本与边框之间的内边距
-    Color cursor_color_ = Color{0, 0, 0, 255};  ///< 光标颜色
-    bool enabled_ = true;  ///< 是否可编辑（禁用态降级绘制并忽略输入）
-    Color text_color_ = Color{20, 20, 20, 255};  ///< 文本颜色
-    Color placeholder_color_ = Color{150, 150, 150, 255};  ///< 占位提示颜色
-    Color background_ = Color{240, 240, 240, 255};  ///< 背景色
-    Color focused_background_ = Color{245, 248, 255, 255};  ///< 聚焦态背景色
-    Color border_color_ = Color{120, 120, 120, 255};  ///< 边框色
-    std::optional<Color> focused_border_color_;  ///< 聚焦态边框色；空 = 跟随主题 primary
-    float border_width_ = 1.0F;  ///< 边框线宽 dp；0 = 不描边
-    Color selection_color_ = Color{80, 120, 220, 90};  ///< 选区高亮色
+    // 19 行属性已全数收进 `TextInputProps` 权威表；此处只留表外字段：组合串配色（从不参与序列化，
+    // 未成行）与控件自己的运行态（方向缓存、两枚回调、选区/光标/视口、IME 组合态）。
     Color preedit_underline_color_ = Color{30, 110, 220, 255};  ///< 组合串（preedit）下划线色
     Color preedit_selection_color_ = Color{255, 200, 80, 120};  ///< preedit 内选区（待转换片段）高亮色
-    std::size_t max_length_ = 0;  ///< 最大长度（码点）；0 = 不限
-    bool read_only_ = false;  ///< 只读：可选择/复制不可编辑
-    bool obscure_ = false;  ///< 密码掩码显示
-    /// @brief 书写方向：nullopt = 继承环境（Directionality 注入/进程级）。
-    std::optional<TextDirection> direction_;
-    /// @brief 生效方向缓存：on_layout 解析（显式属性 > Environment > 进程级 > nullopt），
+    /// @brief 生效方向缓存：on_layout 解析（显式属性 > Environment > 进程级 > 无来源），
     ///        供无 BuildContext 的事件路径与绘制路径共用。
     std::optional<TextDirection> cached_direction_;
     std::function<void(const std::string &)> on_changed_;  ///< 每次编辑后触发
@@ -1361,7 +1516,7 @@ class TextInput : public LeafWidget {
     bool selecting_ = false;
     static constexpr size_t AURORA_NO_SEL = static_cast<size_t>(-1);
 
-    // IME 组合态：preedit 不进 value_（数据模型保持纯净），仅在绘制/测量期插入 caret_ 处。
+    // IME 组合态：preedit 不进文本来源（数据模型保持纯净），仅在绘制/测量期插入 caret_ 处。
     std::string preedit_;  ///< 预编辑串（UTF-8）；空 = 无组合
     size_t preedit_cursor_ = 0;  ///< 组合光标在 preedit 内的码点下标
     size_t preedit_sel_start_ = 0;  ///< preedit 内选区起点（码点下标）
@@ -1406,7 +1561,7 @@ class TextInput : public LeafWidget {
         }
         const size_t a = std::min(sel_start_, sel_end_);
         const size_t b = std::max(sel_start_, sel_end_);
-        std::string v = value_.get();
+        std::string v = value_ref();
         size_t i = 0;
         size_t cp = 0;
         while (i < v.size() && cp < a) {
@@ -1419,7 +1574,7 @@ class TextInput : public LeafWidget {
             ++cp;
         }
         v.erase(begin, i - begin);
-        value_ = v;
+        TextInputProps::set_value(v);
         caret_ = a;
         sel_start_ = a;
         sel_end_ = AURORA_NO_SEL;  // 删除后无选区
@@ -1429,7 +1584,7 @@ class TextInput : public LeafWidget {
         if (caret_ == 0) {
             return;
         }
-        std::string v = value_.get();
+        std::string v = value_ref();
         size_t i = 0;
         size_t cp = 0;
         while (i < v.size() && cp < caret_) {
@@ -1443,7 +1598,7 @@ class TextInput : public LeafWidget {
         }
         const size_t start = (j > 0) ? j - 1U : 0U;
         v.erase(start, end - start);
-        value_ = v;
+        TextInputProps::set_value(v);
         --caret_;
         sel_start_ = caret_;
         sel_end_ = AURORA_NO_SEL;  // 退格后无选区

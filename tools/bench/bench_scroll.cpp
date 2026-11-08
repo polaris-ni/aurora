@@ -530,7 +530,7 @@ class AppCellLeaf : public au::LeafWidget {
                                      .size = au::Size{.width = 7.0F, .height = 3.0F}},
                             1.5F, th.text_secondary);
     });
-    auto search_input = std::make_shared<au::TextInput>(au::TextInputProps{.placeholder = "Search apps and books"});
+    auto search_input = std::make_shared<au::TextInput>(au::TextInputProps().set_placeholder("Search apps and books"));
     search_row->add(Node{search_icon});
     search_row->add(Node{search_input});
     search_row->set_modifier(

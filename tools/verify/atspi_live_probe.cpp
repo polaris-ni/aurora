@@ -347,7 +347,7 @@ struct ProbeWidgets {
     // （与 tools/verify/wasm_aria_live_probe.cpp 的同款豁免一致）。
     // NOLINTBEGIN(cppcoreguidelines-pro-type-static-cast-downcast)
     // CJK-LITERAL: cjk-fixture - Han placeholder painted in the real entry window (manual inspection)
-    aurora::Node entry_node{aurora::TextInput{aurora::TextInputProps{.value = "abc", .placeholder = "请输入"}}};
+    aurora::Node entry_node{aurora::TextInput{aurora::TextInputProps().set_value("abc").set_placeholder("请输入")}};
     aurora::Node list_node{aurora::ReorderableList<std::string>{
         items,
         [](const std::string &label, int) {

@@ -88,9 +88,9 @@ namespace detail {
 /// @param type 序列化 type 名。
 /// @return 该类型的属性是否只能通过 `set_<键名>()` 链式写件装入。
 [[nodiscard]] constexpr auto props_chain_writers(std::string_view type) noexcept -> bool {
-    constexpr std::array<std::string_view, 16> k_chain = {
-        "BarChart",  "BottomNavBar", "Button",        "Column", "Divider",      "Grid",   "Image",     "LazyRow",
-        "LineChart", "PieChart",     "PullToRefresh", "Row",    "ScatterChart", "Scroll", "Sparkline", "Text"};
+    constexpr std::array<std::string_view, 17> k_chain = {
+        "BarChart", "BottomNavBar",  "Button", "Column",       "Divider", "Grid",      "Image", "LazyRow",  "LineChart",
+        "PieChart", "PullToRefresh", "Row",    "ScatterChart", "Scroll",  "Sparkline", "Text",  "TextInput"};
     return std::ranges::find(k_chain, type) != k_chain.end();
 }
 
@@ -100,17 +100,16 @@ struct PropTarget {
     bool via_setter = false;  ///< true = 生成 `w.lhs(值)`；false = 生成 `w.lhs = 值`
 };
 
-/// @brief 公开继承自身 `*Props` 聚合的类型（`has_props_aggregate` 去掉 `TextInput` 与已迁移的链式类型）。
+/// @brief 公开继承自身 `*Props` 聚合的类型（`has_props_aggregate` 去掉已迁移的链式类型）。
 ///
-/// 公开继承意味着「序列化键 == 公有同名成员」这条默认成立，`w.key = value;` 与 `.key = value` 都合法；
-/// `TextInput` 是唯一例外：它以 `TextInputProps` 为**构造参数**、把值拷进 protected 字段，对外只给
-/// `set_*()` / 链式 setter，故它的每个属性都必须走 `prop_target` 登记的写入路径。
-/// `props_chain_writers` 里的类型同样公开继承，但字段私有，故也归入「键名不等于公开成员名」。
+/// 公开继承意味着「序列化键 == 公有同名成员」这条默认成立，`w.key = value;` 与 `.key = value` 都合法。
+/// `props_chain_writers` 里的类型同样公开继承，但字段私有、公共面只剩 `set_<键>` 链式写件，
+/// 故它们归入「键名不等于公开成员名」，落点由词根推出。
 ///
 /// @param type 序列化 type 名。
-/// @return 类型是否公开继承自身 *Props 且序列化键即公有同名成员；TextInput 与链式形态类型除外。
+/// @return 类型是否公开继承自身 *Props 且序列化键即公有同名成员；链式形态类型除外。
 [[nodiscard]] constexpr auto publicly_inherits_props(std::string_view type) noexcept -> bool {
-    return has_props_aggregate(type) && type != "TextInput" && !props_chain_writers(type);
+    return has_props_aggregate(type) && !props_chain_writers(type);
 }
 
 /// @brief 构造签名 bespoke（既不接受通用 `T{ Node… }` 初始化列表，也没有 `*Props` 子节点槽）的类型。
@@ -241,7 +240,7 @@ struct PropTarget {
 ///
 /// 逐条由 `aurora_cli describe <Type>` 的 `props` 表键集与控件头文件的成员声明比对得出，
 /// 并以 `g++ -fsyntax-only` 编译产物验证（未登记者按同名公开成员处理）。当前在册的只有
-/// protected 字段 + 公有链式 setter 一类（TextInput / Stack / Skeleton / TitleBar 等）：
+/// protected 字段 + 公有链式 setter 一类（Stack / Skeleton / TitleBar 等）：
 /// 这类落点不能进指定初始化器（protected 字段不可在类外赋值），故只在 StepByStep 出现；
 /// 属性面已迁到链式写件的类型不在此表登记——落点由词根 `set_<键>` 推出。
 ///
@@ -249,25 +248,6 @@ struct PropTarget {
 [[nodiscard]] inline auto prop_target_table() -> const std::unordered_map<std::string, PropTarget> & {
     // NOLINTNEXTLINE(bugprone-dynamic-static-initializers) 函数级只读表，理由同 enum_type_for_key
     static const std::unordered_map<std::string, PropTarget> M = {
-        {"TextInput.background", {.lhs = "set_background", .via_setter = true}},
-        {"TextInput.border_color", {.lhs = "set_border_color", .via_setter = true}},
-        {"TextInput.border_width", {.lhs = "set_border_width", .via_setter = true}},
-        {"TextInput.corner_radius", {.lhs = "set_corner_radius", .via_setter = true}},
-        {"TextInput.cursor_color", {.lhs = "set_cursor_color", .via_setter = true}},
-        {"TextInput.enabled", {.lhs = "set_enabled", .via_setter = true}},
-        {"TextInput.focused_background", {.lhs = "set_focused_background", .via_setter = true}},
-        {"TextInput.focused_border_color", {.lhs = "set_focused_border_color", .via_setter = true}},
-        {"TextInput.padding", {.lhs = "set_padding", .via_setter = true}},
-        {"TextInput.placeholder_color", {.lhs = "set_placeholder_color", .via_setter = true}},
-        {"TextInput.selection_color", {.lhs = "set_selection_color", .via_setter = true}},
-        {"TextInput.text_color", {.lhs = "set_text_color", .via_setter = true}},
-        // TextInput 不公开继承聚合，其余键同样只有 setter 形公开入口（`font_size` 是无前缀的链式 setter）。
-        {"TextInput.value", {.lhs = "set_value", .via_setter = true}},
-        {"TextInput.placeholder", {.lhs = "set_placeholder", .via_setter = true}},
-        {"TextInput.font_size", {.lhs = "font_size", .via_setter = true}},
-        {"TextInput.max_length", {.lhs = "set_max_length", .via_setter = true}},
-        {"TextInput.read_only", {.lhs = "set_read_only", .via_setter = true}},
-        {"TextInput.obscure_text", {.lhs = "set_obscure_text", .via_setter = true}},
         // Stack 的 `fit` 有公开 setter；`alignment` 只能进构造形参，故落到「未登记 → 告警省略」。
         {"Stack.fit", {.lhs = "set_fit", .via_setter = true}},
         // Skeleton / TitleBar 的样式组：字段是 protected，公开面只有链式 `set_*()`。

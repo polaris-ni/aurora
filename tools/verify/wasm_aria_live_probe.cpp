@@ -93,7 +93,7 @@ auto main() -> int {
     // CJK-LITERAL: cjk-fixture - the CDP driver locates the announcement mirror button by this Han name
     au::Node ann_node{au::Button{au::ButtonProps().set_label(au::LocalizedString{"播报"})}};
     auto *ann = static_cast<au::Button *>(&ann_node.widget());
-    au::Node entry_node{au::TextInput{au::TextInputProps{.value = "abc"}}};
+    au::Node entry_node{au::TextInput{au::TextInputProps().set_value("abc")}};
     auto *entry = static_cast<au::TextInput *>(&entry_node.widget());
     au::Node cb_node{au::Checkbox{false}};
     auto *cb = static_cast<au::Checkbox *>(&cb_node.widget());

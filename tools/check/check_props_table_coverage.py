@@ -17,7 +17,8 @@
 #       作用域依赖档（活令牌档 `.fallback<&Scale::m>()` 与派生档：提供者形参含 `BuildContext`）
 #       ⇒ 必须有 `x(ctx)` 且不得有无参 `x()`。两个方向的漏写与多写各判一次红。
 #   C5  写面转调对号：每行至少一枚 `set_x`；体内只允许 `assign(x_row(), ...)` / `rebind(x_row(), ...)`
-#       / 同名词根重载转调，且 `rebind` 只许出现在来源行（字段形状含 `ReadOnlyState`）上。
+#       / 同名词根重载转调，且 `rebind` 只许出现在来源行（字段形状是句柄：只读 `ReadOnlyState<T>`
+#       或可写 `State<T>`，与机制层 `PropIsHandle` 的两条特化同口径）上。
 #   C6  表外名字不得进公共面：`XxxProps` 的公共函数名只允许「行规则件」
 #       （`x_row` / `x` / `set_x`）+ 回落点提供者（`x_default`）+ 通用件白名单 `{clear, rows}`；
 #       `x_source()` 一类句柄读件、`font()` 一类合成读件、`set_border(c, w)` 一类组合便利写件
@@ -194,7 +195,7 @@ def check_props_class(rel, class_name, body, members, fields, findings, stats):
         is_source_row = False
         if field_decl:
             line_text = body.splitlines()[field_decl - 1]
-            is_source_row = "ReadOnlyState" in line_text
+            is_source_row = props_scan.is_source_field_decl(line_text)
         for m in got:
             calls = re.findall(r"\b(assign|rebind)\s*\(\s*(\w+)_row\s*\(\s*\)", m.body)
             delegates = re.findall(r"\bset_" + re.escape(root) + r"\s*\(", m.body)
@@ -207,7 +208,7 @@ def check_props_class(rel, class_name, body, members, fields, findings, stats):
                                     f"`{called_root}` -- writer root must equal the row root")
                 if kind == "rebind" and not is_source_row:
                     findings.append(f"{rel}:{m.line}: [C5] {class_name}::set_{root} calls `rebind` but the "
-                                    "field shape is not a handle (`ReadOnlyState`) row")
+                                    "field shape is not a handle (`ReadOnlyState` / `State`) row")
 
     # --- C6 表外名字 / C8 reset_ ---
     known_static_suffix = "_default"

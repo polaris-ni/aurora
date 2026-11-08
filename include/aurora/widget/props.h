@@ -17,6 +17,7 @@
 #include "aurora/environment/build_context.h"
 #include "aurora/i18n/localized_string.h"
 #include "aurora/state/read_only_state.h"
+#include "aurora/state/state.h"
 #include "aurora/theming/theme.h"
 #include "aurora/theming/theme_scope.h"
 #include "aurora/widget/descriptor.h"
@@ -33,8 +34,10 @@
 /// 三条支撑这个面成立的类型层事实：
 ///
 ///   - **可空 ⇔ 非必填**。字段是 `std::optional<T>` 即可撤表态、必有回落点；字段是裸 `T`（含不可
-///     空的 `ReadOnlyState<T>`）即必填、回落点就是它自身。`required` 位与「能不能 `clear`」都由字段
-///     形状推出，没有旁注可声明、也就没有旁注可以标错。
+///     空的 `ReadOnlyState<T>` / `State<T>`）即必填、回落点就是它自身。`required` 位与「能不能 `clear`」
+///     都由字段形状推出，没有旁注可声明、也就没有旁注可以标错。句柄形态还另分出「可写来源行」：字段是
+///     `State<T>` 时值写入落进当前来源的现值（控件本体与外部绑定共用同一来源），只读句柄行才换入自有
+///     常量源 —— 判据同样由字段形状推出，不占公共面的名字。
 ///   - **回落点强制**。每行要么给 `.fallback(...)`（活令牌成员指针 / 库内常量提供者 / 派生提供者三
 ///     形态之一），要么 `.required()`。没有第三种形状，于是「未表态时取到什么」在编译期就是确定的，
 ///     取值点不再需要逐属性手写的 `value_or` 口径。
@@ -57,7 +60,8 @@ namespace aurora {
 namespace detail {
 
 /// @brief 逐层剥掉可空外壳与句柄外壳，得到该属性对外的裸值类型。
-/// @tparam T 字段类型（`T` / `std::optional<T>` / `ReadOnlyState<T>` / `std::optional<ReadOnlyState<T>>`）。
+/// @tparam T 字段类型（`T` / `std::optional<T>` / `ReadOnlyState<T>` / `State<T>` /
+///         `std::optional<ReadOnlyState<T>>`）。
 template <typename T>
 struct PropBare {
     /// @brief 裸值类型（已是裸值，原样给出）。
@@ -76,6 +80,14 @@ struct PropBare<std::optional<T>> {
 /// @brief 句柄外壳的去壳规则。
 template <typename T>
 struct PropBare<ReadOnlyState<T>> {
+    /// @brief 句柄承载的裸值类型。
+    /// 同上：`trait::type` 由惯例固定。
+    /// NOLINTNEXTLINE(readability-identifier-naming)
+    using type = T;
+};
+/// @brief 可写句柄外壳的去壳规则（与只读句柄同一条：对外呈现的都是裸值）。
+template <typename T>
+struct PropBare<State<T>> {
     /// @brief 句柄承载的裸值类型。
     /// 同上：`trait::type` 由惯例固定。
     /// NOLINTNEXTLINE(readability-identifier-naming)
@@ -118,6 +130,20 @@ struct PropIsHandle : std::false_type {};
 /// @brief `ReadOnlyState` 字段特化为真。
 template <typename T>
 struct PropIsHandle<ReadOnlyState<T>> : std::true_type {};
+/// @brief 可写句柄 `State` 同样是来源型：它持有的来源可被外部换入，值写入落到该来源现值。
+template <typename T>
+struct PropIsHandle<State<T>> : std::true_type {};
+
+/// @brief 剥掉可空外壳后的字段是否为**可写**句柄（`State<T>`），即本行的值写入通道是否直达当前来源。
+///
+/// 只读句柄的来源对库外没有写通道，值写入只能换入一枚自有常量源；`State<T>` 作字段时，控件本体
+/// 与外部绑定共用同一来源，值写入必须写成该来源的现值——否则一次编辑就静默断掉调用方的绑定。
+/// 判据只在库内消费（`assign` 与反序列化分支），公共面不因它多出一个名字。
+template <typename T>
+struct PropIsWritableHandle : std::false_type {};
+/// @brief `State` 字段特化为真。
+template <typename T>
+struct PropIsWritableHandle<State<T>> : std::true_type {};
 
 /// @brief 从数据成员指针取出字段类型。
 template <typename M>
@@ -239,6 +265,7 @@ class PropRow {
     using Field = detail::PropFieldValueT<decltype(FieldPtr)>;  ///< 字段类型（含可空 / 句柄外壳）
     using Owner = detail::PropFieldOwnerT<decltype(FieldPtr)>;  ///< 宿主 `Props` 类
     using Bare = detail::PropBareT<Field>;  ///< 裸值类型（属性对外呈现的类型）
+    using Handle = detail::PropUnoptionalT<Field>;  ///< 句柄类型（剥掉可空外壳；来源型换绑收它）
 
     /// @brief 本行的字段（写面与读面都经它落到宿主实例上）。
     /// 写成 `static constexpr` 函数而不是常量，理由同 `PropCodec::type_text()`：类内常量在命名门禁里
@@ -252,6 +279,14 @@ class PropRow {
     /// @return 来源型为 true。
     [[nodiscard]] static constexpr auto is_source() -> bool {
         return detail::PropIsHandle<detail::PropUnoptionalT<Field>>::value;
+    }
+    /// @brief 可写来源位：字段是 `State<T>` 时，本行的值写入直达当前来源的现值（外部绑定不断）。
+    ///
+    /// 控件本体要在交互里改写自己的响应式属性（输入框逐字符写回文本）时用的就是这一档：来源不换、
+    /// 句柄不重绑、调用方 `State<T>` 上的其它订阅照常收到这一轮。其余来源行的值写入仍换入自有常量源。
+    /// @return 字段为可写句柄时为 true。
+    [[nodiscard]] static constexpr auto is_writable_source() -> bool {
+        return detail::PropIsWritableHandle<detail::PropUnoptionalT<Field>>::value;
     }
 
     std::string_view key;  ///< 序列化键名（同 schema 的属性名）
@@ -1243,7 +1278,14 @@ class AbstractProps {
         auto &self = static_cast<Derived &>(*this);
         auto &slot = self.*(Row::field());
         using Bare = Row::Bare;
-        if constexpr (Row::is_required() && Row::is_source()) {  // 必填来源件：换入自有常量源
+        if constexpr (Row::is_required() && Row::is_writable_source()) {  // 可写来源件：写当前源现值
+            if constexpr (std::equality_comparable<Bare>) {
+                if (slot.get() == value) {
+                    return self;
+                }
+            }
+            slot.set(Bare{value});  // 不换源、不重绑 ⇒ 调用方那只 `State` 上的其它订阅照常收到这一轮
+        } else if constexpr (Row::is_required() && Row::is_source()) {  // 必填来源件：换入自有常量源
             if constexpr (std::equality_comparable<Bare>) {
                 if (slot.get() == value) {
                     return self;
@@ -1279,18 +1321,21 @@ class AbstractProps {
     }
 
     /// @brief 换绑来源：整只句柄替换并重建订阅（响应式换源的那条路，与值写入共用同一档位）。
+    ///
+    /// 参数类型由该行的字段形状推出：只读来源行收 `ReadOnlyState<T>`，可写来源行收 `State<T>`——
+    /// 后者要求调用方给的是可写句柄，本库不允许把一枚只读源换成控件写不回去的源。
     /// @tparam Row 表行类型（必须来源型）。
     /// @param row 目标行。
-    /// @param source 新的只读句柄来源。
+    /// @param source 新的来源句柄。
     /// @return 派生属性对象引用。
     template <typename Row>
-    auto rebind(const Row &row, ReadOnlyState<typename Row::Bare> source) -> Derived & {
+    auto rebind(const Row &row, const typename Row::Handle &source) -> Derived & {
         static_assert(Row::is_source(), "rebind() only applies to handle-shaped rows");
         auto &self = static_cast<Derived &>(*this);
         if constexpr (Row::is_required()) {
-            self.*(Row::field()) = std::move(source);
+            self.*(Row::field()) = source;
         } else {
-            self.*(Row::field()) = std::optional<ReadOnlyState<typename Row::Bare>>{std::move(source)};
+            self.*(Row::field()) = std::optional<typename Row::Handle>{source};
         }
         link_.resubscribe();
         link_.mark(row.dirty);
@@ -1505,9 +1550,12 @@ class AbstractProps {
                 return;
             }
             if constexpr (Row::is_source()) {
-                const auto &slot = self.*(Row::field());
+                auto &slot = self.*(Row::field());
                 const bool written = [&slot, &value]() {
-                    if constexpr (Row::is_required()) {
+                    if constexpr (Row::is_writable_source()) {
+                        slot.set(*value);  // 可写来源行：本行字段就是来源的写视图
+                        return true;
+                    } else if constexpr (Row::is_required()) {
                         return detail::HandleAccess::write_through(slot, *value);
                     } else {
                         return slot.has_value() && detail::HandleAccess::write_through(*slot, *value);

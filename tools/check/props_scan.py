@@ -21,6 +21,15 @@ PROPS_DECL_RE = re.compile(r"^\s*(?:class|struct)\s+(?!AbstractProps\b)(\w*Props
 MIGRATED_DECL_RE = re.compile(r"(?:class|struct)\s+(\w*Props)\s*(?:final\s*)?:\s*public\s+AbstractProps\s*<\s*\1\s*>")
 # 控件侧：公有继承一枚 Props 的类（基类清单在 `:` 之后、`{` 之前）。
 WIDGET_INHERITS_PROPS_RE = re.compile(r"^\s*class\s+(\w+)\s*(?:final\s*)?:((?:[^;{}]|{[^}]*})+?)\{", re.M)
+# 来源行（句柄行）的字段形状：只读来源 `ReadOnlyState<T>`，或可写来源 `State<T>`。
+# 「什么算一枚可换源的句柄字段」必须由本件给出唯一答案——机制层用 `PropIsHandle` 两条特化
+# 推导同一事实，门禁侧按字段声明行文本对号，判定面不能比机制面窄。
+SOURCE_HANDLE_RE = re.compile(r"\b(?:ReadOnlyState|State)\s*<")
+
+
+def is_source_field_decl(decl):
+    """字段声明文本是否声明一枚来源行（句柄字段）；只读与可写两种来源都算。"""
+    return SOURCE_HANDLE_RE.search(decl) is not None
 
 
 def repo_root_of(path):

@@ -330,8 +330,8 @@ AURORA_TEST_CASE(codegen_never_invents_props_aggregate) {
 }
 
 AURORA_TEST_CASE(codegen_nested_and_setter_props_only_reach_step_style) {
-    // Text 的字体尺寸经链式写件 `set_font_size` 装入，表达式风格同样承载（不再是嵌套路径）；
-    // 没有 `TProps()` 词根可挂、只留 protected 字段 + setter 的 TextInput 样式键仍只在 StepByStep 出现。
+    // Text / TextInput 的字体尺寸与样式键都经链式写件 `set_*` 装入，表达式风格同样承载
+    // （属性面迁到权威表后，`TextInputProps()` 词根可挂，样式键不再只在 StepByStep 出现）。
     const au::Json text_props = testing::json_obj({{"content", "Hi"}, {"font_size", 16.0F}});
     const std::string expr = to_code(make_text(text_props));
     AURORA_TEST_CHECK_MSG(expr.find(".set_font_size(16.0f)") != std::string::npos,
@@ -372,7 +372,12 @@ AURORA_TEST_CASE(codegen_nested_and_setter_props_only_reach_step_style) {
         to_code(make_node("TextInput", testing::json_obj({{"placeholder", "姓名"}, {"corner_radius", 4.0F}})),
                 CodeStyle::StepByStep);
     AURORA_TEST_CHECK_MSG(input_step.find("__w0.set_corner_radius(4.0f);") != std::string::npos,
-                          "step routes setter-only TextInput style through set_corner_radius");
+                          "step routes the TextInput style key through set_corner_radius");
+    // CJK-LITERAL: cjk-fixture - same Han placeholder, this time through the expression style
+    const std::string input_expr =
+        to_code(make_node("TextInput", testing::json_obj({{"placeholder", "姓名"}, {"corner_radius", 4.0F}})));
+    AURORA_TEST_CHECK_MSG(input_expr.find(".set_corner_radius(4.0f)") != std::string::npos,
+                          "expression style carries the TextInput style key");
 }
 
 AURORA_TEST_CASE(codegen_skips_props_without_write_path) {
@@ -608,8 +613,8 @@ AURORA_TEST_CASE(codegen_unconstructible_types_keep_their_real_type_name) {
 }
 
 AURORA_TEST_CASE(codegen_text_input_props_route_through_setters) {
-    // `TextInput` 以 `TextInputProps` 作构造参数、把值拷进 protected 字段，对外只有 `set_*()`/链式 setter：
-    // 同名赋值（`w.value = ...`）取到的是同名成员函数，必须走登记的 setter 落点。
+    // `TextInput` 公开继承 `TextInputProps`，字段全私有、公共面只有 `set_<键>` 链式写件：
+    // 同名赋值（`w.value = ...`）取到的是同名成员函数，故发射侧一律由词根推出 setter 落点。
     // CJK-LITERAL: cjk-fixture - Han placeholder fed to the generator, asserted verbatim below
     const std::string step = to_code(make_node("TextInput", testing::json_obj({{"value", "Ada"},
                                                                                {"placeholder", "姓名"},
@@ -622,7 +627,7 @@ AURORA_TEST_CASE(codegen_text_input_props_route_through_setters) {
     // CJK-LITERAL: cjk-fixture - same Han placeholder expected back verbatim
     AURORA_TEST_CHECK_MSG(step.find("__w0.set_placeholder(\"姓名\");") != std::string::npos,
                           "TextInput placeholder -> set_placeholder");
-    AURORA_TEST_CHECK_MSG(step.find("__w0.font_size(16.0f);") != std::string::npos,
+    AURORA_TEST_CHECK_MSG(step.find("__w0.set_font_size(16.0f);") != std::string::npos,
                           "TextInput font_size -> chained setter");
     AURORA_TEST_CHECK_MSG(step.find("__w0.set_max_length(40);") != std::string::npos, "TextInput max_length → setter");
     AURORA_TEST_CHECK_MSG(step.find("__w0.set_read_only(true);") != std::string::npos, "TextInput read_only → setter");

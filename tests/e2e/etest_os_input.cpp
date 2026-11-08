@@ -61,7 +61,7 @@ struct OsInputUi {
 /// @brief 装配注入目标 UI（值回调先挂好，再组树）。
 [[nodiscard]] auto build_os_input_ui() -> OsInputUi {
     OsInputUi ui;
-    au::Node input{au::TextInput{au::TextInputProps{.value = ""}}};
+    au::Node input{au::TextInput{au::TextInputProps().set_value("")}};
     static_cast<au::TextInput &>(input.widget())  // NOLINT(*-pro-type-static-cast-downcast)
         .set_on_changed([captured = ui.typed](const std::string &v) { *captured = v; });
     ui.input = input;  // Node 拷贝共享同一 widget：置焦与回读都落在树内那个实例上

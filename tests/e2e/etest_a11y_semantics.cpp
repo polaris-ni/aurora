@@ -54,7 +54,7 @@ constexpr std::string_view AURORA_A11Y_FRAME_TITLE = "aurora_e2e_a11y";
         .set_step(1.0);
 
     // CJK-LITERAL: cjk-fixture - Han placeholder painted and exercised through the a11y name fallback
-    au::Node input_node{au::TextInput{au::TextInputProps{.value = "abc", .placeholder = "请输入"}}};
+    au::Node input_node{au::TextInput{au::TextInputProps().set_value("abc").set_placeholder("请输入")}};
 
     return au::Node{au::Column{
         au::Button{au::ButtonProps().set_label(au::LocalizedString{AURORA_A11Y_BUTTON_NAME})},

@@ -67,13 +67,13 @@ inline auto button(Container &parent, std::string_view text, ButtonProps props =
     return b;
 }
 
-/// @brief 单行文本输入框。`value` 为初始文本（覆盖 `props.value`）。
+/// @brief 单行文本输入框。`value` 为初始文本，经 `TextInputProps::set_value` 写入。
 /// @param parent 目标父容器
 /// @param value 初始文本（默认为空）
 /// @param props 输入框属性块（默认构造）
 /// @return 指向新建 `TextInput` 的裸指针，生命周期由 parent 子树持有
 inline auto input(Container &parent, std::string_view value = "", TextInputProps props = {}) -> TextInput * {
-    props.value = std::string(value);
+    props.set_value(std::string(value));
     return detail::make_add<TextInput>(parent, std::move(props));
 }
 

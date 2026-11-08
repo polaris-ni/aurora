@@ -172,7 +172,7 @@ auto main(int argc, char *argv[]) -> int {
         static_cast<aurora::Slider &>(slider_node.widget())  // NOLINT(*-pro-type-static-cast-downcast)
             .set_range(0.0, 100.0)
             .set_step(1.0);
-        aurora::Node input_node{aurora::TextInput{aurora::TextInputProps{.value = "abc", .placeholder = "Type here"}}};
+        aurora::Node input_node{aurora::TextInput{aurora::TextInputProps().set_value("abc").set_placeholder("Type here")}};
         aurora::Node root{aurora::Column{
             aurora::Button{aurora::ButtonProps().set_label(aurora::LocalizedString{AURORA_BUTTON_NAME})},
             aurora::Row{aurora::Text{aurora::TextProps().set_content(aurora::LocalizedString{AURORA_CHECKBOX_LABEL})},

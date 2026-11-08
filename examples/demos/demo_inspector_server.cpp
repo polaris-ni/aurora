@@ -40,8 +40,8 @@ auto build_form(const std::shared_ptr<au::State<int>> &count,
 
     return au::Node{au::Column({
         au::Node{au::Text{"User info form"}},
-        au::Node{au::TextInput{au::TextInputProps{.value = "", .placeholder = "Enter name"}}},
-        au::Node{au::TextInput{au::TextInputProps{.value = "alice@example.com", .placeholder = "Enter email"}}},
+        au::Node{au::TextInput{au::TextInputProps().set_value("").set_placeholder("Enter name")}},
+        au::Node{au::TextInput{au::TextInputProps().set_value("alice@example.com").set_placeholder("Enter email")}},
         au::Node{std::move(submit)},
         au::Node{au::Text{au::TextProps().set_content(*label)}},
     })};

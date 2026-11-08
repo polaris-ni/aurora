@@ -287,7 +287,7 @@ auto main() -> int {
         // （指针目标），键盘值经 `on_changed` 捕获后回读——判据只看外部可读的实值。
         const auto checked = aurora::State<bool>{false};
         auto typed = std::make_shared<std::string>();
-        aurora::Node input_node{aurora::TextInput{aurora::TextInputProps{.value = "", .placeholder = "Type here"}}};
+        aurora::Node input_node{aurora::TextInput{aurora::TextInputProps().set_value("").set_placeholder("Type here")}};
         static_cast<aurora::TextInput &>(input_node.widget())  // NOLINT(*-pro-type-static-cast-downcast)
             .set_on_changed([captured = typed](const std::string &v) { *captured = v; });
         aurora::Node root{aurora::Column{std::move(input_node), aurora::Checkbox{checked}}};

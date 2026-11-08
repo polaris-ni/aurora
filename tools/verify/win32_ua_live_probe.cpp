@@ -233,7 +233,7 @@ auto emit(const std::string &text) -> void { AURORA_LOG_RAW("verify", text, "\n"
         aurora::Row{aurora::Text{aurora::TextProps().set_content(aurora::LocalizedString{"音量"})},
                     aurora::Slider{SLIDER_VALUE}},
         // CJK-LITERAL: cjk-fixture - Han placeholder is the Edit control's Name source (require_name)
-        aurora::TextInput{aurora::TextInputProps{.value = "abc", .placeholder = "请输入"}},
+        aurora::TextInput{aurora::TextInputProps().set_value("abc").set_placeholder("请输入")},
         // CJK-LITERAL: cjk-fixture - Han text node asserted through the UIA Name property
         aurora::Text{aurora::TextProps().set_content(aurora::LocalizedString{"订单总额"})},
         aurora::Node{std::move(caption)},

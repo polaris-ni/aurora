@@ -4,7 +4,8 @@
 /// 经公开文本输入入口验证 on_changed 回调与截断/吞输入行为、IME 组合输入（preedit 显示 /
 /// 上屏落字 / 限长 / 失焦取消 / 参与测量）、Shift+方向键扩选的字符数与退格删选区、
 /// Home/End 跳端点与扩选（含经派发器送达焦点控件）、序列化往返与默认键省略、
-/// Ctrl+X 在剪贴板写入失败时不删选区且留诊断
+/// Ctrl+X 在剪贴板写入失败时不删选区且留诊断、`value` 可写来源行的双向绑定（键入写穿当前源 /
+/// 换源 / 反序列化写穿）、八枚色行与线宽的主题令牌回落及撤表态恢复随主题
 
 #include <algorithm>
 #include <memory>
@@ -21,6 +22,8 @@
 #include "aurora/layout/layout_engine.h"
 #include "aurora/render/font_engine.h"
 #include "aurora/render/painter.h"
+#include "aurora/state/state.h"
+#include "aurora/theming/theme.h"
 #include "aurora/widget/text_input.h"
 #include "framework/aurora_test.h"
 #include "framework/clipboard_memory_backend.h"
@@ -40,7 +43,24 @@ auto bounded(float w, float h) -> Constraints {
     return Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = w, .height = h}};
 }
 
+/// 造一个注入了指定主题的构建上下文（根级环境，无父指针）。
+/// 返回 holder + ctx：`ctx.env` 指向 holder 内的 Environment，二者须在同作用域内使用
+/// （调用方持有 holder 即保证环境存活；BuildContext 本就只供当帧读取）。
+auto themed_ctx(const Theme &t) -> std::pair<std::shared_ptr<Environment>, BuildContext> {
+    auto env = std::make_shared<Environment>();
+    env->set_local(t);
+    BuildContext ctx;
+    ctx.env = env.get();
+    return {std::move(env), ctx};
+}
+
 }  // namespace
+
+/// 探针：把只在库内消费的表态位提到可读位置（`present` 不升公共面）。
+class TextInputProbe final : public TextInput {
+  public:
+    using TextInput::present;
+};
 
 AURORA_TEST_CASE(enter_key_reaches_submit_callback_via_dispatcher) {
     auto field = std::make_shared<TextInput>();
@@ -79,7 +99,7 @@ AURORA_TEST_CASE(enter_key_reaches_submit_callback_via_dispatcher) {
 }
 
 AURORA_TEST_CASE(props_constructor_sets_initial_state) {
-    const TextInputProps props{.value = "init", .placeholder = "ph", .font_size = 16.0F};
+    const TextInputProps props = TextInputProps().set_value("init").set_placeholder("ph").set_font_size(16.0F);
     TextInput ti{props};
     AURORA_TEST_CHECK_EQ(ti.value(), std::string{"init"});
 
@@ -92,7 +112,7 @@ AURORA_TEST_CASE(props_constructor_sets_initial_state) {
 
 AURORA_TEST_CASE(chained_setters_update_serialized_props) {
     TextInput ti;
-    ti.set_value("v").set_placeholder("p").font_size(20.0F);
+    ti.set_value("v").set_placeholder("p").set_font_size(20.0F);
     AURORA_TEST_CHECK_EQ(ti.value(), std::string{"v"});
 
     Json out = Json::object();
@@ -133,10 +153,10 @@ AURORA_TEST_CASE(layout_uses_finite_width_and_pads_height) {
 
     // 字号更大 → 文本度量更高（相对断言，不依赖具体字形宽度）。
     TextInput small;
-    small.font_size(10.0F);
+    small.set_font_size(10.0F);
     LayoutEngine::layout(small, bounded(300.0F, 300.0F));
     TextInput big;
-    big.font_size(30.0F);
+    big.set_font_size(30.0F);
     LayoutEngine::layout(big, bounded(300.0F, 300.0F));
     AURORA_TEST_CHECK_TRUE(big.size().height > small.size().height);
 }
@@ -326,7 +346,7 @@ AURORA_TEST_CASE(serialize_deserialize_roundtrip_and_defaults) {
     TextInput src;
     src.set_value("user")
         .set_placeholder("type here")
-        .font_size(18.0F)
+        .set_font_size(18.0F)
         .set_background(Color(10, 20, 30, 40))
         .set_max_length(5)
         .set_read_only(true)
@@ -353,12 +373,20 @@ AURORA_TEST_CASE(serialize_deserialize_roundtrip_and_defaults) {
     AURORA_TEST_CHECK_EQ(require_child_at(*require_child(back, "background"), 3)->as_or<int>(-1), 40);
     AURORA_TEST_CHECK_EQ(require_child_at(*require_child(back, "focused_border_color"), 0)->as_or<int>(-1), 1);
 
-    // 负边框线宽被钳制为 1.0。
-    TextInput clamped;
-    clamped.set_border_width(-5.0F);
-    Json clamp_props = Json::object();
-    clamped.serialize_props(clamp_props);
-    AURORA_TEST_CHECK_NEAR(require_field<float>(clamp_props, "border_width"), 1.0F, 1e-4F);
+    // 写面不夹取：负线宽按原值存下并落盘，绘制侧的 `bw > 0` 门自然把它按「不描边」处理。
+    TextInput negative;
+    negative.set_border_width(-5.0F);
+    Json negative_props = Json::object();
+    negative.serialize_props(negative_props);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(negative_props, "border_width"), -5.0F, 1e-4F);
+
+    // 读面受约束：同一份 JSON 反序列化时 `border_width >= 0` 判据不过 ⇒ 撤表态，生效值退回主题回落档。
+    TextInputProbe rejected;
+    rejected.deserialize_props(negative_props);
+    AURORA_TEST_CHECK_FALSE(rejected.present(TextInput::border_width_row()));
+    Json rejected_props = Json::object();
+    rejected.serialize_props(rejected_props);
+    AURORA_TEST_CHECK_FALSE(rejected_props.contains("border_width"));
 
     // 默认值省略语义：未设置的键不落盘。
     Json defaults = Json::object();
@@ -754,10 +782,10 @@ AURORA_TEST_CASE(direction_prop_serialization_roundtrip) {
     rtl.serialize_props(props);
     AURORA_TEST_CHECK_EQ(require_field<std::string>(props, "direction"), "RTL");
 
-    TextInput dst;
+    TextInputProbe dst;
     dst.deserialize_props(props);
-    AURORA_TEST_REQUIRE_TRUE(dst.direction().has_value());
-    AURORA_TEST_CHECK_TRUE(require_value(dst.direction()) == TextDirection::RTL);
+    AURORA_TEST_CHECK_TRUE(dst.present(TextInput::direction_row()));  // 表态位：继承语义看它，不看取值
+    AURORA_TEST_CHECK_TRUE(dst.direction() == TextDirection::RTL);
 
     Json defaults = Json::object();
     TextInput def;
@@ -1071,6 +1099,129 @@ AURORA_TEST_CASE(paint_obscured_selection_preedit_and_border) {
     }
     const Rect cb = comp.composition_caret_bounds();
     AURORA_TEST_CHECK_GT(cb.size.height, 0.0F);
+}
+
+// ---- `value` 可写来源行：库内第一枚双向绑定 ----
+
+AURORA_TEST_CASE(typed_edits_write_through_the_bound_value_source) {
+    State<std::string> model{std::string{}};
+    TextInput field{TextInputProps().set_value(model)};
+    int rounds = 0;
+    std::string seen;
+    const auto sub = model.subscribe([&rounds, &seen](const std::string &v) -> void {
+        ++rounds;
+        seen = v;
+    });
+    AURORA_TEST_CHECK_EQ(rounds, 1);  // 订阅即交付首值
+    AURORA_TEST_CHECK_TRUE(seen.empty());
+
+    field.on_focus_change(true);
+    TextInputEvent typed;
+    typed.text = "abc";
+    field.on_text_input(typed);
+    AURORA_TEST_CHECK_EQ(field.value(), std::string{"abc"});
+    AURORA_TEST_CHECK_EQ(model.get(), std::string{"abc"});  // 键入落进当前来源的现值（不换源、不重绑）
+    AURORA_TEST_CHECK_EQ(seen, std::string{"abc"});  // 同一只句柄上的外部订阅照常收到这一轮
+    AURORA_TEST_CHECK_EQ(rounds, 2);
+
+    // 反方向：外部写同一只句柄 ⇒ 控件读到新值（二者共用同一来源，不是各自的副本）。
+    model.set(std::string{"xyz"});
+    AURORA_TEST_CHECK_EQ(field.value(), std::string{"xyz"});
+    AURORA_TEST_CHECK_EQ(rounds, 3);
+
+    // 同值写短路：必填可写来源行按 `==` 去重 ⇒ 既不标脏也不发轮次（字面量与串两条通道同口径）。
+    field.set_value("xyz");
+    AURORA_TEST_CHECK_EQ(rounds, 3);
+    field.set_value(std::string{"xyz"});
+    AURORA_TEST_CHECK_EQ(rounds, 3);
+}
+
+AURORA_TEST_CASE(set_value_handle_is_the_only_way_to_swap_the_value_source) {
+    State<std::string> first{std::string{}};
+    State<std::string> second{std::string{}};
+    TextInput field{TextInputProps().set_value(first)};
+    field.on_focus_change(true);
+
+    field.set_value(second);  // 换源：句柄重载是唯一通道，值写件永远落在当前源上
+    AURORA_TEST_CHECK_TRUE(field.value().empty());
+
+    TextInputEvent typed;
+    typed.text = "k";
+    field.on_text_input(typed);
+    AURORA_TEST_CHECK_EQ(second.get(), std::string{"k"});  // 编辑落进换入的那只来源
+    AURORA_TEST_CHECK_TRUE(first.get().empty());  // 旧源不再被写
+
+    first.set(std::string{"gone"});
+    AURORA_TEST_CHECK_EQ(field.value(), std::string{"k"});  // 旧源的后续变化也不再驱动控件
+}
+
+AURORA_TEST_CASE(deserialize_writes_through_the_bound_value_source) {
+    TextInput src;
+    src.set_value("from_json");
+    Json props = Json::object();
+    src.serialize_props(props);
+    AURORA_TEST_CHECK_TRUE(props.contains("value"));  // 必填行恒落盘（与「等于回落就省略」的可空行不同）
+
+    State<std::string> model{std::string{"old"}};
+    int rounds = 0;
+    const auto sub = model.subscribe([&rounds](const std::string &) -> void { ++rounds; });
+    AURORA_TEST_CHECK_EQ(rounds, 1);
+
+    TextInput field{TextInputProps().set_value(model)};
+    field.deserialize_props(props);
+    AURORA_TEST_CHECK_EQ(field.value(), std::string{"from_json"});
+    AURORA_TEST_CHECK_EQ(model.get(), std::string{"from_json"});  // 写穿当前源，绑定与订阅都没断
+    AURORA_TEST_CHECK_EQ(rounds, 2);
+}
+
+// ---- 回落三档：主题令牌随肤而动，显式表态才脱离主题 ----
+
+AURORA_TEST_CASE(color_and_border_rows_fall_back_to_theme_tokens_when_unset) {
+    const BuildContext bare;  // 无注入：inherit_theme 回落 light（与 OS 未表态同口径）
+    TextInput ti;
+    AURORA_TEST_CHECK_TRUE(ti.cursor_color(bare) == Theme::light().roles.on_surface);
+    AURORA_TEST_CHECK_TRUE(ti.text_color(bare) == Theme::light().roles.on_surface);
+    AURORA_TEST_CHECK_TRUE(ti.placeholder_color(bare) == Theme::light().roles.on_surface_variant);
+    AURORA_TEST_CHECK_TRUE(ti.background(bare) == Theme::light().roles.surface_container);
+    AURORA_TEST_CHECK_TRUE(ti.focused_background(bare) == Theme::light().roles.surface_bright);
+    AURORA_TEST_CHECK_TRUE(ti.border_color(bare) == Theme::light().roles.outline);
+    AURORA_TEST_CHECK_TRUE(ti.focused_border_color(bare) == Theme::light().roles.primary);
+    AURORA_TEST_CHECK_NEAR(ti.border_width(bare), Theme::light().controls.border_thickness, 1e-4F);
+    // 派生档：主色的 alpha=90 半透明高亮（与迁移前那枚字面量同透明度档、同「随主色」语义）。
+    AURORA_TEST_CHECK_TRUE(ti.selection_color(bare) == Theme::light().roles.primary.with_alpha(90));
+
+    const auto [env, dark] = themed_ctx(Theme::dark());
+    AURORA_TEST_CHECK_TRUE(ti.cursor_color(dark) == Theme::dark().roles.on_surface);
+    AURORA_TEST_CHECK_TRUE(ti.text_color(dark) == Theme::dark().roles.on_surface);
+    AURORA_TEST_CHECK_TRUE(ti.placeholder_color(dark) == Theme::dark().roles.on_surface_variant);
+    AURORA_TEST_CHECK_TRUE(ti.background(dark) == Theme::dark().roles.surface_container);
+    AURORA_TEST_CHECK_TRUE(ti.focused_background(dark) == Theme::dark().roles.surface_bright);
+    AURORA_TEST_CHECK_TRUE(ti.border_color(dark) == Theme::dark().roles.outline);
+    AURORA_TEST_CHECK_TRUE(ti.focused_border_color(dark) == Theme::dark().roles.primary);
+    AURORA_TEST_CHECK_TRUE(ti.selection_color(dark) == Theme::dark().roles.primary.with_alpha(90));
+}
+
+AURORA_TEST_CASE(explicit_declaration_stops_theme_follow_and_clear_restores_it) {
+    const auto [env, dark] = themed_ctx(Theme::dark());
+    TextInputProbe ti;
+    ti.set_text_color(Color{0xE0, 0x1B, 0x24}).set_border_width(3.0F);
+    AURORA_TEST_CHECK_TRUE(ti.text_color(dark) == Color{0xE0, 0x1B, 0x24});  // 表态即脱离主题
+    AURORA_TEST_CHECK_NEAR(ti.border_width(dark), 3.0F, 1e-4F);
+
+    Json props = Json::object();
+    ti.serialize_props(props);
+    AURORA_TEST_CHECK_TRUE(props.contains("text_color"));  // 显式值落盘，重建时不再退回主题
+    AURORA_TEST_CHECK_TRUE(props.contains("border_width"));
+
+    ti.clear(TextInput::text_color_row());
+    ti.clear(TextInput::border_width_row());
+    AURORA_TEST_CHECK_FALSE(ti.present(TextInput::text_color_row()));  // 撤的是表态位
+    AURORA_TEST_CHECK_TRUE(ti.text_color(dark) == Theme::dark().roles.on_surface);
+    AURORA_TEST_CHECK_NEAR(ti.border_width(dark), Theme::dark().controls.border_thickness, 1e-4F);
+
+    // 未表态 ⇒ 生效值随作用域换肤：同一控件在两档主题下解出各自的令牌。
+    const auto [env_l, light] = themed_ctx(Theme::light());
+    AURORA_TEST_CHECK_TRUE(ti.text_color(light) == Theme::light().roles.on_surface);
 }
 
 }  // namespace aurora::test_cases::utest_text_input
