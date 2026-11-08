@@ -181,6 +181,21 @@ if (AURORA_BUILD_TESTS)
         add_test(NAME check_no_optional_in_public_signature
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_no_optional_in_public_signature.py"
                 WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
+        # 令牌登记表一致门禁：五组「成员指针 -> 短名」对照表（`AURORA_TOKENS`）必须与该组结构体的
+        # 实际字段一一对应、短名由「theme.h 里声明的前缀 + 字段名」拼出、`value_type` 与字段真实
+        # 类型同号、登记序与声明序同序，且登了表的组不得漏出 `theme_token_groups()`。这是 schema 里
+        # `theme.<短名>` 反查的唯一来源：表漂了不报错，只会让默认值指向一枚不存在的令牌。
+        add_test(NAME check_theme_token_registry
+                COMMAND ${PYTHON3_EXE} "${_check_dir}/check_theme_token_registry.py"
+                WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
+        # 令牌显示串归零门禁：控件侧手抄的 `"theme.x"` 字面量（裸串 / 转义串 / raw-string 三种拼法
+        # 分开计数）必须归零——发射通道齐了（`.fallback<>` / `.shows_token<>` / `theme_token_expr<>`），
+        # 手抄即漂移面：同一档被抄成两种拼法，schema 里就是两种 `default_expr`，令牌改名时还编译不红。
+        # 豁免只有三档且全是结构性或就地标记：登记表数组内、`theme_token_groups()` 体内、
+        # `THEME-LITERAL: <理由>`（名案用例文件按名豁免，但仍只许裸串拼法）。
+        add_test(NAME check_no_theme_display_literals
+                COMMAND ${PYTHON3_EXE} "${_check_dir}/check_no_theme_display_literals.py"
+                WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
         # 伞头（include/aurora/aurora.h）完整性门禁。两层检查：① 文件健康——include 被行尾
         # 注释吞并 / 一行多指令 / 重复 / 路径缺失 / 编码损坏（私用区字符）/ 行结束符混用；
         # ② 覆盖契约——直连集合不得相对基线缩减，且每个 public 头必须「直连 ∨ 从直连集合可达

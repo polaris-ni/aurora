@@ -27,7 +27,7 @@
 #   C8  撤表态无具名件：`XxxProps` 公共面出现任何 `reset_<...>()` 声明即红，
 #       退回回落点只有 `clear(row)` 一条通道（库内非属性类的 `reset_*` 不在判定面内）。
 #   C9  表序即 schema 序：`rows()` 里的点名次序必须等于 `x_row()` 的声明次序。
-#   C10 派生档必带显示串：派生档行须有 `.shows(...)`，否则发射面给不出默认值表示。
+#   C10 派生档必带显示串：派生档行须有 `.shows(...)` 或 `.shows_token<...>()`，否则发射面给不出默认值表示。
 #
 # 解析件（去注释、类体定位、成员与字段扫描）取自同目录 `props_scan`：本门禁与
 # `check_widget_bind_pattern` / `check_no_optional_in_public_signature` 判的是同一张权威表
@@ -151,10 +151,14 @@ def check_props_class(rel, class_name, body, members, fields, findings, stats):
         row["scoped"] = scoped
         row["form"] = form
         # C10 只钉派生档（带 ctx 的提供者）：活令牌档由令牌反查表出 default_expr，
-        # 值形态与库内默认提供者可直接经同一 codec 格式化，均不需要显示串。
-        if form == "provider" and scoped is True and not re.search(r"\.shows\s*\(", expr):
+        # 值形态与库内默认提供者可直接经同一 codec 格式化，均不需要显示串。显示串两种写法皆合法：
+        # `.shows(<串>)` 给非令牌派生（`auto` / `none` 一类），`.shows_token<&X::y>()` 给只读已登记
+        # 令牌的派生（名由登记表反查、引号发射时补）——判据认「有显示串」，不认它的来源写法。
+        if form == "provider" and scoped is True and not re.search(
+                r"\.(shows\s*\(|shows_token<)", expr):
             findings.append(f"{rel}:{row['line']}: [C10] {class_name}: derived-form row `{root}` needs "
-                            "`.shows(...)` -- the emitter has no instance to read a default from")
+                            "`.shows(...)` or `.shows_token<...>()` -- the emitter has no instance to "
+                            "read a default from")
 
     # --- C4 读面每行恰一件 ---
     readers = {}

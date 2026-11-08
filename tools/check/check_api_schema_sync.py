@@ -6,12 +6,15 @@
 #   直接调用真实构建产物 gen_api_tools（与 AuroraTools.cmake 的 aurora_api_json 目标同源），
 #   以 `-` 参数取得「纯代码视角」JSON —— 该模式不做 merge，输出不含既有文件里的
 #   error_codes / debug 段（二者分别由 gen_error_codes / gen_debug_api 维护），
-#   因此只比对生成器自己负责的 widgets / enums 两段。
+#   因此比对范围是生成器自己负责的 widgets / enums 两段与它发射的顶层非条目块；error_codes / debug
+#   两段由各自生成器维护、仅在写文件时合并进来，故从提交侧键集里剔除后再比。
 #
 # 比对项：
 #   1) widgets 的 type 集合（新增控件未刷新 json / 已删控件仍在 json 残留）；
 #   2) 每个共同 type 的属性键集合（单一 props 表：props[].name）；
-#   3) enums 的名称集合。
+#   3) enums 的名称集合；
+#   4) 顶层非条目块（theme_tokens / accessor_rules / layout_rules / state_patterns …）：两侧键集相同，
+#      且代码侧每一枚都须在 NON_ENTRY_BLOCKS 里登记 —— 生成器新发一块而本脚本视而不见即红。
 #   任一项差集非空 → 非零退出并打印缺失 / 多余明细。
 #
 # 为什么不自己解析 C++ 源码提取类型清单：
@@ -83,6 +86,44 @@ def enum_names(api):
         if name:
             out.add(name)
     return out
+
+
+# Top-level sections holding the per-widget / per-enum tables (compared item by item above).
+ENTRY_TABLES = frozenset({"widgets", "enums"})
+
+# Top-level sections the generator itself owns and that are NOT per-widget / per-enum tables.
+# Registered on purpose: the guard compares the top-level key set as well, so a new block emitted by
+# the generator but missing here (or missing from the committed json) goes red instead of being
+# silently ignored. `theme_tokens` / `accessor_rules` carry the machine-readable token vocabulary and
+# the accessor naming rules; both are derived from tables in the headers, never hand-copied.
+NON_ENTRY_BLOCKS = frozenset(
+    {
+        "library",
+        "include",
+        "alias",
+        "language",
+        "layout_rules",
+        "state_patterns",
+        "theme_tokens",
+        "accessor_rules",
+    }
+)
+
+# Sections maintained by other generators (gen_error_codes / gen_debug_api) and merged into the
+# committed file only: the pure code view (`gen_api_tools -`) never carries them.
+MERGE_ONLY_BLOCKS = frozenset({"error_codes", "debug"})
+
+
+def top_level_sections(api, *, drop_merge_only):
+    """Top-level key set, with the two merge-only sections excluded from the committed side.
+
+    Entry tables (`widgets` / `enums`) are compared field by field elsewhere; here they only need to be
+    present on both sides, so they are counted as part of the same set.
+    """
+    names = set(api.keys())
+    if drop_merge_only:
+        names -= MERGE_ONLY_BLOCKS
+    return names
 
 
 def resolve_exe(build_dir, name):
@@ -175,17 +216,41 @@ def main() -> int:
     if enum_extra:
         problems.append(f"enums stale in json: {', '.join(enum_extra)}")
 
+    # 比对项 4：顶层非条目块。两侧键集必须相同，且代码侧每一枚都须已登记进 NON_ENTRY_BLOCKS ——
+    # 「生成器新发一块而门禁视而不见」正是本项要堵的口子（登记与生成同批，漏登记即红）。
+    fresh_sections = top_level_sections(fresh, drop_merge_only=False)
+    committed_sections = top_level_sections(committed, drop_merge_only=True)
+    section_missing = sorted(fresh_sections - committed_sections)
+    section_extra = sorted(committed_sections - fresh_sections)
+    if section_missing:
+        problems.append(
+            "top-level blocks emitted by the generator but missing from aurora_api.json "
+            f"(run --target aurora_api_json): {', '.join(section_missing)}"
+        )
+    if section_extra:
+        problems.append(
+            f"top-level blocks stale in aurora_api.json (no longer emitted): {', '.join(section_extra)}"
+        )
+    unregistered = sorted(fresh_sections - NON_ENTRY_BLOCKS - ENTRY_TABLES)
+    if unregistered:
+        problems.append(
+            "top-level blocks emitted by the generator but not registered in this guard's "
+            f"NON_ENTRY_BLOCKS: {', '.join(unregistered)}"
+        )
+
     if problems:
         print("[FAIL] aurora_api.json is out of sync with the current public API:")
         for item in problems:
             print(f"  - {item}")
         print(f"\n  widgets: code={len(fresh_widgets)} json={len(committed_widgets)}"
-              f" | enums: code={len(fresh_enums)} json={len(committed_enums)}")
+              f" | enums: code={len(fresh_enums)} json={len(committed_enums)}"
+              f" | top-level: code={len(fresh_sections)} json={len(committed_sections)}")
         print("  Fix: cmake --build <build_dir> --target aurora_api_json")
+        print("       (a new non-entry block must also be added to NON_ENTRY_BLOCKS in this script)")
         return 1
 
     print(f"[OK] aurora_api.json in sync: {len(fresh_widgets)} widget types, "
-          f"{len(fresh_enums)} enums.")
+          f"{len(fresh_enums)} enums, {len(fresh_sections)} top-level blocks.")
     return 0
 
 

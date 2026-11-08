@@ -23,3 +23,5 @@ check_agents_size
 check_change_proposals
 check_third_party_versions
 check_workflow_yaml
+check_theme_token_registry
+check_no_theme_display_literals
