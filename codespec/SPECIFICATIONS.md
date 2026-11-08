@@ -325,7 +325,7 @@ ctest -R itest_ai_compat
 | API token 预算 | `ctest -R check_api_budget`（SPEC.PERF.API.TOKEN-EFFICIENCY.001：`aurora_api.json` 估算 token 数 ≤ 预算） | `check_api_budget` |
 | 无写死本机路径 | `ctest -R check_no_hardcoded_paths`（禁止盘符 / 用户主目录等本机专属绝对路径入库，外部路径须显式传入） | `check_no_hardcoded_paths` |
 | 豁免指令排版 | `ctest -R check_nolint_layout`（clang-tidy 豁免只在物理行生效：理由夹在指令与代码之间、被豁免语句折行、注释散文抄裸令牌，三类均静默失效，见 `CODING_STANDARDS.md` §5.2） | `check_nolint_layout` |
-| 属性权威表覆盖 | `ctest -R check_props_table_coverage`（单一声明口径的机械判据：已迁移的 `XxxProps` 须「一私有字段 / 一表行 / 一 JSON 键」三方计数相等、每行回落点与必填二选一、读面每行恰一件且形状由回落点决定、写件逐行转调对号，公共面不得出现句柄读件 / 合成读件 / 组合便利写件 / 具名撤表态件；未迁移的公有字段聚合体放行） | `check_props_table_coverage` |
+| 属性权威表覆盖 | `ctest -R check_props_table_coverage`（单一声明口径的机械判据：已迁移的 `XxxProps` 须「一私有字段 / 一表行 / 一 JSON 键」三方计数相等、每行回落点与必填二选一、读面每行恰一件且形状由回落点决定、写件逐行转调对号，公共面不得出现句柄读件 / 合成读件 / 组合便利写件 / 具名撤表态件；未迁移的公有字段聚合体放行——18 型在册后该放行分支已无对象，留着是给「新增聚合却暂未收表」的窗口期） | `check_props_table_coverage` |
 | 属性基类接线 | `ctest -R check_widget_bind_pattern`（迁移后的控件与属性面之间的两条结构判据：`XxxProps` 必须是该控件的**末位公有基类**——基类子对象先于成员子对象移动，次序颠倒则移动后的控件静默失联；非转调构造的函数体尾部必须**恰有一次** `bind(*this)` 且实参为 `*this`，默认构造与只在头文件里声明、`src/` 也无定义的构造同判红灯；转调委托的构造豁免） | `check_widget_bind_pattern` |
 | 公共签名裸类型 | `ctest -R check_no_optional_in_public_signature`（属性面公共签名禁 `std::optional`：写件参数与读件返回值均取裸 `T`，可空性只活在存储层的表态位里；同时拦 `ReadOnlyState<T>` 作读面、`ReadOnlyState<std::optional<T>>` 一类双重空态、`PropRow` 进参数或作非行访问件的返回值；豁免逐处登记，登记而未命中即红） | `check_no_optional_in_public_signature` |
 | codespec 交叉引用 | `ctest -R check_codespec_xref` | `check_codespec_xref` |

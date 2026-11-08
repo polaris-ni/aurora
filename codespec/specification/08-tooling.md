@@ -157,26 +157,26 @@ enum class CodeStyle : std::uint8_t { Fluent, StepByStep, DesignatedInit };   //
 |:---|:---|
 | `Fluent`（默认） | 链式构造表达式：叶控件 `au::Type(au::TypeProps().set_key(值)…)`，子节点是构造首参的容器 `au::Column({子项}, au::ColumnProps()…)`，不在名单内的类型 `au::Type{子项}` / `au::Type{}` |
 | `StepByStep` | `auto w = au::Type{…}; w.set_key(值);`（或 `w.key = 值;`）分步赋值形式，唯一**完整**承载全部落点的风格 |
-| `DesignatedInit` | **`Fluent` 的逐字节别名**，不另开发射路径。指定初始化器要求 `*Props` 的公有同名成员，而属性迁到链式形态后 17 型字段一律私有（`au::ButtonProps{ .label = "OK" }` 编译红）、其余 59 型不在发射名单内（属性按能力边界省略，见下表）—— 没有一条产物再发设计符。枚值保留只为 CLI `--style di` / MCP / Inspector 的 `style=2` 不破约，`itest_to_code` 逐字节钉住两风格同产物 |
+| `DesignatedInit` | **`Fluent` 的逐字节别名**，不另开发射路径。指定初始化器要求 `*Props` 的公有同名成员，而属性迁到链式形态后 18 型字段一律私有（`au::ButtonProps{ .label = "OK" }` 编译红）、其余 58 型不在发射名单内（属性按能力边界省略，见下表）—— 没有一条产物再发设计符。枚值保留只为 CLI `--style di` / MCP / Inspector 的 `style=2` 不破约，`itest_to_code` 逐字节钉住两风格同产物 |
 
 **风格能力表**（`Fluent` 与 `DesignatedInit` 是同一条构造表达式管线的两个名字，`StepByStep` 另走语句管线；差别只在「能否承载某一类落点」）：
 
 | 属性类别 | Fluent / DesignatedInit | StepByStep |
 |:---|:---|:---|
-| 链式形态 `*Props` 的自有属性（`props_chain_writers` 的 17 型，字段私有、公共面只有 `set_<键>`） | ✅ 发 `au::Type(au::TypeProps().set_key(值)…)`；子节点是构造首参的容器发 `au::Column({子项}, au::ColumnProps()…)` | ✅ `w.set_key(值)` |
-| 不在链式写件名单内的类型（其余 59 型）的自有属性 | ❌ 没有能装入属性的构造入口，只发 `au::T{}` / `au::T{子项}`（臆造 `au::StackProps` 会编译失败） | ❌ 字段是 protected + 访问器，同名赋值编译不过，故**未登记落点的键一律省略并告警**（唯一例外是 `WebView`：它有公有字段聚合、`w.url = 值` 其实合法，但发射面没登记这条通路，同样省略） |
+| 链式形态 `*Props` 的自有属性（`props_chain_writers` 的 18 型，字段私有、公共面只有 `set_<键>`） | ✅ 发 `au::Type(au::TypeProps().set_key(值)…)`；子节点是构造首参的容器发 `au::Column({子项}, au::ColumnProps()…)` | ✅ `w.set_key(值)` |
+| 不在链式写件名单内的类型（其余 58 型）的自有属性 | ❌ 没有能装入属性的构造入口，只发 `au::T{}` / `au::T{子项}`（臆造 `au::StackProps` 会编译失败） | ❌ 字段是 protected + 访问器，同名赋值编译不过，故**未登记落点的键一律省略并告警** |
 | 基类属性（`width`/`height`/`show`/非 Text 的 `overflow`/a11y 三键） | ❌ 不是 `*Props` 成员，构造表达式无从安放，一律省略 | ✅ 链式 setter / 公有成员 / `set_*()` |
 | 嵌套成员路径（成员为结构体、需逐子键写入的落点） | ❌ 构造表达式承载不了「逐子键写入」这件事 | ✅ `w.成员.子键 = 值;` |
-| setter-only 落点（`Stack.fit`、`Skeleton` 的色 / 高亮 / 时长三键、`TitleBar` 的四键…） | ❌ 落点所属类型都在 17 型之外，表达式片段里没有这种调用 | ✅ `w.set_duration(1.5);` |
+| setter-only 落点（`Stack.fit`、`Skeleton` 的色 / 高亮 / 时长三键、`TitleBar` 的四键…） | ❌ 落点所属类型都在 18 型之外，表达式片段里没有这种调用 | ✅ `w.set_duration(1.5);` |
 
 ### 2.5.1 发射管线：一切落点须可核对
 
 `emit_props` 的每个键都要先经 **「类型自描述 + 落点登记表」** 换算成真实写入路径，才决定发射还是省略：
 
-1. **取值形态分派**（`emit_prop_value`）：`bool` / `int` / `float` / `double` / `string` / `LocalizedString`（字符串形态命中 string 分支）/ `Color`（`[r,g,b,a]`）/ `Length`（`["px",N]`、`["percent",N]`、`{"value","unit"}` 旧格式、`"auto"`/`"fill"`，以及 schema `props` 表 `default` 里那种**裸数字**——按 px 语义包成 `au::px(N)`，因为 `Length` 不可由 `float` 隐式转换）/ `EdgeInsets` / 枚举（含 `font_weight`、`text_decoration` 专用分支）。产物一律 `au::` 限定，使代码在任意命名空间可编译。
+1. **取值形态分派**（`emit_prop_value`）：`bool` / `int` / `float` / `double` / `string` / `LocalizedString`（字符串形态命中 string 分支）/ `Color`（`[r,g,b,a]`）/ `Length`（`["px",N]`、`["percent",N]`、`{"value","unit"}` 旧格式、`"auto"`/`"fill"`，以及 schema `props` 表 `default` 里那种**裸数字**——按 px 语义包成 `au::px(N)`，因为 `Length` 不可由 `float` 隐式转换）/ `EdgeInsets` / 枚举（含 `font_weight`、`text_decoration` 专用分支）。产物一律 `au::` 限定，使代码在任意命名空间可编译；控件类不在 `aurora` 直属时（在册 76 型只有 `WebView`，真身 `aurora::webview::WebView`），`au::` 之后还要带同一段子命名空间，类名、`*Props` 聚合名与自描述给出的枚举名共用这一枚前缀（`cpp_namespace`）—— 漏掉任一处都不是「少发一条属性」，而是产出一个不存在的名字。
 2. **枚举还原优先走自描述**（`descriptor_enum_expression`）：`props[].type` 给 C++ 枚举类型名、`props[].enum` 给合法取值名，取值按列表**忽略大小写规范化**（`"center"` → `au::TextAlign::Center`）。这消掉了旧登记表的两类错误：同名键跨类型的歧义（`fit`/`orientation`）与大小写不符声明的取值（`au::Orientation::horizontal`）。列表里没有该取值时保留原样输出，交由产物编译体检暴露。取值名不是合法标识符时（`FontWeight` 的 `"400"`，落点 `Font::weight` 本就是 int）不拼枚举项名。自描述未给取值集的类型仍回落 `enum_type_for_key` 键名登记表。
 3. **表序**：链式写件续在同一个 `TProps()` 之后，形态本身**没有**顺序约束（曾有的是指定初始化器的「乱序 GCC 直接报 `designator order … does not match declaration order`」，该判据随指定初始化器一并退出）。发射前仍按 `props` 表的数组下标（即权威表的点名序）稳定排序，为的是产物与 schema、描述符逐行可对照 —— 快照 JSON 的键是字典序，不排就会漂。StepByStep 的语句序无约束，沿用同一顺序便于两风格逐行对照。
-4. **落点换算**：链式形态的 17 型不进登记表 —— 词根与序列化键同名，落点直接由键名推出 `set_<键>`（这是读面词根规则在发射侧的兑现）。其余键查 `prop_target` 登记表得「成员路径 / 嵌套路径 / setter 名」，基类键走 `base_target`。**表外键的查表默认（同名直接赋值）只是回退值**，两条发射路径都在取落点之前把它滤掉（表达式问 `expressible`、语句问 `statement_assignable`），所以当前没有产物走到赋值那一支；它保留是给「登记表新增一档落点」留的默认，不是「同名公有成员可直写」的承诺。`no_write_path` 显式登记「确认无写入通道」的键（`Scroll.offset`/`LazyRow.offset` 是运行态、`Image.image_width`/`image_height` 是解码派生值、`Skeleton.width`/`height` 需成对的 `set_size()`），`is_base_key` 则处理**同名遮蔽**：`Text` 的 `overflow`、`Skeleton` 的 `width`/`height`、`TitleBar` 的 `height` 都是控件自己的键（`serialize_props` 覆写了基类写入），不得按基类 `Length`/`OverflowStrategy` 发射。
+4. **落点换算**：链式形态的 18 型不进登记表 —— 词根与序列化键同名，落点直接由键名推出 `set_<键>`（这是读面词根规则在发射侧的兑现）。其余键查 `prop_target` 登记表得「成员路径 / 嵌套路径 / setter 名」，基类键走 `base_target`。**表外键的查表默认（同名直接赋值）只是回退值**，两条发射路径都在取落点之前把它滤掉（表达式问 `expressible`、语句问 `statement_assignable`），所以当前没有产物走到赋值那一支；它保留是给「登记表新增一档落点」留的默认，不是「同名公有成员可直写」的承诺。`no_write_path` 显式登记「确认无写入通道」的键（`Scroll.offset`/`LazyRow.offset` 是运行态、`Image.image_width`/`image_height` 是解码派生值、`Skeleton.width`/`height` 需成对的 `set_size()`），`is_base_key` 则处理**同名遮蔽**：`Text` 的 `overflow`、`Skeleton` 的 `width`/`height`、`TitleBar` 的 `height` 都是控件自己的键（`serialize_props` 覆写了基类写入），不得按基类 `Length`/`OverflowStrategy` 发射。
 
 ### 2.5.2 能力边界：宁缺不伪
 
@@ -191,15 +191,15 @@ enum class CodeStyle : std::uint8_t { Fluent, StepByStep, DesignatedInit };   //
 
 | 分支 | 判据 | 发射形态 | 落点 |
 |:---|:---|:---|---:|
-| 1 | 不在链式写件名单内（`!props_chain_writers`，含无聚合的 58 型与 `WebView`） | `au::T{}` / `au::T{ 子项 }` | 59 型 |
-| 2 | 有链式写件、本节点无子节点 | `au::T(au::TProps().set_x(…))` | 12 型 |
+| 1 | 不在链式写件名单内（`!props_chain_writers`，即无聚合的 58 型） | `au::T{}` / `au::T{ 子项 }` | 58 型 |
+| 2 | 有链式写件、本节点无子节点 | `au::T(au::TProps().set_x(…))` | 13 型 |
 | 3 | 子节点是构造首参的容器（`kids_first_ctor`：`Column`/`Row`/`Grid`） | `au::T({ 子项 }, au::TProps().set_x(…))`，无属性时免 `Props` 形参 | 3 型 |
 | 3b | 子节点是构造首参的单子容器（`single_child_first_ctor`：`Scroll`/`PullToRefresh`） | `au::T(子节点, au::TProps().set_x(…))`，无属性时 `au::T(子节点)` | 2 型 |
 | 4 | 有子节点却两者皆非 | 告警丢弃子节点，只发 `au::T(au::TProps()…)` | 0 型 |
 
 本表曾有第六条「免 `Props` 包裹的多子扁平容器」（判据 `is_flat_container`，名单 `Column`/`Row`/`Stack`/`Grid`/`Scroll`/`Card`）与第七条「`*Props` 里仍带 `.children` 成员的聚合容器」兜底发射 `.children = { 子项 }`。两档现都已删除：前者的六型里四型改走 3/3b、`Stack` 走 1、`Card` 在库里根本没有这个类型；后者的产物在字段私有化之后编译红。分支 4 因此是**给「新增容器却忘了登记构造槽」预留的守卫**，不是当前任何一种控件的形态。
 
-**产物可编译性的验证口径**：`tests/integration/itest_to_code.cpp`（29 例）锁形态，其中「DesignatedInit 与 Fluent 逐字节相同」「子节点槽守卫产物仍可编译」两例钉住本节上面的别名裁决与分支 4。另有全量「类型 × 3 风格」产物逐条 `g++ -fsyntax-only` 体检与真实 UI 树 fixture（`tests/fixtures/ai_compat/`）锁可编译性 —— **该矩阵的名单与读数取自属性面批量迁移之前（73 型 × 3 风格：fluent 65/73、di 65/73、step 65/73，缺的 8 项恰是 `is_unconstructible` 名单；fixture 11 棵树 × 3 风格产物 33/33 全通过），本批未重跑**，schema 现为 76 型，故三个数字都是过期读数，只作方法留档；迁移后 `di` 档与 `fluent` 档由同一条发射路径产出，逐字节相同属构造上的事实（由 `itest_to_code` 的样本断言背书），不是重跑矩阵的实测。矩阵须按**每类型一座独立 TU**编译：把全部产物拼进单座大 TU（省时但）会被 GCC 的级联报错污染——一处失败即波及后续命名空间，实测把 65/73 误报成 50/73、18/73，归属不可信。
+**产物可编译性的验证口径**：`tests/integration/itest_to_code.cpp`（30 例）锁形态，其中「DesignatedInit 与 Fluent 逐字节相同」「子节点槽守卫产物仍可编译」两例钉住本节上面的别名裁决与分支 4，「带子命名空间的类型落在自己的子命名空间里」一例钉住 `cpp_namespace` 的三处拼名。另有全量「类型 × 3 风格」产物逐条 `g++ -fsyntax-only` 体检与真实 UI 树 fixture（`tests/fixtures/ai_compat/`）锁可编译性 —— **该矩阵的名单与读数取自属性面批量迁移之前（73 型 × 3 风格：fluent 65/73、di 65/73、step 65/73，缺的 8 项恰是 `is_unconstructible` 名单；fixture 11 棵树 × 3 风格产物 33/33 全通过），本批未重跑**，schema 现为 76 型，故三个数字都是过期读数，只作方法留档；迁移后 `di` 档与 `fluent` 档由同一条发射路径产出，逐字节相同属构造上的事实（由 `itest_to_code` 的样本断言背书），不是重跑矩阵的实测。矩阵须按**每类型一座独立 TU**编译：把全部产物拼进单座大 TU（省时但）会被 GCC 的级联报错污染——一处失败即波及后续命名空间，实测把 65/73 误报成 50/73、18/73，归属不可信。
 
 ```cpp
 std::string code = au::serialization::to_code(json, au::serialization::CodeStyle::Fluent);

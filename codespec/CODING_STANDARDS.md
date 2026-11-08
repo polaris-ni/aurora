@@ -580,7 +580,7 @@ BREAKING CHANGE: 自定义 Widget 的 on_paint 实现须改用全局坐标，
 
 **问题背景：** Fluent API 往往产生长链式调用，AI 容易在链中间遗漏括号或参数顺序错误。
 
-**需求陈述：** 同一控件必须提供三种**语义完全等价**的构建形态，AI 可按复杂度选择——① 链式 setter（简短组件）、② `*Props` 具名聚合（嵌套结构，可分块生成）、③ 对已构造对象逐行赋值（复杂组件）。等价性由「控件继承其 Props」保证：`class Xxx : public XxxProps`，`XxxProps` 的字段即控件自身的公有字段，不再用私有 `m_*` 重复声明同一属性。
+**需求陈述：** 同一控件必须提供三种**语义完全等价**的构建形态，AI 可按复杂度选择——① 链式 setter（简短组件）、② `*Props` 具名聚合（嵌套结构，可分块生成）、③ 对已构造对象逐行赋值（复杂组件）。等价性由「控件继承其 Props」保证：`class Xxx : public XxxProps`，属性声明只有 `XxxProps` 这一处，不再用私有 `m_*` 重复声明同一属性；字段本身是私有的，对外只有逐行的读件与 `set_<键>()` 写件（收口口径见 [`specification/04-widget.md`](specification/04-widget.md) §2.5）。
 
 ```cpp
 // 形态一：链式 setter（setter 返回引用）
@@ -599,11 +599,11 @@ btn3.set_on_click(fn);
 
 **关键约束：**
 
-- **控件类不是聚合类型**，不能用 `au::Button{ .label = ... }` 这类指定初始化器构造控件（编译失败）。合法写法只有三种：① 属性对象——未迁类型写 `*Props{...}` 聚合、已迁类型写 `XxxProps().set_x(...)` 链式；② 初始化列表 `au::Column{ au::Text("A"), au::Text("B") }`（`Column` / `Row` 接受 `std::initializer_list<Node>`），要同时给属性时写 `au::Column({ ... }, au::ColumnProps().set_gap(8.0F))`（子节点是构造首参、不入属性表）；③ 对已构造对象调链式 setter。
-- 指定初始化器**仅适用于 `*Props` 聚合结构**与 `Theme` 等纯数据聚合；其中字段顺序无关，遗漏字段回退默认值。
+- **控件类不是聚合类型**，不能用 `au::Button{ .label = ... }` 这类指定初始化器构造控件（编译失败）。合法写法只有三种：① 属性对象——`XxxProps().set_x(...)` 链式装入（库内的 `*Props` 全部收在权威表里，没有可直写的公有字段）；② 初始化列表 `au::Column{ au::Text("A"), au::Text("B") }`（`Column` / `Row` 接受 `std::initializer_list<Node>`），要同时给属性时写 `au::Column({ ... }, au::ColumnProps().set_gap(8.0F))`（子节点是构造首参、不入属性表）；③ 对已构造对象调链式 setter。
+- 指定初始化器**只适用于 `Theme` / `ChartSeries` 这类纯数据聚合**（`*Props` 本体已无此类形态）；其中字段顺序无关，遗漏字段回退默认值。
 - 链式 setter 返回引用；作为子节点放入 `children` 时必须用 `std::move` 包裹（`Widget` 拷贝构造被删除，`Node` 仅移动派生对象）。
 - 嵌套声明推荐 `au::Column({ 子项... }, au::ColumnProps().set_gap(8.0F))` 的树形结构（子节点是构造首参；属性表内没有 `children` 槽）。
-- **迁移期两种形态并存**：`BarChart` / `BottomNavBar` / `Button` / `Column` / `Divider` / `LazyRow` / `LineChart` / `PieChart` / `Row` / `ScatterChart` / `Sparkline` 的 `*Props` 已无公有字段，形态二写作链式装入 `au::Button(au::ButtonProps().set_label("OK"))`、形态三的逐行赋值改走 `set_*()` 写件（`btn.set_label(...)`），直写成员名不再合法；其余采用继承式双模的控件仍是公有字段聚合，两种写法各自照旧。
+- **属性面已无两种形态并存**：`BarChart` / `BottomNavBar` / `Button` / `Column` / `Divider` / `Grid` / `ImageView` / `LazyRow` / `LineChart` / `PieChart` / `PullToRefresh` / `Row` / `ScatterChart` / `Scroll` / `Sparkline` / `Text` / `TextInput` / `WebView`（真身 `au::webview::WebView`）共 18 型的 `*Props` 已无公有字段，形态二写作链式装入 `au::Button(au::ButtonProps().set_label("OK"))`、形态三的逐行赋值改走 `set_*()` 写件（`btn.set_label(...)`），直写成员名不再合法；未采用继承式双模的控件（`Checkbox` / `Slider` 一类）仍是私有成员 + setter，与本条无关。
 - 控件可用 `au::` 或 `aurora::` 前缀；推荐 `namespace au = aurora;`。
 
 **验收标准：** 同一界面用三种形态各写一遍，编译产物与运行时行为一致；AI 只需记住「属性名 + `*Props`」即可生成整棵嵌套树，无需记忆顺序位置参数。
@@ -616,7 +616,7 @@ btn3.set_on_click(fn);
 
 - **相同语义在所有组件使用完全相同的名称**（`on_click` 在所有可点击控件同名同参），杜绝 `setCaption` / `setValue` / `size().x` 一类同义异名；属性设置器一律为「属性直接赋值」风格。
 - **命名与类型拼写规则**（属性用名词、事件 `on_` 前缀、布尔取 `show` / `enabled` 语义、杜绝缩写、名序与 React / Flutter 对齐、`XxxProps{...}` 具名聚合优先、强类型几何、常量前缀等）以 [`CODING_STANDARDS.md`](CODING_STANDARDS.md) §2 为唯一权威。
-- **扁平命名空间**：所有公共组件、类型、自由函数直接位于 `aurora`，禁止深层嵌套（`aurora::widgets::buttons::MaterialButton` 列为反模式）；变体通过属性区分而非类型区分。对外承诺稳定的**公共子命名空间**为：`colors`（具名颜色常量）、`platform`（平台查询 API）、`debug`（`aurora::debug` 调试门面自由函数，受 §11.2 lint 校验）、`ui`（声明式工厂 `ui::`，用户面构造语法糖）、`storage`（数据存储门面 `aurora::storage`）、`image`（图像编解码）、`imperative`（imperative API）；其余如 `render` / `detail` / `preferences` 等为内部或辅助命名空间，**不属对外承诺稳定的公共 API 表面**。
+- **扁平命名空间**：所有公共组件、类型、自由函数直接位于 `aurora`，禁止深层嵌套（`aurora::widgets::buttons::MaterialButton` 列为反模式）；变体通过属性区分而非类型区分。对外承诺稳定的**公共子命名空间**为：`colors`（具名颜色常量）、`platform`（平台查询 API）、`debug`（`aurora::debug` 调试门面自由函数，受 §11.2 lint 校验）、`ui`（声明式工厂 `ui::`，用户面构造语法糖）、`storage`（数据存储门面 `aurora::storage`）、`image`（图像编解码）、`imperative`（imperative API）、`webview`（原生 Web 嵌入控件 `au::webview::WebView` 与其 `WebViewMode` 等配套类型——它是 76 型里唯一不挂在 `aurora` 直属下的控件，代码生成的产物因此按 `au::webview::…` 发，见 [`specification/08-tooling.md`](specification/08-tooling.md) §2.5.1）；其余如 `render` / `detail` / `preferences` 等为内部或辅助命名空间，**不属对外承诺稳定的公共 API 表面**。
 - 前缀与别名写法见 [`SPECIFICATIONS.md`](SPECIFICATIONS.md) §命名速查。
 
 **验收标准：** AI 在只见过组件名与属性名的情况下，能凭直觉拼出正确 API；`itest_ai_compat` 不出现因「同义异名」导致的生成失败。
