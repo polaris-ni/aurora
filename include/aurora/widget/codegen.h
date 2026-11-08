@@ -28,19 +28,11 @@ namespace aurora::serialization {
 enum class CodeStyle : std::uint8_t {
     Fluent,  ///< 扁平/链式：au::Column 直接罗列子项；无属性容器免 Props 包裹
     StepByStep,  ///< 分步赋值：先声明控件变量，再逐属性写入
-    DesignatedInit,  ///< 指定初始化器：一律 au::T 配 au::TProps 的成员初始化列表形态
+    DesignatedInit,  ///< Fluent 别名：指定初始化器不再合法，产物逐字节相同；值为 CLI/MCP/Inspector 的 style 参数保留
 };
 
 /// @brief codegen 内部实现细节命名空间：类型能力判定与属性发射的辅助函数，仅由本文件公开入口调用，不构成稳定 API。
 namespace detail {
-
-/// @brief 是否为多子扁平容器（Fluent 风格直接罗列子项，免 Props 包裹）。
-/// @param type 序列化 type 名。
-/// @return type 为 Column/Row/Stack/Grid/Scroll/Card 之一时为 true。
-[[nodiscard]] constexpr auto is_flat_container(std::string_view type) noexcept -> bool {
-    constexpr std::array<std::string_view, 6> k_flat = {"Column", "Row", "Stack", "Grid", "Scroll", "Card"};
-    return std::ranges::find(k_flat, type) != k_flat.end();
-}
 
 /// @brief 把序列化 type 名映射到 C++ 类名（部分控件类名与 type 名不同）。
 /// @param type 序列化 type 名。
@@ -61,32 +53,27 @@ namespace detail {
     return std::string{type} + std::string{"Props"};
 }
 
-/// @brief 拥有 `*Props` 属性聚合的控件类型。
-///
-/// 只有这 17 个类型存在属性聚合（逐个 `struct *Props` 声明核对），指定初始化器也只对它们的
-/// **顶层**成员合法；其余类型（`Stack`/`Spacer`/`TabBar`…）没有聚合，臆造 `au::StackProps` 会直接
-/// 编译失败，故表达式风格（Fluent / DesignatedInit）对它们只产出 `au::T{…}` 构造形、属性留待
-/// StepByStep 的构造后语句（见 specification/08-tooling.md §2.5 的风格能力表）。
-///
-/// @param type 序列化 type 名。
-/// @return 是否声明了对应的 struct *Props 属性聚合。
-[[nodiscard]] constexpr auto has_props_aggregate(std::string_view type) noexcept -> bool {
-    constexpr std::array<std::string_view, 17> k_aggregates = {
-        "BarChart", "BottomNavBar",  "Button", "Column",       "Divider", "Grid",      "Image", "LazyRow",  "LineChart",
-        "PieChart", "PullToRefresh", "Row",    "ScatterChart", "Scroll",  "Sparkline", "Text",  "TextInput"};
-    return std::ranges::find(k_aggregates, type) != k_aggregates.end();
-}
-
 /// @brief 属性写入面只由 `set_<键名>()` 链式写件承担的控件类型（属性单一声明形态）。
 ///
 /// 这类 `*Props` 类的字段全部私有、公共面只剩逐属性的 `set_<词根>` 写件（词根与序列化键同名），
 /// 因此 **指定初始化器不再合法**（`au::ButtonProps{ .label = "OK" }` 编译红：无可直写的公有成员），
-/// 三种风格统一改发链式调用形态 `au::Button(au::ButtonProps().set_label("OK"))`。
-/// 未迁移的类型仍是「序列化键 == 公有同名成员」的聚合，继续走指定初始化器；每迁移一枚控件就把它的
-/// 类型名加进这张表，同时删掉 `prop_target_table` 里为该类型登记的手写落点（链式形态下由词根推出）。
+/// 表达式风格统一改发链式调用形态 `au::Button(au::ButtonProps().set_label("OK"))`；每迁移一枚控件
+/// 就把它的类型名加进这张表，同时删掉 `prop_target_table` 里为该类型登记的手写落点（链式形态下由
+/// 词根推出）。
+///
+/// 这 17 型同时是**发射侧唯一认账的属性聚合**：其余 59 型里，`Stack`/`Spacer`/`TabBar`… 根本没有
+/// 聚合（臆造 `au::StackProps` 直接编译失败），`WebView` 有聚合（`WebViewProps` 是唯一剩下的公有字段
+/// 聚合，控件公开继承它）却不在任何一份发射名单里，故按「无聚合」档发 `au::WebView{…}`、其属性在表达
+/// 式两档静默省略（那是该档的既定能力边界）、在 StepByStep 告警省略——少报不误报（`w.url = ...` 其实
+/// 合法，但发射面不认这条通路），纳管与否待裁决。表达式风格对这一档类型只产出 `au::T{…}` 构造形、
+/// 属性留待 StepByStep 的构造后语句（见 specification/08-tooling.md §2.5 的风格能力表）。「有可装入
+/// 属性的聚合」与「聚合只可链式装入」在本形态下是同一件事：新聚合只能由权威表生成，生成即私有字段 +
+/// 链式写件，不再有「有聚合却仍可指定初始化」的中间态——`WebViewProps` 是唯一存量例外，而它进不了
+/// 表达式。这里曾经维护两份名单，而两份名单逐字相等：靠它们的差区分的分支因此恒不成立，判定面比机制
+/// 面窄了一档，故收成一份。
 ///
 /// @param type 序列化 type 名。
-/// @return 该类型的属性是否只能通过 `set_<键名>()` 链式写件装入。
+/// @return 该类型的属性是否只可经 `set_<键名>()` 链式写件装入（= 发射侧认账的属性聚合档）。
 [[nodiscard]] constexpr auto props_chain_writers(std::string_view type) noexcept -> bool {
     constexpr std::array<std::string_view, 17> k_chain = {
         "BarChart", "BottomNavBar",  "Button", "Column",       "Divider", "Grid",      "Image", "LazyRow",  "LineChart",
@@ -99,18 +86,6 @@ struct PropTarget {
     std::string lhs;  ///< 成员路径（可嵌套）或链式 setter 名
     bool via_setter = false;  ///< true = 生成 `w.lhs(值)`；false = 生成 `w.lhs = 值`
 };
-
-/// @brief 公开继承自身 `*Props` 聚合的类型（`has_props_aggregate` 去掉已迁移的链式类型）。
-///
-/// 公开继承意味着「序列化键 == 公有同名成员」这条默认成立，`w.key = value;` 与 `.key = value` 都合法。
-/// `props_chain_writers` 里的类型同样公开继承，但字段私有、公共面只剩 `set_<键>` 链式写件，
-/// 故它们归入「键名不等于公开成员名」，落点由词根推出。
-///
-/// @param type 序列化 type 名。
-/// @return 类型是否公开继承自身 *Props 且序列化键即公有同名成员；链式形态类型除外。
-[[nodiscard]] constexpr auto publicly_inherits_props(std::string_view type) noexcept -> bool {
-    return has_props_aggregate(type) && !props_chain_writers(type);
-}
 
 /// @brief 构造签名 bespoke（既不接受通用 `T{ Node… }` 初始化列表，也没有 `*Props` 子节点槽）的类型。
 ///
@@ -239,9 +214,9 @@ struct PropTarget {
 /// @brief 键名 ≠ 公开成员名、路径嵌套、或只能经 setter 写入的属性差集表。
 ///
 /// 逐条由 `aurora_cli describe <Type>` 的 `props` 表键集与控件头文件的成员声明比对得出，
-/// 并以 `g++ -fsyntax-only` 编译产物验证（未登记者按同名公开成员处理）。当前在册的只有
-/// protected 字段 + 公有链式 setter 一类（Stack / Skeleton / TitleBar 等）：
-/// 这类落点不能进指定初始化器（protected 字段不可在类外赋值），故只在 StepByStep 出现；
+/// 并以 `g++ -fsyntax-only` 编译产物验证（未登记又非链式形态的键没有公开写入通道，告警省略）。
+/// 当前在册的只有 protected 字段 + 公有链式 setter 一类（Stack / Skeleton / TitleBar 等）：
+/// 这类落点既不是 `*Props` 成员也不是词根写件，构造表达式无从承载，故只在 StepByStep 出现；
 /// 属性面已迁到链式写件的类型不在此表登记——落点由词根 `set_<键>` 推出。
 ///
 /// @return 函数级 static 只读表（键为 type.key 拼接串），首次调用构造、此后只读缓存。
@@ -272,14 +247,17 @@ struct PropTarget {
     return prop_target_table().contains(type + "." + key);
 }
 
-/// @brief 取 (类型, 键) 已登记的写入落点，未登记时回退同名赋值形态。
+/// @brief 取 (类型, 键) 已登记的写入落点。
 ///
 /// 链式形态的类型（`props_chain_writers`）不发赋值：词根与序列化键同名，落点直接由键名推出为
 /// `set_<键>`，无需逐键登记（这是属性单一声明形态的读面词根规则在发射侧的兑现）。
+/// 其余类型只认 `prop_target_table` 的登记项；表外回退值（同名直接赋值）只是查表默认，两条发射路径
+/// 都在取落点之前把它滤掉（表达式问 `expressible`、语句问 `statement_assignable`），当前没有产物走到
+/// 这一支——保留是给「登记表新增一档落点」留的默认，不是「同名公有成员可直写」的承诺。
 ///
 /// @param type 序列化 type 名。
 /// @param key 快照属性键名。
-/// @return 登记的 PropTarget；链式类型为由词根推出的 setter 落点；其余未登记时为键名同名、直接赋值的落点。
+/// @return 登记的 PropTarget；链式类型为由词根推出的 setter 落点；其余未登记时为键名同名的查表默认。
 [[nodiscard]] inline auto prop_target(const std::string &type, const std::string &key) -> PropTarget {
     if (props_chain_writers(type)) {
         return {.lhs = "set_" + key, .via_setter = true};
@@ -304,47 +282,36 @@ struct PropTarget {
     return std::ranges::find(K_NONE, type + "." + key) != K_NONE.end();
 }
 
-/// @brief 该键能否出现在指定初始化器里：类型有属性聚合、非基类键、无「已确认无写入通道」的键，
-///        且落点是聚合的顶层成员（而非嵌套路径/setter）。
-/// @param type 序列化 type 名。
-/// @param key 快照属性键名。
-/// @return 该键能否进入指定初始化器（TProps 成员初始化列表形态）。
-[[nodiscard]] inline auto designatable(const std::string &type, const std::string &key) -> bool {
-    if (!has_props_aggregate(type) || is_base_key(key, type) || no_write_path(type, key)) {
-        return false;
-    }
-    const PropTarget target = prop_target(type, key);
-    return !target.via_setter && target.lhs.find('.') == std::string::npos;
-}
-
-/// @brief 该键能否进**构造表达式**（Fluent / DesignatedInit 的 Props 形片段）。
+/// @brief 该键能否进**构造表达式**（Fluent 与 DesignatedInit 共用这一条判据，两风格同发射路径）。
 ///
-/// 两条合法路径：① `*Props` 聚合的顶层可设计成员（`.key = 值`）；② 链式形态类型由词根推出的
-/// `set_<key>(值)` 调用——它不是设计符，而是挂在 `TProps()` 之后的成员调用。
-/// ②同样受 `no_write_path` 约束：链式形态下词根规则会为**任何**键名推出 `set_<key>`，包括运行时键
-/// （`LazyRow.offset` 只有 `set_scroll_offset()`，没有 `set_offset()`），故发射前先问那一枚键有没有写入通道。
+/// 只有一条合法路径：链式形态类型由词根推出的 `set_<key>(值)` 调用——它不是设计符，而是挂在
+/// `TProps()` 之后的成员调用。曾经并列的第二条路径「`*Props` 聚合的顶层可设计成员」随属性单一声明
+/// 形态收口退出：能进表达式的类型全在 `props_chain_writers` 名单里，其字段私有，指定初始化器编译红。
+/// 基类键不在此判（聚合没有同名成员，`emit_prop_targets` 先行分流到 `base_target`）。
+/// 链式形态下词根规则会为**任何**键名推出 `set_<key>`，包括运行时键（`LazyRow.offset` 只有
+/// `set_scroll_offset()`，没有 `set_offset()`），故发射前先问那一枚键有没有写入通道。
 /// @param type 序列化 type 名。
 /// @param key 快照属性键名。
 /// @return 该键是否可在构造期装入（表达式风格不丢这条属性）。
 [[nodiscard]] inline auto expressible(const std::string &type, const std::string &key) -> bool {
-    return designatable(type, key) || (props_chain_writers(type) && !no_write_path(type, key));
+    return props_chain_writers(type) && !no_write_path(type, key);
 }
 
 /// @brief 该键能否以构造后语句写入。
 ///
-/// 三条合法路径：① 类型公开继承自己的 `*Props`（序列化键即公有同名成员）；② 在 `prop_target`
-/// 登记了落点（改名成员 / 嵌套路径 / setter）；③ 基类属性（走 `base_target`，由调用方处理）。
+/// 两条合法路径：① 链式形态类型（落点由词根推出为 `set_<key>()`）；② 在 `prop_target` 登记了落点
+/// （改名成员 / 嵌套路径 / setter）。基类属性是第三条通道，由调用方先行分流到 `base_target`，不进本判据。
 /// 其余类型（`Slider`/`Checkbox`/`Stack`…）的字段是 protected + 访问器，默认同名赋值必然编译失败，
 /// 故**跳过并告警**——宁可少写一条属性，也不产出编译不过的语句，更不静默吞掉语义。
 /// 已确认「无写入通道」的键（`no_write_path`：运行态/派生值）按文档口径静默省略，不告警。
 /// @param type 序列化 type 名。
 /// @param key 快照属性键名。
-/// @return 能否以构造后语句写入；未登记且非公开继承聚合时返回 false 并向 stderr 告警省略。
+/// @return 能否以构造后语句写入；未登记且非链式形态类型时返回 false 并向 stderr 告警省略。
 [[nodiscard]] inline auto statement_assignable(const std::string &type, const std::string &key) -> bool {
     if (no_write_path(type, key)) {
         return false;
     }
-    if (publicly_inherits_props(type) || props_chain_writers(type) || has_prop_target(type, key)) {
+    if (props_chain_writers(type) || has_prop_target(type, key)) {
         return true;
     }
     AURORA_LOG_WARN("codegen", type, ".", key,
@@ -365,9 +332,10 @@ struct PropDescriptor {
 /// @brief 该类型只读属性描述表（键 → PropDescriptor），数据源是 `describe_component()` 的 `props` 表。
 ///
 /// 用它而不是再造一张手写表，因为这三件事只能由控件自己说：
-/// ① **声明序**——C++ 指定初始化器必须按聚合成员声明序书写，乱序直接编译失败，而快照 JSON 的键是
-/// 字典序；② **声明类型**——同名键在不同控件上是不同枚举（`fit` 在 `Stack` 是 `StackFit`、在
-/// `Image` 是 `BoxFit`），只有描述符的 `type` 字段能消歧；③ **取值名**——`enum` 字段列出合法取值，
+/// ① **表序**——`props` 数组下标就是权威表的点名序，发射按它排序，产物才能与 schema、描述符逐行对照
+/// （链式写件之间没有顺序约束，这曾是指定初始化器的硬判据：乱序直接编译失败）；② **声明类型**——同名键
+/// 在不同控件上是不同枚举（`fit` 在 `Stack` 是 `StackFit`、在 `Image` 是 `BoxFit`），只有描述符的 `type`
+/// 字段能消歧；③ **取值名**——`enum` 字段列出合法取值，
 /// 用于把快照里的大小写变体（`"left"`）规范化回 `DrawerSide::Left`。
 /// 未注册类型返回空表，调用方回落到按键名的静态表。
 ///
@@ -754,12 +722,12 @@ struct PropEmit {
 };
 
 /// @brief 属性键 → 发射序列（按 `*Props` 的**成员声明序**，见 `descriptors_for`）。
-/// 无法还原的取值（`/* unknown */`）静默跳过。指定初始化器必须按成员声明序书写（乱序 GCC
-/// 直接报错），而快照 JSON 的键是字典序；StepByStep 的语句顺序无此约束，
-/// 但同一顺序让两种风格的键序可读且可比。
+/// 无法还原的取值（`/* unknown */`）静默跳过。链式写件本身没有顺序约束（曾经的指定初始化器有：乱序
+/// GCC 直接报错），这里仍按权威表的点名序排序，为的是产物与 schema、描述符能逐行对照；快照 JSON 的键
+/// 序无从保证，StepByStep 的语句序无此约束，但同一顺序让两种风格的键序可读且可比。
 /// @param type 序列化 type 名。
 /// @param props 快照属性对象。
-/// @param use_statement true = 构造后语句口径（含基类属性）；false = 指定初始化器口径（仅可设计成员）。
+/// @param use_statement true = 构造后语句口径（含基类属性）；false = 构造表达式口径（仅链式写件可装入的键）。
 /// @return 按 *Props 成员声明序排序的 PropEmit 列表。
 [[nodiscard]] inline auto emit_prop_targets(const std::string &type, const Json &props, bool use_statement)
     -> std::vector<PropEmit> {
@@ -773,7 +741,7 @@ struct PropEmit {
         const bool base = is_base_key(key, type);
         if (base) {
             if (!use_statement) {
-                continue;  // 基类属性没有 `*Props` 成员，指定初始化器无从安放
+                continue;  // 基类属性没有 `*Props` 成员，构造表达式无从安放
             }
             const PropTarget target = base_target(key, type);
             out.push_back(
@@ -794,43 +762,38 @@ struct PropEmit {
     return out;
 }
 
-/// @brief 把可用属性渲染为构造表达式的 Props 形片段：聚合形态发 `.成员 = 值`（逗号分隔，须包进
-///        `{...}`），链式形态发 `.set_成员(值)`（无分隔符，直接续在 `TProps()` 之后）。
+/// @brief 把可用属性渲染为构造表达式的 Props 形片段：链式形态发 `.set_成员(值)`
+///        （无分隔符，直接续在 `TProps()` 之后）。
+///
+/// 能走到这里的只有链式形态类型：`expressible` 已把其余类型的键全部滤掉，「`.成员 = 值` 进初始化列表」
+/// 那一档随属性单一声明形态一并退出。真出现非 setter 落点，说明判定面与发射面又分叉了——按
+/// 「宁缺不伪」省略并告警，不发射编译不过的形态。
 /// @param props 快照属性对象。
-/// @param prefix 每个成员路径的前缀（当前传 `.`，为嵌套设计符预留；链式调用同样以 `.` 起头）。
+/// @param prefix 每个落点的前导点（当前传 `.`，为嵌套落点预留；链式调用同样以 `.` 起头）。
 /// @param type 序列化 type 名。
 /// @return 片段串；无可用属性时为空串。
 [[nodiscard]] inline auto emit_props(const Json &props, const char *prefix, const std::string &type) -> std::string {
-    const bool chain = props_chain_writers(type);  // 链式形态：片段是成员调用串，不是初始化列表
     std::string out{};
     for (const auto &emit : emit_prop_targets(type, props, false)) {
-        if (!out.empty() && !chain) {
-            out += ", ";
+        if (!emit.via_setter) {
+            AURORA_LOG_WARN("codegen", type, ".", emit.key,
+                            " resolves to a member assignment, which the construction expression cannot carry; "
+                            "omitted");
+            continue;
         }
-        out += prefix;
-        out += emit.lhs;
-        if (emit.via_setter) {
-            out += "(" + emit.expr + ")";
-        } else {
-            out += " = " + emit.expr;
-        }
+        out += prefix + emit.lhs + "(" + emit.expr + ")";
     }
     return out;
 }
 
-/// @brief 把 Props 形片段包成构造表达式：聚合走 `au::T(au::TProps{ 片段 })`，链式走
-///        `au::T(au::TProps() 片段)`（片段自身已带 `.set_x(值)` 前导点）。
+/// @brief 把 Props 形片段包成构造表达式：`au::T(au::TProps() 片段)`（片段自身已带 `.set_x(值)` 前导点）。
 /// @param cls C++ 类名（已去命名空间）。
 /// @param pr Props 类名。
 /// @param body Props 形片段。
-/// @param chain 是否链式形态类型。
 /// @return 该节点的构造表达式。
-[[nodiscard]] inline auto wrap_props_ctor(const std::string &cls, const std::string &pr, const std::string &body,
-                                          bool chain) -> std::string {
-    if (chain) {
-        return "au::" + cls + "(au::" + pr + "()" + body + ")";
-    }
-    return "au::" + cls + "(au::" + pr + "{" + body + "})";
+[[nodiscard]] inline auto wrap_props_ctor(const std::string &cls, const std::string &pr, const std::string &body)
+    -> std::string {
+    return "au::" + cls + "(au::" + pr + "()" + body + ")";
 }
 
 /// @brief 子节点是**构造首参**（`T(Node, TProps = {})`）的链式单子容器。
@@ -860,7 +823,8 @@ struct PropEmit {
 
 /// @brief 该类型能否在构造期交出子节点：不能则告警并返回空列表。
 /// @note 子节点没有「构造后统一入口」——`Container::children_` 是 protected，公开面上只有构造形参
-/// （`T{ Node… }` 初始化列表或 `*Props` 的 `children`/`child` 槽）。故 bespoke 构造的类型只能
+/// （无聚合类型是 `T{ Node… }` 初始化列表，链式形态容器是 `T(std::vector<Node>, TProps)` 或
+/// `T(Node, TProps)` 的首参；`*Props` 聚合已不再带 `children`/`child` 成员）。故 bespoke 构造的类型只能
 /// 省略子节点，并**必须在 stderr 留话**：生成的树看着完整、实际少一层，是比编译失败更坏的故障。
 /// @param type 序列化 type 名。
 /// @param kids 已递归生成的子项表达式列表。
@@ -896,21 +860,24 @@ struct PropEmit {
     return os.str() + pad + "}";
 }
 
-/// @brief 生成一个节点的构造表达式（Fluent / DesignatedInit 共用）。
+/// @brief 生成一个节点的构造表达式（Fluent 与 DesignatedInit 共用，两风格同一条发射路径）。
 ///
 /// 形态选择（每条都必须是可编译的真实构造）：
-/// 1. 无属性聚合的类型（`Stack`/`Spacer`…）→ `au::T{}` 或初始化列表形 `au::T{ 子项 }`；属性无处安放
-/// （见 `has_props_aggregate` 的说明与 specification/08-tooling.md §2.5）。
-/// 2. 无子节点 → `au::T(au::TProps{ 属性 })`（链式形态为 `au::T(au::TProps().set_x(…))`）。
-/// 3. 子节点是构造首参的链式容器（`kids_first_ctor`）→ `au::T({ 子项 }, au::TProps().set_x(…))`。
-/// 3b. 子节点是构造首参的链式单子容器（`single_child_first_ctor`）→
+/// 1. 不在链式写件名单里的类型（`Stack`/`Spacer`/`TabBar`/`WebView`…）→ `au::T{}` 或初始化列表形
+///    `au::T{ 子项 }`；属性无处安放（见 `props_chain_writers` 的说明与 specification/08-tooling.md §2.5）。
+/// 2. 无子节点 → `au::T(au::TProps().set_x(…))`。
+/// 3. 子节点是构造首参的容器（`kids_first_ctor`）→ `au::T({ 子项 }, au::TProps().set_x(…))`。
+/// 3b. 子节点是构造首参的单子容器（`single_child_first_ctor`）→
 ///     `au::T(子节点, au::TProps().set_x(…))`（无属性时 `au::T(子节点)`）。
-/// 4. 其余扁平容器 → 初始化列表形 `au::T{ 子项 }`（无标量属性时）。
-/// 5. 非扁平容器兜底 → `au::T(au::TProps{ 属性, .children = { 子项 } })`。
+/// 4. 有子节点却两者皆非 → 告警丢弃子节点，只发 `au::T(au::TProps().set_x(…))`。
+///    子节点没有「构造后统一入口」（`Container::children_` 是 protected），兜底分支曾按
+///    `au::TProps{ …, .children = { 子项 } }` 发射，而链式形态的字段是私有的，那条产物编译红；
+///    随「有聚合」与「只可链式」两份名单合一，它已不可达，按「宁缺不伪」改成留话的省略。
+///    在册 76 型的实测分支落点只有 1/2/3/3b 四条，本条是给「新增容器却忘了登记构造槽」预留的守卫。
 ///
 /// @param type          序列化 type 名。
-/// @param props_str     emit_props 的标量属性串（链式形态形如 `.set_gap(8.0f).set_columns(2)`，
-///                      未迁移的聚合形态形如 `.gap = 8.0f, .flex = {...}`）。
+/// @param props_str     emit_props 的标量属性串（形如 `.set_gap(8.0f).set_columns(2)`，直接续在
+///                      `TProps()` 之后）。
 /// @param kids_all      已递归生成的子节点表达式（bespoke 构造类型可能被告警丢弃）。
 /// @param indent        缩进层级（一级 4 空格）。
 /// @return 该节点的构造表达式。
@@ -919,13 +886,12 @@ struct PropEmit {
     const std::string cls = cpp_class(type);
     (void)note_construction(type);
     const std::vector<std::string> kids = accept_children(type, kids_all);
-    if (!has_props_aggregate(type)) {
+    if (!props_chain_writers(type)) {
         return "au::" + cls + (kids.empty() ? std::string{"{}"} : emit_child_list(kids, indent));
     }
     const std::string pr = cpp_props(type);
-    const bool chain = props_chain_writers(type);
     if (kids.empty()) {
-        return wrap_props_ctor(cls, pr, props_str, chain);
+        return wrap_props_ctor(cls, pr, props_str);
     }
     if (kids_first_ctor(type)) {
         const std::string list = emit_child_list(kids, indent);
@@ -937,23 +903,16 @@ struct PropEmit {
         return props_str.empty() ? "au::" + cls + "(" + kid + ")"
                                  : "au::" + cls + "(" + kid + ", au::" + pr + "()" + props_str + ")";
     }
-    if (is_flat_container(type)) {
-        return "au::" + cls + emit_child_list(kids, indent);
-    }
-    std::string body = props_str;  // 兜底形态的 Props 成员片段累加器（先标量属性后 .children）
-    // 链式聚合容器（`Column`/`Row`/`Grid`）已在 `kids_first_ctor` 分支按首参发射；走到这里的只剩尚未迁移、
-    // `*Props` 里仍带 `.children` 成员的聚合容器。
-    if (!body.empty()) {
-        body += ", ";
-    }
-    body += ".children = " + emit_child_list(kids, indent);
-    return "au::" + cls + "(au::" + pr + "{" + body + "})";
+    AURORA_LOG_WARN("codegen", type, " has ", kids.size(),
+                    " child node(s) but neither a child vector nor a single Node is a constructor argument; omitted");
+    return wrap_props_ctor(cls, pr, props_str);
 }
 }  // namespace detail
 
 /// @brief 递归下降构造表达式生成器（Fluent 与 DesignatedInit 共用；StepByStep 另走 to_code_sb）。
+/// @note `style` 只作递归透传：表达式两条风格走同一条发射路径，产物逐字节相同，不据它分叉。
 /// @param node 子树快照 JSON。
-/// @param style 代码生成风格。
+/// @param style 代码生成风格（Fluent / DesignatedInit 同路径）。
 /// @param indent 缩进层级（一级 4 空格）。
 /// @return 该子树的构造表达式串。
 [[nodiscard]] inline auto to_code_expr(const Json &node, CodeStyle style, int indent) -> std::string {
@@ -971,12 +930,16 @@ struct PropEmit {
     return detail::emit_node(type, detail::emit_props(props, ".", type), kids, indent);
 }
 
-/// @brief 生成 DesignatedInit 形式（indent 为缩进层级）：与 Fluent 同构——已迁移的链式形态类型一律
-/// `au::T(au::TProps().set_x(…))`（字段私有，指定初始化器不再适用）；未迁移的聚合类型仍发
-/// `au::T(au::TProps{ .key = 值 })`——指定初始化器只有 `*Props` 聚合支持，控件类本身是非聚合类型。
+/// @brief 生成 DesignatedInit 形式（indent 为缩进层级）：与 Fluent **逐字节相同**的别名入口。
+///
+/// 指定初始化器要求 `*Props` 的公有同名成员，而属性面全量迁到链式写件后，17 型聚合的字段一律私有
+/// （`au::ButtonProps{ .label = "OK" }` 编译红）；其余 59 型不在发射名单内，表达式压根不给它们装属性
+/// （唯一剩下的公有字段聚合 `WebViewProps` 也在这 59 型里，它的属性按能力边界省略）。故没有一条产物
+/// 再发设计符。保留这个入口只为 CLI `--style di`、MCP 与 Inspector 的 `style=2` 不破约；itest_to_code
+/// 逐字节钉住两风格同产物，别名一旦悄悄分叉即红。
 /// @param node 子树快照 JSON。
 /// @param indent 缩进层级（一级 4 空格）。
-/// @return DesignatedInit 风格的构造表达式串。
+/// @return 与 Fluent 相同的构造表达式串。
 [[nodiscard]] inline auto to_code_di(const Json &node, int indent) -> std::string {
     return to_code_expr(node, CodeStyle::DesignatedInit, indent);
 }
@@ -1038,12 +1001,12 @@ struct PropEmit {
 /// @brief 把序列化的 widget 树 JSON 反向生成为 Aurora C++ 源码（需求 SPEC.FEAT.TOOLING.UI-TO-CODE.001 /
 /// specification/08-tooling.md §2.5）。
 ///
-/// 输入为 `to_json(widget)` 产生的结构快照。默认 Fluent 风格（扁平容器直接罗列子项 +
-/// `au::Type(au::TypeProps{...})` 叶/带属性容器形式）。
-/// 可用 CodeStyle 选择 DesignatedInit（容器也统一走 Props 指定初始化器）或 StepByStep（先声明后逐属性赋值）。
+/// 输入为 `to_json(widget)` 产生的结构快照。默认 Fluent 风格（容器把子项作构造首参、属性续在
+/// `au::Type(au::TypeProps()` 之后的链式写件；无属性聚合的类型直接罗列子项）。
+/// 可用 CodeStyle 选择 DesignatedInit（与 Fluent 同产物的别名，见 `to_code_di`）或 StepByStep（先声明后逐属性赋值）。
 ///
-/// 属性覆盖度：**StepByStep 完整**；Fluent / DesignatedInit 只能承载 `*Props` 聚合的顶层成员，
-/// 基类属性与嵌套/setter-only 属性会被省略（逐类型能力表见 specification/08-tooling.md §2.5）。
+/// 属性覆盖度：**StepByStep 完整**；Fluent / DesignatedInit 只承载链式写件可装入的自有属性，
+/// 基类属性与无写入通道的键会被省略（逐类型能力表见 specification/08-tooling.md §2.5）。
 ///
 /// 用于「设计工具 → 代码」工作流，或把快照作为可编辑源码。
 ///
