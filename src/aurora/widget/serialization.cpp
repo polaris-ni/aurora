@@ -509,6 +509,9 @@ auto component_schema(const std::string &name) -> Json {
         if (!pd.required) {
             entry.erase("required");  // 稀疏：仅必填项显式输出
         }
+        if (!pd.source) {
+            entry.erase("source");  // 稀疏：仅来源型行显式输出（值型 / 派生行缺键即 false）
+        }
         if (const auto *native = serialized.at(pd.name); native != nullptr) {
             entry.set("default", *native);  // 原生值（实测序列化）覆盖描述符显示串
         } else if (pd.default_native.is_null()) {
@@ -563,6 +566,14 @@ auto component_schema(const std::string &name) -> Json {
     }
     if (!invariants.empty()) {
         w.set("invariants", std::move(invariants));
+    }
+    // 载荷声明按稀疏口径输出：只有 `Provider<T>` 系的载荷格非空（注入值既非属性键也无写件），
+    // 其余控件不留键 —— 与 `children_types` / `invariants` 同一「空即不发」的规则。
+    if (!desc.payload_type.empty()) {
+        Json payload = Json::object();
+        payload.set("type", desc.payload_type);
+        payload.set("channel", desc.payload_channel);
+        w.set("payload", std::move(payload));
     }
     return w;
 }

@@ -12,6 +12,7 @@
 #include "aurora/event/event.h"
 #include "aurora/render/painter.h"
 #include "aurora/state/state.h"
+#include "aurora/theming/theme.h"
 #include "aurora/widget/pickers.h"
 #include "framework/aurora_test.h"
 #include "framework/json_access.h"
@@ -189,7 +190,7 @@ AURORA_TEST_CASE(date_picker_layout_and_describe) {
     AURORA_TEST_CHECK_EQ(std::string{d.properties[0].name}, "year");
     AURORA_TEST_CHECK_EQ(std::string{d.properties[2].name}, "day");
     AURORA_TEST_CHECK_EQ(std::string{d.properties[3].name}, "accent_color");
-    AURORA_TEST_CHECK_EQ(std::string{d.properties[3].default_value}, "\"theme.primary\"");
+    AURORA_TEST_CHECK_EQ(d.properties[3].default_value, theme_token_expr<&ColorRoles::primary>());
     AURORA_TEST_REQUIRE_EQ(d.events.size(), 1U);
     AURORA_TEST_CHECK_EQ(std::string{d.events[0]}, "on_change");
     AURORA_TEST_CHECK_EQ(d.invariants.size(), 2U);

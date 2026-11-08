@@ -10,6 +10,7 @@
 #include "aurora/core/font.h"
 #include "aurora/core/types.h"
 #include "aurora/render/painter.h"
+#include "aurora/theming/theme.h"
 #include "aurora/theming/theme_scope.h"  // inherit_theme：未显式设色时取主题角色
 #include "aurora/widget/props_io.h"  // color_to_json / json_to_color
 #include "aurora/widget/widget.h"
@@ -158,13 +159,13 @@ class Stepper : public LeafWidget {
                      .min_value = "0"},
                     {.name = "active_color",
                      .type = "Color",
-                     .default_value = "\"theme.primary\"",
+                     .default_value = theme_token_expr<&ColorRoles::primary>(),
                      .required = false,
                      .note = "Active step accent color (follows theme primary when unset)",
                      .json_type = "array"},
                     {.name = "inactive_color",
                      .type = "Color",
-                     .default_value = "\"theme.on_surface_variant\"",
+                     .default_value = theme_token_expr<&ColorRoles::on_surface_variant>(),
                      .required = false,
                      .note = "Inactive step color (follows theme on_surface_variant when unset)",
                      .json_type = "array"},

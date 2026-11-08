@@ -12,6 +12,7 @@
 #include "aurora/core/font.h"
 #include "aurora/render/font_engine.h"
 #include "aurora/render/painter.h"
+#include "aurora/theming/theme.h"
 #include "aurora/theming/theme_scope.h"  // inherit_theme：未显式设色时取主题角色
 #include "aurora/widget/descriptor.h"
 #include "aurora/widget/props_io.h"  // color_to_json / json_to_color
@@ -70,7 +71,7 @@ class MenuBar : public Widget {
                      .json_type = "integer"},
                     {.name = "text_color",
                      .type = "Color",
-                     .default_value = "\"theme.on_surface\"",
+                     .default_value = theme_token_expr<&ColorRoles::on_surface>(),
                      .required = false,
                      .note = "Menu item text color (follows theme on_surface when enabled, "
                              "on_surface_variant when disabled; explicit value wins)",

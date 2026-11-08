@@ -7,6 +7,7 @@
 #include "aurora/animation/animator.h"
 #include "aurora/core/color.h"
 #include "aurora/render/painter.h"
+#include "aurora/theming/theme.h"
 #include "aurora/theming/theme_scope.h"  // inherit_theme：未显式设色时取主题角色
 #include "aurora/widget/props_io.h"  // color_to_json / json_to_color
 #include "aurora/widget/widget.h"
@@ -113,12 +114,12 @@ class Skeleton : public LeafWidget {
                      .note = "Placeholder height"},
                     {.name = "color",
                      .type = "Color",
-                     .default_value = "\"theme.surface_variant\"",
+                     .default_value = theme_token_expr<&ColorRoles::surface_variant>(),
                      .required = false,
                      .note = "Base color (follows theme surface_variant when unset)"},
                     {.name = "highlight",
                      .type = "Color",
-                     .default_value = "\"theme.surface_container_lowest\"",
+                     .default_value = theme_token_expr<&ColorRoles::surface_container_lowest>(),
                      .required = false,
                      .note = "Highlight band color (follows theme surface_container_lowest when unset)"},
                     {.name = "duration",

@@ -274,10 +274,10 @@ AURORA_TEST_CASE(defaults_and_describe) {
     AURORA_TEST_CHECK_TRUE(desc.properties[0].default_native.is_number());
     AURORA_TEST_CHECK_NEAR(desc.properties[0].default_native.as_or<float>(0.0F), 64.0F, 1e-6F);
     AURORA_TEST_CHECK_NEAR(desc.properties[1].default_native.as_or<float>(0.0F), 128.0F, 1e-6F);
-    // 活令牌档：默认值给令牌短名，schema 里是带引号的 `theme.*` 表达式串。
-    AURORA_TEST_CHECK_EQ(desc.properties[2].default_value, std::string{"\"theme.primary\""});
-    AURORA_TEST_CHECK_EQ(desc.properties[3].default_value, std::string{"\"theme.surface\""});
-    AURORA_TEST_CHECK_EQ(desc.properties[4].default_value, std::string{"\"theme.on_surface_variant\""});
+    // 活令牌档：默认值给令牌短名，schema 里是带引号的 `theme.*` 表达式串（串由登记表生成，不手抄）。
+    AURORA_TEST_CHECK_EQ(desc.properties[2].default_value, theme_token_expr<&ColorRoles::primary>());
+    AURORA_TEST_CHECK_EQ(desc.properties[3].default_value, theme_token_expr<&ColorRoles::surface>());
+    AURORA_TEST_CHECK_EQ(desc.properties[4].default_value, theme_token_expr<&ColorRoles::on_surface_variant>());
 }
 
 AURORA_TEST_CASE(threshold_and_max_pull_serialize_round_trip) {

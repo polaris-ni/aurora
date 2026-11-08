@@ -13,6 +13,7 @@
 #include "aurora/render/font_engine.h"
 #include "aurora/render/painter.h"
 #include "aurora/state/read_only_state.h"
+#include "aurora/theming/theme.h"
 #include "aurora/theming/theme_scope.h"  // inherit_theme：未显式设色时取主题角色
 #include "aurora/widget/text_span.h"
 #include "aurora/widget/widget.h"
@@ -233,7 +234,7 @@ class RichText : public LeafWidget {
                      .json_type = "string"},
                     {.name = "text_color",
                      .type = "Color",
-                     .default_value = "\"theme.on_surface\"",
+                     .default_value = theme_token_expr<&ColorRoles::on_surface>(),
                      .required = false,
                      .note = "Default text color (follows theme on_surface when unset)",
                      .json_type = "array"},

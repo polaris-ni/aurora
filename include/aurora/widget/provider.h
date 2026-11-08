@@ -37,6 +37,42 @@ inline auto provider_type_name<MediaQuery>() -> const char * {
     return "MediaQueryProvider";
 }
 
+/// @brief 注入值的类型名（描述符的载荷格）：默认无载荷，未特化的 `T` 发空串。
+///
+/// 与 `provider_type_name` 同一族写法：类型名是显示面事实，不能由 RTTI 现取（本库不开 RTTI 依赖），
+/// 也不写死在生成器里。空串即「该 Provider 的载荷类型没有登记名」，发射侧按稀疏口径整组不输出 ——
+/// 宁可少发一格，也不发一枚猜出来的类型名。
+/// @tparam T 注入值类型。
+/// @return 载荷类型名（`"Theme"` / `"Locale"` / `"MediaQuery"`），未特化时为空串。
+template <typename T>
+auto provider_payload_type() -> const char * {
+    return "";
+}
+/// @brief `Theme` 特化：主题 Provider 的载荷类型名。
+/// @return "Theme"。
+template <>
+inline auto provider_payload_type<Theme>() -> const char * {
+    return "Theme";
+}
+/// @brief `Locale` 特化：区域设置 Provider 的载荷类型名。
+/// @return "Locale"。
+template <>
+inline auto provider_payload_type<Locale>() -> const char * {
+    return "Locale";
+}
+/// @brief `MediaQuery` 特化：设备度量 Provider 的载荷类型名。
+/// @return "MediaQuery"。
+template <>
+inline auto provider_payload_type<MediaQuery>() -> const char * {
+    return "MediaQuery";
+}
+
+/// @brief 载荷的传入通道显示串：三枚已登记 Provider 同形（注入值只占构造式第一个位置参数）。
+/// @return 构造参数与环境读取路径的说明串。
+[[nodiscard]] inline auto provider_payload_channel() -> const char * {
+    return "first constructor argument; descendants read it via BuildContext::environment<T>()";
+}
+
 /// @brief 环境注入器（参考 Flutter InheritedWidget / SwiftUI Environment）。
 /// @tparam T 要向下注入的值类型（如 Theme / Locale）。
 /// 把值 `T` 注入环境，子树经 `BuildContext::environment<T>()` 取到最近祖先的 Provider。
@@ -76,7 +112,11 @@ class Provider : public SingleChild {  // NOLINT(bugprone-exception-escape)
     [[nodiscard]] auto type_name() const -> const char * override { return provider_type_name<T>(); }
 
     /// @brief 运行时自描述（规格附录 B）：名称取 provider_type_name<T>()，属性键含 width/height/show。
-    /// @return 描述符：single 子策略与 Provider 构造示例。
+    ///
+    /// 载荷格按 provider_payload_type<T>() 填写：已登记的三型（`Theme` / `Locale` / `MediaQuery`）发类型名
+    /// 与传入通道，其余 `T` 发空串即整组不输出 —— 注入值不是属性键，序列化与写件面都没有它的位置，
+    /// 「这条通路靠什么供给」这句话必须由载荷格承担，不能再让消费侧从 examples 的字面串里猜。
+    /// @return 描述符：single 子策略、Provider 构造示例与（已登记型时）载荷声明。
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
         return WidgetDescriptor{
             .name = std::string(provider_type_name<T>()),
@@ -89,6 +129,8 @@ class Provider : public SingleChild {  // NOLINT(bugprone-exception-escape)
             .events = {},
             .children_policy = "single",
             .examples = {"au::Provider<Theme>(theme, child)"},
+            .payload_type = std::string(provider_payload_type<T>()),
+            .payload_channel = provider_payload_channel(),
         };
     }
     /// @brief 实例侧描述入口：转发静态描述。

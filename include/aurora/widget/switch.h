@@ -11,6 +11,7 @@
 #include "aurora/core/color.h"
 #include "aurora/render/painter.h"
 #include "aurora/state/state.h"
+#include "aurora/theming/theme.h"
 #include "aurora/theming/theme_scope.h"
 #include "aurora/widget/widget.h"
 
@@ -182,7 +183,7 @@ class Switch : public LeafWidget {
                      .json_type = "boolean"},
                     {.name = "active_color",
                      .type = "Color",
-                     .default_value = "theme.primary",
+                     .default_value = theme_token_expr<&ColorRoles::primary>(),
                      .required = false,
                      .note = "Track color when on (defaults to theme primary)",
                      .json_type = "array"},

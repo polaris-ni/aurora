@@ -1,5 +1,7 @@
 #include "aurora/widget/rich_text_edit.h"
 
+#include "aurora/theming/theme.h"
+
 // 完整 BuildContext 定义（explicit_text_direction 模板在 on_layout 内实例化，需用到
 // ctx.environment<Directionality>()，前向声明不足以编译）。
 #include <algorithm>
@@ -66,7 +68,7 @@ auto RichTextEdit::describe_static() -> WidgetDescriptor {
                  .json_type = "string"},
                 {.name = "current_color",
                  .type = "Color",
-                 .default_value = "\"theme.on_surface\"",
+                 .default_value = theme_token_expr<&ColorRoles::on_surface>(),
                  .required = false,
                  .note = "Current input color (follows theme on_surface when unset)",
                  .json_type = "array"},

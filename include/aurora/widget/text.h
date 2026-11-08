@@ -33,7 +33,7 @@ namespace aurora {
 ///   `letter_spacing` / `word_spacing` / `font_weight` / `font_style` / `decoration` /
 ///   `background_color`）：全库唯一基线，读件无参；
 /// - 派生档（`decoration_color`）：回落点读同族 `color` 行的生效值再加工，读件带 `BuildContext`，
-///   schema 里的默认值只能是以 `.shows()` 给出的显示串。
+///   schema 里的默认值只能以显示串给出，本行写 `.shows_token<&ColorRoles::on_surface>()`（名由登记表反查）。
 ///
 /// `direction` 的「继承」语义留在表外：本行回落基线是 `LTR`（读件无参），但控件判定方向时先问
 /// 表态位 `present(direction_row())`——未表态即走 `Environment` / 进程级继承，与迁移前 `nullopt` 等价。
@@ -185,7 +185,7 @@ class TextProps : public AbstractProps<TextProps> {
         return prop_row<&TextProps::decoration_color_>("decoration_color")
             .paint()
             .fallback(&TextProps::decoration_color_default)
-            .shows("\"theme.on_surface\"")
+            .shows_token<&ColorRoles::on_surface>()
             .note("Decoration color (follows text color when unset)");
     }
 

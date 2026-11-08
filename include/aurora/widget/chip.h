@@ -11,6 +11,7 @@
 #include "aurora/icon/icon.h"
 #include "aurora/render/font_engine.h"
 #include "aurora/render/painter.h"
+#include "aurora/theming/theme.h"
 #include "aurora/theming/theme_scope.h"  // inherit_theme：未显式设色时取主题角色
 #include "aurora/widget/widget.h"
 
@@ -175,19 +176,19 @@ class Chip : public LeafWidget {
                      .json_type = "string"},
                     {.name = "background",
                      .type = "Color",
-                     .default_value = R"("theme.surface_variant")",
+                     .default_value = theme_token_expr<&ColorRoles::surface_variant>(),
                      .required = false,
                      .note = "Background color (follows theme surface_variant when unset)",
                      .json_type = "array"},
                     {.name = "text_color",
                      .type = "Color",
-                     .default_value = R"("theme.on_surface")",
+                     .default_value = theme_token_expr<&ColorRoles::on_surface>(),
                      .required = false,
                      .note = "Text color (follows theme on_surface when unset)",
                      .json_type = "array"},
                     {.name = "delete_color",
                      .type = "Color",
-                     .default_value = R"("theme.on_surface_variant")",
+                     .default_value = theme_token_expr<&ColorRoles::on_surface_variant>(),
                      .required = false,
                      .note = "Delete button color (follows theme on_surface_variant when unset)",
                      .json_type = "array"},
@@ -468,13 +469,13 @@ class Badge : public SingleChild {
                      .min_value = "0"},
                     {.name = "badge_color",
                      .type = "Color",
-                     .default_value = R"("theme.error")",
+                     .default_value = theme_token_expr<&ColorRoles::error>(),
                      .required = false,
                      .note = "Badge background color (follows theme error when unset)",
                      .json_type = "array"},
                     {.name = "text_color",
                      .type = "Color",
-                     .default_value = R"("theme.on_error")",
+                     .default_value = theme_token_expr<&ColorRoles::on_error>(),
                      .required = false,
                      .note = "Badge text color (follows theme on_error when unset)",
                      .json_type = "array"},

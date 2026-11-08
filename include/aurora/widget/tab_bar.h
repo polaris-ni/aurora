@@ -12,6 +12,7 @@
 #include "aurora/render/font_engine.h"
 #include "aurora/render/painter.h"
 #include "aurora/state/state.h"
+#include "aurora/theming/theme.h"
 #include "aurora/theming/theme_scope.h"
 #include "aurora/widget/descriptor.h"
 #include "aurora/widget/widget.h"
@@ -85,7 +86,7 @@ class TabBar : public Widget {
                      .min_value = "0"},
                     {.name = "active_color",
                      .type = "Color",
-                     .default_value = "theme.primary",
+                     .default_value = theme_token_expr<&ColorRoles::primary>(),
                      .required = false,
                      .note = "Selected text and indicator color (defaults to theme primary)",
                      .json_type = "array"},

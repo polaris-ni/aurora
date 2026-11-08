@@ -10,6 +10,7 @@
 #include "aurora/core/color.h"
 #include "aurora/render/painter.h"
 #include "aurora/state/state.h"
+#include "aurora/theming/theme.h"
 #include "aurora/theming/theme_scope.h"
 #include "aurora/widget/widget.h"
 
@@ -179,7 +180,7 @@ class Checkbox : public LeafWidget {
                      .json_type = "boolean"},
                     {.name = "active_color",
                      .type = "Color",
-                     .default_value = "theme.primary",
+                     .default_value = theme_token_expr<&ColorRoles::primary>(),
                      .required = false,
                      .note = "Checked fill color (defaults to theme primary)",
                      .json_type = "array"},
@@ -197,7 +198,7 @@ class Checkbox : public LeafWidget {
                      .json_type = "array"},
                     {.name = "size",
                      .type = "float",
-                     .default_value = "\"theme.controls.indicator_size\"",
+                     .default_value = theme_token_expr<&ControlMetrics::indicator_size>(),
                      .required = false,
                      .note = "Box size (dp; follows theme controls.indicator_size when unset)",
                      .json_type = "number",

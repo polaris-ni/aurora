@@ -9,6 +9,7 @@
 #include "aurora/render/painter.h"
 #include "aurora/state/read_only_state.h"
 #include "aurora/state/state.h"
+#include "aurora/theming/theme.h"
 #include "aurora/theming/theme_scope.h"
 #include "aurora/widget/widget.h"
 
@@ -150,7 +151,7 @@ class ProgressIndicator : public LeafWidget {
                      .max_value = "1"},
                     {.name = "color",
                      .type = "Color",
-                     .default_value = "theme.primary",
+                     .default_value = theme_token_expr<&ColorRoles::primary>(),
                      .required = false,
                      .note = "Fill color (defaults to theme primary)",
                      .json_type = "array"},

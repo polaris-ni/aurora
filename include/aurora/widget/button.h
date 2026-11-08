@@ -34,7 +34,8 @@ namespace aurora {
 /// - 活令牌档（`color` / `on_color` / `corner_radius`）：随作用域换肤而变，读件带 `BuildContext`；
 /// - 常量档（`font_size` / `enabled` / `border_*` / `disabled_*` / `min_*`）：全库唯一基线，读件无参；
 /// - 派生档（`padding` / `hover_color` / `pressed_color`）：回落点读同族他行或主题间距档再加工，
-///   读件带 `BuildContext`，schema 里的默认值只能是以 `.shows()` 给出的显示串。
+///   读件带 `BuildContext`，schema 里的默认值只能以显示串给出：只读已登记令牌的行写
+///   `.shows_token<&SpacingScale::large, &SpacingScale::small>()`（名由登记表反查），其余写 `.shows("auto")`。
 ///
 /// `padding` 落派生档而非活令牌档：四边结构与单一标量档不同型（`SpacingScale` 的档位说明同口径），
 /// 故未表态时按「水平 `spacing.large`、垂直 `spacing.small`」现场拼装——与令牌层落地前的字面量
@@ -96,7 +97,7 @@ class ButtonProps : public AbstractProps<ButtonProps> {
             .layout()
             .paint()
             .fallback(&ButtonProps::padding_default)
-            .shows("\"theme.spacing(large/small)\"")
+            .shows_token<&SpacingScale::large, &SpacingScale::small>()
             .note("Padding (follows theme spacing when unset)");
     }
 

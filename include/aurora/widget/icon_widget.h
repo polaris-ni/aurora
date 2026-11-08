@@ -8,6 +8,7 @@
 #include "aurora/core/color.h"
 #include "aurora/icon/icon.h"
 #include "aurora/icon/icon_svg.h"
+#include "aurora/theming/theme.h"
 #include "aurora/widget/props_io.h"
 #include "aurora/widget/widget.h"
 
@@ -126,7 +127,7 @@ class Icon : public LeafWidget {
                      .min_value = "0"},
                     {.name = "color",
                      .type = "Color",
-                     .default_value = "theme.on_surface_variant",
+                     .default_value = theme_token_expr<&ColorRoles::on_surface_variant>(),
                      .required = false,
                      .note = "Icon color (follows theme on_surface_variant when unset)",
                      .json_type = "array"},
@@ -339,7 +340,7 @@ class IconButton : public LeafWidget {
                      .min_value = "0"},
                     {.name = "color",
                      .type = "Color",
-                     .default_value = "theme.on_surface_variant",
+                     .default_value = theme_token_expr<&ColorRoles::on_surface_variant>(),
                      .required = false,
                      .note = "Icon color (theme role per state when unset)",
                      .json_type = "array"},

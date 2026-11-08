@@ -8,7 +8,9 @@
 ///   4. 序列化：必填行恒写、非必填行只在表态时写；反序列化：来源型写进**当前源**（不换绑，后续
 ///      `State::set` 仍驱动该属性），非法值降级为该行回落基线并经 Diagnostics 上报；
 ///   5. 描述符条目顺序 = `rows()` 点名顺序，约束旁注落到 `minimum` / `maximum` / `requires_props`，
-///      默认值表示按档位分化（常量档给原生值，令牌档给带引号的令牌短名，派生档给显示串）；
+///      默认值表示按档位分化（常量档给原生值，令牌档给带引号的令牌短名，派生档给显示串）；显示串由
+///      `.shows_token<>` 逐枚反查登记表后补引号、以 ` / ` 相连，同写 `.shows()` 时散文优先，并对
+///      真实控件（Button / Text）验发射面逐字节等价；
 ///   6. `collect_prop_sources` 只登记来源型行，且未表态的可空来源不登记（没有源可订）。
 
 #include <array>
@@ -25,8 +27,11 @@
 #include "aurora/environment/environment.h"
 #include "aurora/state/state.h"
 #include "aurora/theming/color_roles.h"
+#include "aurora/theming/spacing_scale.h"
 #include "aurora/theming/theme.h"
+#include "aurora/widget/button.h"
 #include "aurora/widget/props.h"
+#include "aurora/widget/text.h"
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_props {
@@ -153,6 +158,59 @@ class ProbeProps : public AbstractProps<ProbeProps> {
     friend class AbstractProps<ProbeProps>;
 };
 
+/// @brief 显示串夹具：只测派生档默认值的字符串组装（逐枚加引号、` / ` 相连、散文优先），
+///        字段类型与回落取值都随意——本夹具不读生效值。
+class ShowsProps : public AbstractProps<ShowsProps> {
+  public:
+    /// @brief 单枚令牌：显示串即该枚登记名的带引号形。
+    [[nodiscard]] static constexpr auto tint_row() {
+        return prop_row<&ShowsProps::tint_>("tint")
+            .paint()
+            .fallback(&ShowsProps::tint_baseline)
+            .shows_token<&ColorRoles::primary>();
+    }
+
+    /// @brief 两枚令牌成组：回落点读同族多枚档位时逐枚点名，schema 里以 ` / ` 相连。
+    [[nodiscard]] static constexpr auto insets_row() {
+        return prop_row<&ShowsProps::insets_>("insets")
+            .layout()
+            .fallback(&ShowsProps::insets_baseline)
+            .shows_token<&SpacingScale::large, &SpacingScale::small>();
+    }
+
+    /// @brief 散文显示串优先：同写 `.shows()` 与 `.shows_token<>()` 时取前者，手写的非令牌文案
+    ///        不被名覆盖（派生规则不是纯令牌取档的行仍要能自己说话）。
+    [[nodiscard]] static constexpr auto free_row() {
+        return prop_row<&ShowsProps::free_>("free")
+            .paint()
+            .fallback(&ShowsProps::free_baseline)
+            .shows_token<&ColorRoles::error>()
+            .shows("darkened color");
+    }
+
+    /// @brief 权威表：参数顺序即 schema 顺序。
+    [[nodiscard]] static constexpr auto rows() { return make_prop_rows(tint_row(), insets_row(), free_row()); }
+
+    /// @brief 描述符出口：本夹具只走发射面，不接宿主。
+    [[nodiscard]] static auto describe() -> WidgetDescriptor { return props_descriptor("Shows"); }
+
+    /// @brief 单枚档的回落点。
+    [[nodiscard]] static auto tint_baseline() -> Color { return Color{}; }
+
+    /// @brief 多枚档的回落点。
+    [[nodiscard]] static auto insets_baseline() -> EdgeInsets { return EdgeInsets{}; }
+
+    /// @brief 散文档的回落点。
+    [[nodiscard]] static auto free_baseline() -> Color { return Color{}; }
+
+  private:
+    std::optional<Color> tint_;  ///< 单枚令牌显示串
+    std::optional<EdgeInsets> insets_;  ///< 两枚令牌显示串
+    std::optional<Color> free_;  ///< 散文优先的显示串
+
+    friend class AbstractProps<ShowsProps>;
+};
+
 /// @brief 「这行能不能撤表态」的可检测性：必填行必须在重载集里根本没有 `clear`。
 template <typename Row>
 concept clearable = requires(ProbeProps props, Row row) { props.clear(row); };
@@ -182,6 +240,7 @@ class ProbeWidget : public LeafWidget, public ProbeProps {
 
 using probe::ProbeProps;
 using probe::ProbeWidget;
+using probe::ShowsProps;
 
 AURORA_TEST_CASE(field_shape_drives_required_and_source_bits) {
     using LabelRow = decltype(ProbeProps::label_row());
@@ -208,7 +267,8 @@ AURORA_TEST_CASE(field_shape_drives_required_and_source_bits) {
     AURORA_TEST_CHECK(!radius.scope_dependent());
     AURORA_TEST_CHECK(color.scope_dependent());
     AURORA_TEST_CHECK(hover.scope_dependent());
-    AURORA_TEST_CHECK_EQ(std::string{color.token_name}, std::string{"theme.primary"});
+    AURORA_TEST_CHECK_EQ(std::string{color.token_name},
+                         std::string{"theme.primary"});  // THEME-LITERAL: 名案，钉住回落点烧进表的那个短名本身
     AURORA_TEST_CHECK(radius.token_name.empty());
 }
 
@@ -437,10 +497,41 @@ AURORA_TEST_CASE(descriptor_entries_are_derived_from_the_table) {
     // 派生档只能给显示串；必填行没有默认值可说。
     AURORA_TEST_CHECK(d.properties[3].default_native.is_number());
     AURORA_TEST_CHECK_NEAR(d.properties[3].default_native.as_or<float>(0.0F), 4.0F, 1e-4F);
-    AURORA_TEST_CHECK_EQ(d.properties[2].default_value, std::string{"\"theme.primary\""});
+    AURORA_TEST_CHECK_EQ(d.properties[2].default_value, theme_token_expr<&ColorRoles::primary>());
     AURORA_TEST_CHECK(d.properties[2].default_native.is_null());
     AURORA_TEST_CHECK_EQ(d.properties[4].default_value, std::string{"darkened color"});
     AURORA_TEST_CHECK(d.properties[0].default_value.empty());
+}
+
+AURORA_TEST_CASE(shows_token_row_emits_quoted_registry_names) {
+    // 期望值刻意写成字面量：本例验的就是「由表反查的名补引号后长什么样」，期望值若也经表求得即
+    // 同义反复（就地标记 THEME-LITERAL 的口径见 tools/check/check_no_theme_display_literals.py S4）。
+    auto default_of = [](const WidgetDescriptor &descriptor, std::string_view key) {
+        for (const auto &property : descriptor.properties) {
+            if (property.name == key) {
+                return property.default_value;
+            }
+        }
+        return std::string{};
+    };
+
+    // 派生档显示串：逐枚补引号、多枚以 ` / ` 相连；同写散文档时散文优先。
+    const WidgetDescriptor shows = ShowsProps::describe();
+    AURORA_TEST_CHECK_EQ(default_of(shows, "tint"), std::string{R"("theme.primary")"});  // THEME-LITERAL: 钉住发射拼法
+    AURORA_TEST_CHECK_EQ(
+        default_of(shows, "insets"),
+        std::string{R"("theme.spacing.large" / "theme.spacing.small")"});  // THEME-LITERAL: 钉住发射拼法
+    AURORA_TEST_CHECK_EQ(default_of(shows, "free"), std::string{"darkened color"});
+
+    // 真实控件逐字节等价：把手抄串换成由表反查只改来源，不改发射面。`Button.padding` 是本轮唯一
+    // 有意换形的显示串（旧的手写拼法是 `theme.spacing(large/small)`，现按登记表逐枚点名）。
+    const WidgetDescriptor button = Button::describe_static();
+    AURORA_TEST_CHECK_EQ(
+        default_of(button, "padding"),
+        std::string{R"("theme.spacing.large" / "theme.spacing.small")"});  // THEME-LITERAL: 钉住发射拼法
+    const WidgetDescriptor text = Text::describe_static();
+    AURORA_TEST_CHECK_EQ(default_of(text, "decoration_color"),
+                         std::string{R"("theme.on_surface")"});  // THEME-LITERAL: 钉住发射拼法
 }
 
 AURORA_TEST_CASE(signal_collection_registers_stated_sources_only) {
