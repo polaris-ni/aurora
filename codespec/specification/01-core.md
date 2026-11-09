@@ -277,7 +277,7 @@ auto widget = restored.value();
 
 | 头文件 | 能力 |
 |:---|:---|
-| `color.h` | `Color` 结构（`color.h`）与具名颜色（`aurora::colors` 子命名空间） |
+| `color.h` | `Color` 结构（`color.h`）与具名颜色（`aurora::colors` 子命名空间），加全库唯一的感知亮度对：`relative_luminance` / `contrast_ratio`（WCAG 2.x 定义，sRGB 线性化后加权求和 / 亮度商；**alpha 不参与**，半透明层的对比度只在合成之后有定义）。阈值不在函数里——3:1 / 4.5:1 是「哪一类配对」的属性，判档见 [`07-environment-modifier.md`](07-environment-modifier.md) §5.1；无障碍配对断言、色角色对比度门禁与派生实现共读这一份，不得另写第二套公式 |
 | `time.h` / `duration.h` | 时间表示与时长 |
 | `event_stream.h` | 事件流 |
 | `file_watcher.h` | 文件监听 |
@@ -343,6 +343,12 @@ btn.set_on_click(au::TODO("handle_click"));   // 编译通过，运行时留可�
 **事件通道（两条并列，互不覆盖）。** 事件处理器在 `accessibility.h` 内是**进程级单槽**（`current_accessibility_event_handler()`，宿主用）；桥另经 `detail::a11y_broadcast_hook` 独立接收同一批事件。两条通道**并列**而非链式：宿主处理器永远被调用，桥广播独立生效，安装顺序无关（历史上「保存旧处理器 + 链式包裹」会让先安装者失效）。另有第三条并列通道 `detail::a11y_widget_destroy_hook`：控件实例销毁前**带上其指针**广播一次，供桥判定「我缓存的根是不是没了」（语义树事件只能给出宿主容器，无法承载这一判定）。
 
 `AccessibilityEventKind` 含 `Announcement`（动态播报 / Live Region）：`announce_accessibility(text, target)` 走独立事件通道，**不经**语义树 diff——toast / 状态提示 / 异步结果这类临时文本没有焦点或取值变化，只有此通道能被读屏感知。
+
+**三枚开关的消费点是唯一物化点，不在本层**。`reduce_motion` / `high_contrast` / `font_scale` 作为输入折进主题快照的那一处（`Theme::with_accessibility`，口径与逐开关折法见 [`07-environment-modifier.md`](07-environment-modifier.md) §5.1）之后即退场：控件与图表读的是折好的令牌，不再回读这些位，因此本类型与 `Theme` 之间不存在并行的第二条通道。三处口径：
+
+- 读取入口统一为 `resolved_accessibility_settings(ctx)`——上下文注入优先，缺失回落进程级单例 `current_accessibility_settings()`。链上没有 `BuildContext` 的子系统（动画驱动器由控件墙钟 tick 推进）传 `BuildContext{}` 走兜底档，那是同一入口的缺省腿而非旁路。
+- `resolved_font_scale()` 是倍率的唯一取用形态：非正 / 非有限值归一化为 1.0，故宿主反复写入同一非法值不会被窗口误判成换档。裸字段 `font_scale` 不参与比较与解算。
+- `screen_reader_active` 不是渲染输入：它不改任何主题取值，只影响语义树播报与桥的通知映射，因此既不入物化也不入窗口的解算键（窗口的换档差量比对同样跳过该位）。
 
 `screen_reader_active`（`AccessibilitySettings`）的语义是 **heuristic**：以「读屏主动取根对象」近似「有读屏在线」，由桥激活时回填 `true`、桥去激活时回填 `false`；读屏退出无反向信号，故不保证及时复位。
 

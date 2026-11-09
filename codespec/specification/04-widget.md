@@ -271,7 +271,7 @@ au::Text("Welcome").font_size(24).bold();
 
 | 控件 | 关键属性 |
 |:---|:---|
-| `Text` | `content`、`font_size`、`color`、`bold()`、`family()`（注：斜体经 `font_style=Italic` 设置，由 FontEngine 施加合成斜体实现，见 `text.h`）。支持指针拖选、键盘扩选与复制 |
+| `Text` | `content`、`font_size`（未表态即取主题正文档 `type_scale.body_medium`，见 §4.1）、`color`、`bold()`、`family()`（注：斜体经 `font_style=Italic` 设置，由 FontEngine 施加合成斜体实现，见 `text.h`）。支持指针拖选、键盘扩选与复制 |
 | `RichText` / `TextSpan` | 富文本片段组合。片段来源是只读句柄 `ReadOnlyState<std::vector<TextSpan>>`（可由 `State<std::vector<TextSpan>>` 隐式降级或字面量自有来源承载） |
 | `RichTextEdit` | 富文本编辑器（`widget/rich_text_edit.h`）；序列化键 `text`（纯文本内容），回调 `on_text_input` |
 | `TextInput` | 全部 19 枚序列化键进 `TextInputProps` 权威表（`text_input.h`）：`value`（**必填可写来源行**，字段形状 `State<std::string>`）、`placeholder`、`font_size`、`corner_radius`、`padding`、`cursor_color`、`enabled`、`text_color`、`placeholder_color`、`background`、`focused_background`、`border_color`、`focused_border_color`、`border_width`、`selection_color`、`max_length`、`read_only`、`obscure_text`、`direction`。八枚色行与 `border_width` 未表态时回落主题令牌（`roles.on_surface` / `on_surface_variant` / `surface_container` / `surface_bright` / `outline` / `primary` 与 `controls.border_thickness`），`selection_color` 走派生档（`roles.primary` 加 90 透明度）。回调 `on_changed`（每次编辑）/`on_submit`（Enter） |
@@ -473,8 +473,11 @@ au::Text("Welcome").font_size(24).bold();
 | `Divider` | `thickness` | `theme.controls.separator_thickness` | `thickness(ctx)`（`color` 同形，回落 `roles.outline_variant`；控件侧的 `resolve_thickness` / `resolve_color` 随迁移退役） |
 | `Checkbox` | `size` | `theme.controls.indicator_size` | `resolve_size(ctx)` |
 | `Dialog` 工厂 | 动作按钮排布、标题对齐、行距 | `theme.conventions.dialog_button_order` / `dialog_title_alignment`、`theme.spacing.medium` / `large` | `detail::dialog_actions` / `dialog_title_text` / `dialog_stretches_children`；两个工厂的末位形参是 `const Theme & = Theme::defaults()` |
+| `Text` | `font_size` | `type_scale.body_medium`（字阶档，`theme_tokens` 表外的**非注册组**，故 `default_expr` 登记为 `type_scale.body_medium` 而非 `theme.*` 前缀） | `font_size(ctx)`（派生档回落点 `TextProps::font_size_default(self, ctx)`；主题被写成非正字号时兜底取 `TypeScale{}` 的声明默认值，不另立第二份 14pt 常量） |
 
-三行控件项与颜色面逐条同构：未表态即不序列化、`describe_static` 的 `default_value` 登记令牌路径串（`"theme.shapes.small"` / `"theme.spacing(large/small)"` / `"theme.controls.separator_thickness"` / `"theme.controls.indicator_size"`，均为 AI/codegen 面文档值，不参与运行时）——`Button` / `Divider` 迁移后这串由行上的回落点自动派生，不再手抄；`Checkbox` 仍是公有 `std::optional` 字段 + 手写 `default_value`。显式设值一律优先，两态语义见 §2.5。`Dialog` 那行的主题来自 `Theme::defaults()`（风格轴探测档），因此它是「惯例真实生效」的落点：`AcceptFirst` + `Leading` 档（Material / Windows / KDE）产出的节点树与接线前逐位同构，其余档位才多包一层右靠容器——右靠需要自由空间，故非默认档的动作行会被拉到 `Dialog` 给的内容盒宽（`Dialog::on_layout` 的 0.8× 上限），这是排布观感的取舍而非尺寸变化。
+三行度量项与颜色面逐条同构：未表态即不序列化、`describe_static` 的 `default_value` 登记令牌路径串（`"theme.shapes.small"` / `"theme.spacing(large/small)"` / `"theme.controls.separator_thickness"` / `"theme.controls.indicator_size"`，均为 AI/codegen 面文档值，不参与运行时）——`Button` / `Divider` 迁移后这串由行上的回落点自动派生，不再手抄；`Checkbox` 仍是公有 `std::optional` 字段 + 手写 `default_value`。显式设值一律优先，两态语义见 §2.5。`Dialog` 那行的主题来自 `Theme::defaults()`（风格轴探测档），因此它是「惯例真实生效」的落点：`AcceptFirst` + `Leading` 档（Material / Windows / KDE）产出的节点树与接线前逐位同构，其余档位才多包一层右靠容器——右靠需要自由空间，故非默认档的动作行会被拉到 `Dialog` 给的内容盒宽（`Dialog::on_layout` 的 0.8× 上限），这是排布观感的取舍而非尺寸变化。
+
+**字号缩放的覆盖面（现状，如实登记）**：`AccessibilitySettings::font_scale` 只在唯一物化点折进令牌快照（口径见 [`07-environment-modifier.md`](07-environment-modifier.md) §5.1），控件侧不再有任何第二次末端乘法——原先那两处 `f.size_pt *= ...` 住在 `Text` 的绘制入口，是全库唯一的消费点。因此随缩放而动的是：`Text` 的 `font_size` 行（经字阶）、四枚读 `type_scale.body_medium` 的图表控件、以及同倍增长的 `spacing` / `shapes` 两族。**不随缩放而动的字号来源仍有八处**：`Button`（14）与 `TextInput`（14）是权威表上的常量档回落点，`Chip` / `Dropdown` / `RadioGroup` / `SpinBox` / `TabBar`（各 13）与 `SegmentedControl`（14）尚未进表、常量写在该控件的默认值与序列化入口里。覆盖面相对接入前只增不减（这八处此前同样不受缩放影响），把它们逐个改到字阶是后续批次的挂账：三枚 14 恰与 `Material` 档正文档同值（改到字阶后在 Material 档逐磅不变，但会随风格档翻到 13），五枚 13 与任何一档正文档都不同值，改的是观感与全部相关像素 golden，需要独立的档位裁决而不是顺带改。显式设值一律压过主题，故缩放不二次作用于已 `set_font_size()` 的控件——这与「显式表态优先」是同一句话。
 
 尚未接线的两枚如实登记在此：`controls.min_touch_target` **不**绑 `Button::min_width` / `min_height`（改绑会把既有全部像素 golden 一起移动，属未经请求的视觉变更）；`controls.scrollbar_thickness` 与焦点环两枚（`focus_ring_width` / `focus_ring_inset`）当前无消费点，理由见 [`07-environment-modifier.md`](07-environment-modifier.md) §5.1 的消费面段。
 

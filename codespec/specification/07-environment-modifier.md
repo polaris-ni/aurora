@@ -213,7 +213,13 @@ margin 在 Maximized / FullScreen / tiled 态塌缩为 0（贴边无可拖缝隙
 - Aurora 扩展角色（Material 3 无对应）：`focus_ring`（焦点环极性色，light 纯黑 / dark 纯白）、`hover` / `pressed`（交互态配色的收纳位）
 - 取舍：Material 3 的 `background` / `on_background` 折叠进 `surface` / `on_surface`（M3 新版 `ColorScheme` 亦移除 background，本库跟随）
 
-每个 `on_*` 角色与配对容器角色的 WCAG AA 对比度 ≥ 4.5:1 由 `utest_theme_roles` 断言；角色基准值即预设取值（dark `primary` 为达标修正后的取值，理由见 `CHANGELOG.md` 破坏性条目）。
+每个 `on_*` 角色与配对容器角色的对比度按**三档口径**判，而非笼统套 AA（角色基准值即预设取值，dark `primary` 为达标修正后的取值，理由见 `CHANGELOG.md` 破坏性条目）：
+
+- **文本档 ≥ 4.5:1**（WCAG 2.2 SC 1.4.3）：承载可读文字的前景对——十枚 `on_*` 与其配对底色，加同一前景落在库内会绘制文字的每个中性底上（`surface_dim` / `surface_bright` / 五档 `surface_container_*` / 反转族两枚）。
+- **非文本档 ≥ 3.0:1**（WCAG 2.2 SC 1.4.11）：靠形状而非文字承载信息的前景对——输入框描边 `outline`、焦点环 `focus_ring`、错误态图形 `error`、交互控件的活跃轨道与滑块 `primary`，各对 `surface`。
+- **不适用**：存储值从来不是上屏值的对（`scrim` / `shadow` 由调用点显式给 alpha 合成后才落屏，`hover` / `pressed` 自带半透明叠加，`surface_tint` 垫在状态层之下），以及不承载识别信息的装饰对（`outline_variant` 分隔线）。不适用不是口头免判：每格**逐条登记理由**；**未登记色对默认按前两档判**——判据面里新出现的配对不会因为「没人表过态」而被跳过。
+
+亮度与比值的真值只有一处：`core/color.h` 的 `relative_luminance` / `contrast_ratio`（alpha 不参与：半透明层的对比度只在合成之后有定义；阈值不在函数里——3:1 / 4.5:1 是「哪一类配对」的属性，判档由登记表承担）。取数由 `gen_contrast_tools`（`tools/gen/gen_contrast.cpp`）走 `Theme::from_style(风格档, 明暗档, 无障碍快照)` 逐档实测，列面是五个风格值 × 明暗 × 对比度两档 = **二十列**：normal 列就是真正上屏的那套值，high 列是同一次调用把 `high_contrast` 置位后的读数——即按「开关声称做到的事」取数，不另造一条派生通路。登记表 `theming/detail/contrast_audit.h` 三张表（档位下限 3 行、逐对归档 30 行 = 文本 20 + 非文本 4 + 不适用 6、预设豁免 14 行），派生实现、门禁与单测共读同一张。门禁 `check_theme_contrast` 判十件事并逐条编号（编号即违规行里的 `C0`–`C9`，变异自证按它定位）：`C0` 运行环境（工具缺失 / 非零退出 / 产物非 JSON / 输入文件缺席，一律红而不静默放行）；`C1` 表声明的枚数与实际行数及产物读数三方对号；`C2` 列面是否穷举 `enum class ThemeStyle` × 明暗 × 对比度两档；`C3` 色角色令牌表的 38 枚是否枚枚被工具读出、且枚枚出现在某格的任一侧、配对两端是否是真角色、档位名是否已知——**期望集取自 `color_roles.h` 的 `AURORA_TOKENS` 而不是产物读数**：按产物建期望时，工具少发一枚角色就等于把该角色从判定面里静默删掉，这条腿因此是唯一可能空转的一腿；`C4` 档位下限是否仍是 WCAG 那两个数与那两条 SC；`C5` 逐格实测比值是否达标；`C6` 每格豁免是否「仍然需要且确有出处」（双向：比值 ≥ 登记下限**且**仍 < 档位下限，后者转红即该格已修好、条目该删）；`C7` 理由是否逐条非空 ASCII；`C8` 本节与表的等集（两枚比值与两条 SC 编号**必须同句在场**、三条判据句与「不适用」角色清单，文档与表任一处漂开即红——只做全节子串搜索会让档位句改成别的数而别处仍写着 4.5，那一类漏判已按变异自证补掉）；`C9` **派生列不享有任何豁免**——高对比那一档逐格按裸档位下限判（开关声称做到的事按它的判据验，不按被豁免过的读数验），同时钉住「派生只是修对比、不是重配色」：某列的原生取值已全部达标时派生列必须逐字节不动，原生取值有未达标格时派生列必须确有改动，且至少有一列发生变化（否则这半条判据空转）。当前读数：480 格参与判定，其中 120 格按「不适用」登记（逐条带理由），十列高对比派生列里六列改动了上屏角色。`utest_theme_roles` 断言的是同一件事的另一侧：它调库内实现、读同一张登记表，不另写一份 WCAG 公式。**十腿变异自证**（每腿一处改动，要求它只把自己那条判红；跑完还原并重跑一次判据）：`C0` 指向不存在的构建目录、`C1` 产物少报一枚审计行、`C2` 工具的风格档清单丢 `Kde`、`C3` 角色循环不发 `tertiary_container`、`C4` 档位下限自改 4.0、`C5` 逐格读数虚报 1.0、`C6` 预设豁免绑到派生列、`C7` 理由置空、`C8` 文本档句改成 4.6、`C9` 派生列不接线——十腿全部按预期转红、还原后回零。首轮自证里 `C3` / `C8` 两腿曾判绿：前者因期望集来自产物（少发即少判），后者因比值的子串在同一节的说明句里也出现（档位句漂开无人报）；两腿的判据按上述口径加固后复跑，各自转红。
 
 **排版角色层 `TypeScale`**（`theming/type_scale.h`）：Material 3 排版 15 档（`display` / `headline` / `title` / `body` / `label` 各 large/medium/small）的 `Font` 字段；图表族经 `compute_geometry` 读取的字阶语义由 `type_scale.body_medium` 承接。
 
@@ -229,11 +235,19 @@ margin 在 Maximized / FullScreen / tiled 态塌缩为 0（贴边无可拖缝隙
 
 **风格轴 `ThemeStyle`**（`theming/theme_style.h`）：`{Material, Windows, MacOs, Gnome, Kde}` 五档，与明暗轴 `ColorScheme{Unspecified, Light, Dark}` **正交**——一套设计语言的亮/暗是同一档的两种呈现，不是两档风格（枚举名里不带 Light/Dark 字样是这条的命名面）。`Material` 同时是**无证据回落档**（无头构建、WASM、裸 X11 拿到的就是它，故 golden 基线与无头 CI 的观感与此前逐位相同）。第二枚证据 `DesktopEnvironment{Unknown, Gnome, Kde, Other}` 只在 Linux / BSD 上读得到，公共入口 `desktop_environment()` 见 [`06-app-platform.md`](06-app-platform.md) §5。
 
-**两轴解算面**：`Theme::from_style(ThemeStyle, ColorScheme = Unspecified)` 是纯函数，按（风格, 档）出一整套标定令牌，取值出处逐字段带等级注记（官方 / 实测 / 派生 / 未取证）；`Theme::default_style()` 探测本机的风格档；`Theme::defaults()` ≡ `from_style(default_style())`。三条口径：
+**两轴解算面**：`Theme::from_style(ThemeStyle, ColorScheme = Unspecified, const AccessibilitySettings & = {})` 是纯函数，按（风格, 档）出一整套标定令牌，取值出处逐字段带等级注记（官方 / 实测 / 派生 / 未取证）；`Theme::default_style()` 探测本机的风格档；`Theme::defaults()` ≡ `from_style(default_style())`。三条口径：
 
 - `scheme = Unspecified` 时**填明色列但 `scheme` 字段保持 `Unspecified`**——不表态不等于亮，这一条与 §5.2 的三级优先链共用同一口径。
 - `default_style()` 的证据源是 `platform().kind` 与 `auto_detect_surface()`，**不是** `MediaQuery::platform`（后者表渲染后端、非 Windows 恒 `Unknown`，取错源会让 Linux 桌面误落回落档）。判据表本身是纯函数 `detail::style_from(PlatformKind, DesktopEnvironment, has_window_backend)`，无头一票否决、Windows / macOS 单轴定档、Linux 有 KDE 证据取 `Kde` 否则 `Gnome`（Adwaita 基线与既有 GTK 配置启发式同源）、`PlatformKind::Unknown` 按外壳证据取档两者皆无才回落 `Material`、`Web` 恒 `Material`；14 格逐格断言由 `utest_theme_probe` 锚定。
 - `defaults()` **只定风格轴、不定明暗档**：不在构造期直读注册表 / 配置文件，那会同时违反 §5.2「创建时读一次」与应用侧「构造期不隐式读 OS 偏好」。要一份确定的暗色写 `from_style(default_style(), os_color_scheme())`，由调用方显式承担那次读取。
+
+**无障碍开关是第三路输入，不是第三根轴**：`high_contrast` / `font_scale` / `reduce_motion` 三枚位**不进 `Theme` 字段、不进 `theme_tokens` 表**，只在**唯一物化点** `Theme::with_accessibility(const AccessibilitySettings &)`（声明 `theming/theme.h`、实现 `theming/theme_presets.cpp`）作为输入折进快照；`from_style` 在收尾处转调它，第三枚形参默认全关 ⇒ 取值与开关接入前逐位一致。物化点是这几路输入的唯一交点，除它之外的读取通路（`inherit_theme` / `resolve_theme` / 属性行回落）一律不看这三枚位——第二条隐式通道因此不存在，开关轴与风格 / 明暗两轴保持正交。三个开关各自的折法：
+
+- `high_contrast` 走 `ColorRoles::with_high_contrast()`（实现 `src/aurora/theming/color_roles_high_contrast.cpp`）的**整族调 tone 派生**，不另打第三列手时常量——判据出处只有 `theming/detail/contrast_audit.h` 那一张登记表。派生只改**相对亮度**、不重新配色：把线性 RGB 等比缩放到该行档位下限的目标亮度（仅当目标越出色域壳时才向白点收敛），观感因此是「同一套配色的强对比版」。可动端优先取底色、其次取前景（前景标签一动即换观感），底色为满足自己的档位必须移动时压在其上的前景在同一步内被修复，故修复不级联；纯底色（只作背景出现者，`surface` 族等）恒不动——高对比语义下页面地不得移位。本已全达标的列返回逐字段相等的副本，默认档 golden 因此不变。**覆盖面边界**：`CsdRoles` 不在登记表内，窗口装饰配色不随高对比变形（待登记后再接，届时同一张表加行）。
+- `font_scale` 作用于 `TypeScale` 解析并**带动非文本度量**：字阶 15 档、`SpacingScale` 7 档、`ShapeScale` 6 档同倍增长，后两组遍历各自 `AURORA_TOKENS` 登记表而不手写第二份名单（`check_theme_token_registry` 的 T1 保证表 == 全部公开标量字段）。倍率**只在这一处乘** ⇒ 控件侧不再有第二次末端乘法，读 `type_scale.body_medium` 的图表控件与未表态字号的 `Text` 回落点因此同值。教训来自 Apple `@ScaledMetric` 与 Compose `sp` 的同一条共识：度量不跟着长就是溢出硬失败，这是可达性不是观感。显式设值仍压过主题——本函数只改令牌，表态过的属性行读自己的字段、不读这里。
+- `reduce_motion` 是 `MotionScale` 的**短路门**（整族取零档），不是倍率——与惯例组 `conventions.motion_scale` 那根缩放轴分列两轴，「二者相乘消费」的口径不变。动画侧另有两处等价短路（`AnimationController::tick` 与 `SpringAnimation` 的推进），它们一步落端点而不等令牌解析，理由见下面「读取入口」。
+
+**读取入口统一**为 `resolved_accessibility_settings(ctx)`（`core/accessibility.h`：上下文注入优先，缺失回落进程级单例 `current_accessibility_settings()`）。动画驱动器由控件墙钟 tick 进入（`Widget::tick` → 控制器 / 弹簧 `tick(dt)`），链上没有 `BuildContext` 可取，故那两处传 `BuildContext{}` 走兜底档——那是同一入口的缺省腿，不是绕开入口的第二条通道；带上下文的一档已经存在（`Theme::with_accessibility` 把置位折成零档时长），时长一经真正从令牌族解析即随作用域生效，无需短路。`screen_reader_active` 不参与物化：它不改任何主题取值，只影响语义树播报，故既不入折法也不入 §5.2 的解算缓存键。「开关置位 → 生效值变」的成对断言分两侧落点：值那一侧在 `utest_accessibility`，帧通道那一侧在 `utest_window`（口径见 §5.2）。
 
 **令牌层四组**（`theming/shape_scale.h` / `spacing_scale.h` / `control_metrics.h` / `layout_conventions.h`，全为逻辑 dp 的纯值 struct，`Theme` 逐字段直挂）：`shapes`（`small` / `medium` / `large` / `extra_large` 圆角）、`spacing`（留白与内边距档位）、`controls`（控件高、命中下限、焦点环粗细与偏移、滚动条粗细与内缩）、`conventions`（`DialogButtonOrder{AcceptFirst, AcceptLast, VerticalRightAligned}` / `DialogTitleAlignment{Leading, Centered}` / `MenuBarPlacement{InWindow, NativePreferred}` / `ScrollbarMode{Classic, Overlay}` / `FocusRingStyle{Outline, OuterGlow, None}` 五枚惯例枚举加 `motion_scale` 动效倍率）。四组的声明默认值即 Material 基线，故 `Theme{}` 与 `from_style(Material, Unspecified)` 逐位等于 `with_defaults()`。
 
@@ -251,11 +265,20 @@ margin 在 Maximized / FullScreen / tiled 态塌缩为 0（贴边无可拖缝隙
 
 因此 `WindowHost::on_os_color_scheme` 不再自己补 `force_full_redraw`——整帧标脏与整子树失效都在 setter 内成对完成，宿主层重复一次会让同档重推绕过 setter 的短路白重绘一帧。判据在 `itest_theme_root_injection`：常驻树上换档帧断言「重排发生且读到新档」（关脏追踪观察失效那一半）、换档帧断言 `has_pending_dirty()`（开脏追踪观察像素那一半）、同值重推两半皆无。
 
+**无障碍换档（第四类换档源：没有 setter，故改差量比对）**：§5.1 那三枚参与物化的开关位住在进程级单例（宿主 / OS 桥经 `set_accessibility_settings` 翻位），本窗没有 setter 可挂标志，因此置位点换成帧入口的 `sync_accessibility_fold()`——与本窗上次物化读到的快照比对 `high_contrast` / `resolved_font_scale()` / `reduce_motion`，换档即按与 `set_theme_style` 同构的口径把两半一起挂上（`theme_pending_` 向下失效 + `force_full_redraw` 整帧标脏）。四条口径：
+
+- 比对**必须排在脏区计划之前**：计划一旦判定「无脏、无布局变化」就整帧跳过，在那之后才标脏的换档信号会随本帧一起丢掉，「开关置位 → 生效值变」退化成「等到下次交互」。
+- 差异判定走归一化的 `resolved_font_scale()` 而非裸字段，宿主反复写入同一非法值（0 / NaN）归一化后恒等于 1.0，不会被误判为换档；`screen_reader_active` 不入键也不参与比对。
+- 显式 `theme_` 在场时开关不参与物化（那套值是应用作者写死的；要高对比由应用自行 `theme.with_accessibility(...)` 后再 `set_theme`），翻位因此不构成重绘理由；比对基准仍照常跟进，免得撤销显式主题后拿一份旧快照白判一次换档。
+- 判据为何不是「挂标志」而是每帧三次内存读：漏判的代价是「开关置位不生效」，那是可达性缺陷不是观感问题，三次纯内存读买它不亏。
+
+断言在 `utest_window` 的无障碍注入用例：字号缩放三档（取 2 → 3 → 1，因为换档检测比的是相邻两帧的输入，从 1.0 起步的第一步与基线同值、本就不该出一帧）断言「出一帧且字阶 / 间距 / 形状同倍增长、`Text` 回落点与图表读同一枚字阶」，减动效断言「`MotionScale` 整族取零档且不串档」，高对比断言「该位参与解算键、置位即出一帧」（生效值本身的成对断言在 `utest_accessibility`：内置色列本就达线，「折叠后必须改变」按风格档与本机探测结果而定，跨机器不成立），读屏在线反过来断言**不出帧**。撤开关后必须复原到逐字段全等的快照——折算必须是输入的纯函数。
+
 **已知不对称（现状，非设计）**：`set_locale` 只有向下失效那一半、没有整帧标脏。文本换档同样改的是每一枚字形，理论上需要同样的整帧重绘；本条只记录口径，未随本批改动。
 
 **两轴解算**：`resolved_root_theme()` 在显式 `theme_` 缺席时返回 `Theme::from_style(风格档, 明暗档)`——风格轴取 `set_theme_style` 钉住的档位，未钉时取 `Theme::default_style()` 的探测档；明暗轴取宿主推入的 `os_scheme_`，其中 `Unspecified` ≡ 明色，故注入主题的 `scheme` 恒为 `Light` / `Dark` 具体档、不为 `Unspecified`（这一条与下面三级链的口径同源）。`set_theme` 与 `set_theme_style` 同时给出时前者生效（它携带完整两轴取值，短路排在风格解算之前）。零回归边界：`from_style(Material, Light)` ≡ `Theme::light()`、`from_style(Material, Dark)` ≡ `Theme::dark()`，故风格档落回 `Material` 的那几类环境（无窗口后端的构建——含测试宿主与无头 CI；`PlatformKind::Web`；以及未映射进平台家族且读不到外壳证据的目标）解算结果与两轴模型引入前逐值相同。注意 Linux 一行的 `Unknown` / `Other` **不**回落 `Material` 而是取 `Gnome`（理由见 `theming/theme_style.h` 判据表注释：本库既有的 `os_color_scheme()` Linux 支读 GTK `settings.ini`，已经默认这台机器在跑 GTK 系桌面，Adwaita 是与该启发式同源的基线，而非另造一档「无主风格」）。
 
-**解算结果的缓存**：`Theme` 是含 15 枚字体族名串的 936 字节聚合（`sizeof` 实测，见 `CHANGELOG.md` 的 [Unreleased] Notes），而本函数每帧被 `prepare_context` 调用，故按**解算后的 `(风格档, 明暗档)` 档位对**缓存、同组合内不再调 `Theme::from_style`——帧路径因此不含主题构造。缓存不靠 setter 失效：任一 setter 换档即改变键、下一帧自然重建，显式 `theme_` 走短路分支根本不读写缓存。断言在 `itest_theme_root_injection`（删去键中的明暗比对后，OS 档翻转、seam 生产链路与双轴钉档三格同时转红）。
+**解算结果的缓存**：`Theme` 是含 15 枚字体族名串的 936 字节聚合（`sizeof` 实测，见 `CHANGELOG.md` 的 [Unreleased] Notes），而本函数每帧被 `prepare_context` 调用，故按**解算后的输入档位对**缓存、同组合内不再调 `Theme::from_style`——帧路径因此不含主题构造。键自两轴模型落地起是 `(风格档, 明暗档)`，无障碍接线后扩为 `(风格档, 明暗档, 高对比位, 归一化字号倍率, 减动效位)`（三枚无障碍输入即上面差量比对的那三枚，两处口径同源；`screen_reader_active` 不入键——它不改任何主题取值，入键会让每次桥激活白重建一份 936 字节快照）。缓存不靠 setter 失效：任一 setter 换档、或宿主翻开关，都会改变键、下一帧自然重建，显式 `theme_` 走短路分支根本不读写缓存。断言在 `itest_theme_root_injection`（删去键中的明暗比对后，OS 档翻转、seam 生产链路与双轴钉档三格同时转红）。
 
 **行为变更（主题解算口径的破坏性变化；控件属性类型侧的破坏另见 `CHANGELOG.md` 的 [Unreleased]）**：应用什么都不设时，默认观感从「Material 基线」变为「本机风格档」——Windows 构建得 Windows 档、macOS 得 MacOs 档、Linux 按外壳证据得 Gnome 或 Kde 档。两条迁移路径：`set_theme(Theme::light())` 取回与本窗探测无关的逐值相同旧观感；`set_theme_style(ThemeStyle::Material)` 保留明暗跟随但锁死风格档。
 
