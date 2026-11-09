@@ -569,7 +569,7 @@ stdio JSON-RPC 2.0 语言服务，对 `au::<Type>(au::<Type>Props().set_<key>(..
 
 **运行时性能测量与持续看护（权威口径）**：六个基准工具每次运行都落盘一份结构化结果文件（契约在 `tools/include/bench_result.h`，编解码复用 `include/aurora/core/json.h`），字段含契约版本、运行元数据（提交、构建指纹、编译器、构建类型、后端、测试环境、场景、重复序号与交错种子）、读数段与可信度结论；原有标准输出一字不变。采样不可信、后端不可用或场景跳过时仍落盘带原因码的结果，判数据缺失而非通过。结果默认写在 `bench-results/`，可由 `AURORA_BENCH_RESULT_DIR` 改向。
 
-阈值与读数是两类数据：`tools/check/perf_gates.json` 仍是 G-1 至 G-14 的唯一阈值登记册，本机 `tools/check/check_perf_gates.ps1` 与 `tests/unit/utest_scroll.cpp` 两个读取方及三次取最小值口径都不变；`tools/check/perf_baselines.json` 才是入库的跨提交趋势读数，按测试环境、构建口径、后端与场景分桶，只允许由显式写入动作更新。`tools/check/bench_compare.py` 是零依赖统计判定载体：同一份代码两臂同码对照标定噪声预算，每臂有效重复不少于九次，交错顺序由显式种子决定，相对变化同时超过噪声预算与最小可检出变化后经双样本秩检验与多重比较校正给出「通过 / 回归 / 噪声不足 / 数据缺失」四种结论；入库基线只作趋势，同次双构建交错对照才作回归判定，任一侧缺失即判数据缺失，不回退静态阈值。
+阈值与读数是两类数据：`tools/check/perf_gates.json` 仍是 G-1 至 G-14 的唯一阈值登记册，本机 `tools/check/check_perf_gates.ps1` 与 `tests/unit/utest_scroll.cpp` 两个读取方及三次取最小值口径都不变；`tools/check/perf_baselines.json` 才是入库的跨提交趋势读数，按测试环境、构建口径、后端与场景分桶，只允许由显式写入动作更新。`tools/check/bench_compare.py` 是零依赖统计判定载体：同一份代码两臂同码对照标定噪声预算，每臂有效重复不少于九次，交错顺序由显式种子决定，相对变化同时超过噪声预算与最小可检出变化后经双样本秩检验与多重比较校正给出「通过 / 回归 / 噪声不足 / 数据缺失」四种结论；小样本无并列值走精确秩分布、否则走带并列与连续性校正的正态近似，因为正态近似在九对九完全分离时给出的 p 值经数百指标同族校正后不再显著，判定会恒为通过；入库基线只作趋势，同次双构建交错对照才作回归判定，任一侧缺失即判数据缺失，不回退静态阈值。九次重复的分辨率有限：同族校正后只有近乎完全分离的差异才会被判红，因此回归告警不等于「没有退化」。
 
 `tools/check/bench_nightly.py` 驱动 `.github/workflows/nightly-bench.yml` 的独立夜间作业：同一运行器内构建父提交与当前提交两套产物，先跑同码标定再跑交错对照，机器可读报告与作业摘要上传为产物；跳过或不可信读数单独列为覆盖缺口，不混入有效读数。该作业不进持续集成测试注册、不进 `tools/check/declared_gates.txt` 现役声明清单，时间类超阈值只产生告警，不改变拉取请求状态与既有作业通过失败语义；计数类确定性判据仍由既有单元测试硬红守护。量化需求见 `SPEC.PERF.RUNTIME.FRAME-BUDGET.001`，运行配方见 `GUIDELINE.md` §14，下游恒开帧监控门面见 `include/aurora/perf/frame_monitor.h`。
 
