@@ -25,6 +25,9 @@ SCHEMA_VERSION = 1
 MIN_REPETITIONS = 9
 DEFAULT_ALPHA = 0.05
 DEFAULT_MIN_CHANGE = 0.02
+# Above this rank-pair count the exact U distribution costs more than it buys, and the
+# normal approximation is accurate anyway.
+EXACT_U_LIMIT = 200
 VERDICTS = ("pass", "regression", "insufficient-noise-data", "data-missing")
 
 
@@ -115,8 +118,34 @@ def group_samples(records):
     return grouped
 
 
+def _exact_u_distribution(n1, n2):
+    """Count every size-n1 subset of the n1+n2 ranks, indexed by its U statistic."""
+    total = n1 + n2
+    max_u = n1 * n2
+    rows = [[0] * (max_u + 1) for _ in range(n1 + 1)]
+    rows[0][0] = 1
+    for rank in range(1, total + 1):
+        for chosen in range(min(rank, n1), 0, -1):
+            shift = rank - chosen
+            row = rows[chosen]
+            previous = rows[chosen - 1]
+            for u in range(max_u - shift, -1, -1):
+                if previous[u]:
+                    row[u + shift] += previous[u]
+    return rows[n1]
+
+
+def _exact_mann_whitney_p(n1, n2, u_observed):
+    """Two-sided exact p-value: without it a 9-vs-9 perfect separation cannot survive
+    a family of a few hundred metrics, so no regression could ever be declared."""
+    counts = _exact_u_distribution(n1, n2)
+    tail = sum(count for value, count in enumerate(counts) if value <= u_observed)
+    return min(1.0, 2.0 * tail / math.comb(n1 + n2, n1))
+
+
 def mann_whitney_p(a, b):
-    """Two-sided Mann-Whitney U p-value with tie and continuity correction."""
+    """Two-sided Mann-Whitney U p-value: exact for small tie-free samples, otherwise the
+    normal approximation with tie and continuity correction."""
     n1, n2 = len(a), len(b)
     if n1 == 0 or n2 == 0:
         return 1.0
@@ -138,6 +167,8 @@ def mann_whitney_p(a, b):
     rank_sum = sum(ranks[k] for k in range(total) if combined[k][1] == 0)
     u1 = rank_sum - n1 * (n1 + 1) / 2.0
     u = min(u1, n1 * n2 - u1)
+    if n1 * n2 <= EXACT_U_LIMIT and all(group == 1 for group in tie_groups):
+        return _exact_mann_whitney_p(n1, n2, int(round(u)))
     mean = n1 * n2 / 2.0
     tie_term = sum(t ** 3 - t for t in tie_groups)
     variance = (n1 * n2 / 12.0) * ((total + 1) - tie_term / (total * (total - 1)))
@@ -403,6 +434,37 @@ def run_selftest():
         checks.append((name, bool(condition)))
 
     with tempfile.TemporaryDirectory() as root:
+        # A parallel metric family must not turn one borderline p-value into a
+        # regression: replacing the step-down correction with an identity must
+        # make these checks fail instead of silently staying green.
+        borderline = 0.04
+        family_adjusted = holm_adjust([borderline] * 8)
+        check("a borderline p is significant on its own",
+              holm_adjust([borderline])[0] < DEFAULT_ALPHA)
+        check("Holm caps a borderline p by the family size",
+              abs(family_adjusted[0] - 8 * borderline) < 1e-9)
+        check("parallel metric family does not manufacture significance",
+              family_adjusted[0] >= DEFAULT_ALPHA)
+        family_pvalues = [0.01, 0.04, 0.03]
+        adjusted = holm_adjust(family_pvalues)
+        check("Holm never loosens a p-value",
+              all(a >= p for p, a in zip(family_pvalues, adjusted)))
+        check("Holm step-down matches the three-metric reference",
+              all(abs(a - b) < 1e-9 for a, b in zip(adjusted, [0.03, 0.06, 0.06])))
+
+        # A perfect 9-vs-9 separation is the strongest signal nine repetitions can carry.
+        # Its exact p-value must still survive a few-hundred-metric family, otherwise the
+        # gate can never fire no matter how large the regression is.
+        separated_base = [1.0 + 0.001 * i for i in range(MIN_REPETITIONS)]
+        separated_head = [2.0 + 0.001 * i for i in range(MIN_REPETITIONS)]
+        exact_p = mann_whitney_p(separated_base, separated_head)
+        check("perfect separation has a small exact p-value", exact_p < 5.0e-5)
+        wide_family = holm_adjust([exact_p] + [1.0] * 246)
+        check("perfect separation survives a 247-metric family",
+              wide_family[0] < DEFAULT_ALPHA)
+        check("overlapping samples keep a large p-value",
+              mann_whitney_p([1.0, 2.0, 3.0], [1.0, 2.0, 3.0]) > 0.5)
+
         base, head = _make_arms(Path(root) / "aa", MIN_REPETITIONS)
         budget = str(Path(root) / "budget.json")
         calibration = run_calibrate(base, head, budget)
@@ -410,10 +472,15 @@ def run_selftest():
 
         report = run_compare(base, head, 42, budget)
         check("same-code A/A is pass", report["verdict"] == "pass")
+        for repeat in range(2):
+            check("same-code A/A stays pass on repeat %d" % (repeat + 1),
+                  run_compare(base, head, 42, budget)["verdict"] == "pass")
 
         replay = run_compare(base, head, 42, budget)
         check("explicit seed is reproducible",
               replay["interleave_sequence"] == report["interleave_sequence"])
+        check("explicit seed replay keeps the verdict",
+              replay["verdict"] == report["verdict"])
         check("unseeded run is rejected",
               run_compare(base, head, None, budget)["verdict"] == "data-missing")
 
