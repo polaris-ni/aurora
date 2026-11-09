@@ -2,9 +2,11 @@
 // aurora_lsp.cpp — Aurora language service (LSP, stdio JSON-RPC 2.0).
 // -----------------------------------------------------------------------------
 // Capabilities (specification/08-tooling.md §7.3): completion / hover / diagnostics / codeAction.
-// Consumes the library's live API (describe_component + known_enums) and, via the lightweight
-// C++ source scanning of the layered LSP analyzer (lsp_schema.h / lsp_document.h /
-// lsp_features.h), assists declarative syntax such as au::<Type>Props{ .prop = ... }.
+// Consumes the library's live API through lsp_live_schema.h (describe_component + known_enums +
+// codegen's capability bits) and, via the lightweight C++ source scanning of the layered LSP analyzer
+// (lsp_schema.h / lsp_document.h / lsp_features.h), assists the chain form
+// au::<Type>(au::<Type>Props().set_<key>(...)). Brace property blocks are reported as an illegal form
+// with a whole-block rewrite; brace child-node lists are left alone.
 // Build: same pattern as aurora_mcp / aurora_cli (add_executable + link aurora).
 // =============================================================================
 
@@ -22,9 +24,8 @@
 #endif
 
 #include "aurora/aurora.h"
-#include "aurora/widget/serialization.h"
-#include "known_enums.h"
 #include "lsp_features.h"
+#include "lsp_live_schema.h"
 
 // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
 
@@ -35,75 +36,9 @@ static auto docs() -> std::map<std::string, std::string> & {
 }
 
 static auto schema() -> const au::tools::Schema & {
-    static const au::tools::Schema S = []() -> au::tools::Schema {
-        au::tools::Schema result;
-        for (const auto &kv : au::tools::known_enums()) {
-            au::tools::EnumSchema e;
-            e.name = kv.first;
-            e.values = kv.second;
-            result.enums.push_back(std::move(e));
-        }
-        for (const std::string &t : au::list_all_components()) {
-            try {
-                au::Json j = au::describe_component(t);
-                if (j.is_null() || j.empty()) {
-                    continue;
-                }
-                au::tools::ComponentSchema c;
-                c.type = j.as_or<std::string>("type", t);
-                if (const auto *v = j.at("category"); v != nullptr && v->is_string()) {
-                    c.category = v->as_or<std::string>("");
-                }
-                if (const auto *v = j.at("children_policy"); v != nullptr && v->is_string()) {
-                    c.children_policy = v->as_or<std::string>("");
-                } else if (const auto *v = j.at("container"); v != nullptr && v->is_string()) {
-                    c.children_policy = v->as_or<std::string>("");
-                }
-                if (const auto *descriptors = j.at("props"); descriptors != nullptr && descriptors->is_array()) {
-                    for (const auto &descriptor : *descriptors) {
-                        au::tools::PropSchema ps;
-                        if (const auto *v = descriptor.at("name"); v != nullptr && v->is_string()) {
-                            ps.name = v->as_or<std::string>("");
-                        }
-                        if (const auto *v = descriptor.at("type"); v != nullptr && v->is_string()) {
-                            ps.type = v->as_or<std::string>("");
-                        }
-                        if (const auto *d = descriptor.at("default"); d != nullptr) {
-                            if (d->is_string()) {
-                                ps.default_value = d->as_or<std::string>("");
-                            } else {
-                                const auto dumped = au::json::dump(*d);
-                                ps.default_value = dumped.ok() ? dumped.value() : std::string{};
-                            }
-                        }
-                        ps.required = descriptor.as_or<bool>("required", false);
-                        if (const auto *v = descriptor.at("note"); v != nullptr && v->is_string()) {
-                            ps.note = v->as_or<std::string>("");
-                        }
-                        c.props.push_back(std::move(ps));
-                    }
-                }
-                if (const auto *events = j.at("events"); events != nullptr && events->is_array()) {
-                    for (const auto &event : *events) {
-                        if (event.is_string()) {
-                            c.events.push_back(event.as_or<std::string>(""));
-                        }
-                    }
-                }
-                if (const auto *examples = j.at("examples"); examples != nullptr && examples->is_array()) {
-                    for (const auto &example : *examples) {
-                        if (example.is_string()) {
-                            c.examples.push_back(example.as_or<std::string>(""));
-                        }
-                    }
-                }
-                result.components.push_back(std::move(c));
-            } catch (const std::exception &e) {
-                AURORA_LOG_ERROR("lsp", "[aurora-lsp] skip component ", t, ": ", e.what());
-            }
-        }
-        return result;
-    }();
+    // Filled once from the live API; the bridge lives in tools/include so the integration tests can
+    // exercise the very same schema the server serves (see itest_aurora_lsp).
+    static const au::tools::Schema S = au::tools::live_schema();
     return S;
 }
 
@@ -188,11 +123,14 @@ static auto range_json(size_t line, size_t col, size_t end_line, size_t end_col)
 }
 
 static auto kind_to_int(const std::string &k) -> int {
+    // LSP CompletionItemKind: 2=Method, 7=Class, 13=Enum, 20=EnumMember. Property writers are member
+    // calls, so they are Methods; the old Property kind went away with the designated-initializer
+    // completion surface.
+    if (k == "Method") {
+        return 2;
+    }
     if (k == "Class") {
         return 7;
-    }
-    if (k == "Property") {
-        return 10;
     }
     if (k == "Enum") {
         return 13;
@@ -349,7 +287,8 @@ static auto on_code_action(const au::Json &params) -> au::Json {
         au::Json edits = au::Json::array();
         for (const auto &e : a.edits) {
             au::Json te = au::Json::object();
-            te.set("range", range_json(e.line, e.col, e.line, e.col));
+            // A zero-width range is an insertion; the brace-to-chain rewrite replaces a whole block.
+            te.set("range", range_json(e.line, e.col, e.end_line, e.end_col));
             te.set("newText", e.new_text);
             edits.push_back(te);
         }

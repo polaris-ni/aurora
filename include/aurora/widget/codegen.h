@@ -31,7 +31,12 @@ enum class CodeStyle : std::uint8_t {
     DesignatedInit,  ///< Fluent 别名：指定初始化器不再合法，产物逐字节相同；值为 CLI/MCP/Inspector 的 style 参数保留
 };
 
-/// @brief codegen 内部实现细节命名空间：类型能力判定与属性发射的辅助函数，仅由本文件公开入口调用，不构成稳定 API。
+/// @brief codegen 内部实现细节命名空间：类型能力判定与属性发射的辅助函数，不构成稳定 API。
+///
+/// 消费端有两处：本文件的公开入口（代码生成），以及 `tools/include/lsp_live_schema.h`（语言服务的
+/// schema 桥）。后者同源取 `props_chain_writers` / `is_base_key` / `expressible` / `prop_target` /
+/// `cpp_class` / `cpp_props`，使 LSP 补全插出的写件名与生成器发射的落点是同一枚字符串——两份名单
+/// 手抄必然漂移，而漂移的表现是「补出来的代码编译不过」。改动这些判定时须同时想到那两个消费端。
 namespace detail {
 
 /// @brief 类名之外还需要带一段 `au::` 下的子命名空间时，这段前缀是什么。
