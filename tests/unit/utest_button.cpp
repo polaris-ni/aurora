@@ -76,6 +76,7 @@ class PropsProbe final : public Button {
     using Button::present;
     using Button::resolve;
     using Button::resolve_background;
+    using Button::resolve_state_overlay;
     using Button::resolve_text_color;
 };
 
@@ -544,6 +545,42 @@ AURORA_TEST_CASE(button_explicit_colors_override_theme) {
     AURORA_TEST_CHECK(b.resolve_text_color(dark) == Color(0x12, 0x34, 0x56));
 }
 
+AURORA_TEST_CASE(button_state_overlays_follow_theme_roles) {
+    // 交互态是半透明状态层：悬停/按下读主题 hover/pressed，叠在基色之上（不改基色）。
+    const auto [env_l, light] = themed_ctx(Theme::light());
+    const auto [env_d, dark] = themed_ctx(Theme::dark());
+    PropsProbe b;
+
+    const auto &light_roles = inherit_theme(light).roles;
+    const auto &dark_roles = inherit_theme(dark).roles;
+    AURORA_TEST_CHECK(b.hover_color(light) == light_roles.hover);
+    AURORA_TEST_CHECK(b.pressed_color(light) == light_roles.pressed);
+    AURORA_TEST_CHECK(b.hover_color(dark) == dark_roles.hover);
+    AURORA_TEST_CHECK(b.pressed_color(dark) == dark_roles.pressed);
+
+    // 禁用档同样跟随主题：背景取 surface_container_high、文字取 outline。
+    AURORA_TEST_CHECK(b.disabled_color(light) == light_roles.surface_container_high);
+    AURORA_TEST_CHECK(b.disabled_text_color(light) == light_roles.outline);
+    AURORA_TEST_CHECK(b.disabled_color(dark) == dark_roles.surface_container_high);
+    AURORA_TEST_CHECK(b.disabled_text_color(dark) == dark_roles.outline);
+
+    // 状态层解析：无交互 ⇒ 空；悬停 ⇒ hover；按下压过悬停；禁用 ⇒ 空。
+    AURORA_TEST_CHECK_FALSE(b.resolve_state_overlay(light).has_value());
+    b.on_hover_change(true);
+    AURORA_TEST_REQUIRE_TRUE(b.resolve_state_overlay(light).has_value());
+    AURORA_TEST_CHECK(*b.resolve_state_overlay(light) == light_roles.hover);
+    MouseEvent press;
+    press.action = MouseAction::Press;
+    b.on_pointer_event(press);
+    AURORA_TEST_REQUIRE_TRUE(b.resolve_state_overlay(dark).has_value());
+    AURORA_TEST_CHECK(*b.resolve_state_overlay(dark) == dark_roles.pressed);
+    // 基色不受状态影响：按下态下 resolve_background 仍等于 color 行。
+    AURORA_TEST_CHECK(b.resolve_background(light) == b.color(light));
+    b.set_enabled(false);
+    AURORA_TEST_CHECK_FALSE(b.resolve_state_overlay(light).has_value());
+    AURORA_TEST_CHECK(b.resolve_background(light) == b.disabled_color(light));
+}
+
 // ---- 度量跟随：未表态 → 读主题形状 / 间距档；表过态 → 主题不覆盖 ----
 
 AURORA_TEST_CASE(button_metrics_default_to_material_baseline) {
@@ -735,10 +772,6 @@ AURORA_TEST_CASE(button_constant_rows_read_identically_under_light_and_dark) {
     AURORA_TEST_CHECK(b.border_color() == b.resolve(ButtonProps::border_color_row(), dark));
     AURORA_TEST_CHECK_NEAR(b.border_width(), b.resolve(ButtonProps::border_width_row(), light), 1e-6F);
     AURORA_TEST_CHECK_NEAR(b.border_width(), b.resolve(ButtonProps::border_width_row(), dark), 1e-6F);
-    AURORA_TEST_CHECK(b.disabled_color() == b.resolve(ButtonProps::disabled_color_row(), light));
-    AURORA_TEST_CHECK(b.disabled_color() == b.resolve(ButtonProps::disabled_color_row(), dark));
-    AURORA_TEST_CHECK(b.disabled_text_color() == b.resolve(ButtonProps::disabled_text_color_row(), light));
-    AURORA_TEST_CHECK(b.disabled_text_color() == b.resolve(ButtonProps::disabled_text_color_row(), dark));
     AURORA_TEST_CHECK_NEAR(b.min_width(), b.resolve(ButtonProps::min_width_row(), light), 1e-6F);
     AURORA_TEST_CHECK_NEAR(b.min_height(), b.resolve(ButtonProps::min_height_row(), dark), 1e-6F);
     // 表态后仍与解析同值（两半都恒等，才排除「无参读件读的是另一份存储」）。
@@ -891,8 +924,8 @@ AURORA_TEST_CASE(button_full_key_json_restores_every_effective_value) {
     AURORA_TEST_CHECK(dst.pressed_color(ctx) == src.pressed_color(ctx));
     AURORA_TEST_CHECK(dst.border_color() == src.border_color());
     AURORA_TEST_CHECK_NEAR(dst.border_width(), src.border_width(), 1e-6F);
-    AURORA_TEST_CHECK(dst.disabled_color() == src.disabled_color());
-    AURORA_TEST_CHECK(dst.disabled_text_color() == src.disabled_text_color());
+    AURORA_TEST_CHECK(dst.disabled_color(ctx) == src.disabled_color(ctx));
+    AURORA_TEST_CHECK(dst.disabled_text_color(ctx) == src.disabled_text_color(ctx));
     AURORA_TEST_CHECK_NEAR(dst.min_width(), src.min_width(), 1e-6F);
     AURORA_TEST_CHECK_NEAR(dst.min_height(), src.min_height(), 1e-6F);
 

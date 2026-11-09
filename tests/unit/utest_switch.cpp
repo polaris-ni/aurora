@@ -211,12 +211,12 @@ AURORA_TEST_CASE(switch_paint_covers_state_branches) {
     disabled.set_enabled(false);
     paint_once(disabled);
 
-    // 悬停态轨道压暗（shaded 0.90 分支）。
+    // 悬停态：轨道上叠加主题 hover 状态层。
     Switch hovered;
     hovered.on_hover_change(true);
     paint_once(hovered);
 
-    // 按下态轨道压暗（shaded 0.80 分支；Press 置 pressed_）。
+    // 按下态：轨道上叠加主题 pressed 状态层（Press 置 pressed_）。
     Switch pressed;
     MouseEvent press;
     press.action = MouseAction::Press;

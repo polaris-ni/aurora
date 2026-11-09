@@ -25,6 +25,7 @@
 #include "aurora/layout/layout_engine.h"
 #include "aurora/state/async.h"
 #include "aurora/theming/theme.h"
+#include "aurora/theming/theme_scope.h"
 #include "aurora/widget/image_widget.h"
 #include "framework/aurora_test.h"
 #include "framework/json_access.h"
@@ -172,21 +173,14 @@ AURORA_TEST_CASE(paint_empty_bitmap_draws_placeholder_rect) {
     Painter p;
     p.begin(64, 64);
     const Rect vp{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 64.0F, .height = 64.0F}};
-    iv.paint(p, vp, BuildContext{});
+    const BuildContext ctx;
+    iv.paint(p, vp, ctx);
     AURORA_TEST_CHECK_TRUE(iv.paint_bounds() == vp);
-    // 占位为 180 灰 1px 描边框（Painter::draw_rect = 四条 1px fill_rect 边带），非实心填充：
-    // 边框像素为 {180,180,180,255}，框内保持 begin 后的全零底色 {0,0,0,0}。逐通道断言（Color 不可打印）。
-    const Color top = p.get_pixel(32, 0);
-    AURORA_TEST_CHECK_EQ(static_cast<int>(top.r), 180);
-    AURORA_TEST_CHECK_EQ(static_cast<int>(top.g), 180);
-    AURORA_TEST_CHECK_EQ(static_cast<int>(top.b), 180);
-    AURORA_TEST_CHECK_EQ(static_cast<int>(top.a), 255);
-
-    const Color left = p.get_pixel(0, 32);
-    AURORA_TEST_CHECK_EQ(static_cast<int>(left.r), 180);
-    AURORA_TEST_CHECK_EQ(static_cast<int>(left.g), 180);
-    AURORA_TEST_CHECK_EQ(static_cast<int>(left.b), 180);
-    AURORA_TEST_CHECK_EQ(static_cast<int>(left.a), 255);
+    // 占位为 `roles.outline` 的 1px 描边框（Painter::draw_rect = 四条 1px fill_rect 边带），非实心填充：
+    // 边框像素等于兜底主题（无注入作用域即 `Theme::light()`）的描边色，框内保持 begin 后的全零底色。
+    const Color border = inherit_theme(ctx).roles.outline;
+    AURORA_TEST_CHECK_TRUE(p.get_pixel(32, 0) == border);
+    AURORA_TEST_CHECK_TRUE(p.get_pixel(0, 32) == border);
 
     const Color center = p.get_pixel(32, 32);
     AURORA_TEST_CHECK_EQ(static_cast<int>(center.r), 0);

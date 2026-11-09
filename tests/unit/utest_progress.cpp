@@ -36,7 +36,7 @@ AURORA_TEST_CASE(default_state_and_type_name) {
     p.serialize_props(props);
     AURORA_TEST_CHECK_NEAR(require_field<double>(props, "value"), 0.0, 1e-4);
     AURORA_TEST_CHECK_FALSE(props.contains("color"));  // 未显式设色不落盘，保留「跟随主题」语义
-    AURORA_TEST_CHECK_EQ(require_child_at(*require_child(props, "track_color"), 0)->as_or<int>(0), 220);
+    AURORA_TEST_CHECK_FALSE(props.contains("track_color"));  // 同样未显式设色不落盘，跟随主题 surface_variant
     AURORA_TEST_CHECK_NEAR(require_field<float>(props, "thickness"), 6.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(require_field<float>(props, "corner_radius"), -1.0F, 1e-4F);  // <0 = 自动胶囊
 }

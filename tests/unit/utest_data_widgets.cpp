@@ -3,14 +3,19 @@
 /// 测试说明: 覆盖 DataTable/TreeView/ListView
 /// 的构造与单元格访问、选中与排序回调、越界防御、指针命中、布局尺寸、序列化与自描述，含离屏绘制冒烟
 
+#include <memory>
 #include <string>
 #include <type_traits>
 #include <utility>
 #include <vector>
 
+#include "aurora/environment/build_context.h"
+#include "aurora/environment/environment.h"
 #include "aurora/event/event.h"
 #include "aurora/layout/layout_engine.h"
 #include "aurora/render/painter.h"
+#include "aurora/theming/theme.h"
+#include "aurora/theming/theme_scope.h"
 #include "aurora/widget/data_widgets.h"
 #include "framework/aurora_test.h"
 #include "framework/json_access.h"
@@ -25,6 +30,17 @@ namespace {
 
 auto bounded(float w, float h) -> Constraints {
     return Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = w, .height = h}};
+}
+
+/// @brief 造一个注入指定主题的构建上下文（根级环境，无父指针）。
+/// @param t 注入的主题取值。
+/// @return holder + ctx；二者须在同一作用域内使用（BuildContext 只供当帧读取）。
+auto themed_ctx(const Theme &t) -> std::pair<std::shared_ptr<Environment>, BuildContext> {
+    auto env = std::make_shared<Environment>();
+    env->set_local(t);
+    BuildContext ctx;
+    ctx.env = env.get();
+    return {std::move(env), ctx};
 }
 
 auto make_table() -> DataTable {
@@ -477,6 +493,38 @@ AURORA_TEST_CASE(data_widgets_offscreen_paint_smoke) {
     lv.paint(p, Rect{.origin = Point{.x = 0.0F, .y = 230.0F}, .size = Size{.width = 200.0F, .height = 52.0F}}, ctx);
     AURORA_TEST_CHECK_EQ(p.width(), 240);
     AURORA_TEST_CHECK_EQ(p.height(), 300);
+}
+
+AURORA_TEST_CASE(data_table_surfaces_paint_with_theme_roles) {
+    // 表头与斑马行底色曾写死；改读角色后同一像素在明暗两档下必须等于该档的角色，且两档互不相等。
+    // DataTable 只铺表头与奇数行，偶数行透出画布，故取样点取表头与第 2 行（r=1）的斑马底。
+    // 每档各用一枚新表：显示列表缓存只认盒与光栅世代，同一实例二绘会直接回放上一档的命令。
+    const auto [env_l, light] = themed_ctx(Theme::light());
+    const auto [env_d, dark] = themed_ctx(Theme::dark());
+    DataTable light_table = make_table();  // 列宽 180、高 32 + 3*28 = 116
+    LayoutEngine::layout(light_table, bounded(400.0F, 300.0F), light);
+    DataTable dark_table = make_table();
+    LayoutEngine::layout(dark_table, bounded(400.0F, 300.0F), dark);
+    AURORA_TEST_CHECK_EQ(light_table.size().width, 180.0F);
+    AURORA_TEST_CHECK_EQ(light_table.size().height, 116.0F);
+    const Rect light_box{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = light_table.size()};
+    const Rect dark_box{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = dark_table.size()};
+
+    Painter lp;
+    lp.begin(180, 116);
+    light_table.paint(lp, light_box, light);
+    Painter dp;
+    dp.begin(180, 116);
+    dark_table.paint(dp, dark_box, dark);
+
+    const auto &lr = inherit_theme(light).roles;
+    const auto &dr = inherit_theme(dark).roles;
+    // (1,1) 表头左上内衬；(1,70) 落在 r=1 的斑马行（60..88），x=1 在行首缩进左缘不压字。
+    AURORA_TEST_CHECK(lp.get_pixel(1, 1) == lr.surface_container_low);
+    AURORA_TEST_CHECK(dp.get_pixel(1, 1) == dr.surface_container_low);
+    AURORA_TEST_CHECK(lp.get_pixel(1, 70) == lr.surface_container_lowest);
+    AURORA_TEST_CHECK(dp.get_pixel(1, 70) == dr.surface_container_lowest);
+    AURORA_TEST_CHECK(lp.get_pixel(1, 70) != dp.get_pixel(1, 70));
 }
 
 }  // namespace aurora::test_cases::utest_data_widgets

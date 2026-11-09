@@ -20,12 +20,16 @@
 #include <functional>
 #include <limits>
 #include <memory>
+#include <utility>
 #include <vector>
 
 #include "aurora/environment/build_context.h"
+#include "aurora/environment/environment.h"
 #include "aurora/event/event.h"
 #include "aurora/layout/layout_engine.h"
 #include "aurora/render/painter.h"
+#include "aurora/theming/theme.h"
+#include "aurora/theming/theme_scope.h"
 #include "aurora/widget/drawer.h"
 #include "aurora/widget/widget.h"
 #include "framework/aurora_test.h"
@@ -36,6 +40,17 @@ namespace {
 
 auto bounded(float w, float h) -> Constraints {
     return Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = w, .height = h}};
+}
+
+/// @brief 造一个注入指定主题的构建上下文（根级环境，无父指针）。
+/// @param t 注入的主题取值。
+/// @return holder + ctx；二者须在同一作用域内使用（BuildContext 只供当帧读取）。
+auto themed_ctx(const Theme &t) -> std::pair<std::shared_ptr<Environment>, BuildContext> {
+    auto env = std::make_shared<Environment>();
+    env->set_local(t);
+    BuildContext ctx;
+    ctx.env = env.get();
+    return {std::move(env), ctx};
 }
 
 class LeafProbe final : public Widget {
@@ -558,6 +573,60 @@ AURORA_TEST_CASE(page_view_layout_paint_hit_test) {
                          ctx);
     AURORA_TEST_CHECK_EQ(fb.size().width, 320.0F);
     AURORA_TEST_CHECK_EQ(fb.size().height, 240.0F);
+}
+
+AURORA_TEST_CASE(theme_blind_surfaces_paint_with_theme_roles) {
+    // Drawer 面板与 ProgressDialog 提示框都曾把底色写死；改读主题角色后，同一探针像素在明暗两档下
+    // 必须各自等于该档的 `roles.surface`，且两档互不相等——判的是「读了主题」而不是「恰好写白」。
+    // 每档各用一枚新控件：显示列表缓存只认盒与光栅世代，同一实例二绘会直接回放上一档的命令。
+    const auto [env_l, light] = themed_ctx(Theme::light());
+    const auto [env_d, dark] = themed_ctx(Theme::dark());
+    constexpr Rect box{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 800.0F, .height = 600.0F}};
+    const auto make_drawer = [] {
+        return Drawer{Node{std::make_shared<LeafProbe>()}, Node{std::make_shared<LeafProbe>()}, DrawerSide::Left,
+                      240.0F};
+    };
+
+    // Drawer：面板宽 240，取面板内、子节点不落墨处。
+    Drawer light_drawer = make_drawer();
+    light_drawer.set_open(true);
+    LayoutEngine::layout(light_drawer, bounded(800.0F, 600.0F), light);
+    Painter lp;
+    lp.begin(800, 600);
+    light_drawer.paint(lp, box, light);
+    Drawer dark_drawer = make_drawer();
+    dark_drawer.set_open(true);
+    LayoutEngine::layout(dark_drawer, bounded(800.0F, 600.0F), dark);
+    Painter dp;
+    dp.begin(800, 600);
+    dark_drawer.paint(dp, box, dark);
+    const Color light_panel = lp.get_pixel(120, 300);
+    const Color dark_panel = dp.get_pixel(120, 300);
+    AURORA_TEST_CHECK(light_panel == inherit_theme(light).roles.surface);
+    AURORA_TEST_CHECK(dark_panel == inherit_theme(dark).roles.surface);
+    AURORA_TEST_CHECK(light_panel != dark_panel);
+
+    // ProgressDialog：盒 320x120 居中于 400x300，取盒内、文字上方的左上角内衬。
+    constexpr Rect small{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 400.0F, .height = 300.0F}};
+    ProgressDialog light_dialog{"working", true};
+    light_dialog.show();
+    light_dialog.set_progress(0.5F);
+    LayoutEngine::layout(light_dialog, bounded(400.0F, 300.0F), light);
+    Painter lq;
+    lq.begin(400, 300);
+    light_dialog.paint(lq, small, light);
+    ProgressDialog dark_dialog{"working", true};
+    dark_dialog.show();
+    dark_dialog.set_progress(0.5F);
+    LayoutEngine::layout(dark_dialog, bounded(400.0F, 300.0F), dark);
+    Painter dq;
+    dq.begin(400, 300);
+    dark_dialog.paint(dq, small, dark);
+    const Color light_box = lq.get_pixel(42, 92);
+    const Color dark_box = dq.get_pixel(42, 92);
+    AURORA_TEST_CHECK(light_box == inherit_theme(light).roles.surface);
+    AURORA_TEST_CHECK(dark_box == inherit_theme(dark).roles.surface);
+    AURORA_TEST_CHECK(light_box != dark_box);
 }
 
 }  // namespace aurora::test_cases::utest_drawer
