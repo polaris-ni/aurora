@@ -21,6 +21,7 @@
 // 的第三方真机 dump 与其可达性说明，随对应档位段落就地写明。
 // ============================================================================
 
+#include <array>
 #include <string_view>
 
 #include "aurora/core/color.h"
@@ -42,6 +43,24 @@ constexpr float AURORA_MATERIAL_BODY_PT = 14.0F;
 // 1pt = 4/3px 的逆向换算：上游给的像素基准折回本库的磅值口径。
 constexpr auto points_from_pixels(float px) noexcept -> float { return px * 0.75F; }
 
+// 字阶十五档的成员指针清单：**整族变换的唯一遍历面**（风格档重锚与字号缩放共用一份）。
+//
+// 为什么需要这张表而不是逐档手写：`TypeScale` 的两处整族变换（`retarget_type_scale` 换基准、
+// `with_accessibility` 按 `font_scale` 增长）各写一遍十五档就是两份名单，加一档字阶时漏改其中
+// 一处不会编译红，只会让那一档悄悄不受缩放——正是本批要消灭的「绕过 `TypeScale` 的通道」。
+// 本组**不是**令牌登记表（`TypeScale` 的值是 `Font` 而非标量档，不满足属性回落点的同型要求，
+// 故不进 `theme_tokens`，理由见 specification/07-environment-modifier.md §5.1），因此没有门禁
+// 拿它比对字段；穷尽性改由下面那条 `sizeof` 守卫机检——`TypeScale` 全字段皆 `Font` 且无 padding，
+// 清单少列一档时乘积即不等于结构体大小，当场编译红。
+constexpr std::array<Font TypeScale::*, 15> AURORA_TYPE_SCALE_SLOTS = {
+    &TypeScale::display_large,   &TypeScale::display_medium, &TypeScale::display_small, &TypeScale::headline_large,
+    &TypeScale::headline_medium, &TypeScale::headline_small, &TypeScale::title_large,   &TypeScale::title_medium,
+    &TypeScale::title_small,     &TypeScale::body_large,     &TypeScale::body_medium,   &TypeScale::body_small,
+    &TypeScale::label_large,     &TypeScale::label_medium,   &TypeScale::label_small};
+
+static_assert(AURORA_TYPE_SCALE_SLOTS.size() * sizeof(Font) == sizeof(TypeScale),
+              "AURORA_TYPE_SCALE_SLOTS must list every TypeScale tier: a missing tier stops scaling silently");
+
 // 字阶重锚：族名整组替换，字号按「平台正文基准 / Material 正文基准」等比缩放。
 //
 // 为什么是等比缩放而不是照抄上游的 15 档字阶表：四套语言各自的字阶名与本库的 Material
@@ -52,15 +71,10 @@ constexpr auto points_from_pixels(float px) noexcept -> float { return px * 0.75
 auto retarget_type_scale(std::string_view family, float body_pt) -> TypeScale {
     TypeScale scale;
     const float factor = body_pt / AURORA_MATERIAL_BODY_PT;
-    auto retime = [&family, factor](Font &font) {
+    for (Font TypeScale::*slot : AURORA_TYPE_SCALE_SLOTS) {
+        Font &font = scale.*slot;
         font.family = std::string(family);
         font.size_pt = font.size_pt * factor;
-    };
-    for (Font *font : {&scale.display_large, &scale.display_medium, &scale.display_small, &scale.headline_large,
-                       &scale.headline_medium, &scale.headline_small, &scale.title_large, &scale.title_medium,
-                       &scale.title_small, &scale.body_large, &scale.body_medium, &scale.body_small, &scale.label_large,
-                       &scale.label_medium, &scale.label_small}) {
-        retime(*font);
     }
     return scale;
 }
@@ -328,7 +342,7 @@ auto apply_kde(Theme &t, bool dark) -> void {
 
 }  // namespace
 
-auto Theme::from_style(ThemeStyle style, ColorScheme scheme) -> Theme {
+auto Theme::from_style(ThemeStyle style, ColorScheme scheme, const AccessibilitySettings &accessibility) -> Theme {
     // `Unspecified` ≡ 明色列：与 `resolve_color_scheme` 及 CSD 桥的口径一致，三态不塌——
     // 取明色列只是为了「必须有值才能出主题」，`scheme` 字段本身仍原样回传，交由优先链下层解析。
     const bool is_dark = (scheme == ColorScheme::Dark);
@@ -351,7 +365,48 @@ auto Theme::from_style(ThemeStyle style, ColorScheme scheme) -> Theme {
             apply_kde(themed, is_dark);
             break;
     }
-    return themed;
+    // 无障碍开关在这里作为**输入**折进快照，且只经 `with_accessibility` 一处实现（两轴解算与开关折入
+    // 因此是同一个交点，读取通路不看开关）。默认实参全关 ⇒ 本行等价于原样返回。
+    return themed.with_accessibility(accessibility);
+}
+
+auto Theme::with_accessibility(const AccessibilitySettings &accessibility) const -> Theme {
+    Theme folded = *this;
+    // 全关 / 不缩放时逐字段原样返回：默认档与开关接入前逐位一致（golden 判据）。
+    if (accessibility.high_contrast) {
+        // 高对比不另打第三列常量：整族调 tone 的派生，判据即 detail::AURORA_CONTRAST_AUDITS 那一张表。
+        // 覆盖面边界：窗口装饰配色（`CsdRoles`）不在该登记表内，故本批不随高对比变形（待登记后再接）。
+        folded.roles = folded.roles.with_high_contrast();
+    }
+    // 字号缩放作用于 `TypeScale` 解析，并**带动非文本度量**：字阶十五档、间距七档、形状六档同倍增长。
+    // 只在这一处乘倍率 ⇒ 读字阶的四枚图表与读正文档的文本控件走的是同一个数，缩放倍率在控件侧不再
+    // 有第二次乘法（Apple `@ScaledMetric` / Compose `sp` 的同一条教训：度量不跟着长就是溢出硬失败）。
+    // 显式设值仍压过主题：本函数只改令牌，表态过的属性行读自己的字段、不读这里。
+    if (const float scale = accessibility.resolved_font_scale(); scale != 1.0F) {
+        for (Font TypeScale::*slot : AURORA_TYPE_SCALE_SLOTS) {
+            // 括号必要：`a.*p.m` 按 `a.*(p.m)` 解析（成员指针解引用的优先级低于成员访问）。
+            (folded.type_scale.*slot).size_pt *= scale;
+        }
+        // 间距与形状档自带登记表（`check_theme_token_registry` 的 T1 保证表 == 全部公开标量字段），
+        // 故整族变换直接遍历登记表，不再手写第二份名单。
+        for (const auto &[slot, name] : SpacingScale::AURORA_TOKENS) {
+            static_cast<void>(name);
+            folded.spacing.*slot *= scale;
+        }
+        for (const auto &[slot, name] : ShapeScale::AURORA_TOKENS) {
+            static_cast<void>(name);
+            folded.shapes.*slot *= scale;
+        }
+    }
+    // 减动效是时长档的短路门（取零档），不是倍率：整族归零后动画侧一步落端点。
+    if (accessibility.reduce_motion) {
+        const Duration zero{};
+        for (const auto &[slot, name] : MotionScale::AURORA_TOKENS) {
+            static_cast<void>(name);
+            folded.motion.*slot = zero;
+        }
+    }
+    return folded;
 }
 
 }  // namespace aurora

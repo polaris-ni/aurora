@@ -6,6 +6,7 @@
 #include <utility>
 #include <vector>
 
+#include "aurora/core/accessibility.h"
 #include "aurora/theming/color_roles.h"
 #include "aurora/theming/color_scheme.h"
 #include "aurora/theming/control_metrics.h"
@@ -110,12 +111,32 @@ struct Theme {
     /// 取值口径：只覆盖**有出处**的角色与度量，其余沿用 Material 基线值——不臆造无据数值。
     /// 出处分级（官方一手 / 真机实测 / 官方公式派生）随值写在实现体的注释里。
     ///
+    /// 无障碍开关在这里是**输入**而不是第三根轴：折法只在 `with_accessibility` 实现一份，本函数在收尾
+    /// 处转调它，除物化之外的读取通路一律不看开关（开关轴与风格 / 明暗两轴因此保持正交，第二条隐式
+    /// 通道不存在）。默认实参全关 ⇒ 取值与本参数接入前逐位一致。
+    ///
     /// @param style 风格轴取值（见 `ThemeStyle`）。
     /// @param scheme 明暗档；`Unspecified` 取该风格明色列且不表态。
+    /// @param accessibility 无障碍开关快照（`AccessibilitySettings{}` = 全关 / 不缩放）。
     /// @return 该组合的标定主题。`from_style(Material, Light)` 逐位等于 `light()`、
     ///         `from_style(Material, Dark)` 逐位等于 `dark()`、
     ///         `from_style(Material, Unspecified)` 逐位等于 `with_defaults()`。
-    [[nodiscard]] static auto from_style(ThemeStyle style, ColorScheme scheme = ColorScheme::Unspecified) -> Theme;
+    [[nodiscard]] static auto from_style(ThemeStyle style, ColorScheme scheme = ColorScheme::Unspecified,
+                                         const AccessibilitySettings &accessibility = AccessibilitySettings{}) -> Theme;
+
+    /// @brief 把无障碍开关折进本快照——全库唯一实现折法的地方（`from_style` 的收尾即转调本函数）。
+    ///
+    /// 折法只此一份，故「开关置位 → 生效值变」与开关来源无关；开关本身不进字段、不参与比较，读取通路
+    /// （`inherit_theme` / `resolve_theme`）因此仍然不看它们，第二条隐式通道不存在。窗口的默认根主题经
+    /// `from_style` 自动折入；显式 `set_theme` 给出的配色**不**由框架折（那是应用作者写死的值），需要
+    /// 高对比时由应用自行 `theme.with_accessibility(...)` 后再 set。
+    ///
+    /// @param accessibility 开关快照。
+    /// @return 全关 / 不缩放时逐字段等于本对象（默认档 golden 因此不变）；置位时按各开关的派生形态
+    ///         折入：`high_contrast` 整族调 tone、字号缩放重锚度量族、`reduce_motion` 时长档取零。
+    /// @note Thread: thread-safe (pure value type)
+    /// @note Side-effects: none
+    [[nodiscard]] auto with_accessibility(const AccessibilitySettings &accessibility) const -> Theme;
 
     /// @brief 探测「这台机器的设计语言」属于哪套风格（风格轴的唯一运行期入口）。
     ///

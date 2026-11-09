@@ -13,6 +13,8 @@ namespace aurora {
 /// 取代旧的扁平字段（`background` / `primary` / `on_primary` / `text`）与 stringly 命名令牌表。
 /// 一个实例只持**一列**（亮或暗）；明暗双列由 `ColorRoles::light()` / `ColorRoles::dark()` 给出，
 /// 角色名一套、取值两列（对标 Material 3 color roles 与 Fluent 2 alias tokens 的 light/dark variants）。
+/// 高对比**不是第三列**：`with_high_contrast()` 从既有那一列派生，取值出处只有判据登记表
+/// `detail/contrast_audit.h` 一处，不存在另打一份手时常量的第二张配色表。
 ///
 /// 取值口径分两类：
 /// - **已消费角色**（`primary` / `on_primary` / `surface` / `on_surface` / `focus_ring` /
@@ -227,6 +229,24 @@ struct ColorRoles {
             .pressed = Color{255, 255, 255, 56},
         };
     }
+
+    /// @brief 高对比派生列：按判据登记表 `detail::AURORA_CONTRAST_AUDITS` 整族调 tone，让每一行都
+    ///        达到它自己的档位下限——本库对 `AccessibilitySettings::high_contrast` 的唯一响应通道。
+    ///
+    /// 派生只改**相对亮度**、不重新配色：把线性 RGB 等比缩放到目标亮度（仅当目标越出色域壳时才
+    /// 向白点收敛），故观感是「同一套配色的强对比版」。可动端优先取底色、其次取前景——前景标签
+    /// 一动即换观感；当某底色为满足它自己的档位而必须移动时，压在它上面的前景标签在同一步内被
+    /// 修复（只在登记表里作前景的角色不会连带破坏其他行，修复因此不级联）。纯底色（只作背景出现
+    /// 者，`surface` 族等）恒不动：高对比语义下页面地不得移位。
+    ///
+    /// 判据表是唯一规则来源：本函数、`check_theme_contrast` 门禁与 `utest_theme_roles` 读同一张表、
+    /// 同一份 `aurora::contrast_ratio`，不存在第二套对比度口径。档位下限就地再乘一点余量，避免
+    /// 8 位量化把 4.4998 这类值压到线下。
+    ///
+    /// @return 逐行达标的副本；本已全达标的列返回逐字段相等的副本（不扰动，默认档 golden 因此不变）。
+    /// @note Thread: thread-safe (pure value type)
+    /// @note Side-effects: none
+    [[nodiscard]] auto with_high_contrast() const -> ColorRoles;
 };
 
 }  // namespace aurora
