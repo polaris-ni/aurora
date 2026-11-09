@@ -5680,6 +5680,66 @@
     ],
     "names_retired_scope": "retired for rows declared on the authoritative table; controls still on hand-written descriptors and the widget base's modifier plumbing keep their own *_source() names"
   },
+  "perf": {
+    "header": "aurora/perf/frame_monitor.h",
+    "entry": "FrameMonitor",
+    "availability": "always-on",
+    "profiling_dependency": "none",
+    "release_usable_without_rebuild": true,
+    "max_batch_frames": 64,
+    "functions": [
+      {
+        "name": "subscribe"
+      },
+      {
+        "name": "unsubscribe"
+      },
+      {
+        "name": "register_metric"
+      },
+      {
+        "name": "last_metric_error"
+      },
+      {
+        "name": "set_metric"
+      },
+      {
+        "name": "metric_value"
+      },
+      {
+        "name": "unregister_metric"
+      },
+      {
+        "name": "begin_scope"
+      },
+      {
+        "name": "end_scope"
+      },
+      {
+        "name": "snapshot_json"
+      },
+      {
+        "name": "diagnostics"
+      },
+      {
+        "name": "max_batch_frames"
+      }
+    ],
+    "zero_subscriber_contract": {
+      "hook_registrations": 0,
+      "heap_allocations": 0,
+      "clock_reads": 0,
+      "bytes_emitted": 0
+    },
+    "diagnostics": [
+      "hook_registrations",
+      "heap_allocations",
+      "clock_reads",
+      "bytes_emitted",
+      "dropped_batches",
+      "subscriber_count"
+    ]
+  },
   "error_codes": [
     {
       "enum": "GeneralUnknown",

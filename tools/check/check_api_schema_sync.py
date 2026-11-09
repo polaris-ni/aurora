@@ -106,6 +106,7 @@ NON_ENTRY_BLOCKS = frozenset(
         "state_patterns",
         "theme_tokens",
         "accessor_rules",
+        "perf",
     }
 )
 

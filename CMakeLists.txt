@@ -294,6 +294,9 @@ aurora_apply_unity(aurora)
 if (AURORA_UNITY_BUILD)
     aurora_unity_exclude("${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/net/*.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/perf/profiler.cpp"
+            # 监控门面的进程级状态落在匿名命名空间（State / state() / Scope 等），
+            # 与同域其他 TU 合并时存在 ODR 重名风险，独立编译与关闭 unity 时逐字节相同。
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/perf/frame_monitor.cpp"
             # 成对实现文件在各自匿名命名空间定义同名符号，合并进同一 unity TU
             # 即 ODR 冲突（重名来源见下，独立编译与关闭 unity 时逐字节相同）：
             #  - app：os_hotkey.cpp / clipboard.cpp 的 test_backend() + TestBackend*

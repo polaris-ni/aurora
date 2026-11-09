@@ -138,6 +138,7 @@ aurora/net/tls_backend.h
 aurora/net/transport.h
 aurora/net/websocket.h
 aurora/perf/counters.h
+aurora/perf/frame_monitor.h
 aurora/perf/perf_log.h
 aurora/perf/perf_session.h
 aurora/perf/profiler.h

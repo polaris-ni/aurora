@@ -4,6 +4,7 @@
 
 #include "aurora/app/display.h"
 #include "aurora/app/scroll_storage.h"
+#include "aurora/perf/frame_monitor.h"
 #include "aurora/window/frame_pacing.h"
 #include "aurora/window/platform.h"
 
@@ -253,6 +254,9 @@ auto WindowHost::render_frame(double dt) -> Result<bool> {
     } else {
         active_stats_->record(dt);
     }
+    // 帧统计定型后投递帧读数。门面在无订阅者时立即返回，不挂采集、不分配、不读时钟；
+    // idle 帧同样投递并带标记，由下游按标记过滤，帧语义与上屏结果不受影响。
+    aurora::detail::publish_frame_sample(dt, window_->is_idle_frame());
     return r;
 }
 

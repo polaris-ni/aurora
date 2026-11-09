@@ -146,6 +146,7 @@
 #include "aurora/net/transport.h"
 #include "aurora/net/websocket.h"
 #include "aurora/perf/counters.h"
+#include "aurora/perf/frame_monitor.h"
 #include "aurora/perf/perf_log.h"
 #include "aurora/perf/perf_session.h"
 #include "aurora/perf/profiler.h"
