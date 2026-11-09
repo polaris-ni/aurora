@@ -338,7 +338,7 @@ AURORA_TEST_CASE(endpoint_chars_inclusive_on_drag_select) {
     BuildContext ctx;
     txt.mount(ctx);
     txt.layout(bounded(1000.0F, 100.0F), ctx);
-    const Font f{.size_pt = txt.font_size()};
+    const Font f{.size_pt = txt.font_size(ctx)};
     const render::TextLayoutOpts o{};
     const std::string s = "Hello World";
     const std::size_t total = s.size();  // 全 ASCII：字节数 == 码点数
@@ -382,7 +382,7 @@ AURORA_TEST_CASE(multi_line_endpoints_inclusive) {
     txt.font_size(24).set_soft_wrap(true).set_text_align(TextAlign::Left);
     BuildContext ctx;
     txt.mount(ctx);
-    const Font f{.size_pt = txt.font_size()};
+    const Font f{.size_pt = txt.font_size(ctx)};
     const render::TextLayoutOpts o{};
     const float w_hello = render::FontEngine::measure_width("Hello", f, o);
     txt.layout(bounded(w_hello + 2.0F, 100.0F), ctx);
@@ -414,7 +414,7 @@ AURORA_TEST_CASE(single_line_full_selection_highlights_line_endpoints) {
     txt.font_size(24).set_soft_wrap(false).set_text_align(TextAlign::Left);
     BuildContext ctx;
     txt.mount(ctx);
-    const Font f{.size_pt = txt.font_size()};
+    const Font f{.size_pt = txt.font_size(ctx)};
     const render::TextLayoutOpts o{};
     const float full_w = render::FontEngine::measure_width(s, f, o);
     const Size sz = txt.layout(bounded(400.0F, 100.0F), ctx);
@@ -476,7 +476,7 @@ AURORA_TEST_CASE(word_wrap_per_line_endpoint_highlight) {
     txt.font_size(24).set_soft_wrap(true).set_text_align(TextAlign::Left);
     BuildContext ctx;
     txt.mount(ctx);
-    const Font f{.size_pt = txt.font_size()};
+    const Font f{.size_pt = txt.font_size(ctx)};
     const render::TextLayoutOpts o{};
     const float w_hello = render::FontEngine::measure_width("Hello", f, o);
     const float w_world = render::FontEngine::measure_width("World", f, o);
@@ -538,7 +538,7 @@ AURORA_TEST_CASE(justify_line_highlight_reaches_right_edge_and_gap_hits_space) {
     txt.font_size(24).set_soft_wrap(true).set_text_align(TextAlign::Justify);
     BuildContext ctx;
     txt.mount(ctx);
-    const Font f{.size_pt = txt.font_size()};
+    const Font f{.size_pt = txt.font_size(ctx)};
     const render::TextLayoutOpts o{};
     const float w_aa = render::FontEngine::measure_width("aa", f, o);
     const float w_bb = render::FontEngine::measure_width("bb", f, o);
@@ -669,7 +669,7 @@ AURORA_TEST_CASE(scaled_display_last_line_tail_fully_highlighted) {
     txt.font_size(15).set_soft_wrap(true).set_text_align(TextAlign::Justify);
     BuildContext ctx;
     txt.mount(ctx);
-    const Font f{.size_pt = txt.font_size()};
+    const Font f{.size_pt = txt.font_size(ctx)};
     const render::TextLayoutOpts o{};
     const float full = render::FontEngine::measure_width(k_para, f, o);
     const float line_h = render::FontEngine::measure_height(f);
@@ -739,7 +739,7 @@ AURORA_TEST_CASE(per_char_display_space_hit_round_trip) {
     txt.font_size(15).set_soft_wrap(false);  // 单行，默认左对齐（line_off=0）
     BuildContext ctx;
     txt.mount(ctx);
-    const Font f{.size_pt = txt.font_size()};
+    const Font f{.size_pt = txt.font_size(ctx)};
     const render::TextLayoutOpts o{};
     const float full = render::FontEngine::measure_width(k_line, f, o);
     const Size sz = txt.layout(bounded(full + 20.0F, 100.0F), ctx);

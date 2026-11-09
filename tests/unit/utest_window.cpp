@@ -4,7 +4,8 @@
 /// 标题/尺寸/装饰内边距与帧生命周期向 Surface 的转发、程序化窗口控制、
 /// 脏追踪开关语义、HUD 叠加层槽位与「空闲期 HUD-only 刷新帧」调度、
 /// run 帧数上限与空 Surface 工厂拒绝；
-/// 另以计数型 RhiFrameSink 桩锁定「系统重绘请求在 GPU 帧路径下重渲染而非裸 present」
+/// 另以计数型 RhiFrameSink 桩锁定「系统重绘请求在 GPU 帧路径下重渲染而非裸 present」，
+/// 并锁定无障碍开关换档经根注入送达子树（含换档帧不得被 idle 跳过、不入键位不得出帧）
 
 #include <chrono>
 #include <memory>
@@ -12,9 +13,13 @@
 #include <string>
 #include <thread>
 
+#include "aurora/core/accessibility.h"
+#include "aurora/core/duration.h"
 #include "aurora/render/rhi/rhi_backend.h"
 #include "aurora/render/rhi/rhi_frame_sink.h"
+#include "aurora/theming/theme_scope.h"
 #include "aurora/widget/spacer.h"
+#include "aurora/widget/text.h"
 #include "aurora/window/window.h"
 #include "framework/aurora_test.h"
 
@@ -149,6 +154,53 @@ class FilledSpacer final : public Spacer {
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext & /*ctx*/) -> void override {
         p.fill_rect(bounds, Color{0x11U, 0x22U, 0x33U, 0xFFU});
     }
+};
+
+/// @brief 布局期抄下「注入到本窗根上下文的主题」的叶桩。
+///
+/// 无障碍开关的生效路径是「进程级设置 → Window 物化点 → root_env_ 注入 → 子树读取」，物化点在
+/// Window 私有面里取不到，故「开关置位 → 生效值变」只能由子树侧的读数证明。桩同时留下
+/// `BuildContext` 副本（其 `env` 指向地址恒定的 root_env_，窗口存活期内可再喂给控件读件），
+/// 用于比对控件回落点解出的生效值与主题令牌是否同源。
+class ThemeProbeLeaf final : public LeafWidget {
+  public:
+    [[nodiscard]] auto type_name() const -> const char * override { return "ThemeProbe"; }
+
+    /// @brief 最近一次布局所见主题的快照拷贝。
+    /// @return 已布局过为其指针；否则 nullptr（调用方须判空）。
+    [[nodiscard]] auto seen() const -> const Theme * { return seen_.has_value() ? &*seen_ : nullptr; }
+
+    /// @brief 最近一次布局拿到的上下文副本。
+    /// @return 已布局过为有值；否则为空。
+    [[nodiscard]] auto ctx() const -> const std::optional<BuildContext> & { return ctx_; }
+
+  protected:
+    auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
+        seen_ = inherit_theme(ctx);
+        ctx_ = ctx;
+        return c.constrain(Size{.width = 64.0F, .height = 64.0F});
+    }
+
+    auto on_paint(Painter & /*p*/, const Rect & /*bounds*/, const BuildContext & /*ctx*/) -> void override {}
+
+  private:
+    std::optional<Theme> seen_;
+    std::optional<BuildContext> ctx_;
+};
+
+/// @brief 进程级无障碍设置的 RAII 复原守卫：本文件其余用例默认全关，改动必须还原。
+class ScopedSettings final {
+  public:
+    ScopedSettings() : saved_{current_accessibility_settings()} {}
+    ~ScopedSettings() { set_accessibility_settings(saved_); }
+
+    ScopedSettings(const ScopedSettings &) = delete;
+    auto operator=(const ScopedSettings &) -> ScopedSettings & = delete;
+    ScopedSettings(ScopedSettings &&) = delete;
+    auto operator=(ScopedSettings &&) -> ScopedSettings & = delete;
+
+  private:
+    AccessibilitySettings saved_;
 };
 
 }  // namespace
@@ -435,6 +487,80 @@ AURORA_TEST_CASE(system_redraw_after_gpu_fallback_keeps_bare_present) {
     AURORA_TEST_CHECK_EQ(surf.painter_begin_calls, begins);
     AURORA_TEST_CHECK_EQ(surf.sink.begin_calls, 1);
     AURORA_TEST_CHECK_EQ(surf.sink.end_calls, 0);
+}
+
+AURORA_TEST_CASE(accessibility_switches_reach_subtree_through_root_injection) {
+    const ScopedSettings guard;
+    auto stub = std::make_unique<RecordingSurface>();
+    Window w{std::move(stub)};
+    auto probe = std::make_shared<ThemeProbeLeaf>();
+    Node page{probe};
+
+    set_accessibility_settings(AccessibilitySettings{});
+    AURORA_TEST_CHECK_TRUE(static_cast<bool>(w.present_root(page)));
+    AURORA_TEST_REQUIRE(probe->seen() != nullptr);
+    const Theme neutral = *probe->seen();
+    AURORA_TEST_REQUIRE(probe->ctx().has_value());
+    // 基线自身必须是「不缩放 / 不减动效 / 不高对比」的快照，否则后面的成对比较没有基准。
+    AURORA_TEST_CHECK_GT(neutral.type_scale.body_medium.size_pt, 0.0F);
+    AURORA_TEST_CHECK_GT(neutral.spacing.medium, 0.0F);
+    AURORA_TEST_CHECK_GT(neutral.shapes.small, 0.0F);
+    AURORA_TEST_CHECK_FALSE(neutral.motion.medium == Duration{});  // 基线非零档，否则②的短路无从证明
+
+    // ① 字号缩放三档：字阶正文档与两枚**非文本**度量族同倍增长。
+    //    口径出处是 Apple `@ScaledMetric` / Compose `sp` 的那条共识——度量不跟着长就是溢出硬失败，
+    //    属可达性而非观感；且只允许在物化点乘这一次，故这里用「同帧倍数」而非绝对磅值断言
+    //    （绝对磅值随进程探测到的风格档变，跨机器不成立）。
+    //    次序取 2 → 3 → 1 而非 1 → 2 → 3：换档检测比的是**相邻两帧**的输入，从 1.0 起步的第一步
+    //    与基线同值、本就不该出一帧（那是④的判据），放在最后一步恰好既覆盖 1.0 档又把基准复原给②。
+    for (const float scale : {2.0F, 3.0F, 1.0F}) {
+        set_accessibility_settings(AccessibilitySettings{.font_scale = scale});
+        AURORA_TEST_CHECK_TRUE(static_cast<bool>(w.present_root(page)));
+        // 换档帧不得被 idle 跳过：跳过的话子树停在旧读数，「开关置位」在真实帧循环里等于没生效。
+        AURORA_TEST_CHECK_FALSE(w.is_idle_frame());
+        const Theme &seen = *probe->seen();
+        AURORA_TEST_CHECK_NEAR(seen.type_scale.body_medium.size_pt, neutral.type_scale.body_medium.size_pt * scale,
+                               1e-3F);
+        AURORA_TEST_CHECK_NEAR(seen.spacing.medium, neutral.spacing.medium * scale, 1e-3F);
+        AURORA_TEST_CHECK_NEAR(seen.shapes.small, neutral.shapes.small * scale, 1e-3F);
+        // 两条通道缺陷的直接反证：图表读的是 `inherit_theme(ctx).type_scale.body_medium`，
+        // `Text` 未表态字号的回落点是同一枚令牌——同一 ctx 下两者必须给出同一个数。
+        AURORA_TEST_CHECK_NEAR(Text{std::string{"x"}}.font_size(*probe->ctx()), seen.type_scale.body_medium.size_pt,
+                               1e-4F);
+    }
+
+    // ② 减动效：时长档整族取零档（短路门不是倍率），且折叠不串档——字阶仍回到基线。
+    set_accessibility_settings(AccessibilitySettings{.reduce_motion = true});
+    AURORA_TEST_CHECK_TRUE(static_cast<bool>(w.present_root(page)));
+    AURORA_TEST_CHECK_FALSE(w.is_idle_frame());
+    const Theme &reduced = *probe->seen();
+    AURORA_TEST_CHECK(reduced.motion.none == Duration{});
+    AURORA_TEST_CHECK(reduced.motion.extra_small == Duration{});
+    AURORA_TEST_CHECK(reduced.motion.small == Duration{});
+    AURORA_TEST_CHECK(reduced.motion.medium == Duration{});
+    AURORA_TEST_CHECK(reduced.motion.large == Duration{});
+    AURORA_TEST_CHECK(reduced.motion.extra_large == Duration{});
+    AURORA_TEST_CHECK_NEAR(reduced.type_scale.body_medium.size_pt, neutral.type_scale.body_medium.size_pt, 1e-4F);
+    // 撤开关即复原到逐字段全等的快照：折算必须是输入的纯函数（否则「同值覆写不重排」判据不成立）。
+    set_accessibility_settings(AccessibilitySettings{});
+    AURORA_TEST_CHECK_TRUE(static_cast<bool>(w.present_root(page)));
+    AURORA_TEST_CHECK(*probe->seen() == neutral);
+
+    // ③ 高对比：本档锁的是**通道**——该位参与解算键，置位即出一帧并重新注入快照。
+    //    生效值本身的成对断言在无障碍单测里（那里人为造一枚不达线的登记行）：内置色列本就达线，
+    //    「折叠后必须改变」按风格档与本机探测结果而定，跨机器不成立，写在这里只会成为空转断言。
+    set_accessibility_settings(AccessibilitySettings{.high_contrast = true});
+    AURORA_TEST_CHECK_TRUE(static_cast<bool>(w.present_root(page)));
+    AURORA_TEST_CHECK_FALSE(w.is_idle_frame());
+    set_accessibility_settings(AccessibilitySettings{});
+    AURORA_TEST_CHECK_TRUE(static_cast<bool>(w.present_root(page)));
+    AURORA_TEST_CHECK(*probe->seen() == neutral);
+
+    // ④ 不入键的位不构成换档：读屏在线不改任何主题取值，也不该为此出一帧。
+    set_accessibility_settings(AccessibilitySettings{.screen_reader_active = true});
+    AURORA_TEST_CHECK_TRUE(static_cast<bool>(w.present_root(page)));
+    AURORA_TEST_CHECK_TRUE(w.is_idle_frame());
+    AURORA_TEST_CHECK(*probe->seen() == neutral);
 }
 
 }  // namespace aurora::test_cases::utest_window

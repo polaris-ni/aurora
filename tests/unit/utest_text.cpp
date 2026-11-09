@@ -58,7 +58,8 @@ AURORA_TEST_CASE(default_text_state_and_type_name) {
     // `overflow` 与基类键撞名：本控件恒以文本溢出策略收口（不跟随基类 OverflowStrategy）。
     AURORA_TEST_CHECK_EQ(require_field<std::string>(props, "overflow"), std::string{"Clip"});
     // 未表态行读回落点，与旧「恒写默认值」的生效值逐项相同。
-    AURORA_TEST_CHECK_NEAR(t.font_size(), 14.0F, 1e-4F);
+    // 字号回落点是派生档（作用域主题的 `type_scale.body_medium`）：无作用域时取进程级明色基线 = 14pt。
+    AURORA_TEST_CHECK_NEAR(t.font_size(BuildContext{}), 14.0F, 1e-4F);
     AURORA_TEST_CHECK_EQ(t.max_lines(), 0);
     AURORA_TEST_CHECK_TRUE(t.soft_wrap());
     AURORA_TEST_CHECK_NEAR(t.line_height(), 1.0F, 1e-4F);
@@ -183,7 +184,7 @@ AURORA_TEST_CASE(serialize_deserialize_roundtrip) {
 
     Text dst;
     dst.deserialize_props(props);
-    AURORA_TEST_CHECK_NEAR(dst.font_size(), 16.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(dst.font_size(BuildContext{}), 16.0F, 1e-4F);
     AURORA_TEST_CHECK_TRUE(dst.text_align() == TextAlign::Center);
     AURORA_TEST_CHECK_EQ(dst.max_lines(), 2);
     AURORA_TEST_CHECK_FALSE(dst.soft_wrap());

@@ -1,13 +1,15 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/theming/color_roles.h
-/// 测试说明: 覆盖色角色取值的两条不变量——(1) 每个 on_* 与其配对角色满足 WCAG AA ≥ 4.5:1，
-/// 断言面从 Material 两列扩到五风格 × 明暗共 10 组（不达者按官方配对记豁免并钉住实测下限）；
-/// (2) 已消费角色取现行主题基准值（观感不变），暗色 primary/on_primary 为 WCAG 修正对；
-/// 并断言明暗两列取向相反（暗色表面族显著深于亮色）。
+/// 测试说明: 覆盖色角色取值的三条不变量——(1) 已消费角色取现行主题基准值（观感不变），
+/// 暗色 primary / on_primary 为 WCAG 修正对；(2) 明暗两列取向相反（暗色表面族显著深于亮色）；
+/// (3) 对比度判据不再自带第二份 WCAG 公式：用例调库内 aurora::contrast_ratio，并逐行读
+/// include/aurora/theming/detail/contrast_audit.h 的登记表（与 check_theme_contrast 同一张表），按三档
+/// （text 4.5:1 / non_text 3.0:1 / not_applicable 不判）裁决五风格 × 明暗共 10 列；
+/// 命中预设豁免的格子同时断言「≥ 登记下限且 < 档位线」，取到达标值后必须显式删掉那行。
 
-#include <string_view>
-
+#include "aurora/core/color.h"
 #include "aurora/theming/color_roles.h"
+#include "aurora/theming/detail/contrast_audit.h"
 #include "aurora/theming/theme.h"
 #include "aurora/theming/theme_style.h"
 #include "framework/aurora_test.h"
@@ -16,22 +18,28 @@ namespace aurora::test_cases::utest_theme_roles {
 
 namespace {
 
-/// @brief 相对亮度（WCAG 2.x sRGB 线性化加权和）。
-auto luminance(const Color &c) -> double {
-    const auto lin = [](uint8_t v) {
-        const double s = v / 255.0;
-        return s <= 0.04045 ? s / 12.92 : std::pow((s + 0.055) / 1.055, 2.4);
-    };
-    return (0.2126 * lin(c.r)) + (0.7152 * lin(c.g)) + (0.0722 * lin(c.b));
+/// @brief 配对角色成员指针的别名（登记表与豁免表靠它逐字比对同一色对）。
+using RoleMember = Color ColorRoles::*;
+
+/// @brief 档位下限；未登记档位返回负值，让调用处断言转红而不是静默放行。
+auto tier_floor(detail::ContrastTier tier) -> double {
+    for (const detail::ContrastTierFloor &f : detail::AURORA_CONTRAST_TIERS) {
+        if (f.tier == tier) {
+            return f.min_ratio;
+        }
+    }
+    return -1.0;
 }
 
-/// @brief 两色对比度（WCAG 定义）。
-auto contrast(const Color &a, const Color &b) -> double {
-    const double la = luminance(a);
-    const double lb = luminance(b);
-    const double hi = la > lb ? la : lb;
-    const double lo = la > lb ? lb : la;
-    return (hi + 0.05) / (lo + 0.05);
+/// @brief 查该列该色对的预设豁免行；未列出者必须达到档位线。
+auto find_preset_floor(ThemeStyle style, ColorScheme scheme, RoleMember fg, RoleMember bg)
+    -> const detail::ContrastPresetFloor * {
+    for (const detail::ContrastPresetFloor &e : detail::AURORA_CONTRAST_PRESET_FLOORS) {
+        if (e.style == style && e.scheme == scheme && e.fg == fg && e.bg == bg) {
+            return &e;
+        }
+    }
+    return nullptr;
 }
 
 }  // namespace
@@ -62,123 +70,66 @@ AURORA_TEST_CASE(dark_roles_preserve_consumed_baseline_except_wcag_fix) {
     AURORA_TEST_CHECK(r.on_primary == Color{0x00, 0x2B, 0x73});  // tone-20 深色
 }
 
-AURORA_TEST_CASE(all_on_color_pairs_meet_wcag_aa) {
-    // 每个 on_* 与其配对角色对比度 ≥ 4.5:1（明暗两列全集）。
-    for (const ColorRoles &r : {ColorRoles::light(), ColorRoles::dark()}) {
-        AURORA_TEST_CHECK(contrast(r.on_primary, r.primary) >= 4.5);
-        AURORA_TEST_CHECK(contrast(r.on_primary_container, r.primary_container) >= 4.5);
-        AURORA_TEST_CHECK(contrast(r.on_secondary, r.secondary) >= 4.5);
-        AURORA_TEST_CHECK(contrast(r.on_secondary_container, r.secondary_container) >= 4.5);
-        AURORA_TEST_CHECK(contrast(r.on_tertiary, r.tertiary) >= 4.5);
-        AURORA_TEST_CHECK(contrast(r.on_tertiary_container, r.tertiary_container) >= 4.5);
-        AURORA_TEST_CHECK(contrast(r.on_error, r.error) >= 4.5);
-        AURORA_TEST_CHECK(contrast(r.on_error_container, r.error_container) >= 4.5);
-        AURORA_TEST_CHECK(contrast(r.on_surface, r.surface) >= 4.5);
-        AURORA_TEST_CHECK(contrast(r.on_surface_variant, r.surface_variant) >= 4.5);
+AURORA_TEST_CASE(tier_floors_are_the_wcag_numbers) {
+    // 档位线钉在判据的外部真值上（SC 1.4.3 / SC 1.4.11），登记表不得自带一套数字；
+    // 重谈档位属规格变更，须与 specification/07-environment-modifier.md §5.1 同批改。
+    AURORA_TEST_CHECK(tier_floor(detail::ContrastTier::Text) == 4.5);
+    AURORA_TEST_CHECK(tier_floor(detail::ContrastTier::NonText) == 3.0);
+    AURORA_TEST_CHECK(tier_floor(detail::ContrastTier::NotApplicable) == 0.0);
+    for (const detail::ContrastTierFloor &f : detail::AURORA_CONTRAST_TIERS) {
+        AURORA_TEST_CHECK(!f.criterion.empty());
     }
 }
 
 AURORA_TEST_CASE(dark_surface_family_darker_than_light) {
-    // 明暗取向相反：暗色表面族整体亮度显著低于亮色。
+    // 明暗取向相反：暗色表面族整体亮度显著低于亮色。亮度取库内唯一实现。
     constexpr ColorRoles l = ColorRoles::light();
     constexpr ColorRoles d = ColorRoles::dark();
-    AURORA_TEST_CHECK(luminance(d.surface) < luminance(l.surface));
-    AURORA_TEST_CHECK(luminance(d.surface_container) < luminance(l.surface_container));
-    AURORA_TEST_CHECK(luminance(d.on_surface) > luminance(l.on_surface));
+    AURORA_TEST_CHECK(relative_luminance(d.surface) < relative_luminance(l.surface));
+    AURORA_TEST_CHECK(relative_luminance(d.surface_container) < relative_luminance(l.surface_container));
+    AURORA_TEST_CHECK(relative_luminance(d.on_surface) > relative_luminance(l.on_surface));
 }
 
-namespace {
-
-/// @brief 十组标准配对（`on_*` 与其容器底色），成员指针让表格只写名不写取值。
-struct Pair {
-    const char *name;  ///< 配对名（豁免表与失败定位共用；输出须 ASCII）。
-    Color ColorRoles::*fg;  ///< 前景角色。
-    Color ColorRoles::*bg;  ///< 底色角色。
-};
-
-constexpr Pair AURORA_PAIRS[] = {
-    {.name = "on_primary/primary", .fg = &ColorRoles::on_primary, .bg = &ColorRoles::primary},
-    {.name = "on_primary_container/primary_container",
-     .fg = &ColorRoles::on_primary_container,
-     .bg = &ColorRoles::primary_container},
-    {.name = "on_secondary/secondary", .fg = &ColorRoles::on_secondary, .bg = &ColorRoles::secondary},
-    {.name = "on_secondary_container/secondary_container",
-     .fg = &ColorRoles::on_secondary_container,
-     .bg = &ColorRoles::secondary_container},
-    {.name = "on_tertiary/tertiary", .fg = &ColorRoles::on_tertiary, .bg = &ColorRoles::tertiary},
-    {.name = "on_tertiary_container/tertiary_container",
-     .fg = &ColorRoles::on_tertiary_container,
-     .bg = &ColorRoles::tertiary_container},
-    {.name = "on_error/error", .fg = &ColorRoles::on_error, .bg = &ColorRoles::error},
-    {.name = "on_error_container/error_container",
-     .fg = &ColorRoles::on_error_container,
-     .bg = &ColorRoles::error_container},
-    {.name = "on_surface/surface", .fg = &ColorRoles::on_surface, .bg = &ColorRoles::surface},
-    {.name = "on_surface_variant/surface_variant",
-     .fg = &ColorRoles::on_surface_variant,
-     .bg = &ColorRoles::surface_variant},
-};
-
-/// @brief 不达 AA 的配对豁免（照抄上游官方配对的那几支）。
-struct Exemption {
-    ThemeStyle style;  ///< 风格档。
-    ColorScheme scheme;  ///< 明暗档。
-    const char *pair;  ///< 配对名（须与 `AURORA_PAIRS` 里的 name 逐字相同）。
-    double floor_ratio;  ///< 实测比值下限（钉住现状，取更差的改动即红灯；仍要求 < 4.5，豁免失效要显式撤销）。
-};
-
-constexpr Exemption AURORA_EXEMPTIONS[] = {
-    // Aqua：controlAccentColor #007AFF 配白 4.02:1，达 AA Large 未达普通文本线；HIG 的 Blue 只有
-    // 这一档，改深即是自造色（见 theme_presets.cpp 的 macOS 段）。
-    {.style = ThemeStyle::MacOs, .scheme = ColorScheme::Light, .pair = "on_primary/primary", .floor_ratio = 4.0},
-    {.style = ThemeStyle::MacOs, .scheme = ColorScheme::Dark, .pair = "on_primary/primary", .floor_ratio = 4.0},
-    // Breeze：#3DAEE9 是 Plasma 6 明暗同值的官方强调色，其调色板没有达标深蓝档，选中态白字
-    // 2.4x 是 KDE 的真实观感；#DA4453（ForegroundNegative）配白 4.26:1；ForegroundInactive
-    // 是「弱化前景」专用色，任何官方底色上都到不了 4.5（见 KDE 段注释）。
-    {.style = ThemeStyle::Kde, .scheme = ColorScheme::Light, .pair = "on_primary/primary", .floor_ratio = 2.4},
-    {.style = ThemeStyle::Kde, .scheme = ColorScheme::Dark, .pair = "on_primary/primary", .floor_ratio = 2.4},
-    {.style = ThemeStyle::Kde, .scheme = ColorScheme::Light, .pair = "on_error/error", .floor_ratio = 4.2},
-    {.style = ThemeStyle::Kde, .scheme = ColorScheme::Dark, .pair = "on_error/error", .floor_ratio = 4.2},
-    {.style = ThemeStyle::Kde,
-     .scheme = ColorScheme::Light,
-     .pair = "on_surface_variant/surface_variant",
-     .floor_ratio = 3.2},
-    {.style = ThemeStyle::Kde,
-     .scheme = ColorScheme::Dark,
-     .pair = "on_surface_variant/surface_variant",
-     .floor_ratio = 3.8},
-};
-
-/// @brief 查豁免表；未列出者为「必须达 AA」。
-auto find_exemption(ThemeStyle style, ColorScheme scheme, const char *pair) -> const Exemption * {
-    for (const Exemption &e : AURORA_EXEMPTIONS) {
-        if (e.style == style && e.scheme == scheme && std::string_view{e.pair} == pair) {
-            return &e;
-        }
-    }
-    return nullptr;
-}
-
-}  // namespace
-
-AURORA_TEST_CASE(ten_style_combos_meet_wcag_aa) {
-    // 判据第六条：五风格 × 明暗两档共 10 组角色，每对 on_* 与配对角色 ≥ 4.5:1，
-    // 不达标者按官方配对照抄并记豁免（豁免同时断言「仍未达标」，取到达标值后要显式撤销条目）。
+AURORA_TEST_CASE(ten_style_columns_judged_by_shared_registry) {
+    // 判据主体：10 列 × 登记表每一对，按各自档位裁决。公式取库内实现、配对与档位取登记表——
+    // 本用例与 check_theme_contrast 读同一张表，两侧不再各写一份 WCAG。
+    using aurora::detail::ContrastTier;
     for (const ThemeStyle style :
          {ThemeStyle::Material, ThemeStyle::Windows, ThemeStyle::MacOs, ThemeStyle::Gnome, ThemeStyle::Kde}) {
         for (const ColorScheme scheme : {ColorScheme::Light, ColorScheme::Dark}) {
             const ColorRoles roles = Theme::from_style(style, scheme).roles;
-            for (const Pair &p : AURORA_PAIRS) {
-                const double ratio = contrast(roles.*(p.fg), roles.*(p.bg));
-                const Exemption *ex = find_exemption(style, scheme, p.name);
-                if (ex == nullptr) {
-                    AURORA_TEST_CHECK(ratio >= 4.5);
+            for (const detail::ContrastPairAudit &row : detail::AURORA_CONTRAST_AUDITS) {
+                // 逐条登记理由：不适用档靠理由说明「为什么跳过」，空理由即判据失效。
+                AURORA_TEST_CHECK(!row.reason.empty());
+                const double min_ratio = tier_floor(row.tier);
+                if (row.tier == ContrastTier::NotApplicable) {
+                    continue;
+                }
+                const double ratio = contrast_ratio(roles.*(row.fg), roles.*(row.bg));
+                const detail::ContrastPresetFloor *floor = find_preset_floor(style, scheme, row.fg, row.bg);
+                if (floor == nullptr) {
+                    AURORA_TEST_CHECK(ratio >= min_ratio);
                 } else {
-                    AURORA_TEST_CHECK(ratio >= ex->floor_ratio);
-                    AURORA_TEST_CHECK(ratio < 4.5);
+                    AURORA_TEST_CHECK(ratio >= floor->floor_ratio);
+                    AURORA_TEST_CHECK(ratio < min_ratio);  // 已达档位线 => 该豁免行必须显式删除
                 }
             }
         }
+    }
+}
+
+AURORA_TEST_CASE(preset_floors_point_at_registered_pairs) {
+    // 豁免表不得指向未登记的色对，也不得在档位线之上占位——这是「豁免失效要显式撤销」的另一半。
+    for (const detail::ContrastPresetFloor &floor : detail::AURORA_CONTRAST_PRESET_FLOORS) {
+        AURORA_TEST_CHECK(!floor.reason.empty());
+        double min_ratio = -1.0;
+        for (const detail::ContrastPairAudit &row : detail::AURORA_CONTRAST_AUDITS) {
+            if (row.fg == floor.fg && row.bg == floor.bg) {
+                min_ratio = tier_floor(row.tier);
+            }
+        }
+        AURORA_TEST_CHECK(min_ratio > 0.0);
+        AURORA_TEST_CHECK(floor.floor_ratio < min_ratio);
     }
 }
 
