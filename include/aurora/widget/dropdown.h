@@ -314,10 +314,18 @@ class Dropdown : public Widget {
         if (accent_color_.has_value()) {
             props.set("accent_color", color_to_json(*accent_color_));  // 未设置不输出：保留「跟随主题」语义
         }
-        props.set("box_color", color_to_json(box_color_));
-        props.set("border_color", color_to_json(border_color_));
-        props.set("text_color", color_to_json(text_color_));
-        props.set("arrow_color", color_to_json(arrow_color_));
+        if (box_color_.has_value()) {
+            props.set("box_color", color_to_json(*box_color_));  // 未设置不输出：保留「跟随主题」语义
+        }
+        if (border_color_.has_value()) {
+            props.set("border_color", color_to_json(*border_color_));  // 未设置不输出：保留「跟随主题」语义
+        }
+        if (text_color_.has_value()) {
+            props.set("text_color", color_to_json(*text_color_));  // 未设置不输出：保留「跟随主题」语义
+        }
+        if (arrow_color_.has_value()) {
+            props.set("arrow_color", color_to_json(*arrow_color_));  // 未设置不输出：保留「跟随主题」语义
+        }
         props.set("box_height", box_height_);
         props.set("item_height", item_height_);
         props.set("font_size", font_size_);
@@ -437,16 +445,17 @@ class Dropdown : public Widget {
         f.size_pt = font_size_;
         // 状态色解析：显式设置优先，否则跟随主题 primary；禁用态统一灰化。
         Color accent = accent_color_.value_or(inherit_theme(ctx).roles.primary);
-        Color box = box_color_;
-        Color border = border_color_;
-        Color text = text_color_;
-        Color arrow = arrow_color_;
+        Color box = box_color_.value_or(inherit_theme(ctx).roles.surface_container_lowest);
+        Color border = border_color_.value_or(inherit_theme(ctx).roles.outline_variant);
+        Color text = text_color_.value_or(inherit_theme(ctx).roles.on_surface);
+        Color arrow = arrow_color_.value_or(inherit_theme(ctx).roles.on_surface_variant);
         if (!enabled_) {
-            accent = Color{176, 176, 180, 255};
-            box = Color{235, 235, 237, 255};
-            border = Color{215, 215, 219, 255};
-            text = Color{168, 168, 172, 255};
-            arrow = Color{190, 190, 194, 255};
+            const auto &roles = inherit_theme(ctx).roles;
+            accent = roles.outline_variant;
+            box = roles.surface_container_high;
+            border = roles.outline_variant;
+            text = roles.outline;
+            arrow = roles.outline_variant;
         } else if (hovered() || is_open_) {
             border = accent;  // 悬停/展开时边框高亮
         }
@@ -459,9 +468,9 @@ class Dropdown : public Widget {
         if (const std::optional<PanelGeometry> geo = panel_geometry(box_rect.size.width, bounds.origin.y);
             geo.has_value()) {
             const Rect drop = geo->window;
-            p.draw_shadow(drop, 0.0F, 2.0F, 8.0F, Color(0, 0, 0, 48));
-            p.fill_rect(drop, box_color_);
-            p.draw_rect(drop, border_color_);
+            p.draw_shadow(drop, 0.0F, 2.0F, 8.0F, inherit_theme(ctx).roles.shadow.with_alpha(48));
+            p.fill_rect(drop, box);
+            p.draw_rect(drop, border);
             // 裁剪到窗口盒：被限高时只画窗口内那几行，其余行滚入后才可见。
             p.push_clip(drop);
             const float y = drop.origin.y - geo->scroll;  // 内容顶相对窗口顶上移 scroll
@@ -646,10 +655,10 @@ class Dropdown : public Widget {
     std::function<void(int)> on_change_;  ///< 选中变更回调（入参为新序号）；空 = 不回调
     std::string placeholder_;  ///< 空选项时的占位文本
     std::optional<Color> accent_color_;  ///< 选中高亮色；空 = 跟随主题 primary
-    Color box_color_ = Color{255, 255, 255, 255};  ///< 主框背景色
-    Color border_color_ = Color{200, 200, 205, 255};  ///< 主框/面板边框色
-    Color text_color_ = Color{30, 30, 30, 255};  ///< 选项文本色
-    Color arrow_color_ = Color{120, 120, 125, 255};  ///< 箭头颜色
+    std::optional<Color> box_color_;  ///< 主框背景色；空 = 跟随主题 surface_container_lowest
+    std::optional<Color> border_color_;  ///< 主框/面板边框色；空 = 跟随主题 outline_variant
+    std::optional<Color> text_color_;  ///< 选项文本色；空 = 跟随主题 on_surface
+    std::optional<Color> arrow_color_;  ///< 箭头颜色；空 = 跟随主题 on_surface_variant
     float box_height_ = 30.0F;  ///< 主框高度 dp
     float item_height_ = 26.0F;  ///< 选项行高 dp
     float panel_scroll_ = 0.0F;  ///< 面板内部滚动偏移 dp（仅面板被限高时非零；见 panel_geometry）
@@ -696,27 +705,27 @@ inline auto Dropdown::describe_static() -> WidgetDescriptor {
                  .json_type = "array"},
                 {.name = "box_color",
                  .type = "Color",
-                 .default_value = "Color::white()",
+                 .default_value = theme_token_expr<&ColorRoles::surface_container_lowest>(),
                  .required = false,
-                 .note = "Main box background color",
+                 .note = "Main box background color (defaults to theme surface_container_lowest)",
                  .json_type = "array"},
                 {.name = "border_color",
                  .type = "Color",
-                 .default_value = "{200,200,205,255}",
+                 .default_value = theme_token_expr<&ColorRoles::outline_variant>(),
                  .required = false,
-                 .note = "Main box / panel border color",
+                 .note = "Main box / panel border color (defaults to theme outline_variant)",
                  .json_type = "array"},
                 {.name = "text_color",
                  .type = "Color",
-                 .default_value = "{30,30,30,255}",
+                 .default_value = theme_token_expr<&ColorRoles::on_surface>(),
                  .required = false,
-                 .note = "Option text color",
+                 .note = "Option text color (defaults to theme on_surface)",
                  .json_type = "array"},
                 {.name = "arrow_color",
                  .type = "Color",
-                 .default_value = "{120,120,125,255}",
+                 .default_value = theme_token_expr<&ColorRoles::on_surface_variant>(),
                  .required = false,
-                 .note = "Arrow color",
+                 .note = "Arrow color (defaults to theme on_surface_variant)",
                  .json_type = "array"},
                 {.name = "box_height",
                  .type = "float",

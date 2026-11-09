@@ -3,6 +3,7 @@
 #include <utility>
 
 #include "aurora/core/diagnostics.h"
+#include "aurora/theming/theme_scope.h"
 
 namespace aurora {
 
@@ -114,12 +115,13 @@ auto DataTable::on_layout(const Constraints &c, const BuildContext & /*ctx*/) ->
     return c.constrain(Size{.width = w, .height = h});
 }
 
-auto DataTable::on_paint(Painter &p, const Rect &bounds, const BuildContext & /*ctx*/) -> void {
+auto DataTable::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void {
+    const auto &roles = inherit_theme(ctx).roles;
     Font f;
     f.size_pt = 12.0F;
     // 表头
     const Rect head{.origin = bounds.origin, .size = Size{.width = bounds.size.width, .height = AURORA_HEADER_HEIGHT}};
-    p.fill_rect(head, Color(246, 246, 248, 255));
+    p.fill_rect(head, roles.surface_container_low);
     float x = bounds.origin.x;
     for (const auto &col : columns_) {
         std::string label = col.label;
@@ -130,7 +132,7 @@ auto DataTable::on_paint(Painter &p, const Rect &bounds, const BuildContext & /*
         }
         p.draw_text(Rect{.origin = Point{.x = x + 8.0F, .y = head.origin.y + 8.0F},
                          .size = Size{.width = col.width - 12.0F, .height = AURORA_HEADER_HEIGHT - 12.0F}},
-                    label, f, Color(60, 60, 65, 255));
+                    label, f, roles.on_surface_variant);
         x += col.width;
     }
     // 行
@@ -140,11 +142,11 @@ auto DataTable::on_paint(Painter &p, const Rect &bounds, const BuildContext & /*
         if (std::cmp_equal(r, sel)) {
             p.fill_rect(Rect{.origin = Point{.x = bounds.origin.x, .y = ry},
                              .size = Size{.width = bounds.size.width, .height = AURORA_ROW_HEIGHT}},
-                        Color(0, 122, 255, 30));
+                        roles.primary.with_alpha(30));
         } else if (r % 2 == 1) {
             p.fill_rect(Rect{.origin = Point{.x = bounds.origin.x, .y = ry},
                              .size = Size{.width = bounds.size.width, .height = AURORA_ROW_HEIGHT}},
-                        Color(249, 249, 251, 255));
+                        roles.surface_container_lowest);
         }
         float cx = bounds.origin.x;
         for (std::size_t ci = 0; ci < columns_.size(); ++ci) {
@@ -152,7 +154,7 @@ auto DataTable::on_paint(Painter &p, const Rect &bounds, const BuildContext & /*
                              // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
                              // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
                              .size = Size{.width = columns_[ci].width - 12.0F, .height = AURORA_ROW_HEIGHT - 10.0F}},
-                        cell(r, ci), f, Color(30, 30, 35, 255));
+                        cell(r, ci), f, roles.on_surface);
             // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
             // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
             cx += columns_[ci].width;
@@ -210,7 +212,8 @@ auto TreeView::on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> 
     return c.constrain(Size{.width = w, .height = static_cast<float>(visible_count()) * AURORA_ROW_HEIGHT});
 }
 
-auto TreeView::on_paint(Painter &p, const Rect &bounds, const BuildContext & /*ctx*/) -> void {
+auto TreeView::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void {
+    const auto &roles = inherit_theme(ctx).roles;
     Font f;
     f.size_pt = 12.0F;
     int row = 0;
@@ -220,18 +223,18 @@ auto TreeView::on_paint(Painter &p, const Rect &bounds, const BuildContext & /*c
         if (row == sel) {
             p.fill_rect(Rect{.origin = Point{.x = bounds.origin.x, .y = y},
                              .size = Size{.width = bounds.size.width, .height = AURORA_ROW_HEIGHT}},
-                        Color(0, 122, 255, 30));
+                        roles.primary.with_alpha(30));
         }
         const float indent = bounds.origin.x + (static_cast<float>(depth) * AURORA_INDENT);
         if (!item.is_leaf()) {
             p.draw_text(Rect{.origin = Point{.x = indent + 4.0F, .y = y + 5.0F},
                              .size = Size{.width = 14.0F, .height = AURORA_ROW_HEIGHT - 8.0F}},
-                        item.expanded ? "v" : ">", f, Color(110, 110, 115, 255));
+                        item.expanded ? "v" : ">", f, roles.on_surface_variant);
         }
         p.draw_text(Rect{.origin = Point{.x = indent + AURORA_ARROW_ZONE, .y = y + 5.0F},
                          .size = Size{.width = bounds.size.width - indent - AURORA_ARROW_ZONE,
                                       .height = AURORA_ROW_HEIGHT - 8.0F}},
-                    item.label, f, Color(30, 30, 35, 255));
+                    item.label, f, roles.on_surface);
         ++row;
         if (item.expanded) {
             for (const auto &ch : item.children) {
@@ -334,7 +337,8 @@ auto ListView::on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> 
     return c.constrain(Size{.width = w, .height = static_cast<float>(items_.size()) * AURORA_ROW_HEIGHT});
 }
 
-auto ListView::on_paint(Painter &p, const Rect &bounds, const BuildContext & /*ctx*/) -> void {
+auto ListView::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void {
+    const auto &roles = inherit_theme(ctx).roles;
     Font f;
     f.size_pt = 12.0F;
     for (std::size_t i = 0; i < items_.size(); ++i) {
@@ -342,13 +346,13 @@ auto ListView::on_paint(Painter &p, const Rect &bounds, const BuildContext & /*c
         if (is_selected(static_cast<int>(i))) {
             p.fill_rect(Rect{.origin = Point{.x = bounds.origin.x, .y = y},
                              .size = Size{.width = bounds.size.width, .height = AURORA_ROW_HEIGHT}},
-                        Color(0, 122, 255, 30));
+                        roles.primary.with_alpha(30));
         }
         p.draw_text(Rect{.origin = Point{.x = bounds.origin.x + 10.0F, .y = y + 5.0F},
                          .size = Size{.width = bounds.size.width - 16.0F, .height = AURORA_ROW_HEIGHT - 8.0F}},
                     // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
                     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-                    items_[i], f, Color(30, 30, 35, 255));
+                    items_[i], f, roles.on_surface);
     }
 }
 

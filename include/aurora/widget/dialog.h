@@ -6,6 +6,7 @@
 
 #include "aurora/event/focus.h"
 #include "aurora/theming/theme.h"
+#include "aurora/theming/theme_scope.h"  // inherit_theme：遮罩取主题 scrim
 #include "aurora/widget/button.h"
 #include "aurora/widget/containers.h"
 #include "aurora/widget/descriptor.h"
@@ -149,7 +150,7 @@ class Dialog : public Container {
             return;
         }
         // 半透明遮罩：按本控件的盒铺满（模态语义要求盖住下层视口，不限于内容盒）。
-        p.fill_rect(bounds, Color(0, 0, 0, 128));
+        p.fill_rect(bounds, inherit_theme(ctx).roles.scrim.with_alpha(128));
         // 内容按 on_layout 落定的居中盒落笔——不再在此另算一遍居中（两处各算一遍必然分叉）。
         // children_[0].bounds() 是相对本控件内容区的局部盒，转全局需加 bounds.origin。
         if (!children_.empty()) {

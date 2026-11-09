@@ -217,9 +217,9 @@ class Slider : public LeafWidget {
                      .json_type = "array"},
                     {.name = "inactive_color",
                      .type = "Color",
-                     .default_value = "{210,210,210,255}",
+                     .default_value = theme_token_expr<&ColorRoles::surface_container_highest>(),
                      .required = false,
-                     .note = "Unfilled track color",
+                     .note = "Unfilled track color (defaults to theme surface_container_highest)",
                      .json_type = "array"},
                     {.name = "thumb_color",
                      .type = "Color",
@@ -319,7 +319,9 @@ class Slider : public LeafWidget {
         if (active_color_.has_value()) {
             props.set("active_color", color_to_json(*active_color_));  // 未设置不输出：保留「跟随主题」语义
         }
-        props.set("inactive_color", color_to_json(inactive_color_));
+        if (inactive_color_.has_value()) {
+            props.set("inactive_color", color_to_json(*inactive_color_));  // 未设置不输出：保留「跟随主题」语义
+        }
         if (thumb_color_.has_value()) {
             props.set("thumb_color", color_to_json(*thumb_color_));
         }
@@ -372,21 +374,25 @@ class Slider : public LeafWidget {
     }
 
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
-        // 状态色解析：显式设置优先，否则跟随主题 primary；禁用态统一灰化。
-        Color active = active_color_.value_or(inherit_theme(ctx).roles.primary);
-        Color inactive = inactive_color_;
+        // 状态色解析：显式设置优先，否则跟随主题 primary；禁用态统一按主题中性档灰化。
+        const auto &roles = inherit_theme(ctx).roles;
+        Color active = active_color_.value_or(roles.primary);
+        Color inactive = inactive_color_.value_or(roles.surface_container_highest);
         Color thumb = thumb_color_.value_or(active);
         if (!enabled_) {
-            active = Color{176, 176, 180, 255};
-            inactive = Color{225, 225, 228, 255};
-            thumb = Color{200, 200, 204, 255};
-        } else if (hovered() || pressed_) {
-            thumb = thumb.shaded(pressed_ ? 0.78F : 0.90F);  // 悬停/拖动反馈
+            active = roles.outline_variant;
+            inactive = roles.surface_container_high;
+            thumb = roles.surface_container_highest;
         }
         const Rect track = track_rect(bounds);
         paint_track(p, track, inactive);
         paint_active_track(p, track, active);
         paint_thumb(p, bounds, track, thumb);
+        // 悬停/拖动是半透明状态层：叠在滑块之上（源覆盖混合），不改滑块基色。
+        if (enabled_ && (hovered() || pressed_)) {
+            const Rect knob = thumb_rect(bounds, track);
+            p.fill_rounded_rect(knob, knob.size.width * 0.5F, pressed_ ? roles.pressed : roles.hover);
+        }
     }
 
     // ---- 继承扩展点：几何与分阶段绘制 ----
@@ -428,18 +434,25 @@ class Slider : public LeafWidget {
                             track.size.height * 0.5F, c);
     }
 
+    /// @brief 滑块圆心矩形（中心在当前值位置）。
+    /// @param bounds 本控件布局矩形（thumb_size_ 未设时按其中高减 6dp 推直径）。
+    /// @param track 轨道矩形（水平定位基准）。
+    /// @return 滑块的方形包围盒（边长即直径）。
+    [[nodiscard]] auto thumb_rect(const Rect &bounds, const Rect &track) const -> Rect {
+        const float d = thumb_size_ > 0.0F ? thumb_size_ : bounds.size.height - 6.0F;
+        const float cx = track.origin.x + (value_fraction() * track.size.width);
+        const float cy = bounds.origin.y + (bounds.size.height * 0.5F);
+        return Rect{.origin = Point{.x = cx - (d * 0.5F), .y = cy - (d * 0.5F)}, .size = Size{.width = d, .height = d}};
+    }
+
     /// @brief 绘制圆形滑块（中心在当前值位置）。
     /// @param p 绘制器。
     /// @param bounds 本控件布局矩形（thumb_size_ 未设时按其中高减 6dp 推直径）。
     /// @param track 轨道矩形（水平定位基准）。
-    /// @param c 滑块颜色。
+    /// @param c 滑块基色（悬停/按下状态层由调用方另行叠加）。
     virtual auto paint_thumb(Painter &p, const Rect &bounds, const Rect &track, Color c) -> void {
-        const float d = thumb_size_ > 0.0F ? thumb_size_ : bounds.size.height - 6.0F;
-        const float cx = track.origin.x + (value_fraction() * track.size.width);
-        const float cy = bounds.origin.y + (bounds.size.height * 0.5F);
-        const Rect knob{.origin = Point{.x = cx - (d * 0.5F), .y = cy - (d * 0.5F)},
-                        .size = Size{.width = d, .height = d}};
-        p.fill_rounded_rect(knob, d * 0.5F, c);
+        const Rect knob = thumb_rect(bounds, track);
+        p.fill_rounded_rect(knob, knob.size.width * 0.5F, c);
     }
 
     auto apply_at(float local_x) -> void {
@@ -460,7 +473,7 @@ class Slider : public LeafWidget {
     double max_ = 1.0;
     double step_ = 0.0;  ///< 步进；0 = 连续无级
     std::optional<Color> active_color_;  ///< 已填充轨道与滑块颜色；空 = 跟随主题 primary
-    Color inactive_color_ = Color{210, 210, 210, 255};  ///< 未填充轨道颜色
+    std::optional<Color> inactive_color_;  ///< 未填充轨道颜色；空 = 跟随主题 surface_container_highest
     std::optional<Color> thumb_color_;  ///< 滑块颜色；空 = 与激活色一致
     float track_height_ = 6.0F;  ///< 轨道高度 dp
     float thumb_size_ = -1.0F;  ///< 滑块直径 dp；< 0 自动 = 控件高 − 6

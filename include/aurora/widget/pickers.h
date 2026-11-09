@@ -942,7 +942,7 @@ class ColorPicker : public Widget {
                               .size = Size{.width = cell - 4.0F, .height = cell - 4.0F}};
             p.fill_rect(swatch, pal[i]);
             const bool is_sel = pal[i].r == sel.r && pal[i].g == sel.g && pal[i].b == sel.b;
-            p.draw_rect(swatch, is_sel ? accent : Color(200, 200, 205, 255));
+            p.draw_rect(swatch, is_sel ? accent : inherit_theme(ctx).roles.outline_variant);
         }
     }
 
@@ -953,7 +953,7 @@ class ColorPicker : public Widget {
   private:
     static constexpr float AURORA_COLS = 8.0F;  ///< 色板列数
 
-    State<Color> selected_{Color(0, 0, 0, 255)};
+    State<Color> selected_{Color::black()};
     std::vector<Color> palette_;
     std::function<void(Color)> on_change_;
     std::optional<Color> accent_color_;  ///< 强调色；空 = 跟随主题 primary

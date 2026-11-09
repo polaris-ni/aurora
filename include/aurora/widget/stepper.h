@@ -280,6 +280,7 @@ class Stepper : public LeafWidget {
     /// @param bounds 本控件的绘制矩形（相对坐标系）。
     /// @param ctx 构建上下文：供主题取色（未显式设色时回落对应角色）。
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
+        const auto &roles = inherit_theme(ctx).roles;
         const Font f{.size_pt = 14.0F};
         const Font f_bold{.size_pt = 14.0F, .weight = 700};
         constexpr float step_h = 40.0F;
@@ -302,32 +303,32 @@ class Stepper : public LeafWidget {
         y += 4.0F;
         p.fill_rect(Rect{.origin = Point{.x = bounds.origin.x, .y = y},
                          .size = Size{.width = bounds.size.width, .height = 1.0F}},
-                    Color{220, 220, 220});
+                    roles.outline_variant);
         y += 8.0F;
 
         // 当前步骤内容区（占位）
         p.draw_text(
             Rect{.origin = Point{.x = bounds.origin.x + 12.0F, .y = y}, .size = Size{.width = 350.0F, .height = 80.0F}},
             std::string{"Step "} + std::to_string(current_ + 1) + std::string{" content area"}, f,
-            Color{128, 128, 128});
+            roles.on_surface_variant);
 
         // 底部按钮区
         const float btn_y = bounds.origin.y + bounds.size.height - 44.0F;
         // "Cancel" 按钮
         p.draw_rect(Rect{.origin = Point{.x = bounds.origin.x + 12.0F, .y = btn_y},
                          .size = Size{.width = 80.0F, .height = 32.0F}},
-                    Color{200, 200, 200});
+                    roles.outline_variant);
         p.draw_text(Rect{.origin = Point{.x = bounds.origin.x + 20.0F, .y = btn_y + 6.0F},
                          .size = Size{.width = 60.0F, .height = 20.0F}},
-                    "Cancel", f, Color::black());
+                    "Cancel", f, roles.on_surface);
         // "Next/Done" 按钮
         const std::string btn_text = is_last_step() ? "Done" : "Next →";
         const float btn_x = bounds.origin.x + bounds.size.width - 100.0F;
         p.fill_rect(Rect{.origin = Point{.x = btn_x, .y = btn_y}, .size = Size{.width = 88.0F, .height = 32.0F}},
-                    Color{66, 133, 244});
+                    roles.primary);
         p.draw_text(
             Rect{.origin = Point{.x = btn_x + 8.0F, .y = btn_y + 6.0F}, .size = Size{.width = 72.0F, .height = 20.0F}},
-            btn_text, f, Color::white());
+            btn_text, f, roles.on_primary);
     }
 
   private:

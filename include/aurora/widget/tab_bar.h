@@ -92,21 +92,21 @@ class TabBar : public Widget {
                      .json_type = "array"},
                     {.name = "bar_background",
                      .type = "Color",
-                     .default_value = "{245,245,247,255}",
+                     .default_value = theme_token_expr<&ColorRoles::surface_container_low>(),
                      .required = false,
-                     .note = "Tab bar background color",
+                     .note = "Tab bar background color (defaults to theme surface_container_low)",
                      .json_type = "array"},
                     {.name = "tab_background",
                      .type = "Color",
-                     .default_value = "Color::white()",
+                     .default_value = theme_token_expr<&ColorRoles::surface_container_lowest>(),
                      .required = false,
-                     .note = "Selected tab background color",
+                     .note = "Selected tab background color (defaults to theme surface_container_lowest)",
                      .json_type = "array"},
                     {.name = "text_color",
                      .type = "Color",
-                     .default_value = "{96,96,96,255}",
+                     .default_value = theme_token_expr<&ColorRoles::on_surface_variant>(),
                      .required = false,
-                     .note = "Unselected tab text color",
+                     .note = "Unselected tab text color (defaults to theme on_surface_variant)",
                      .json_type = "array"},
                     {.name = "indicator_thickness",
                      .type = "float",
@@ -244,7 +244,7 @@ class TabBar : public Widget {
         return *this;
     }
 
-    /// @brief 设置标签栏背景色（链式）。
+    /// @brief 设置标签栏背景色（链式）。不调用则跟随主题 `Theme::surface_container_low`。
     /// @param c 栏底色
     /// @return 引用 `*this` 以继续链式配置
     auto set_bar_background(Color c) -> TabBar & {
@@ -253,7 +253,7 @@ class TabBar : public Widget {
         return *this;
     }
 
-    /// @brief 设置选中标签背景色（链式）。
+    /// @brief 设置选中标签背景色（链式）。不调用则跟随主题 `Theme::surface_container_lowest`。
     /// @param c 选中标签的底色
     /// @return 引用 `*this` 以继续链式配置
     auto set_tab_background(Color c) -> TabBar & {
@@ -262,7 +262,7 @@ class TabBar : public Widget {
         return *this;
     }
 
-    /// @brief 设置未选中标签文本色（链式）。
+    /// @brief 设置未选中标签文本色（链式）。不调用则跟随主题 `Theme::on_surface_variant`。
     /// @param c 未选中项文字色（选中项用强调色）
     /// @return 引用 `*this` 以继续链式配置
     auto set_text_color(Color c) -> TabBar & {
@@ -341,9 +341,15 @@ class TabBar : public Widget {
         if (active_color_.has_value()) {
             props.set("active_color", color_to_json(*active_color_));  // 未设置不输出：保留「跟随主题」语义
         }
-        props.set("bar_background", color_to_json(bar_background_));
-        props.set("tab_background", color_to_json(tab_background_));
-        props.set("text_color", color_to_json(text_color_));
+        if (bar_background_.has_value()) {
+            props.set("bar_background", color_to_json(*bar_background_));  // 未设置不输出：保留「跟随主题」语义
+        }
+        if (tab_background_.has_value()) {
+            props.set("tab_background", color_to_json(*tab_background_));  // 未设置不输出：保留「跟随主题」语义
+        }
+        if (text_color_.has_value()) {
+            props.set("text_color", color_to_json(*text_color_));  // 未设置不输出：保留「跟随主题」语义
+        }
         props.set("indicator_thickness", indicator_thickness_);
         props.set("font_size", font_size_);
         props.set("tab_padding", tab_padding_);
@@ -426,9 +432,9 @@ class TabBar : public Widget {
     }
 
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
-        // 标签栏背景
+        // 标签栏背景：显式设置优先，否则跟随主题 surface_container_low。
         const Rect bar{.origin = bounds.origin, .size = Size{.width = bounds.size.width, .height = tab_height_}};
-        p.fill_rect(bar, bar_background_);
+        p.fill_rect(bar, bar_background_.value_or(inherit_theme(ctx).roles.surface_container_low));
 
         // 选中色：显式设置优先，否则跟随主题 primary（ThemeScope 换肤即生效）。
         const Color accent = active_color_.value_or(inherit_theme(ctx).roles.primary);
@@ -440,7 +446,7 @@ class TabBar : public Widget {
             const float w = tab_width(i);
             const Rect tab_box{.origin = Point{.x = x, .y = bounds.origin.y},
                                .size = Size{.width = w, .height = tab_height_}};
-            paint_tab(p, i, tab_box, std::cmp_equal(i, selected_.get()), accent, label_font);
+            paint_tab(p, i, tab_box, std::cmp_equal(i, selected_.get()), accent, label_font, ctx);
             x += w;
         }
 
@@ -462,10 +468,12 @@ class TabBar : public Widget {
     /// @param selected 是否为当前选中标签（决定背景/指示器/文字色）。
     /// @param accent 主题强调色（选中态指示器与文字用）。
     /// @param label_font 标签文字字体。
+    /// @param ctx 构建上下文（解析未显式设置的标签配色）。
     virtual auto paint_tab(Painter &p, std::size_t index, const Rect &tab_box, bool selected, Color accent,
-                           const Font &label_font) -> void {
+                           const Font &label_font, const BuildContext &ctx) -> void {
+        const auto &roles = inherit_theme(ctx).roles;
         if (selected) {
-            p.fill_rect(tab_box, tab_background_);
+            p.fill_rect(tab_box, tab_background_.value_or(roles.surface_container_lowest));
             if (indicator_thickness_ > 0.0F) {
                 const Rect underline{
                     .origin = Point{.x = tab_box.origin.x, .y = tab_box.origin.y + tab_height_ - indicator_thickness_},
@@ -473,7 +481,7 @@ class TabBar : public Widget {
                 p.fill_rect(underline, accent);
             }
         }
-        const Color text_color = selected ? accent : text_color_;
+        const Color text_color = selected ? accent : text_color_.value_or(roles.on_surface_variant);
         const Rect text_box{
             .origin = Point{.x = tab_box.origin.x + tab_padding_, .y = tab_box.origin.y + 8.0F},
             .size = Size{.width = tab_box.size.width - (tab_padding_ * 2.0F), .height = tab_height_ - 16.0F}};
@@ -483,7 +491,7 @@ class TabBar : public Widget {
             const Rect close_box{.origin = Point{.x = tab_box.origin.x + tab_box.size.width - AURORA_CLOSE_ZONE + 2.0F,
                                                  .y = tab_box.origin.y + 10.0F},
                                  .size = Size{.width = 12.0F, .height = tab_height_ - 20.0F}};
-            p.draw_text(close_box, "x", label_font, Color{140, 140, 140, 255});
+            p.draw_text(close_box, "x", label_font, roles.outline);
         }
     }
 
@@ -587,9 +595,9 @@ class TabBar : public Widget {
     std::function<void(int)> on_change_;
     std::function<void(int)> on_close_;
     std::optional<Color> active_color_;  ///< 选中文本/指示器色；空 = 跟随主题 primary
-    Color bar_background_ = Color{245, 245, 247, 255};  ///< 标签栏背景色
-    Color tab_background_ = Color{255, 255, 255, 255};  ///< 选中标签背景色
-    Color text_color_ = Color{96, 96, 96, 255};  ///< 未选中标签文本色
+    std::optional<Color> bar_background_;  ///< 标签栏背景色；空 = 跟随主题 surface_container_low
+    std::optional<Color> tab_background_;  ///< 选中标签背景色；空 = 跟随主题 surface_container_lowest
+    std::optional<Color> text_color_;  ///< 未选中标签文本色；空 = 跟随主题 on_surface_variant
     float indicator_thickness_ = 2.0F;  ///< 选中指示器厚度 dp；0 = 不画
     float font_size_ = 13.0F;  ///< 标签字号 pt
     float tab_padding_ = 12.0F;  ///< 标签左右内边距 dp

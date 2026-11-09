@@ -275,9 +275,10 @@ class MenuBar : public Widget {
     }
 
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
+        const auto &roles = inherit_theme(ctx).roles;
         // 栏背景
         const Rect bar{.origin = bounds.origin, .size = Size{.width = bounds.size.width, .height = bar_height_}};
-        p.fill_rect(bar, Color(248, 248, 250, 255));
+        p.fill_rect(bar, roles.surface_container_low);
 
         Font f;
         f.size_pt = 13.0F;
@@ -290,7 +291,7 @@ class MenuBar : public Widget {
             if (active) {
                 p.fill_rect(Rect{.origin = Point{.x = x, .y = bounds.origin.y},
                                  .size = Size{.width = w, .height = bar_height_}},
-                            Color(0, 122, 255, 40));
+                            roles.primary.with_alpha(40));
             }
             const Rect text_box{
                 .origin = Point{.x = x + AURORA_TITLE_PADDING, .y = bounds.origin.y + 6.0F},
@@ -307,9 +308,9 @@ class MenuBar : public Widget {
             const Rect drop{
                 .origin = Point{.x = bounds.origin.x + drop_local.origin.x, .y = bounds.origin.y + drop_local.origin.y},
                 .size = drop_local.size};
-            p.draw_shadow(drop, 0.0F, 2.0F, 8.0F, Color(0, 0, 0, 48));
-            p.fill_rect(drop, Color(255, 255, 255, 255));
-            p.draw_rect(drop, Color(220, 220, 224, 255));
+            p.draw_shadow(drop, 0.0F, 2.0F, 8.0F, roles.shadow.with_alpha(48));
+            p.fill_rect(drop, roles.surface_container_lowest);
+            p.draw_rect(drop, roles.outline_variant);
 
             const auto &items = menus_[static_cast<std::size_t>(open_)].items;
             float y = drop.origin.y;
@@ -318,7 +319,7 @@ class MenuBar : public Widget {
                     const float mid = y + (AURORA_ITEM_HEIGHT * 0.5F);
                     p.fill_rect(Rect{.origin = Point{.x = drop.origin.x + 4.0F, .y = mid},
                                      .size = Size{.width = drop.size.width - 8.0F, .height = 1.0F}},
-                                Color(228, 228, 232, 255));
+                                roles.outline_variant);
                 } else {
                     const Color text_color = resolve_item_text_color(ctx, item.enabled);
                     const Rect text_box{
@@ -333,7 +334,7 @@ class MenuBar : public Widget {
                     if (!item.shortcut_text.empty()) {
                         const Rect sc_box{.origin = Point{.x = drop.origin.x + drop.size.width - 70.0F, .y = y + 5.0F},
                                           .size = Size{.width = 60.0F, .height = AURORA_ITEM_HEIGHT - 10.0F}};
-                        p.draw_text(sc_box, item.shortcut_text, f, Color(150, 150, 150, 255));
+                        p.draw_text(sc_box, item.shortcut_text, f, roles.on_surface_variant);
                     }
                 }
                 y += AURORA_ITEM_HEIGHT;

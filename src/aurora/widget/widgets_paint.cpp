@@ -197,7 +197,7 @@ auto Text::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> 
             const float yy = bounds.origin.y + (static_cast<float>(li) * line_h);
             p.fill_rect(
                 Rect{.origin = Point{.x = seg_x0, .y = yy}, .size = Size{.width = seg_x1 - seg_x0, .height = line_h}},
-                Color{80, 120, 220, 110});
+                inherit_theme(ctx).roles.primary.with_alpha(110));
         }
         p.pop_clip();
     }
@@ -250,11 +250,16 @@ auto Button::paint_label(Painter &p, const Rect &bounds, Color text_color, const
 }
 
 auto Button::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void {
-    // 绘制分阶段（继承扩展点）：背景 → 边框 → 文字；状态色由 resolve_* 钩子解析
-    // （未显式设色时经 ctx 取主题角色）。圆角同理：本帧解算一次（表态值优先，未表态取主题
-    // shapes.small），同一份值同时喂背景与边框两阶段，避免同帧换档时两阶段取到不同半径。
+    // 绘制分阶段（继承扩展点）：背景 → 状态层 → 边框 → 文字；状态色由 resolve_* 钩子解析
+    // （未显式设色时经 ctx 取主题角色）。悬停/按下是半透明叠色，画在基色之上而不改基色。
+    // 圆角同理：本帧解算一次（表态值优先，未表态取主题 shapes.small），同一份值同时喂背景与
+    // 边框两阶段，避免同帧换档时两阶段取到不同半径。
     const float radius = corner_radius(ctx);
     paint_background(p, bounds, resolve_background(ctx), radius);
+    // 状态层与背景同形：同一份 bounds / radius 再叠一层（源覆盖混合，半透明色生效）。
+    if (const auto overlay = resolve_state_overlay(ctx)) {
+        paint_background(p, bounds, *overlay, radius);
+    }
     paint_border(p, bounds, radius);
     // 本帧只解析一次：量宽与落笔共用 display 这一份副本。
     paint_label(p, bounds, resolve_text_color(ctx), resolved_label(ctx));

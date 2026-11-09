@@ -72,7 +72,7 @@ class SegmentedControl : public LeafWidget {
         mark_needs_paint();
         return *this;
     }
-    /// @brief 设置未选中段文本色（链式）。
+    /// @brief 设置未选中段文本色（链式）。不调用则跟随主题 `Theme::on_surface`。
     /// @param c 文本颜色。
     /// @return *this（链式调用）。
     auto set_text_color(Color c) -> SegmentedControl & {
@@ -80,7 +80,7 @@ class SegmentedControl : public LeafWidget {
         mark_needs_paint();
         return *this;
     }
-    /// @brief 设置选中段文本色（链式）。
+    /// @brief 设置选中段文本色（链式）。不调用则跟随主题 `Theme::on_primary`。
     /// @param c 选中文本颜色。
     /// @return *this（链式调用）。
     auto set_selected_text_color(Color c) -> SegmentedControl & {
@@ -88,7 +88,7 @@ class SegmentedControl : public LeafWidget {
         mark_needs_paint();
         return *this;
     }
-    /// @brief 设置外框边框色（链式）。
+    /// @brief 设置外框边框色（链式）。不调用则跟随主题 `Theme::outline_variant`。
     /// @param c 边框颜色。
     /// @return *this（链式调用）。
     auto set_border_color(Color c) -> SegmentedControl & {
@@ -147,21 +147,21 @@ class SegmentedControl : public LeafWidget {
                      .json_type = "array"},
                     {.name = "text_color",
                      .type = "Color",
-                     .default_value = "Color::black()",
+                     .default_value = theme_token_expr<&ColorRoles::on_surface>(),
                      .required = false,
-                     .note = "Unselected segment text color",
+                     .note = "Unselected segment text color (defaults to theme on_surface)",
                      .json_type = "array"},
                     {.name = "selected_text_color",
                      .type = "Color",
-                     .default_value = "Color::white()",
+                     .default_value = theme_token_expr<&ColorRoles::on_primary>(),
                      .required = false,
-                     .note = "Selected segment text color",
+                     .note = "Selected segment text color (defaults to theme on_primary)",
                      .json_type = "array"},
                     {.name = "border_color",
                      .type = "Color",
-                     .default_value = "{200,200,200,255}",
+                     .default_value = theme_token_expr<&ColorRoles::outline_variant>(),
                      .required = false,
-                     .note = "Outer frame border color",
+                     .note = "Outer frame border color (defaults to theme outline_variant)",
                      .json_type = "array"},
                     {.name = "font_size",
                      .type = "float",
@@ -258,9 +258,16 @@ class SegmentedControl : public LeafWidget {
         if (active_color_.has_value()) {
             props.set("active_color", color_to_json(*active_color_));  // 未设置不输出：保留「跟随主题」语义
         }
-        props.set("text_color", color_to_json(text_color_));
-        props.set("selected_text_color", color_to_json(selected_text_color_));
-        props.set("border_color", color_to_json(border_color_));
+        if (text_color_.has_value()) {
+            props.set("text_color", color_to_json(*text_color_));  // 未设置不输出：保留「跟随主题」语义
+        }
+        if (selected_text_color_.has_value()) {
+            props.set("selected_text_color",
+                      color_to_json(*selected_text_color_));  // 未设置不输出：保留「跟随主题」语义
+        }
+        if (border_color_.has_value()) {
+            props.set("border_color", color_to_json(*border_color_));  // 未设置不输出：保留「跟随主题」语义
+        }
         props.set("font_size", font_size_);
         props.set("corner_radius", corner_radius_);
         props.set("enabled", Json{enabled_});
@@ -322,16 +329,17 @@ class SegmentedControl : public LeafWidget {
     /// @param ctx 构建上下文（用于解析主题色）。
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
         const Font f{.size_pt = font_size_};
-        // 状态色解析：显式设置优先，否则跟随主题 primary；禁用态统一灰化。
+        // 状态色解析：显式设置优先，否则跟随主题角色；禁用态统一灰化。
         Color accent = active_color_.value_or(inherit_theme(ctx).roles.primary);
-        Color text = text_color_;
-        Color sel_text = selected_text_color_;
-        Color border = border_color_;
+        Color text = text_color_.value_or(inherit_theme(ctx).roles.on_surface);
+        Color sel_text = selected_text_color_.value_or(inherit_theme(ctx).roles.on_primary);
+        Color border = border_color_.value_or(inherit_theme(ctx).roles.outline_variant);
         if (!enabled_) {
-            accent = Color{176, 176, 180, 255};
-            text = Color{168, 168, 172, 255};
-            sel_text = Color{240, 240, 242, 255};
-            border = Color{215, 215, 219, 255};
+            const auto &roles = inherit_theme(ctx).roles;
+            accent = roles.outline;
+            text = roles.outline;
+            sel_text = roles.surface_container_lowest;
+            border = roles.outline_variant;
         }
         // 外框（圆角裁剪保证选中段填充不溢出圆角）
         if (corner_radius_ > 0.0F) {
@@ -383,9 +391,9 @@ class SegmentedControl : public LeafWidget {
     /// @brief 选中变化回调（可空；调用时传入新序号）。
     std::function<void(int)> on_change_;
     std::optional<Color> active_color_;  ///< 选中段填充色；空 = 跟随主题 primary
-    Color text_color_ = Color::black();  ///< 未选中段文本色
-    Color selected_text_color_ = Color::white();  ///< 选中段文本色
-    Color border_color_ = Color{200, 200, 200, 255};  ///< 外框边框色
+    std::optional<Color> text_color_;  ///< 未选中段文本色；空 = 跟随主题 on_surface
+    std::optional<Color> selected_text_color_;  ///< 选中段文本色；空 = 跟随主题 on_primary
+    std::optional<Color> border_color_;  ///< 外框边框色；空 = 跟随主题 outline_variant
     float font_size_ = 14.0F;  ///< 字号 pt
     float corner_radius_ = 6.0F;  ///< 外框圆角半径 dp；0 = 直角
     bool enabled_ = true;  ///< 禁用态灰化并忽略点击

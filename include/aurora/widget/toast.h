@@ -11,6 +11,7 @@
 #include "aurora/core/font.h"
 #include "aurora/render/font_engine.h"
 #include "aurora/render/painter.h"
+#include "aurora/theming/theme_scope.h"  // inherit_theme：通知条取主题反色面与配对前景
 #include "aurora/widget/descriptor.h"
 #include "aurora/widget/widget.h"
 
@@ -137,6 +138,7 @@ class ToastHost : public SingleChild {
     }
 
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
+        const auto &roles = inherit_theme(ctx).roles;
         if (child_) {
             child_.widget().paint(p, bounds, ctx);
         }
@@ -154,11 +156,11 @@ class ToastHost : public SingleChild {
                                 ? bounds.origin.y + bounds.size.height - AURORA_MARGIN - th - stack_off
                                 : bounds.origin.y + AURORA_MARGIN + stack_off;
             const Rect box{.origin = Point{.x = x, .y = y}, .size = Size{.width = tw, .height = th}};
-            p.draw_shadow(box, 0.0F, 2.0F, 6.0F, Color{0, 0, 0, 40});
-            p.fill_rect(box, Color{50, 50, 54, 235});
+            p.draw_shadow(box, 0.0F, 2.0F, 6.0F, roles.shadow.with_alpha(40));
+            p.fill_rect(box, roles.inverse_surface.with_alpha(235));
             const Rect text_box{.origin = Point{.x = x + AURORA_PADDING, .y = y + 7.0F},
                                 .size = Size{.width = tw - (AURORA_PADDING * 2.0F), .height = th - 14.0F}};
-            p.draw_text(text_box, text, f, Color{255, 255, 255, 255});
+            p.draw_text(text_box, text, f, roles.inverse_on_surface);
         }
     }
 

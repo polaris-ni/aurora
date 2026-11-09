@@ -186,9 +186,9 @@ class Checkbox : public LeafWidget {
                      .json_type = "array"},
                     {.name = "border_color",
                      .type = "Color",
-                     .default_value = "{140,140,146,255}",
+                     .default_value = theme_token_expr<&ColorRoles::outline_variant>(),
                      .required = false,
-                     .note = "Unchecked border color",
+                     .note = "Unchecked border color (defaults to theme outline_variant)",
                      .json_type = "array"},
                     {.name = "check_color",
                      .type = "Color",
@@ -290,7 +290,9 @@ class Checkbox : public LeafWidget {
         if (active_color_.has_value()) {
             props.set("active_color", color_to_json(*active_color_));  // 未设置不输出：保留「跟随主题」语义
         }
-        props.set("border_color", color_to_json(border_color_));
+        if (border_color_.has_value()) {
+            props.set("border_color", color_to_json(*border_color_));  // 未设置不输出：保留「跟随主题」语义
+        }
         props.set("check_color", color_to_json(check_color_));
         if (size_.has_value()) {
             props.set("size", *size_);  // 未设置不输出：保留「跟随主题度量档」语义
@@ -352,19 +354,20 @@ class Checkbox : public LeafWidget {
         Color check;  ///< 勾号颜色
     };
 
-    /// @brief 解析当前状态配色：禁用时统一灰化。子类可只覆盖配色而不改绘制几何。
+    /// @brief 解析当前状态配色：禁用时统一按主题中性档灰化。子类可只覆盖配色而不改绘制几何。
     /// @param ctx 构建上下文：提供主题作用域，未显式设置 `active_color` 时取 `inherit_theme(ctx).roles.primary`。
-    /// @return 三态配色聚合；禁用态返回固定灰化三元组（忽略显式设置的颜色）。
+    /// @return 三态配色聚合；禁用态返回主题中性三元组（忽略显式设置的颜色）。
     /// @note Side-effects: none
     [[nodiscard]] virtual auto resolve_palette(const BuildContext &ctx) -> Palette {
-        Palette pal{.active = active_color_.value_or(inherit_theme(ctx).roles.primary),
-                    .border = border_color_,
+        const auto &roles = inherit_theme(ctx).roles;
+        Palette pal{.active = active_color_.value_or(roles.primary),
+                    .border = border_color_.value_or(roles.outline_variant),
                     .check = check_color_};
         if (!enabled_) {
-            // 禁用灰化：统一降饱和（对标 Material disabled 38% 透明语义的软件光栅近似）。
-            pal.active = Color{176, 176, 180, 255};
-            pal.border = Color{200, 200, 204, 255};
-            pal.check = Color{245, 245, 247, 255};
+            // 禁用灰化：取主题描边/表面中性档（深色档随之翻转为暗中性，不再是固定浅灰）。
+            pal.active = roles.outline_variant;
+            pal.border = roles.outline_variant;
+            pal.check = roles.surface;
         }
         return pal;
     }
@@ -376,17 +379,15 @@ class Checkbox : public LeafWidget {
         return corner_radius_ >= 0.0F ? corner_radius_ : std::min(bounds.size.width, bounds.size.height) * 0.2F;
     }
 
-    /// @brief 绘制勾选态盒体：激活色填充，悬停 / 按下乘性加深（保留色相）。
+    /// @brief 绘制勾选态盒体：激活色填充（悬停 / 按下的状态层由 `on_paint` 另行叠加）。
     /// @param p 软件光栅画笔。
     /// @param bounds 盒体矩形（本控件分配到的绘制区域）。
     /// @param radius 圆角半径（dp），由 `corner_radius` 算出。
-    /// @param active 勾选态填充色（`resolve_palette` 已解析，未含 hot 加深）。
-    /// @param hot 是否处于悬停或按下态；true 时按 0.86（悬停）/0.72（按下）乘性加深。
+    /// @param active 勾选态填充基色（`resolve_palette` 已解析，未含状态层）。
+    /// @param hot 是否处于悬停或按下态；基类不再改基色，仅留给子类做自定义反馈。
     /// @note Side-effects: paints
-    virtual auto paint_checked_box(Painter &p, const Rect &bounds, float radius, Color active, bool hot) -> void {
-        if (hot) {
-            active = active.shaded(pressed_ ? 0.72F : 0.86F);
-        }
+    virtual auto paint_checked_box(Painter &p, const Rect &bounds, float radius, Color active,
+                                   [[maybe_unused]] bool hot) -> void {
         p.fill_rounded_rect(bounds, radius, active);
     }
 
@@ -433,6 +434,11 @@ class Checkbox : public LeafWidget {
         const bool hot = enabled_ && (hovered() || pressed_);
         if (value()) {
             paint_checked_box(p, bounds, radius, pal.active, hot);
+            if (hot) {
+                // 悬停/按下是半透明状态层：叠在盒体之上、勾号之下（源覆盖混合）。
+                const auto &roles = inherit_theme(ctx).roles;
+                p.fill_rounded_rect(bounds, radius, pressed_ ? roles.pressed : roles.hover);
+            }
             paint_check_mark(p, bounds, pal.check);
         } else {
             paint_idle_box(p, bounds, radius, pal, hot);
@@ -443,7 +449,7 @@ class Checkbox : public LeafWidget {
     State<bool> value_;  ///< 勾选态来源（自有或与调用方共享）
     std::function<void(bool)> on_changed_;
     std::optional<Color> active_color_;  ///< 勾选态填充色；空 = 跟随主题 primary
-    Color border_color_ = Color{140, 140, 146, 255};  ///< 未勾选边框色
+    std::optional<Color> border_color_;  ///< 未勾选边框色；空 = 跟随主题 outline_variant
     Color check_color_ = colors::AURORA_WHITE;  ///< 勾号颜色
     std::optional<float> size_;  ///< 方框边长 dp；空 = 跟随主题 controls.indicator_size
     float corner_radius_ = -1.0F;  ///< 圆角半径 dp；< 0 自动 = 边长 × 0.2

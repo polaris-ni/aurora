@@ -438,7 +438,7 @@ class TextProps : public AbstractProps<TextProps> {
 
     /// @brief 文本底色回落基线：全透明（不绘制底色）。
     /// @return 透明色。
-    [[nodiscard]] static auto background_color_default() -> Color { return Color{0, 0, 0, 0}; }
+    [[nodiscard]] static auto background_color_default() -> Color { return Color::transparent(); }
 
     /// @brief 装饰线色回落点（派生档）：读同族 `color` 行的生效值。
     /// @param self 本属性对象（经它读 `color` 行，故显式设色时装饰线随该色）。

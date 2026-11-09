@@ -157,9 +157,9 @@ class ProgressIndicator : public LeafWidget {
                      .json_type = "array"},
                     {.name = "track_color",
                      .type = "Color",
-                     .default_value = "{220,220,220,255}",
+                     .default_value = theme_token_expr<&ColorRoles::surface_variant>(),
                      .required = false,
-                     .note = "Track color",
+                     .note = "Track color (defaults to theme surface_variant)",
                      .json_type = "array"},
                     {.name = "thickness",
                      .type = "float",
@@ -212,7 +212,9 @@ class ProgressIndicator : public LeafWidget {
         if (color_.has_value()) {
             props.set("color", color_to_json(*color_));  // 未设置不输出：保留「跟随主题」语义
         }
-        props.set("track_color", color_to_json(track_color_));
+        if (track_color_.has_value()) {
+            props.set("track_color", color_to_json(*track_color_));  // 未设置不输出：保留「跟随主题」语义
+        }
         props.set("thickness", thickness_);
         props.set("corner_radius", corner_radius_);
     }
@@ -246,9 +248,11 @@ class ProgressIndicator : public LeafWidget {
     }
 
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
-        const Color fill = color_.value_or(inherit_theme(ctx).roles.primary);
+        const auto &roles = inherit_theme(ctx).roles;
+        const Color fill = color_.value_or(roles.primary);
+        const Color track = track_color_.value_or(roles.surface_variant);
         const float radius = corner_radius_ >= 0.0F ? corner_radius_ : bounds.size.height * 0.5F;
-        paint_track(p, bounds, track_color_, radius);
+        paint_track(p, bounds, track, radius);
         paint_fill(p, bounds, fill, radius);
     }
 
@@ -288,7 +292,7 @@ class ProgressIndicator : public LeafWidget {
     ReadOnlyState<double> external_;  ///< 外部只读来源（绑定构造时持有）
     bool bound_ = false;  ///< 是否使用外部只读来源
     std::optional<Color> color_;  ///< 填充色；空 = 跟随主题 primary
-    Color track_color_ = Color{220, 220, 220, 255};  ///< 轨道底色
+    std::optional<Color> track_color_;  ///< 轨道底色；空 = 跟随主题 surface_variant
     float thickness_ = 6.0F;  ///< 厚度 dp（自然高度）
     float corner_radius_ = -1.0F;  ///< 圆角半径 dp；< 0 自动 = 厚度一半
     // NOLINTEND(*-non-private-member-variables-in-classes)

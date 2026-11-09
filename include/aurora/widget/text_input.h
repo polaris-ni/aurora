@@ -1283,7 +1283,7 @@ class TextInput : public LeafWidget, public TextInputProps {
         const std::string shown = composed_text(empty ? placeholder() : display_value());
         const Color text_col = [&] {  // NOLINT
             if (disabled) {
-                return Color{150, 150, 152, 255};
+                return inherit_theme(ctx).roles.outline;
             }
             if (empty) {
                 return placeholder_color(ctx);
@@ -1314,7 +1314,7 @@ class TextInput : public LeafWidget, public TextInputProps {
 
         // 组合态：preedit 内选区高亮 + 整段下划线
         if (is_composing()) {
-            paint_composition(p, shown, tx, ty, th, f, layout_opts());
+            paint_composition(p, shown, tx, ty, th, f, layout_opts(), ctx);
         }
 
         p.draw_text(Rect{.origin = Point{.x = tx, .y = ty},
@@ -1340,14 +1340,14 @@ class TextInput : public LeafWidget, public TextInputProps {
         const bool disabled = !enabled();
         const Color bg = [&] {  // NOLINT
             if (disabled) {
-                return Color{225, 225, 225, 255};
+                return inherit_theme(ctx).roles.surface_container_high;
             }
             if (is_focused()) {
                 return focused_background(ctx);
             }
             return background(ctx);
         }();
-        Color border = disabled ? Color{180, 180, 180, 255} : border_color(ctx);
+        Color border = disabled ? inherit_theme(ctx).roles.outline_variant : border_color(ctx);
         float bw = border_width(ctx);
         if (!disabled && is_focused()) {
             border = focused_border_color(ctx);
@@ -1451,9 +1451,11 @@ class TextInput : public LeafWidget, public TextInputProps {
     /// @param th 文本行高：高亮高度与下划线纵位（`ty + th - 1`）的计算基准。
     /// @param f 当前字体。
     /// @param opts 布局选项（含生效方向）。
+    /// @param ctx 构建上下文（preedit 配色未显式设置时取主题角色）。
     /// @return preedit 的宽度（即所画下划线段的宽度）。
     auto paint_composition(Painter &p, const std::string &shown, float x0, float ty, float th, const Font &f,
-                           const render::TextLayoutOpts &opts) const -> float {
+                           const render::TextLayoutOpts &opts, const BuildContext &ctx) const -> float {
+        const auto &roles = inherit_theme(ctx).roles;
         const float px0 = x0 + render::FontEngine::caret_x(shown, caret_, f, opts);
         const float pw = render::FontEngine::measure_width(preedit_, f);
 
@@ -1464,11 +1466,11 @@ class TextInput : public LeafWidget, public TextInputProps {
             const float sx0 = px0 + render::FontEngine::caret_x(preedit_, a, f, opts);
             const float sx1 = px0 + render::FontEngine::caret_x(preedit_, b + 1, f, opts);  // 含尾
             p.fill_rect(Rect{.origin = Point{.x = sx0, .y = ty}, .size = Size{.width = sx1 - sx0, .height = th}},
-                        preedit_selection_color_);
+                        preedit_selection_color_.value_or(roles.primary.with_alpha(96)));
         }
         // ② 组合下划线（整段 preedit，区别于正式文本）
         p.fill_rect(Rect{.origin = Point{.x = px0, .y = ty + th - 1.0F}, .size = Size{.width = pw, .height = 2.0F}},
-                    preedit_underline_color_);
+                    preedit_underline_color_.value_or(roles.primary));
         return pw;
     }
 
@@ -1498,8 +1500,8 @@ class TextInput : public LeafWidget, public TextInputProps {
     // NOLINTBEGIN(*-non-private-member-variables-in-classes)
     // 19 行属性已全数收进 `TextInputProps` 权威表；此处只留表外字段：组合串配色（从不参与序列化，
     // 未成行）与控件自己的运行态（方向缓存、两枚回调、选区/光标/视口、IME 组合态）。
-    Color preedit_underline_color_ = Color{30, 110, 220, 255};  ///< 组合串（preedit）下划线色
-    Color preedit_selection_color_ = Color{255, 200, 80, 120};  ///< preedit 内选区（待转换片段）高亮色
+    std::optional<Color> preedit_underline_color_;  ///< 组合串（preedit）下划线色；空 = 跟随主题 primary
+    std::optional<Color> preedit_selection_color_;  ///< preedit 内选区高亮色；空 = 主题 primary 加 96 透明度
     /// @brief 生效方向缓存：on_layout 解析（显式属性 > Environment > 进程级 > 无来源），
     ///        供无 BuildContext 的事件路径与绘制路径共用。
     std::optional<TextDirection> cached_direction_;

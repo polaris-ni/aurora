@@ -885,7 +885,7 @@ class ReorderableList : public Container {
     auto paint_dragged_item(Painter &p, const Rect &bounds, const BuildContext &ctx, int index) -> void {
         const Rect local = item_rect(bounds, index);
         const Rect global{.origin = bounds.origin + local.origin, .size = local.size};
-        paint_drag_shadow(p, global, local);
+        paint_drag_shadow(p, global, local, ctx);
         children_[static_cast<std::size_t>(index)].widget().paint(p, global, ctx);
     }
 
@@ -1004,8 +1004,11 @@ class ReorderableList : public Container {
     /// @brief 被拖项抬升（自绘阴影；不污染子项修饰链，裁决 16）。
     /// @param p 绘制器。
     /// @param global 被拖项全局矩形。
-    static auto paint_drag_shadow(Painter &p, const Rect &global, const Rect & /*local*/) -> void {
-        p.draw_shadow(global, 0.0F, 6.0F, 12.0F, Color(0, 0, 0, 70));  // 抬升阴影参数：海拔/模糊/半透明黑
+    /// @param ctx 构建上下文（阴影取主题 `shadow` 角色）。
+    static auto paint_drag_shadow(Painter &p, const Rect &global, const Rect & /*local*/, const BuildContext &ctx)
+        -> void {
+        // 抬升阴影：偏 6dp、模糊 12dp，取主题 shadow 角色加 70 透明度。
+        p.draw_shadow(global, 0.0F, 6.0F, 12.0F, inherit_theme(ctx).roles.shadow.with_alpha(70));
     }
 
     // ---- 键盘重排辅助 ----
@@ -1024,7 +1027,7 @@ class ReorderableList : public Container {
     auto paint_lifted_item(Painter &p, const Rect &bounds, const BuildContext &ctx, int index) -> void {
         const Rect local = item_rect(bounds, index);
         const Rect global{.origin = bounds.origin + local.origin, .size = local.size};
-        paint_drag_shadow(p, global, local);
+        paint_drag_shadow(p, global, local, ctx);
         children_[static_cast<std::size_t>(index)].widget().paint(p, global, ctx);
     }
 

@@ -189,9 +189,9 @@ class Switch : public LeafWidget {
                      .json_type = "array"},
                     {.name = "inactive_color",
                      .type = "Color",
-                     .default_value = "{180,180,180,255}",
+                     .default_value = theme_token_expr<&ColorRoles::surface_container_highest>(),
                      .required = false,
-                     .note = "Track color when off",
+                     .note = "Track color when off (defaults to theme surface_container_highest)",
                      .json_type = "array"},
                     {.name = "thumb_color",
                      .type = "Color",
@@ -308,7 +308,8 @@ class Switch : public LeafWidget {
         }
     }
 
-    /// @brief 序列化开关属性；active_color/border_color/border_width 仅在显式设置时输出，保留「跟随主题」语义。
+    /// @brief 序列化开关属性；active_color/inactive_color/border_color/border_width 仅在显式设置时输出，
+    ///        保留「跟随主题」语义。
     /// @param props 输出的 JSON 对象，属性键值追加到其上
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
@@ -316,7 +317,9 @@ class Switch : public LeafWidget {
         if (active_color_.has_value()) {
             props.set("active_color", color_to_json(*active_color_));  // 未设置不输出：保留「跟随主题」语义
         }
-        props.set("inactive_color", color_to_json(inactive_color_));
+        if (inactive_color_.has_value()) {
+            props.set("inactive_color", color_to_json(*inactive_color_));  // 未设置不输出：保留「跟随主题」语义
+        }
         props.set("thumb_color", color_to_json(thumb_color_));
         props.set("track_width", track_width_);
         props.set("track_height", track_height_);
@@ -375,27 +378,28 @@ class Switch : public LeafWidget {
 
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
         const bool on = value();
-        // 状态色解析：显式设置优先，否则跟随主题 primary；禁用态统一灰化。
-        Color active = active_color_.value_or(inherit_theme(ctx).roles.primary);
-        Color inactive = inactive_color_;
+        // 状态色解析：显式设置优先，否则跟随主题 primary；禁用态统一按主题中性档灰化。
+        const auto &roles = inherit_theme(ctx).roles;
+        Color active = active_color_.value_or(roles.primary);
+        Color inactive = inactive_color_.value_or(roles.surface_container_highest);
         Color thumb = thumb_color_;
         if (!enabled_) {
-            active = Color{176, 176, 180, 255};
-            inactive = Color{210, 210, 214, 255};
-            thumb = Color{240, 240, 242, 255};
+            active = roles.outline_variant;
+            inactive = roles.surface_container_high;
+            thumb = roles.surface_container_lowest;
         }
-        Color track = on ? active : inactive;
+        paint_track(p, bounds, on ? active : inactive, on);
+        // 悬停/按下是半透明状态层：叠在轨道之上、滑块之下（源覆盖混合）。
         if (enabled_ && (hovered() || pressed_)) {
-            track = track.shaded(pressed_ ? 0.80F : 0.90F);  // 悬停/按下反馈
+            p.fill_rounded_rect(bounds, bounds.size.height * 0.5F, pressed_ ? roles.pressed : roles.hover);
         }
-        paint_track(p, bounds, track, on);
         paint_thumb(p, bounds, thumb, on);
     }
 
     /// @brief 绘制圆角轨道（关闭态可选描边）。
     /// @param p 绘制器。
     /// @param bounds 轨道区域。
-    /// @param track 轨道填充色（已含悬停/按下压暗）。
+    /// @param track 轨道填充基色（悬停/按下状态层由调用方另行叠加，不在本钩子里处理）。
     /// @param on 开关状态（关闭态才画描边）。
     virtual auto paint_track(Painter &p, const Rect &bounds, Color track, bool on) -> void {
         const float radius = bounds.size.height * 0.5F;
@@ -423,7 +427,7 @@ class Switch : public LeafWidget {
     State<bool> value_;  ///< 开关态来源（自有或与调用方共享）
     std::function<void(bool)> on_changed_;
     std::optional<Color> active_color_;  ///< 开启态轨道色；空 = 跟随主题 primary
-    Color inactive_color_ = Color{180, 180, 180, 255};  ///< 关闭态轨道色
+    std::optional<Color> inactive_color_;  ///< 关闭态轨道色；空 = 跟随主题 surface_container_highest
     Color thumb_color_ = colors::AURORA_WHITE;  ///< 滑块（圆形）颜色
     float track_width_ = 44.0F;  ///< 轨道宽 dp
     float track_height_ = 24.0F;  ///< 轨道高 dp

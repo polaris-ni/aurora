@@ -330,17 +330,26 @@ class Chip : public LeafWidget {
         return c.constrain(Size{.width = w, .height = h});
     }
 
-    /// @brief 继承扩展点：绘制胶囊背景（悬停调暗）。
+    /// @brief 继承扩展点：绘制胶囊背景（悬停时叠加状态层）。
     /// @param p 绘制器。
     /// @param bounds 本控件布局矩形（圆角未设时取其半高为半径）。
-    /// @param ctx 构建上下文：未显式设色时解析主题 `surface_variant` 作背景。
+    /// @param ctx 构建上下文：未显式设色时解析主题 `surface_variant` 作背景；悬停叠色取 `hover`。
     virtual auto paint_background(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void {
         const float radius = corner_radius_ >= 0.0F ? corner_radius_ : bounds.size.height * 0.5F;
-        const Color bg = hovered() ? resolve_background(ctx).shaded(0.92F) : resolve_background(ctx);
+        const Color bg = resolve_background(ctx);
         if (radius > 0.0F) {
             p.fill_rounded_rect(bounds, radius, bg);
         } else {
             p.fill_rect(bounds, bg);
+        }
+        // 悬停反馈是半透明状态层：同形再叠一层，不改基色本身。
+        if (hovered()) {
+            const Color overlay = inherit_theme(ctx).roles.hover;
+            if (radius > 0.0F) {
+                p.fill_rounded_rect(bounds, radius, overlay);
+            } else {
+                p.fill_rect(bounds, overlay);
+            }
         }
     }
 

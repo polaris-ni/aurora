@@ -9,6 +9,7 @@
 
 #include "aurora/core/log.h"
 #include "aurora/core/platform.h"  // NOLINT
+#include "aurora/theming/theme_scope.h"  // inherit_theme：面板配色只取主题角色
 #include "aurora/widget/codegen.h"
 #include "aurora/widget/inspect.h"
 
@@ -157,7 +158,7 @@ auto InspectorPanel::on_layout(const Constraints &c, const BuildContext &ctx) ->
 // ---------------------------------------------------------------------------
 
 auto InspectorPanel::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void {
-    (void)ctx;
+    const auto &roles = inherit_theme(ctx).roles;
     const float total_w = bounds.size.width;
     const float total_h = bounds.size.height;
     const float tree_w = total_w * ratio_;
@@ -165,18 +166,18 @@ auto InspectorPanel::on_paint(Painter &p, const Rect &bounds, const BuildContext
     const float props_w = total_w - props_x;
 
     // 背景
-    p.fill_rect(bounds, Color{250, 250, 252});
+    p.fill_rect(bounds, roles.surface_container_low);
 
     // ---- 左侧：树形浏览器 ----
     const Rect tree_rect{.origin = bounds.origin, .size = Size{.width = tree_w, .height = total_h}};
-    p.fill_rect(tree_rect, Color{245, 246, 250});
+    p.fill_rect(tree_rect, roles.surface_container);
 
     // 树标题
     const Rect header_rect{.origin = bounds.origin, .size = Size{.width = tree_w, .height = AURORA_HEADER_HEIGHT}};
-    p.fill_rect(header_rect, Color{235, 237, 242});
+    p.fill_rect(header_rect, roles.surface_container_high);
     p.draw_text(Rect{.origin = Point{.x = bounds.origin.x + 8.0F, .y = bounds.origin.y + 6.0F},
                      .size = Size{.width = tree_w - 16.0F, .height = AURORA_HEADER_HEIGHT - 8.0F}},
-                "Widget Tree", Font{.size_pt = 11.0F}, Color{80, 80, 100});
+                "Widget Tree", Font{.size_pt = 11.0F}, roles.on_surface_variant);
 
     // 树行
     const float tree_y_start = bounds.origin.y + AURORA_HEADER_HEIGHT;
@@ -199,36 +200,35 @@ auto InspectorPanel::on_paint(Painter &p, const Rect &bounds, const BuildContext
         if (w == selected_widget_) {
             p.fill_rect(Rect{.origin = Point{.x = bounds.origin.x, .y = ry},
                              .size = Size{.width = tree_w, .height = AURORA_ROW_HEIGHT}},
-                        Color{200, 220, 255});
+                        roles.primary.with_alpha(48));
         }
 
         // 缩进 + 标签
         const float indent = (static_cast<float>(depth) * 16.0F) + 8.0F;
-        constexpr auto text_color = Color{40, 40, 50};
         p.draw_text(Rect{.origin = Point{.x = bounds.origin.x + indent, .y = ry + 4.0F},
                          .size = Size{.width = tree_w - indent - 4.0F, .height = AURORA_ROW_HEIGHT - 6.0F}},
-                    label, Font{.size_pt = 10.0F}, text_color);
+                    label, Font{.size_pt = 10.0F}, roles.on_surface);
     }
 
     // ---- 分隔条 ----
     const Rect handle_rect{.origin = Point{.x = bounds.origin.x + tree_w, .y = bounds.origin.y},
                            .size = Size{.width = AURORA_HANDLE_SIZE, .height = total_h}};
-    p.fill_rect(handle_rect, dragging_ ? Color{0, 122, 255, 120} : Color{0, 0, 0, 24});
+    p.fill_rect(handle_rect, dragging_ ? roles.primary.with_alpha(120) : roles.on_surface.with_alpha(24));
 
     // ---- 右侧：属性面板 ----
     const Rect props_rect{.origin = Point{.x = bounds.origin.x + props_x, .y = bounds.origin.y},
                           .size = Size{.width = props_w, .height = total_h}};
-    p.fill_rect(props_rect, Color{255, 255, 255});
+    p.fill_rect(props_rect, roles.surface_container_lowest);
 
     // 属性标题
     const Rect props_header{.origin = Point{.x = bounds.origin.x + props_x, .y = bounds.origin.y},
                             .size = Size{.width = props_w, .height = AURORA_HEADER_HEIGHT}};
-    p.fill_rect(props_header, Color{235, 237, 242});
+    p.fill_rect(props_header, roles.surface_container_high);
 
     const std::string title_text = (selected_widget_ != nullptr) ? selected_widget_->type_name() : "(none selected)";
     p.draw_text(Rect{.origin = Point{.x = bounds.origin.x + props_x + 8.0F, .y = bounds.origin.y + 6.0F},
                      .size = Size{.width = props_w - 16.0F, .height = AURORA_HEADER_HEIGHT - 8.0F}},
-                title_text, Font{.size_pt = 11.0F}, Color{80, 80, 100});
+                title_text, Font{.size_pt = 11.0F}, roles.on_surface_variant);
 
     // Export Code 按钮（右侧 header 右端）
     {
@@ -237,8 +237,8 @@ auto InspectorPanel::on_paint(Painter &p, const Rect &bounds, const BuildContext
         const float btn_x = bounds.origin.x + props_x + props_w - btn_w - 4.0F;
         const float btn_y = bounds.origin.y + 3.0F;
         export_btn_rect_ = Rect{.origin = Point{.x = btn_x, .y = btn_y}, .size = Size{.width = btn_w, .height = btn_h}};
-        p.fill_rect(export_btn_rect_, Color{0, 122, 255});
-        p.draw_text(export_btn_rect_, "Export Code", Font{.size_pt = 9.0F}, Color{255, 255, 255});
+        p.fill_rect(export_btn_rect_, roles.primary);
+        p.draw_text(export_btn_rect_, "Export Code", Font{.size_pt = 9.0F}, roles.on_primary);
     }
 
     // 属性行
@@ -256,7 +256,7 @@ auto InspectorPanel::on_paint(Painter &p, const Rect &bounds, const BuildContext
         if (i % 2 == 1) {
             p.fill_rect(Rect{.origin = Point{.x = bounds.origin.x + props_x, .y = ry},
                              .size = Size{.width = props_w, .height = AURORA_ROW_HEIGHT}},
-                        Color{248, 248, 252});
+                        roles.surface_container_low);
         }
 
         // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
@@ -265,11 +265,11 @@ auto InspectorPanel::on_paint(Painter &p, const Rect &bounds, const BuildContext
         // 属性名
         p.draw_text(Rect{.origin = Point{.x = bounds.origin.x + props_x + AURORA_PROP_INDENT, .y = ry + 4.0F},
                          .size = Size{.width = props_w * 0.4F, .height = AURORA_ROW_HEIGHT - 6.0F}},
-                    key, Font{.size_pt = 10.0F}, Color{100, 100, 120});
+                    key, Font{.size_pt = 10.0F}, roles.on_surface_variant);
         // 属性值
         p.draw_text(Rect{.origin = Point{.x = bounds.origin.x + props_x + (props_w * 0.4F) + 4.0F, .y = ry + 4.0F},
                          .size = Size{.width = props_w * 0.55F, .height = AURORA_ROW_HEIGHT - 6.0F}},
-                    val, Font{.size_pt = 10.0F}, Color{30, 30, 40});
+                    val, Font{.size_pt = 10.0F}, roles.on_surface);
     }
 }
 

@@ -13,6 +13,7 @@
 #include "aurora/render/image_cache.h"
 #include "aurora/render/painter.h"
 #include "aurora/state/async.h"
+#include "aurora/theming/theme_scope.h"  // inherit_theme：占位框取主题描边角色
 #include "aurora/widget/props.h"
 #include "aurora/widget/props_io.h"
 #include "aurora/widget/widget.h"
@@ -267,11 +268,11 @@ class ImageView : public Widget, public ImageViewProps {
         return c.constrain(Size{.width = w, .height = h});
     }
 
-    auto on_paint(Painter &p, const Rect &bounds, const BuildContext & /*ctx*/) -> void override {
+    auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
         if (!bitmap.pixels.empty()) {
             p.draw_image(bitmap, bounds);
         } else {
-            p.draw_rect(bounds, Color{180, 180, 180, 255});  // 占位框
+            p.draw_rect(bounds, inherit_theme(ctx).roles.outline);  // 占位框
         }
     }
 

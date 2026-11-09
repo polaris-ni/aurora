@@ -8,6 +8,7 @@
 
 #include "aurora/core/color.h"
 #include "aurora/render/painter.h"
+#include "aurora/theming/theme_scope.h"  // inherit_theme：栏底色与分隔线取主题角色
 #include "aurora/widget/descriptor.h"
 #include "aurora/widget/widget.h"
 
@@ -138,11 +139,12 @@ class ToolBar : public Container {
     }
 
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
+        const auto &roles = inherit_theme(ctx).roles;
         // 背景 + 底部分隔线
-        p.fill_rect(bounds, Color{250, 250, 252, 255});
+        p.fill_rect(bounds, roles.surface_container_low);
         p.fill_rect(Rect{.origin = Point{.x = bounds.origin.x, .y = bounds.origin.y + bounds.size.height - 1.0F},
                          .size = Size{.width = bounds.size.width, .height = 1.0F}},
-                    Color{225, 225, 229, 255});
+                    roles.outline_variant);
         Container::on_paint(p, bounds, ctx);
     }
 
@@ -264,10 +266,11 @@ class StatusBar : public Container {
     }
 
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
+        const auto &roles = inherit_theme(ctx).roles;
         // 背景 + 顶部分隔线
-        p.fill_rect(bounds, Color{248, 248, 250, 255});
+        p.fill_rect(bounds, roles.surface_container_low);
         p.fill_rect(Rect{.origin = bounds.origin, .size = Size{.width = bounds.size.width, .height = 1.0F}},
-                    Color{225, 225, 229, 255});
+                    roles.outline_variant);
         Container::on_paint(p, bounds, ctx);
     }
 

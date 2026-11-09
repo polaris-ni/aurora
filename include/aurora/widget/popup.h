@@ -9,6 +9,7 @@
 #include "aurora/core/types.h"
 #include "aurora/event/focus.h"
 #include "aurora/render/painter.h"
+#include "aurora/theming/theme_scope.h"  // inherit_theme：浮层投影取主题 shadow
 #include "aurora/widget/descriptor.h"
 #include "aurora/widget/widget.h"
 
@@ -216,7 +217,7 @@ class Popup : public SingleChild {
         }
         // 内容绘制在锚点处（全局坐标），叠加轻微投影提升层次感
         const Rect content_box{.origin = anchor_, .size = content_size_};
-        p.draw_shadow(content_box, 0.0F, 2.0F, 8.0F, Color(0, 0, 0, 48));
+        p.draw_shadow(content_box, 0.0F, 2.0F, 8.0F, inherit_theme(ctx).roles.shadow.with_alpha(48));
         child_.widget().paint(p, content_box, ctx);
     }
 

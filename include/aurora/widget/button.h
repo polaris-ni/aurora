@@ -31,10 +31,11 @@ namespace aurora {
 /// - **来源行**（`label` / `color`）：另有一只同名写件收 `ReadOnlyState`，即响应式换源。
 ///
 /// 回落点三档在本表里同时在场：
-/// - 活令牌档（`color` / `on_color` / `corner_radius`）：随作用域换肤而变，读件带 `BuildContext`；
-/// - 常量档（`font_size` / `enabled` / `border_*` / `disabled_*` / `min_*`）：全库唯一基线，读件无参；
-/// - 派生档（`padding` / `hover_color` / `pressed_color`）：回落点读同族他行或主题间距档再加工，
-///   读件带 `BuildContext`，schema 里的默认值只能以显示串给出：只读已登记令牌的行写
+/// - 活令牌档（`color` / `on_color` / `corner_radius` / `hover_color` / `pressed_color` /
+///   `disabled_color` / `disabled_text_color`）：随作用域换肤而变，读件带 `BuildContext`；
+/// - 常量档（`font_size` / `enabled` / `border_*` / `min_*`）：全库唯一基线，读件无参；
+/// - 派生档（`padding`）：回落点读同族他行或主题间距档再加工，读件带 `BuildContext`，
+///   schema 里的默认值只能以显示串给出：只读已登记令牌的行写
 ///   `.shows_token<&SpacingScale::large, &SpacingScale::small>()`（名由登记表反查），其余写 `.shows("auto")`。
 ///
 /// `padding` 落派生档而非活令牌档：四边结构与单一标量档不同型（`SpacingScale` 的档位说明同口径），
@@ -110,24 +111,22 @@ class ButtonProps : public AbstractProps<ButtonProps> {
             .note("Clickable");
     }
 
-    /// @brief 可空值件：悬停背景色。派生档由当前背景调暗得到 ⇒ 默认值只能是显示串。
+    /// @brief 可空值件：悬停叠色。未表态时取主题 `roles.hover`（半透明，绘制时叠在基色之上）。
     /// @return 本行的表行对象。
     [[nodiscard]] static constexpr auto hover_color_row() {
         return prop_row<&ButtonProps::hover_color_>("hover_color")
             .paint()
-            .fallback(&ButtonProps::hover_color_default)
-            .shows("auto")
-            .note("Hover background color (defaults to a darkened background)");
+            .fallback<&ColorRoles::hover>()
+            .note("Hover overlay tint (follows theme hover when unset)");
     }
 
-    /// @brief 可空值件：按下背景色。派生档同上口径。
+    /// @brief 可空值件：按下叠色。未表态时取主题 `roles.pressed`。
     /// @return 本行的表行对象。
     [[nodiscard]] static constexpr auto pressed_color_row() {
         return prop_row<&ButtonProps::pressed_color_>("pressed_color")
             .paint()
-            .fallback(&ButtonProps::pressed_color_default)
-            .shows("auto")
-            .note("Pressed background color (defaults to a darkened background)");
+            .fallback<&ColorRoles::pressed>()
+            .note("Pressed overlay tint (follows theme pressed when unset)");
     }
 
     /// @brief 可空值件：边框色。缺省「无边框」是语义事实，故给显示串而非透明色。
@@ -151,22 +150,22 @@ class ButtonProps : public AbstractProps<ButtonProps> {
             .note("Border width (dp); 0 = no border");
     }
 
-    /// @brief 可空值件：禁用态背景色。
+    /// @brief 可空值件：禁用态背景色。未表态时取主题 `roles.surface_container_high`。
     /// @return 本行的表行对象。
     [[nodiscard]] static constexpr auto disabled_color_row() {
         return prop_row<&ButtonProps::disabled_color_>("disabled_color")
             .paint()
-            .fallback(&ButtonProps::disabled_color_default)
-            .note("Disabled background color");
+            .fallback<&ColorRoles::surface_container_high>()
+            .note("Disabled background color (follows theme surface_container_high when unset)");
     }
 
-    /// @brief 可空值件：禁用态文字色。
+    /// @brief 可空值件：禁用态文字色。未表态时取主题 `roles.outline`。
     /// @return 本行的表行对象。
     [[nodiscard]] static constexpr auto disabled_text_color_row() {
         return prop_row<&ButtonProps::disabled_text_color_>("disabled_text_color")
             .paint()
-            .fallback(&ButtonProps::disabled_text_color_default)
-            .note("Disabled text color");
+            .fallback<&ColorRoles::outline>()
+            .note("Disabled text color (follows theme outline when unset)");
     }
 
     /// @brief 可空值件：最小宽度（dp）；只参与度量。
@@ -234,14 +233,14 @@ class ButtonProps : public AbstractProps<ButtonProps> {
     /// @return 生效的启用位。
     [[nodiscard]] auto enabled() const -> bool { return stated(enabled_row()); }
 
-    /// @brief 当前作用域下生效的悬停背景色（未表态时由生效背景调暗）。
+    /// @brief 当前作用域下生效的悬停叠色（未表态时取主题 `roles.hover`）。
     /// @param ctx 构建上下文。
-    /// @return 生效悬停色。
+    /// @return 生效悬停叠色（半透明，绘制时叠在基色之上）。
     [[nodiscard]] auto hover_color(const BuildContext &ctx) const -> Color { return resolve(hover_color_row(), ctx); }
 
-    /// @brief 当前作用域下生效的按下背景色（未表态时由生效背景调暗得更深）。
+    /// @brief 当前作用域下生效的按下叠色（未表态时取主题 `roles.pressed`）。
     /// @param ctx 构建上下文。
-    /// @return 生效按下色。
+    /// @return 生效按下叠色（半透明，绘制时叠在基色之上）。
     [[nodiscard]] auto pressed_color(const BuildContext &ctx) const -> Color {
         return resolve(pressed_color_row(), ctx);
     }
@@ -254,13 +253,19 @@ class ButtonProps : public AbstractProps<ButtonProps> {
     /// @return 生效线宽；0 即不描边。
     [[nodiscard]] auto border_width() const -> float { return stated(border_width_row()); }
 
-    /// @brief 当前生效的禁用态背景色。
+    /// @brief 当前作用域下生效的禁用态背景色（未表态时取主题 `roles.surface_container_high`）。
+    /// @param ctx 构建上下文。
     /// @return 生效禁用背景色。
-    [[nodiscard]] auto disabled_color() const -> Color { return stated(disabled_color_row()); }
+    [[nodiscard]] auto disabled_color(const BuildContext &ctx) const -> Color {
+        return resolve(disabled_color_row(), ctx);
+    }
 
-    /// @brief 当前生效的禁用态文字色。
+    /// @brief 当前作用域下生效的禁用态文字色（未表态时取主题 `roles.outline`）。
+    /// @param ctx 构建上下文。
     /// @return 生效禁用文字色。
-    [[nodiscard]] auto disabled_text_color() const -> Color { return stated(disabled_text_color_row()); }
+    [[nodiscard]] auto disabled_text_color(const BuildContext &ctx) const -> Color {
+        return resolve(disabled_text_color_row(), ctx);
+    }
 
     /// @brief 当前生效的最小宽度（dp）。
     /// @return 生效最小宽度。
@@ -329,13 +334,13 @@ class ButtonProps : public AbstractProps<ButtonProps> {
     /// @return 引用本属性对象，便于链式续写。
     auto set_enabled(bool value) -> ButtonProps & { return assign(enabled_row(), value); }
 
-    /// @brief 装入悬停背景色；不调用则由生效背景自动调暗。
-    /// @param value 显式悬停色。
+    /// @brief 装入悬停叠色；不调用则取主题 `roles.hover`。
+    /// @param value 显式悬停叠色（半透明色叠在基色之上）。
     /// @return 引用本属性对象，便于链式续写。
     auto set_hover_color(Color value) -> ButtonProps & { return assign(hover_color_row(), value); }
 
-    /// @brief 装入按下背景色；不调用则由生效背景自动调暗。
-    /// @param value 显式按下色。
+    /// @brief 装入按下叠色；不调用则取主题 `roles.pressed`。
+    /// @param value 显式按下叠色（半透明色叠在基色之上）。
     /// @return 引用本属性对象，便于链式续写。
     auto set_pressed_color(Color value) -> ButtonProps & { return assign(pressed_color_row(), value); }
 
@@ -381,19 +386,11 @@ class ButtonProps : public AbstractProps<ButtonProps> {
 
     /// @brief 边框色回落基线：全透明（填充按钮）。
     /// @return 透明色。
-    [[nodiscard]] static auto border_color_default() -> Color { return Color{0, 0, 0, 0}; }
+    [[nodiscard]] static auto border_color_default() -> Color { return Color::transparent(); }
 
     /// @brief 边框线宽回落基线。
     /// @return 0.0F（不描边）。
     [[nodiscard]] static auto border_width_default() -> float { return 0.0F; }
-
-    /// @brief 禁用态背景色回落基线。
-    /// @return 浅灰 {200,200,200,255}。
-    [[nodiscard]] static auto disabled_color_default() -> Color { return Color{200, 200, 200, 255}; }
-
-    /// @brief 禁用态文字色回落基线。
-    /// @return 中灰 {130,130,130,255}。
-    [[nodiscard]] static auto disabled_text_color_default() -> Color { return Color{130, 130, 130, 255}; }
 
     /// @brief 最小宽度回落基线。
     /// @return 0.0F（不擑宽）。
@@ -411,22 +408,6 @@ class ButtonProps : public AbstractProps<ButtonProps> {
         (void)self;
         const auto &s = inherit_theme(ctx).spacing;
         return EdgeInsets{.left = s.large, .top = s.small, .right = s.large, .bottom = s.small};
-    }
-
-    /// @brief 悬停色回落点（派生档）：读同族 `color` 行的**生效值**再压暗。
-    /// @param self 本属性对象（经它读 `color` 行，故显式设色时悬停色随该色压暗）。
-    /// @param ctx 构建上下文：未表态时 `color` 行本身还要解主题。
-    /// @return 生效背景 ×0.92 的悬停色。
-    [[nodiscard]] static auto hover_color_default(const ButtonProps &self, const BuildContext &ctx) -> Color {
-        return self.color(ctx).shaded(0.92F);
-    }
-
-    /// @brief 按下色回落点（派生档）：读同族 `color` 行的生效值再压暗得更深。
-    /// @param self 本属性对象。
-    /// @param ctx 构建上下文。
-    /// @return 生效背景 ×0.80 的按下色。
-    [[nodiscard]] static auto pressed_color_default(const ButtonProps &self, const BuildContext &ctx) -> Color {
-        return self.color(ctx).shaded(0.80F);
     }
 
   private:
@@ -452,7 +433,8 @@ class ButtonProps : public AbstractProps<ButtonProps> {
 /// @brief 按钮控件（叶 widget）：填充背景 + 居中文字；点击激活 on_click。
 ///
 /// 视觉（对标 Material Filled/Outlined Button / Fluent Button）：
-/// - 填充态：背景色 + 圆角；悬停/按下自动调暗（或用 hover_color/pressed_color 显式指定）；
+/// - 填充态：背景色 + 圆角；悬停/按下在基色上叠加状态层（默认取主题 `roles.hover` /
+///   `roles.pressed`，也可用 `set_hover_color()` / `set_pressed_color()` 显式指定叠色）；
 /// - 描边态：`set_border_color()` + `set_border_width()` 同时表态即描边（配合透明背景可做 Outlined）；
 /// - 禁用态：灰化并忽略点击。
 ///
@@ -574,7 +556,7 @@ class Button : public LeafWidget, public ButtonProps {
     /// @return 启用且已设置 `on_click` 时为 true（禁用或无回调时不消费点击）
     [[nodiscard]] auto wants_click() const -> bool override { return enabled() && on_click != nullptr; }
 
-    /// @brief 悬停反馈：背景色随悬停态变化（自动调暗或 hover_color）。
+    /// @brief 悬停反馈：状态层随悬停态叠加（默认 `roles.hover`）。
     /// @param entered true=指针进入，false=离开；启用态下据此标记重绘
     auto on_hover_change(bool entered) -> void override {
         Widget::on_hover_change(entered);  // 基类维护 hovered 状态并派发无障碍悬停事件
@@ -623,12 +605,20 @@ class Button : public LeafWidget, public ButtonProps {
 
     // ---- 继承扩展点：子类可单独覆盖某个绘制阶段，无需重写整个 on_paint ----
 
-    /// @brief 解析当前状态（enabled/pressed/hover）下的背景色。
+    /// @brief 解析当前状态（enabled）下的背景色。
     /// @param ctx 构建上下文：提供主题作用域，未表态时取 `roles.primary`。
-    /// @return 启用态按 pressed/hover 取按下色/悬停色（缺省为基色加深），禁用态取禁用色（缺省浅灰）。
+    /// @return 启用态取基色（`color` 行），禁用态取禁用色（缺省 `roles.surface_container_high`）。
     [[nodiscard]] virtual auto resolve_background(const BuildContext &ctx) const -> Color {
+        return enabled() ? color(ctx) : disabled_color(ctx);
+    }
+
+    /// @brief 解析当前状态下的交互叠色（悬停 / 按下）。
+    /// @param ctx 构建上下文：未表态时悬停取 `roles.hover`、按下取 `roles.pressed`。
+    /// @return 需要叠加的状态层色；无状态层（无指针交互或禁用态）时为空。
+    /// @note 叠色是半透明层，绘制路径把它画在基色之上（源覆盖混合），不改基色本身。
+    [[nodiscard]] virtual auto resolve_state_overlay(const BuildContext &ctx) const -> std::optional<Color> {
         if (!enabled()) {
-            return disabled_color();
+            return std::nullopt;
         }
         if (pressed_) {
             return pressed_color(ctx);
@@ -636,14 +626,14 @@ class Button : public LeafWidget, public ButtonProps {
         if (hovered()) {
             return hover_color(ctx);
         }
-        return color(ctx);
+        return std::nullopt;
     }
 
     /// @brief 解析当前状态下的文字色。
     /// @param ctx 构建上下文：提供主题作用域，未表态时取 `roles.on_primary`。
-    /// @return 启用态取 on_color（或其主题回退）；禁用态取禁用文字色（缺省中灰）。
+    /// @return 启用态取 on_color（或其主题回退）；禁用态取禁用文字色（缺省 `roles.outline`）。
     [[nodiscard]] virtual auto resolve_text_color(const BuildContext &ctx) const -> Color {
-        return enabled() ? on_color(ctx) : disabled_text_color();
+        return enabled() ? on_color(ctx) : disabled_text_color(ctx);
     }
 
     /// @brief 绘制背景（圆角填充）。

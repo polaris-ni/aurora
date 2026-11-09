@@ -11,6 +11,7 @@
 #include "aurora/core/font.h"
 #include "aurora/render/painter.h"
 #include "aurora/state/state.h"
+#include "aurora/theming/theme_scope.h"  // inherit_theme：错误态取主题 error 角色
 #include "aurora/widget/descriptor.h"
 #include "aurora/widget/widget.h"
 
@@ -247,15 +248,16 @@ class FormField : public SingleChild {
             const Rect child_box{.origin = bounds.origin, .size = child_.bounds().size};
             child_.widget().paint(p, child_box, ctx);
             if (has_error()) {
+                const Color error = inherit_theme(ctx).roles.error;
                 // 红色边框标识错误态
-                p.draw_rect(child_box, Color(220, 53, 69, 255));
+                p.draw_rect(child_box, error);
                 // 错误文本绘制在子控件下方
                 const Rect text_box{
                     .origin = Point{.x = bounds.origin.x, .y = bounds.origin.y + child_box.size.height + 2.0F},
                     .size = Size{.width = bounds.size.width, .height = AURORA_ERROR_TEXT_HEIGHT}};
                 Font err_font;
                 err_font.size_pt = 11.0F;
-                p.draw_text(text_box, error_.get(), err_font, Color(220, 53, 69, 255));
+                p.draw_text(text_box, error_.get(), err_font, error);
             }
         }
     }
