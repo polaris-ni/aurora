@@ -8,6 +8,7 @@
 
 #include "aurora/animation/animator.h"
 #include "aurora/core/accessibility.h"
+#include "aurora/environment/build_context.h"
 #include "aurora/state/state.h"
 
 namespace aurora {
@@ -222,7 +223,9 @@ class SpringAnimation {
                 return;  // 未在途（含已定格：收敛后不再增长时间、不再写 State，无幽灵帧）
             }
             // reduce_motion 优先：单帧落目标并结束，与 AnimationController::tick 的短路语义一致。
-            if (current_accessibility_settings().reduce_motion) {
+            // 解析入口同为该处的 `resolved_accessibility_settings(ctx)`：本驱动路径由控件的墙钟 tick
+            // 进入、链上没有 BuildContext，故传空上下文走进程级兜底档（不是第二条读取通路）。
+            if (resolved_accessibility_settings(BuildContext{}).reduce_motion) {
                 settle();
                 return;
             }

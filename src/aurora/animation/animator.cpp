@@ -3,6 +3,7 @@
 #include <algorithm>
 
 #include "aurora/core/accessibility.h"
+#include "aurora/environment/build_context.h"
 
 namespace aurora {
 
@@ -75,7 +76,13 @@ auto AnimationController::tick(double dt_seconds) -> void {
     // **排在零步长守卫之前**：本短路不使用 dt，故零步长（冻结 / 无推进帧）不改变它——「一步到位」
     // 本来就是一帧到位，没有什么可被冻住。次序与 `SpringAnimation::Payload::advance` 一致，两个驱动
     // 件对同一无障碍档给出同一形态；既有 `reduce_motion_snaps_controller_to_endpoint` 亦以此为准。
-    if (current_accessibility_settings().reduce_motion) {
+    //
+    // 解析入口统一为 `resolved_accessibility_settings(ctx)`，本路径传的是**空上下文**：动画驱动器由
+    // 帧循环以墙钟推进（`Widget::tick(time_point)` → 控制器 / 弹簧 `tick(dt)`），链上没有 BuildContext
+    // 可取——这正是本类型注释里「无上下文子系统」的兜底档，不是绕开统一入口的第二条通道。
+    // 带上下文的另一档已经存在：`Theme::with_accessibility` 把置位折成 `MotionScale` 的零档，时长一经
+    // 从令牌族解析（该接线点尚无消费端，见 `MotionScale` 的未消费档注记）即随作用域生效，无需本短路。
+    if (resolved_accessibility_settings(BuildContext{}).reduce_motion) {
         if (status_ == AnimationStatus::Forward) {
             value_ = 1.0;
             status_ = AnimationStatus::Completed;

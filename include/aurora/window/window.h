@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "aurora/app/perf_overlay.h"
+#include "aurora/core/accessibility.h"
 #include "aurora/core/aurora_assert.h"
 #include "aurora/core/log.h"
 #include "aurora/core/result.h"
@@ -760,6 +761,9 @@ class Window {
         // AURORA_ENABLE_PROFILING 关闭时本行完全消失（零开销）。
         AURORA_PROFILE_FRAME();
         idle_frame_ = false;  // 进入 present_root 即视为非 idle；idle 跳过分支会重新置 true
+        // 无障碍开关换档同步：必须排在脏区计划**之前**——计划一旦判定「无脏无布局变化」就整帧跳过，
+        // 在那之后标脏的换档信号会随本帧一起丢掉，「开关置位 → 生效值变」退化成「等到下次交互」。
+        sync_accessibility_fold();
 
         FramePlan plan;
         if (dirty_tracking_) {
@@ -965,17 +969,29 @@ class Window {
     /// 消费 `inherit_theme(ctx)`，只靠脏标记不会向下传播，后代即停在旧观感（真机复现：切换风格档后
     /// 常驻树里的按钮/滑杆仍按旧 primary 绘制）。本标志负责**向下失效**那一半；像素那一半由 setter
     /// 同批的 `force_full_redraw` 负责（两者缺一：只失效则增量脏区不重绘，只标脏则重排仍读旧缓存）。
+    ///
+    /// 三枚无障碍开关是同一组解算输入（进 `RootThemeCache` 的键），但翻位发生在进程级单例里、
+    /// 本窗没有 setter 可挂标志，因此置位点换成本帧入口的差量比对（见 `sync_accessibility_fold()`），
+    /// 像素与缓存两半的分工不变。
     bool theme_pending_ = false;
-    /// @brief 根主题解算缓存的键值对：两枚输入档位 + 该组合的解算结果。
+    /// @brief 根主题解算缓存的键值对：风格档 + 明暗档 + 三枚参与物化的无障碍输入 + 该组合的解算结果。
     ///
     /// 键取**解算后的档位**而非 setter 的可选值：`style_` 为空时结果取决于进程级探测档，
     /// 后者每进程只读一次（见 `Theme::default_style()`），因此键一旦成立即稳定。
     struct RootThemeCache {
         ThemeStyle style = ThemeStyle::Material;  ///< 解算用的风格档（探测档已并入）。
         ColorScheme scheme = ColorScheme::Light;  ///< 解算用的明暗档（`Unspecified` ≡ 明色）。
+        bool high_contrast = false;  ///< 解算用的高对比开关位（无障碍开关进键，见 `resolved_root_theme()`）。
+        float font_scale = 1.0F;  ///< 解算用的字号倍率（取 `resolved_font_scale()` 的归一化值，非裸字段）。
+        bool reduce_motion = false;  ///< 解算用的减动效位（置位时 `MotionScale` 整族取零档）。
         Theme value;  ///< 该档位组合的解算结果。
     };
     mutable std::optional<RootThemeCache> root_theme_cache_;  ///< 见 `resolved_root_theme()` 的缓存注记。
+    /// @brief 上一次本窗物化时读到的无障碍输入快照：换档检测的比较基准，见 `sync_accessibility_fold()`。
+    ///
+    /// 差异判定走 `resolved_font_scale()` 而非裸字段，故宿主反复写入同一非法值（0 / NaN）
+    /// 归一化后恒等于 1.0，不会被误判为换档。
+    AccessibilitySettings last_accessibility_fold_{};
     DirtyRegionTracker dirty_;  ///< 绘制脏追踪器（specification/06-app-platform.md §3.2）。
     bool dirty_tracking_ = true;  ///< 脏追踪开关（默认开启：idle 跳帧 + layout/paint 分离）。
     bool layout_dirty_ = true;  ///< 布局脏：尺寸/结构/约束变化或 mark_needs_layout 触发，下一帧需重排。
@@ -1191,9 +1207,35 @@ class Window {
         return Result<bool>{true};
     }
 
+    /// @brief 帧入口同步无障碍输入：与本窗上次物化读到的快照比对三枚会改变主题取值的开关位，
+    ///        换档则按「主题换档」的同构口径标脏并挂起向下失效。
+    ///
+    /// 判据为何是差量比对而非挂起标志：这三枚位住在进程级单例（宿主 / OS 桥翻位，
+    /// `set_accessibility_settings`），本窗没有 setter 可挂标志；代价是每帧三次内存读，而漏判的代价
+    /// 是「开关置位不生效」——后者是可达性缺陷，不是观感问题。像素一半由 `force_full_redraw` 负责，
+    /// 缓存一半复用 `theme_pending_`（那三枚位是解算输入，翻位与 `set_theme_style` 换档等价）。
+    ///
+    /// 显式 `set_theme` 时开关不参与物化（那套值是作者写死的，口径见 `resolved_root_theme()` 的返回值
+    /// 说明），翻位因此不构成重绘理由；基准值仍照常跟进，免得撤销显式主题后拿旧快照白判一次换档。
+    /// `screen_reader_active` 不参与比对，与它不入缓存键同口径。
+    auto sync_accessibility_fold() -> void {
+        const AccessibilitySettings fold = current_accessibility_settings();
+        const bool differs = fold.high_contrast != last_accessibility_fold_.high_contrast ||
+                             fold.resolved_font_scale() != last_accessibility_fold_.resolved_font_scale() ||
+                             fold.reduce_motion != last_accessibility_fold_.reduce_motion;
+        last_accessibility_fold_ = fold;
+        if (!differs || theme_.has_value()) {
+            return;
+        }
+        theme_pending_ = true;
+        force_full_redraw();
+    }
+
     /// @brief 解析本窗当前应注入根 BuildContext 的主题（三级优先链，两轴解算）。
-    /// @return 显式 `theme_`（若有，原样，其 `scheme` 即最终档，风格与明暗一并由它携带）；
-    ///         否则 `Theme::from_style(风格档, 明暗档)`——风格轴取 `style_`，未钉时取
+    /// @return 显式 `theme_`（若有，原样，其 `scheme` 即最终档，风格与明暗一并由它携带；无障碍开关
+    ///         **不折**进用户配色——那套值是应用作者写死的，需要高对比请自行转调
+    ///         `Theme::with_accessibility`）；
+    ///         否则 `Theme::from_style(风格档, 明暗档, 无障碍开关)`——风格轴取 `style_`，未钉时取
     ///         `Theme::default_style()` 的探测档；明暗轴取 `os_scheme_`，其中 `Unspecified` ≡ 明色
     ///         （与 CSD 桥、`inherit_theme` 兜底同口径），故注入主题的 `scheme` 恒为 `Light` / `Dark`
     ///         具体档、不为 `Unspecified`。
@@ -1204,19 +1246,30 @@ class Window {
     /// @note 解算结果按**输入档位对**缓存，帧路径因此不调 `Theme::from_style`：本函数每帧经
     ///       `prepare_context` 调用，而 `Theme` 是 936 字节的聚合（含 `TypeScale` 的 15 枚字体族
     ///       名串），逐帧重建会把堆分配留在稳态帧里。缓存不靠 setter 失效——键就是
-    ///       `(风格档, 明暗档)` 两枚输入，任一 setter 换档后下一帧自然重建，无遗漏路径可言；
-    ///       显式 `theme_` 走短路分支，不读写该缓存。
+    ///       `(风格档, 明暗档, 三枚会改变快照的无障碍输入)`，任一 setter 换档或宿主翻开关后下一帧
+    ///       自然重建，无遗漏路径可言；显式 `theme_` 走短路分支，不读写该缓存。
+    ///       开关位取自进程级 `current_accessibility_settings()`（纯内存读，不碰注册表 / 配置文件，
+    ///       与动画侧 `reduce_motion` 的现行读法同源），因此「开关置位 → 生效值变」在根主题上成立。
+    ///       `screen_reader_active` **不入键**：读屏在线不改任何主题取值，把它算进键会让每次桥激活
+    ///       都白白重建一份 936 字节快照。
     [[nodiscard]] auto resolved_root_theme() const -> const Theme & {
         if (theme_.has_value()) {
             return *theme_;
         }
         const ThemeStyle style = style_.value_or(Theme::default_style());
         const ColorScheme scheme = (os_scheme_ == ColorScheme::Dark) ? ColorScheme::Dark : ColorScheme::Light;
-        if (!root_theme_cache_ || root_theme_cache_->style != style || root_theme_cache_->scheme != scheme) {
+        const AccessibilitySettings accessibility = current_accessibility_settings();
+        if (!root_theme_cache_ || root_theme_cache_->style != style || root_theme_cache_->scheme != scheme ||
+            root_theme_cache_->high_contrast != accessibility.high_contrast ||
+            root_theme_cache_->font_scale != accessibility.resolved_font_scale() ||
+            root_theme_cache_->reduce_motion != accessibility.reduce_motion) {
             root_theme_cache_ = RootThemeCache{
                 .style = style,
                 .scheme = scheme,
-                .value = Theme::from_style(style, scheme),
+                .high_contrast = accessibility.high_contrast,
+                .font_scale = accessibility.resolved_font_scale(),
+                .reduce_motion = accessibility.reduce_motion,
+                .value = Theme::from_style(style, scheme, accessibility),
             };
         }
         return root_theme_cache_->value;
