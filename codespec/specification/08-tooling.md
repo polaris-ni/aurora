@@ -518,19 +518,21 @@ aurora_cli --version (-V)                      # 显示版本号
 
 ### 7.3 LSP（`aurora_lsp`）
 
-stdio JSON-RPC 2.0 语言服务，对 `au::<Type>Props{ .prop = ... }` 等声明式写法提供 completion / hover / diagnostics / codeAction 四件套。
+stdio JSON-RPC 2.0 语言服务，对 `au::<Type>(au::<Type>Props().set_<key>(...))` 这类链式声明式写法提供 completion / hover / diagnostics / codeAction 四件套。
 
 | LSP 方法 | 说明 |
 |:---|:---|
 | `initialize` / `initialized` / `shutdown` / `exit` | 生命周期 |
 | `textDocument/didOpen` · `didChange` · `didClose` | 文档同步；`didOpen` / `didChange` 后发布 `textDocument/publishDiagnostics` |
-| `textDocument/completion` | `au::` 后补类型 / 枚举；`XxxProps{` 内 `.` 后补属性（显示默认值 / 必填 / 文档）；枚举属性 `=` 后补枚举值 |
-| `textDocument/hover` | `au::Type` 组件概要（属性数 / 事件 / 示例）；`.prop` 类型 / 默认值 / 必填 / 文档 |
-| `textDocument/codeAction` | 为缺失必填属性生成「补全缺失必填属性」快速修复（在 `}` 前插入 `.prop = <default>`） |
+| `textDocument/completion` | `au::` 后补类型 / 枚举；`XxxProps()` 链的 `.` 后补 `set_<key>()` 写件（显示默认值 / 必填 / 文档；匹配同时接受裸键与写件名，输入 `lab` 也能命中 `set_label`）；枚举属性的写件实参内补枚举值 |
+| `textDocument/hover` | `au::Type` 组件概要（属性数 / 事件 / 示例）；`set_<key>` 的类型 / 默认值 / 必填 / 文档 |
+| `textDocument/codeAction` | 为缺失必填属性生成「补全缺失必填属性」快速修复（在链尾插入 `.set_<key>(<default>)`）；为花括号属性块生成整块改写为链式的迁移修复（该类型没有 `Props` 聚合时不提供改写） |
 
-`publishDiagnostics` 报告：未知组件类型、未知属性、非法枚举值、缺失必填属性（warning）。
+`publishDiagnostics` 报告：未知组件类型、未知属性写件、非法枚举值、缺失必填属性（warning，只对闭合的构造实参报）、花括号属性块（error，一个块一条而不是逐键一条）。
 
 **schema 来源**：库 live API（`describe_component` + `known_enums`），**不读取 `aurora_api.json` 文件**，始终与代码同步。
+
+**能力位来源**：链式名单、基类键分流与属性写件落点同源取 `include/aurora/widget/codegen.h` 的 `props_chain_writers` / `is_base_key` / `expressible` / `prop_target` / `cpp_class` / `cpp_props`，经唯一链接库的桥 `tools/include/lsp_live_schema.h` 取用（其上是三层不依赖库的 `lsp_schema.h` / `lsp_document.h` / `lsp_features.h`）。补全插出的写件名与代码生成器发射的落点因此是同一枚字符串，两份名单手抄必然漂移，而漂移的表现是「补出来的代码编译不过」。
 
 ### 7.4 工具可执行与自定义目标
 
@@ -1294,7 +1296,7 @@ int main() {
 
 - **MCP Server（`aurora_mcp`）**：stdio JSON-RPC 2.0，暴露 24 个 MCP tools（清单见 §7.1；含 `live_*` 五枚、`list_network_activity` / `describe_network_request` 两枚网络工具）。
 - **CLI（`aurora_cli`）**：子命令 `components` / `describe` / `search` / `validate` / `snapshot` / `render` / `preview` / `to-code` / `to-yaml` / `schema`，以及全局选项 `--help`（`-h`）/ `--version`（`-V`）。
-- **LSP（`aurora_lsp`）**：stdio JSON-RPC 2.0 语言服务，对声明式写法提供 completion / hover / diagnostics / codeAction 四件套，消费库 live API（`describe_component` + `known_enums`），无需读取 `aurora_api.json` 文件，始终与代码同步。
+- **LSP（`aurora_lsp`）**：stdio JSON-RPC 2.0 语言服务，对链式声明式写法（`au::<Type>(au::<Type>Props().set_<key>(...))`）提供 completion / hover / diagnostics / codeAction 四件套，消费库 live API（`describe_component` + `known_enums`）并经 `tools/include/lsp_live_schema.h` 同源取 `codegen.h` 的链式名单与写件落点，无需读取 `aurora_api.json` 文件，始终与代码同步。
 
 **验收标准：** AI Agent 可仅凭工具链完成「发现控件 → 校验树 → 渲染快照 → 生成代码」全链路，无需读取源码。
 

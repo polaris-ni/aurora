@@ -21,7 +21,7 @@
 
 - **名序一致**：属性 / 参数名序与 React / Flutter 对齐（回调用 `on_xxx` 如 `on_click`，非 `click_handler`；子节点用 `children`；尺寸用 `width` / `height`）。避免自创词序。
 - **默认参数友好**：高频构造提供默认参数 / 便捷工厂（如 `au::colors::AURORA_BLUE`、`dp(16)`），降低记忆负担。
-- **顺序容错**：多参数构造优先用具名写法而非位置参数，具体形态按目标类型选——属性对象仍是聚合的类型用 `XxxProps{...}` 指定初始化器；已迁到链式形态的 `*Props`（§11.1）用 `XxxProps().set_x(...)` 链式写件，子节点是构造首参的容器写 `Column({ 子项 }, ColumnProps()...)`。两者的共同点是「每个实参都带名字」，避免位置参数顺序错误。
+- **顺序容错**：多参数构造优先用具名写法而非位置参数，具体形态按目标类型选——属性对象一律用 `XxxProps().set_x(...)` 链式写件（`*Props` 已无公有字段，指定初始化器编译即红，见 §11.1）；子节点是构造首参的容器写 `Column({ 子项 }, ColumnProps()...)`；指定初始化器只留给 `Theme` / `ChartSeries` 这类纯数据聚合。三者的共同点是「每个实参都带名字」，避免位置参数顺序错误。
 - **强类型几何**：`Length` / `Color` / `Size` / `Point` 为强类型；禁止 `Length(int)` 隐式转换（裸整数编译失败）。已采纳用户字面量 `au::literals`（`100_dp`、`16_ms`、`0xRRGGBB_rgb`），`px(100)` 与 `100_dp` 互补；**禁止头文件全局 `using`**，字面量只在 TU 内按需引入（示例代码用 `using namespace au::literals;`，测试代码按 §3.1 用 using 声明 / 命名空间别名引入，不得用 using-directive）。
 - **所有权清晰**：资源所有权用 `unique_ptr` / `shared_ptr` 明确；跨边界传递用 `std::move`。状态句柄（`State<T>` / `ReadOnlyState<T>`）按值传递与捕获——复制即共享同一来源，`get()` 返回借用，不得跨写入、来源重绑或最后持有者释放保存。
 - **成员变量命名**：`struct` 成员与类 `public` 成员用**裸名**（无前缀、无后缀，如 `Color::r`、`DragData::mime_type`）；类的 `protected` / `private` 非静态成员统一**尾部下划线**后缀（如 `children_`、`value_`、`on_close_`）；**全仓禁止 `m_` 前缀**。`static` 常量按下一条「常量命名」走 `AURORA_` 前缀 + `UPPER_CASE`（如 `AURORA_NO_SEL`）；`static` 可变成员、`static` `protected`/`private` 成员规则与普通成员一致（尾部下划线）。
@@ -374,7 +374,7 @@
 ### 6.11 Schema 强制与工具链
 
 - **Schema 强制**：公共 API 的入参 / 出参有 Schema 校验；`gen_api_tools` 输出 `aurora_api.json` 即机器可读 Schema。
-- **代码补全 / LSP**：`aurora_lsp` 消费库 live API（`describe_component` + `known_enums`）对 `au::XxxProps{ .prop = ... }` 等声明式写法做 completion / hover / diagnostics / codeAction。
+- **代码补全 / LSP**：`aurora_lsp` 消费库 live API（`describe_component` + `known_enums`）并经 `tools/include/lsp_live_schema.h` 同源取 `codegen.h` 的链式名单与写件落点，对 `au::XxxProps().set_<key>(...)` 链式声明式写法做 completion / hover / diagnostics / codeAction；花括号属性块按非法形态报一条 error 并给整块改写。
 - **MCP / CLI**：stdio JSON-RPC 2.0 MCP Server（`aurora_mcp`，10 个 tools）+ CLI 工具（`aurora_cli`），消费 `describe()` / `list_all_schemas()` / `validate()` / `render_to_png()` / `to_code()` 等库 API。
 - **序列化 diff**：`to_json` / `from_json` / `diff` / `apply_patch` 提供树级 diff，便于 AI 推断「改了什么」。
 - **示例文档化**：每个 widget 的最小可编译示例随 API 文档发布（`examples/` + [`GUIDELINE.md`](GUIDELINE.md)）。
@@ -583,14 +583,14 @@ BREAKING CHANGE: 自定义 Widget 的 on_paint 实现须改用全局坐标，
 
 **问题背景：** Fluent API 往往产生长链式调用，AI 容易在链中间遗漏括号或参数顺序错误。
 
-**需求陈述：** 同一控件必须提供三种**语义完全等价**的构建形态，AI 可按复杂度选择——① 链式 setter（简短组件）、② `*Props` 具名聚合（嵌套结构，可分块生成）、③ 对已构造对象逐行赋值（复杂组件）。等价性由「控件继承其 Props」保证：`class Xxx : public XxxProps`，属性声明只有 `XxxProps` 这一处，不再用私有 `m_*` 重复声明同一属性；字段本身是私有的，对外只有逐行的读件与 `set_<键>()` 写件（收口口径见 [`specification/04-widget.md`](specification/04-widget.md) §2.5）。
+**需求陈述：** 同一控件必须提供三种**语义完全等价**的构建形态，AI 可按复杂度选择——① 链式 setter（简短组件）、② 属性对象链式装入 `XxxProps().set_<key>(...)`（嵌套结构，可分块生成）、③ 对已构造对象逐行赋值（复杂组件）。等价性由「控件继承其 Props」保证：`class Xxx : public XxxProps`，属性声明只有 `XxxProps` 这一处，不再用私有 `m_*` 重复声明同一属性；字段本身是私有的，对外只有逐行的读件与 `set_<键>()` 写件（收口口径见 [`specification/04-widget.md`](specification/04-widget.md) §2.5）。
 
 ```cpp
 // 形态一：链式 setter（setter 返回引用）
 auto btn = au::Button(au::ButtonProps().set_label("OK"));
 btn.set_on_click(fn);
 
-// 形态二：*Props 具名聚合
+// 形态二：属性对象链式装入
 auto btn2 = au::Button(au::ButtonProps().set_label("OK"));
 btn2.set_on_click(fn);
 
@@ -618,7 +618,7 @@ btn3.set_on_click(fn);
 **需求陈述：**
 
 - **相同语义在所有组件使用完全相同的名称**（`on_click` 在所有可点击控件同名同参），杜绝 `setCaption` / `setValue` / `size().x` 一类同义异名；属性设置器一律为「属性直接赋值」风格。
-- **命名与类型拼写规则**（属性用名词、事件 `on_` 前缀、布尔取 `show` / `enabled` 语义、杜绝缩写、名序与 React / Flutter 对齐、`XxxProps{...}` 具名聚合优先、强类型几何、常量前缀等）以 [`CODING_STANDARDS.md`](CODING_STANDARDS.md) §2 为唯一权威。
+- **命名与类型拼写规则**（属性用名词、事件 `on_` 前缀、布尔取 `show` / `enabled` 语义、杜绝缩写、名序与 React / Flutter 对齐、属性对象链式装入 `XxxProps().set_x(...)` 优先、强类型几何、常量前缀等）以 [`CODING_STANDARDS.md`](CODING_STANDARDS.md) §2 为唯一权威。
 - **扁平命名空间**：所有公共组件、类型、自由函数直接位于 `aurora`，禁止深层嵌套（`aurora::widgets::buttons::MaterialButton` 列为反模式）；变体通过属性区分而非类型区分。对外承诺稳定的**公共子命名空间**为：`colors`（具名颜色常量）、`platform`（平台查询 API）、`debug`（`aurora::debug` 调试门面自由函数，受 §11.2 lint 校验）、`ui`（声明式工厂 `ui::`，用户面构造语法糖）、`storage`（数据存储门面 `aurora::storage`）、`image`（图像编解码）、`imperative`（imperative API）、`webview`（原生 Web 嵌入控件 `au::webview::WebView` 与其 `WebViewMode` 等配套类型——它是 76 型里唯一不挂在 `aurora` 直属下的控件，代码生成的产物因此按 `au::webview::…` 发，见 [`specification/08-tooling.md`](specification/08-tooling.md) §2.5.1）；其余如 `render` / `detail` / `preferences` 等为内部或辅助命名空间，**不属对外承诺稳定的公共 API 表面**。
 - 前缀与别名写法见 [`SPECIFICATIONS.md`](SPECIFICATIONS.md) §命名速查。
 
