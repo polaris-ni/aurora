@@ -18,11 +18,15 @@ include(CMakeFindDependencyMacro)
 get_filename_component(_aurora_root "${CMAKE_CURRENT_LIST_DIR}/../../.." ABSOLUTE)
 
 # ---- FreeType（vendored 静态库，随 aurora 安装到 @CMAKE_INSTALL_LIBDIR@） ----
-find_library(FREETYPE_LIB NAMES freetype libfreetype
+# 随附 FreeType 自带 CMAKE_DEBUG_POSTFIX "d"：单配置 Debug 安装的产物名为 freetyped.lib /
+# libfreetyped.a，而 aurora 与 harfbuzz 没有该后缀。候选名按「先发布态、后调试态」排列，
+# 使同一份包配置同时覆盖 Release 与 Debug 安装产物；单配置安装目录下两者只会有其一。
+find_library(FREETYPE_LIB NAMES freetype libfreetype freetyped libfreetyped
              PATHS "${_aurora_root}/@CMAKE_INSTALL_LIBDIR@" NO_DEFAULT_PATH)
 if(NOT FREETYPE_LIB)
-    message(FATAL_ERROR "Aurora: bundled FreeType static library not found"
-            " (expected ${_aurora_root}/@CMAKE_INSTALL_LIBDIR@/libfreetype.a)")
+    message(FATAL_ERROR "Aurora: bundled FreeType static library not found in"
+            " ${_aurora_root}/@CMAKE_INSTALL_LIBDIR@"
+            " (searched freetype / libfreetype / freetyped / libfreetyped)")
 endif()
 if(NOT TARGET freetype)
     add_library(freetype STATIC IMPORTED)

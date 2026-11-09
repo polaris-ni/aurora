@@ -821,11 +821,13 @@ Aurora 以静态库交付，并提供 `find_package(Aurora)` 消费端集成。�
 <PREFIX>/include/freetype2/...     # FreeType 头
 <PREFIX>/include/harfbuzz/...      # HarfBuzz 头
 <PREFIX>/lib/libaurora.a           # 主静态库
-<PREFIX>/lib/libfreetype.a         # 随附 FreeType 静态库
+<PREFIX>/lib/libfreetype.a         # 随附 FreeType 静态库（Debug 安装为 libfreetyped.a / freetyped.lib）
 <PREFIX>/lib/libharfbuzz.a         # 随附 HarfBuzz 静态库
 <PREFIX>/lib/cmake/Aurora/AuroraConfig.cmake         # 包配置（定义导入目标）
 <PREFIX>/lib/cmake/Aurora/AuroraConfigVersion.cmake
 ```
+
+随附 FreeType 自带调试后缀：单配置 Debug 安装的库名为 `freetyped.lib` / `libfreetyped.a`，而 `aurora` 与 `harfbuzz` 不加后缀。`AuroraConfig.cmake` 因此按「发布态优先、调试态兜底」枚举 FreeType 候选库名，两类安装产物都可直接 `find_package(Aurora)`，消费者无需按构建类型改配置或手工补库名副本。CI 的 `install-consumer` 作业覆盖 Release 安装产物；Debug 安装产物的消费端由 `installed_consumer` 探针（安装 → 配置 → 编译 → 运行全流程，不做任何人工改名）验证。
 
 ### 9.1 安装
 
