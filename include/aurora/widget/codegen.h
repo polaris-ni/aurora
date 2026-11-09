@@ -456,13 +456,29 @@ struct PropDescriptor {
         return std::isalpha(static_cast<unsigned char>(first)) != 0 || first == '_';
     };
     const std::string ns{cpp_namespace(type)};
+    // 单串拼接走 append：链式 `operator+` 会在每一步产生临时串分配（clang-tidy
+    // performance-inefficient-string-concatenation），此处改为一次预留 + 追加。
+    // 取值名须为合法 C++ 标识符才发射限定名，否则退回空串交由类型体检暴露。
+    const auto emit_typed = [&](const std::string &value) -> std::string {
+        if (!identifier_shaped(value)) {
+            return std::string{};
+        }
+        std::string out;
+        out.reserve(4 + ns.size() + it->second.cpp_type.size() + 2 + value.size());
+        out += "au::";
+        out += ns;
+        out += it->second.cpp_type;
+        out += "::";
+        out += value;
+        return out;
+    };
     for (const std::string &candidate : it->second.enum_values) {
         if (same_ignore_case(candidate, json_val)) {
-            return identifier_shaped(candidate) ? "au::" + ns + it->second.cpp_type + "::" + candidate : std::string{};
+            return emit_typed(candidate);
         }
     }
     // 列表里没有该取值：保留原样输出（交由类型体检暴露），但同样不发射非标识符形态。
-    return identifier_shaped(json_val) ? "au::" + ns + it->second.cpp_type + "::" + json_val : std::string{};
+    return emit_typed(json_val);
 }
 
 /// @brief JSON 属性名 → C++ 枚举类型名（用于 codegen 输出 `au::EnumType::Value`）。

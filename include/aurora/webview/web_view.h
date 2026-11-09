@@ -309,8 +309,8 @@ class WebView : public Widget, public WebViewProps {
     ~WebView() override;
     /// @brief 以 URL 构造（其余行不表态，生效值即各行回落点），并接线宿主。
     /// @param url 初始导航目标。
-    explicit WebView(std::string url) {
-        set_url(std::move(url));
+    explicit WebView(const std::string &url) {
+        set_url(url);
         bind(*this);
     }
     /// @brief 配置块构造：整份属性接管后接线宿主。

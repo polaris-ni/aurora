@@ -567,13 +567,15 @@ AURORA_TEST_CASE(button_state_overlays_follow_theme_roles) {
     // 状态层解析：无交互 ⇒ 空；悬停 ⇒ hover；按下压过悬停；禁用 ⇒ 空。
     AURORA_TEST_CHECK_FALSE(b.resolve_state_overlay(light).has_value());
     b.on_hover_change(true);
-    AURORA_TEST_REQUIRE_TRUE(b.resolve_state_overlay(light).has_value());
-    AURORA_TEST_CHECK(*b.resolve_state_overlay(light) == light_roles.hover);
+    const auto overlay_light = b.resolve_state_overlay(light);
+    AURORA_TEST_REQUIRE_TRUE(overlay_light.has_value());
+    AURORA_TEST_CHECK(*overlay_light == light_roles.hover);
     MouseEvent press;
     press.action = MouseAction::Press;
     b.on_pointer_event(press);
-    AURORA_TEST_REQUIRE_TRUE(b.resolve_state_overlay(dark).has_value());
-    AURORA_TEST_CHECK(*b.resolve_state_overlay(dark) == dark_roles.pressed);
+    const auto overlay_dark = b.resolve_state_overlay(dark);
+    AURORA_TEST_REQUIRE_TRUE(overlay_dark.has_value());
+    AURORA_TEST_CHECK(*overlay_dark == dark_roles.pressed);
     // 基色不受状态影响：按下态下 resolve_background 仍等于 color 行。
     AURORA_TEST_CHECK(b.resolve_background(light) == b.color(light));
     b.set_enabled(false);
