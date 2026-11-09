@@ -480,7 +480,7 @@ au::Text("Welcome").font_size(24).bold();
 
 ### 4.2 状态反馈与禁用态
 
-hover / 按下统一用 `Color::shaded(k)` 乘性调暗（hover ≈ ×0.90 / ×0.92，pressed ≈ ×0.78 / ×0.80），淡色底与选区用 `Color::with_alpha(a)`。按钮 / 输入 / 选择类控件（`Button` / `Checkbox` / `Switch` / `Slider` / `TextInput` / `Dropdown` / `RadioSpin` / `SegmentedControl`）提供 `set_enabled(bool)`：禁用态统一灰化绘制、**吞掉指针事件**（置 `e.handled = true` 不冒泡）且不改值。例外：`Chip` / `TabBar` / `ProgressIndicator` 无 `set_enabled` 方法，也无禁用态分支。
+hover / 按下统一是**半透明状态层叠加**：基色先按显式表态值或主题角色绘制，再由绘制路径以源覆盖混合叠一层 `roles.hover` / `roles.pressed`（`Button` 走 `resolve_state_overlay`，`Checkbox` / `Slider` / `Switch` 在各自绘制钩子内同形叠层，`Chip` 在 `paint_background` 末尾叠层）；层色可经 `set_hover_color()` / `set_pressed_color()` 显式指定（`Button`），未表态即取角色，因而暗档自动翻面。淡色底与选区仍用 `Color::with_alpha(a)`。旧写法「按状态对基色乘性压暗」的 `Color::shaded(0.92F)` / `shaded(0.80F)` 一类交互态魔数在控件层已归零（`check_no_theme_color_literals` 判零），基色本身不随状态改写。按钮 / 输入 / 选择类控件（`Button` / `Checkbox` / `Switch` / `Slider` / `TextInput` / `Dropdown` / `RadioSpin` / `SegmentedControl`）提供 `set_enabled(bool)`：禁用态统一按主题中性档灰化绘制、**吞掉指针事件**（置 `e.handled = true` 不冒泡）且不改值。例外：`Chip` / `TabBar` / `ProgressIndicator` 无 `set_enabled` 方法，也无禁用态分支。
 
 ### 4.3 继承友好：protected 绘制分阶段钩子
 
@@ -492,7 +492,7 @@ hover / 按下统一用 `Color::shaded(k)` 乘性调暗（hover ≈ ×0.90 / ×0
 
 | 控件 | 绘制钩子 |
 |:---|:---|
-| `Button` | `resolve_background` / `resolve_text_color` / `paint_background` / `paint_border` / `paint_label`（末者多收一个 `const std::string &display` 形参 = 本帧显示串） |
+| `Button` | `resolve_background` / `resolve_state_overlay` / `resolve_text_color` / `paint_background` / `paint_border` / `paint_label`（`resolve_state_overlay` 返回本帧要叠的半透明状态层，空即不叠；`paint_label` 多收一个 `const std::string &display` 形参 = 本帧显示串） |
 | `Switch` | `paint_track` / `paint_thumb` |
 | `Slider` | `paint_track` / `paint_active_track` / `paint_thumb`；几何 `track_rect` / `value_fraction` |
 | `ProgressIndicator` | `paint_track` / `paint_fill` |
