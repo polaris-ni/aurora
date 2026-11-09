@@ -343,14 +343,14 @@
         {
           "name": "hover_color",
           "type": "Color",
-          "note": "Hover background color (defaults to a darkened background)",
-          "default_expr": "auto"
+          "note": "Hover overlay tint (follows theme hover when unset)",
+          "default_expr": "\"theme.hover\""
         },
         {
           "name": "pressed_color",
           "type": "Color",
-          "note": "Pressed background color (defaults to a darkened background)",
-          "default_expr": "auto"
+          "note": "Pressed overlay tint (follows theme pressed when unset)",
+          "default_expr": "\"theme.pressed\""
         },
         {
           "name": "border_color",
@@ -371,24 +371,14 @@
         {
           "name": "disabled_color",
           "type": "Color",
-          "default": [
-            200,
-            200,
-            200,
-            255
-          ],
-          "note": "Disabled background color"
+          "note": "Disabled background color (follows theme surface_container_high when unset)",
+          "default_expr": "\"theme.surface_container_high\""
         },
         {
           "name": "disabled_text_color",
           "type": "Color",
-          "default": [
-            130,
-            130,
-            130,
-            255
-          ],
-          "note": "Disabled text color"
+          "note": "Disabled text color (follows theme outline when unset)",
+          "default_expr": "\"theme.outline\""
         },
         {
           "name": "min_width",
@@ -459,13 +449,8 @@
         {
           "name": "border_color",
           "type": "Color",
-          "default": [
-            140,
-            140,
-            146,
-            255
-          ],
-          "note": "Unchecked border color"
+          "note": "Unchecked border color (defaults to theme outline_variant)",
+          "default_expr": "\"theme.outline_variant\""
         },
         {
           "name": "check_color",
@@ -1079,46 +1064,26 @@
         {
           "name": "box_color",
           "type": "Color",
-          "default": [
-            255,
-            255,
-            255,
-            255
-          ],
-          "note": "Main box background color"
+          "note": "Main box background color (defaults to theme surface_container_lowest)",
+          "default_expr": "\"theme.surface_container_lowest\""
         },
         {
           "name": "border_color",
           "type": "Color",
-          "default": [
-            200,
-            200,
-            205,
-            255
-          ],
-          "note": "Main box / panel border color"
+          "note": "Main box / panel border color (defaults to theme outline_variant)",
+          "default_expr": "\"theme.outline_variant\""
         },
         {
           "name": "text_color",
           "type": "Color",
-          "default": [
-            30,
-            30,
-            30,
-            255
-          ],
-          "note": "Option text color"
+          "note": "Option text color (defaults to theme on_surface)",
+          "default_expr": "\"theme.on_surface\""
         },
         {
           "name": "arrow_color",
           "type": "Color",
-          "default": [
-            120,
-            120,
-            125,
-            255
-          ],
-          "note": "Arrow color"
+          "note": "Arrow color (defaults to theme on_surface_variant)",
+          "default_expr": "\"theme.on_surface_variant\""
         },
         {
           "name": "box_height",
@@ -2529,13 +2494,8 @@
         {
           "name": "track_color",
           "type": "Color",
-          "default": [
-            220,
-            220,
-            220,
-            255
-          ],
-          "note": "Track color"
+          "note": "Track color (defaults to theme surface_variant)",
+          "default_expr": "\"theme.surface_variant\""
         },
         {
           "name": "thickness",
@@ -2683,24 +2643,14 @@
         {
           "name": "border_color",
           "type": "Color",
-          "default": [
-            140,
-            140,
-            146,
-            255
-          ],
-          "note": "Unselected ring color"
+          "note": "Unselected ring color (defaults to theme outline_variant)",
+          "default_expr": "\"theme.outline_variant\""
         },
         {
           "name": "text_color",
           "type": "Color",
-          "default": [
-            30,
-            30,
-            30,
-            255
-          ],
-          "note": "Option text color"
+          "note": "Option text color (defaults to theme on_surface)",
+          "default_expr": "\"theme.on_surface\""
         },
         {
           "name": "dot_size",
@@ -3135,35 +3085,20 @@
         {
           "name": "text_color",
           "type": "Color",
-          "default": [
-            0,
-            0,
-            0,
-            255
-          ],
-          "note": "Unselected segment text color"
+          "note": "Unselected segment text color (defaults to theme on_surface)",
+          "default_expr": "\"theme.on_surface\""
         },
         {
           "name": "selected_text_color",
           "type": "Color",
-          "default": [
-            255,
-            255,
-            255,
-            255
-          ],
-          "note": "Selected segment text color"
+          "note": "Selected segment text color (defaults to theme on_primary)",
+          "default_expr": "\"theme.on_primary\""
         },
         {
           "name": "border_color",
           "type": "Color",
-          "default": [
-            200,
-            200,
-            200,
-            255
-          ],
-          "note": "Outer frame border color"
+          "note": "Outer frame border color (defaults to theme outline_variant)",
+          "default_expr": "\"theme.outline_variant\""
         },
         {
           "name": "font_size",
@@ -3342,13 +3277,8 @@
         {
           "name": "inactive_color",
           "type": "Color",
-          "default": [
-            210,
-            210,
-            210,
-            255
-          ],
-          "note": "Unfilled track color"
+          "note": "Unfilled track color (defaults to theme surface_container_highest)",
+          "default_expr": "\"theme.surface_container_highest\""
         },
         {
           "name": "thumb_color",
@@ -3571,46 +3501,26 @@
         {
           "name": "background",
           "type": "Color",
-          "default": [
-            255,
-            255,
-            255,
-            255
-          ],
-          "note": "Background color"
+          "note": "Background color (defaults to theme surface_container_lowest)",
+          "default_expr": "\"theme.surface_container_lowest\""
         },
         {
           "name": "border_color",
           "type": "Color",
-          "default": [
-            200,
-            200,
-            205,
-            255
-          ],
-          "note": "Border color"
+          "note": "Border color (defaults to theme outline_variant)",
+          "default_expr": "\"theme.outline_variant\""
         },
         {
           "name": "text_color",
           "type": "Color",
-          "default": [
-            30,
-            30,
-            30,
-            255
-          ],
-          "note": "Value text color"
+          "note": "Value text color (defaults to theme on_surface)",
+          "default_expr": "\"theme.on_surface\""
         },
         {
           "name": "arrow_color",
           "type": "Color",
-          "default": [
-            100,
-            100,
-            105,
-            255
-          ],
-          "note": "Arrow color"
+          "note": "Arrow color (defaults to theme on_surface_variant)",
+          "default_expr": "\"theme.on_surface_variant\""
         },
         {
           "name": "corner_radius",
@@ -3928,13 +3838,8 @@
         {
           "name": "inactive_color",
           "type": "Color",
-          "default": [
-            180,
-            180,
-            180,
-            255
-          ],
-          "note": "Track color when off"
+          "note": "Track color when off (defaults to theme surface_container_highest)",
+          "default_expr": "\"theme.surface_container_highest\""
         },
         {
           "name": "thumb_color",
@@ -4045,35 +3950,20 @@
         {
           "name": "bar_background",
           "type": "Color",
-          "default": [
-            245,
-            245,
-            247,
-            255
-          ],
-          "note": "Tab bar background color"
+          "note": "Tab bar background color (defaults to theme surface_container_low)",
+          "default_expr": "\"theme.surface_container_low\""
         },
         {
           "name": "tab_background",
           "type": "Color",
-          "default": [
-            255,
-            255,
-            255,
-            255
-          ],
-          "note": "Selected tab background color"
+          "note": "Selected tab background color (defaults to theme surface_container_lowest)",
+          "default_expr": "\"theme.surface_container_lowest\""
         },
         {
           "name": "text_color",
           "type": "Color",
-          "default": [
-            96,
-            96,
-            96,
-            255
-          ],
-          "note": "Unselected tab text color"
+          "note": "Unselected tab text color (defaults to theme on_surface_variant)",
+          "default_expr": "\"theme.on_surface_variant\""
         },
         {
           "name": "indicator_thickness",
@@ -5616,6 +5506,7 @@
   "theme_tokens": {
     "name_rule": "short name = theme.<Theme field>.<member> for metric groups (shapes / spacing / controls / motion), theme.<member> for color roles; the prefix column gives the group's prefix verbatim",
     "usage": "a token name is a display path only; property fallbacks bind the member pointer, so renaming a token is a compile error rather than a stale string",
+    "consumed_rule": "consumed=true means at least one token of the group is used as a property-row default (it appears in some entry's default_expr); per-token wiring detail is not expressed by this bit. The groups listed as unconsumed in specification/07-environment-modifier.md section 5.1 must equal the groups with consumed=false; check_no_theme_color_literals judges that equality",
     "groups": [
       {
         "owner": "ColorRoles",
@@ -5623,6 +5514,7 @@
         "prefix": "theme",
         "type": "Color",
         "count": 38,
+        "consumed": true,
         "tokens": [
           "theme.primary",
           "theme.on_primary",
@@ -5670,6 +5562,7 @@
         "prefix": "theme.shapes",
         "type": "float",
         "count": 6,
+        "consumed": true,
         "tokens": [
           "theme.shapes.none",
           "theme.shapes.extra_small",
@@ -5685,6 +5578,7 @@
         "prefix": "theme.spacing",
         "type": "float",
         "count": 7,
+        "consumed": true,
         "tokens": [
           "theme.spacing.none",
           "theme.spacing.extra_small",
@@ -5701,6 +5595,7 @@
         "prefix": "theme.controls",
         "type": "float",
         "count": 12,
+        "consumed": true,
         "tokens": [
           "theme.controls.control_height",
           "theme.controls.control_height_small",
@@ -5722,6 +5617,7 @@
         "prefix": "theme.motion",
         "type": "Duration",
         "count": 6,
+        "consumed": false,
         "tokens": [
           "theme.motion.none",
           "theme.motion.extra_small",
@@ -5731,7 +5627,33 @@
           "theme.motion.extra_large"
         ]
       }
-    ]
+    ],
+    "exemptions": {
+      "gate": "check_no_theme_color_literals",
+      "usage": "numeric color literals still allowed in the widget layer and the CSD preset table; count is the exact occurrence count of Color{...} / Color(...) constructions in that file, judged by the gate",
+      "files": [
+        {
+          "path": "include/aurora/widget/chart_common.h",
+          "count": 16,
+          "reason": "chart series palettes: built-in fallback and ChartPalette default share eight data-encoding colours, not theme roles; the two tables must stay equal so an unseeded theme renders identically"
+        },
+        {
+          "path": "include/aurora/widget/pickers.h",
+          "count": 17,
+          "reason": "ColorPicker swatch data: the default sixteen-swatch palette and one descriptor example string are the picker payload, not component chrome"
+        },
+        {
+          "path": "include/aurora/widget/recipes.h",
+          "count": 3,
+          "reason": "composition recipes build Modifier backgrounds before any BuildContext exists, so the colour is fixed at composition time and cannot read theme roles"
+        },
+        {
+          "path": "include/aurora/window/title_bar_style.h",
+          "count": 40,
+          "reason": "CsdPreset tables: the per-style title-bar look-alike values are the source CsdRoles is derived from, not widget chrome that should read roles"
+        }
+      ]
+    }
   },
   "accessor_rules": {
     "root": "the table key is the word root: table key, JSON key and accessor root agree",

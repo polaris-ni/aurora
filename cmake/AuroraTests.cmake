@@ -196,6 +196,16 @@ if (AURORA_BUILD_TESTS)
         add_test(NAME check_no_theme_display_literals
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_no_theme_display_literals.py"
                 WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
+        # 主题硬编码色清偿门禁（验收判据「主题债务清零」）：控件层（include/aurora/widget /
+        # src/aurora/widget）与 CSD 预设表（include/aurora/window/title_bar_style.h）里的
+        # `Color{...}` / `Color(...)` 数字构造式必须归零，只许 `tools/include/theme_literal_exemptions.h`
+        # 逐条登记（文件 + 精确次数 + 理由）；同一枚脚本还判两处文档与表的一致性：
+        # ① `theme_tokens.groups[].consumed` 与 07-environment-modifier.md §5.1「属性行未消费组」等集；
+        # ② `theme_tokens.exemptions.files` 与登记表逐条相等（schema 过期即红）。控件层 `shaded(...)`
+        # 乘算魔数一并判零——交互态改由绘制路径叠加 `roles.hover` / `roles.pressed` 承担。
+        add_test(NAME check_no_theme_color_literals
+                COMMAND ${PYTHON3_EXE} "${_check_dir}/check_no_theme_color_literals.py"
+                WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
         # 伞头（include/aurora/aurora.h）完整性门禁。两层检查：① 文件健康——include 被行尾
         # 注释吞并 / 一行多指令 / 重复 / 路径缺失 / 编码损坏（私用区字符）/ 行结束符混用；
         # ② 覆盖契约——直连集合不得相对基线缩减，且每个 public 头必须「直连 ∨ 从直连集合可达

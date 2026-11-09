@@ -12,6 +12,7 @@
 #include <fstream>
 #include <initializer_list>
 #include <map>
+#include <set>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -22,6 +23,7 @@
 #include "aurora/cli/args.h"
 #include "aurora/cli/command.h"
 #include "known_enums.h"
+#include "theme_literal_exemptions.h"
 
 namespace {
 // Known enums (compile-time constants, not obtainable by pure runtime reflection).
@@ -73,6 +75,65 @@ auto known_enums() -> std::map<std::string, std::vector<std::string>> { return a
         return root;
     }();
     return ROOT_SPEC;
+}
+
+/// @brief 判断一段文案里是否**完整**出现某枚令牌名（令牌后面不得紧跟名字字符）。
+///
+/// 边界检查是必需的：`theme.primary` 是 `theme.primary_container` 的前缀，按裸子串匹配会把
+/// 未消费的 `primary` 误判成已消费。令牌名本身来自登记表，故本函数不含任何手抄显示串。
+/// @param text 待扫描文案（default_expr 的显示串）。
+/// @param token 登记表里的完整令牌名。
+/// @return 完整出现时 true。
+auto token_appears_in(std::string_view text, std::string_view token) -> bool {
+    const auto is_name_char = [](char ch) {
+        return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_' ||
+               ch == '.';
+    };
+    std::size_t pos = text.find(token);
+    while (pos != std::string_view::npos) {
+        const std::size_t end = pos + token.size();
+        if (end == text.size() || !is_name_char(text[end])) {
+            return true;
+        }
+        pos = text.find(token, end);
+    }
+    return false;
+}
+
+/// @brief 收集全部已生成控件属性里被属性行默认值消费的令牌名（含显示串内的令牌）。
+/// @param api 已装配好 widgets 条目的 schema 骨架。
+/// @return 令牌名集合（形如 `theme.motion.medium`）。
+[[nodiscard]] auto collect_consumed_tokens(const au::Json &api) -> std::set<std::string> {
+    std::vector<std::string> exprs;
+    if (const au::Json *widgets = api.at("widgets"); widgets != nullptr) {
+        for (const au::Json &widget : *widgets) {
+            const au::Json *props = widget.at("props");
+            if (props == nullptr) {
+                continue;
+            }
+            for (const au::Json &prop : *props) {
+                const au::Json *expr = prop.at("default_expr");
+                if (expr == nullptr) {
+                    continue;
+                }
+                if (const auto text = expr->as_string(); text) {
+                    exprs.emplace_back(*text);
+                }
+            }
+        }
+    }
+    std::set<std::string> used;
+    for (const auto &group : au::theme_token_groups()) {
+        for (const auto &name : group.tokens) {
+            for (const auto &expr : exprs) {
+                if (token_appears_in(expr, name)) {
+                    used.emplace(name);
+                    break;
+                }
+            }
+        }
+    }
+    return used;
 }
 
 }  // namespace
@@ -220,6 +281,14 @@ auto main(int argc, char **argv) -> int {
             "usage",
             "a token name is a display path only; property fallbacks bind the member pointer, so renaming a "
             "token is a compile error rather than a stale string");
+        theme_tokens.set(
+            "consumed_rule",
+            "consumed=true means at least one token of the group is used as a property-row default (it appears "
+            "in some entry's default_expr); per-token wiring detail is not expressed by this bit. The groups "
+            "listed as unconsumed in specification/07-environment-modifier.md section 5.1 must equal the groups "
+            "with consumed=false; check_no_theme_color_literals judges that equality");
+        // 属性行消费面：从刚装配好的 widgets 条目反查 default_expr 里出现的令牌名，再对每组判「至少一枚」。
+        const std::set<std::string> consumed_tokens = collect_consumed_tokens(api);
         au::Json groups = au::Json::array();
         for (const auto &group : au::theme_token_groups()) {
             au::Json row = au::Json::object();
@@ -228,14 +297,36 @@ auto main(int argc, char **argv) -> int {
             row.set("prefix", std::string{group.prefix});
             row.set("type", std::string{group.value_type});
             au::Json tokens = au::Json::array();
+            bool consumed = false;
             for (const auto &name : group.tokens) {
+                consumed = consumed || consumed_tokens.contains(std::string{name});
                 tokens.push_back(std::string{name});
             }
             row.set("count", au::Json{static_cast<int>(group.tokens.size())});
+            row.set("consumed", au::Json{consumed});
             row.set("tokens", std::move(tokens));
             groups.push_back(std::move(row));
         }
         theme_tokens.set("groups", std::move(groups));
+
+        // 颜色字面量豁免登记（唯一真源：tools/include/theme_literal_exemptions.h）。同一枚门禁
+        // （check_no_theme_color_literals）按本块逐条核对实际出现次数，故本块与源码不可能各说各话。
+        au::Json exemptions = au::Json::object();
+        exemptions.set("gate", "check_no_theme_color_literals");
+        exemptions.set(
+            "usage",
+            "numeric color literals still allowed in the widget layer and the CSD preset table; count is the "
+            "exact occurrence count of Color{...} / Color(...) constructions in that file, judged by the gate");
+        au::Json files = au::Json::array();
+        for (const auto &entry : aurora::tools::AURORA_THEME_COLOR_LITERAL_EXEMPTIONS) {
+            au::Json row = au::Json::object();
+            row.set("path", std::string{entry.path});
+            row.set("count", au::Json{entry.count});
+            row.set("reason", std::string{entry.reason});
+            files.push_back(std::move(row));
+        }
+        exemptions.set("files", std::move(files));
+        theme_tokens.set("exemptions", std::move(exemptions));
     }
     api.set("theme_tokens", theme_tokens);
 
