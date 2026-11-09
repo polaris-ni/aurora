@@ -1,0 +1,115 @@
+name: Nightly runtime benchmarks
+
+on:
+  schedule:
+    - cron: "37 2 * * *"
+  workflow_dispatch:
+    inputs:
+      repetitions:
+        description: "Repetitions per arm"
+        required: false
+        default: "9"
+      seed:
+        description: "Seed deciding the interleaved sampling order"
+        required: false
+        default: "20261109"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-runtime-bench
+  cancel-in-progress: false
+
+# Deliberately separate from ci.yml: the nightly job is observational, adds no
+# gate, and must not change the pull request status or the existing job matrix.
+# Both arms are built on the same runner so wall-clock noise affects them alike.
+env:
+  AURORA_NIGHTLY_SEED: ${{ inputs.seed || '20261109' }}
+  AURORA_NIGHTLY_REPETITIONS: ${{ inputs.repetitions || '9' }}
+  AURORA_NIGHTLY_TESTBED: gh-ubuntu-release-headless
+
+jobs:
+  nightly-bench:
+    name: Same-runner base/head interleaved A-B
+    runs-on: ubuntu-26.04
+    timeout-minutes: 180
+    steps:
+      - name: Checkout full history for both arms
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Set up ccache
+        uses: hendrikmuhs/ccache-action@v1.2.24
+        with:
+          key: nightly-bench
+
+      # A green self-validation is not evidence on its own: the driver injects a
+      # deterministic slowdown and a skipped result and requires both to turn red.
+      - name: Driver injected-mutation self-validation
+        run: python3 tools/check/bench_nightly.py selftest
+
+      - name: Prepare base checkout at the parent revision
+        run: |
+          git worktree add --detach base-src HEAD~1
+          echo "BASE_COMMIT=$(git rev-parse HEAD~1)" >> "$GITHUB_ENV"
+          echo "HEAD_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      # Release without instrumentation: the time-class thresholds keep their
+      # historical build convention. Tests, demos, format and lint targets are
+      # off so only the library and the six bench executables are compiled.
+      - name: Configure both arms
+        run: |
+          flags="-G Ninja -DCMAKE_BUILD_TYPE=Release -DAURORA_BUILD_TESTS=OFF -DAURORA_BUILD_E2E=OFF -DAURORA_BUILD_DEMOS=OFF -DAURORA_BUILD_DOCS=OFF -DAURORA_ENABLE_CLANG_FORMAT=OFF -DAURORA_ENABLE_CLANG_TIDY=OFF"
+          cmake -S base-src -B build-base $flags
+          cmake -S . -B build-head $flags
+
+      - name: Build six bench executables for both arms
+        run: |
+          targets="bench_render bench_scroll bench_theme bench_gpu bench_win32_present bench_idle_cpu"
+          cmake --build build-base --parallel --target $targets
+          cmake --build build-head --parallel --target $targets
+
+      # The driver exits zero for all four comparator verdicts. A regression
+      # emits a warning annotation only; infrastructure failures still fail
+      # this observational job so a broken pipeline is visible in the summary.
+      - name: Interleaved A-A calibration and A-B comparison
+        run: |
+          python3 tools/check/bench_nightly.py run \
+            --base-bin build-base \
+            --head-bin build-head \
+            --work bench-nightly-out \
+            --report bench-nightly-out/report.json \
+            --summary bench-nightly-out/summary.md \
+            --baseline tools/check/perf_baselines.json \
+            --testbed "$AURORA_NIGHTLY_TESTBED" \
+            --base-commit "$BASE_COMMIT" \
+            --head-commit "$HEAD_COMMIT" \
+            --seed "$AURORA_NIGHTLY_SEED" \
+            --repetitions "$AURORA_NIGHTLY_REPETITIONS"
+
+      - name: Publish verdict to job summary
+        if: always()
+        run: |
+          if [ -f bench-nightly-out/summary.md ]; then
+            cat bench-nightly-out/summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Nightly benchmark produced no summary; see the job log." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload machine-readable reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: nightly-bench-report
+          path: |
+            bench-nightly-out/report.json
+            bench-nightly-out/summary.md
+            bench-nightly-out/noise-budget.json
+          if-no-files-found: warn
