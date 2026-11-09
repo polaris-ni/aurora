@@ -1,7 +1,7 @@
 # 序列化、检查器与工具链（serialization / inspector / tooling / log）
 
 > 覆盖 `widget/serialization.h`、`widget/codegen.h`、`widget/yaml.h`、`widget/inspect.h`、`inspector/`、`core/log.h`、`core/json.h`（JSON 值容器，契约见 [`01-core.md`](01-core.md) §9）、`debug/`、仓库私有 `tests/support/test_helpers.h` 与 `tools/`。
-> 本文件是 UI 树线格式、差分补丁、代码生成、运行时检查、MCP / CLI / LSP 工具链与日志通道的**唯一权威**。
+> 本文件是 UI 树线格式、差分补丁、代码生成、运行时检查、MCP / CLI / LSP 工具链、日志通道与**运行时性能测量口径**的**唯一权威**；`manual-test/17-perf.md` 只保留人工执行记录，`tools/check/perf_gates.json` 只保留阈值，两者都不是口径来源。
 > `WidgetDescriptor` / `PropDescriptor` 结构见 [`04-widget.md`](04-widget.md) §2.1；`Result` 与 `Error` 见 [`01-core.md`](01-core.md) §3。
 
 ---
@@ -554,6 +554,7 @@ stdio JSON-RPC 2.0 语言服务，对 `au::<Type>(au::<Type>Props().set_<key>(..
 | `bench_win32_present` | `tools/bench/bench_win32_present.cpp` | Win32 上屏诊断基准（无 Win32 后端时跳过） |
 | `bench_idle_cpu` | `tools/bench/bench_idle_cpu.cpp` | 空闲 CPU 基准（无 Win32 后端时跳过） |
 | `bench_theme` | `tools/bench/bench_theme.cpp` | 主题读面基准（Headless 下才可运行；同一棵树跑「整值拷贝 / 按引用 / 不读」三形态 × 字体族名三档——小串内的 Material 基线档、注入的越界长族名档、以及缺省配置下窗口每帧注入的本机平台族名档，输出一帧内主题解析次数、每次解析的堆分配与纳秒、换肤一帧耗时；非 CTest 断言） |
+| `bench_gpu` | `tools/bench/bench_gpu.cpp` | GPU 离屏基准（CPU 对照两形态恒在；wgpu 后端编入时追加四形态，未编入如实标注跳过，非 CTest 断言） |
 
 **自定义目标**
 
@@ -562,9 +563,15 @@ stdio JSON-RPC 2.0 语言服务，对 `au::<Type>(au::<Type>Props().set_<key>(..
 | `generate_error_codes` | 触发 `gen_error_codes` 重跑（errors.toml 变更时）。产物先落 `<build>/_gen_error_codes_stage/`，经 clang-format（配置以 `file:<仓库根绝对路径>` 钉死，口径见 `BUILD_OPTIONS.md` §4.7）折行后 `copy_if_different` 回源码树；生成器四个路径参数一律必需，缺省即拒绝执行，以免绕过折行步骤直写版控文件 |
 | `aurora_api_json` | 运行 `gen_api_tools` 直写 `aurora_api.json`，随后 `gen_debug_api` 再合并 `debug` 段（单跑即得完整文件） |
 | `gen_debug_api_json` | 仅刷新 `aurora_api.json` 的 `debug` 段 |
-| `perf_gates` | 本机时间类门槛校验（`tools/check/check_perf_gates.ps1`，仅 Windows，不进 CI）。判定口径：计入项**取不到读数即失败**（显示 `FAIL(no data)`、退出码 1），只作信息项的 G-9~G-11 未给 PROFILING 构建时记 `n/a` 且不计入；`bench_scroll` 的读数按 CSV **表头列名**定位（历史上写死下标取到的是 p95，门槛被放松一个百分位）。空表一律不判通过 |
+| `perf_gates` | 本机时间类门槛**趋势对照**（`tools/check/check_perf_gates.ps1`，仅 Windows，不进 CI）。判定口径：计入项**取不到读数即失败**（显示 `FAIL(no data)`、退出码 1），只作信息项的 G-9~G-11 未给 PROFILING 构建时记 `n/a` 且不计入；`bench_scroll` 的读数按 CSV **表头列名**定位（历史上写死下标取到的是 p95，门槛被放松一个百分位）。空表一律不判通过。独立进程三次取最小值只作趋势对照，**不是统计判定来源**；统计判定由本节的夜间同机交错对照承担 |
 
 > AI 兼容性批量验证**不是** cmake 目标，而是 CTest 集成用例 `itest_ai_compat`（`tests/integration/itest_ai_compat.cpp`）：遍历 `tests/fixtures/ai_compat/` 下的 JSON fixture，无 LLM 调用；`valid_*` 期望通过、`error_*` 期望报错、`interact_*` 为「静态树 → TestController 交互 → 状态断言」回归脚本（`itest_ai_compat.cpp` 中段消费）。运行：`ctest -R itest_ai_compat`。
+
+**运行时性能测量与持续看护（权威口径）**：六个基准工具每次运行都落盘一份结构化结果文件（契约在 `tools/include/bench_result.h`，编解码复用 `include/aurora/core/json.h`），字段含契约版本、运行元数据（提交、构建指纹、编译器、构建类型、后端、测试环境、场景、重复序号与交错种子）、读数段与可信度结论；原有标准输出一字不变。采样不可信、后端不可用或场景跳过时仍落盘带原因码的结果，判数据缺失而非通过。结果默认写在 `bench-results/`，可由 `AURORA_BENCH_RESULT_DIR` 改向。
+
+阈值与读数是两类数据：`tools/check/perf_gates.json` 仍是 G-1 至 G-14 的唯一阈值登记册，本机 `tools/check/check_perf_gates.ps1` 与 `tests/unit/utest_scroll.cpp` 两个读取方及三次取最小值口径都不变；`tools/check/perf_baselines.json` 才是入库的跨提交趋势读数，按测试环境、构建口径、后端与场景分桶，只允许由显式写入动作更新。`tools/check/bench_compare.py` 是零依赖统计判定载体：同一份代码两臂同码对照标定噪声预算，每臂有效重复不少于九次，交错顺序由显式种子决定，相对变化同时超过噪声预算与最小可检出变化后经双样本秩检验与多重比较校正给出「通过 / 回归 / 噪声不足 / 数据缺失」四种结论；入库基线只作趋势，同次双构建交错对照才作回归判定，任一侧缺失即判数据缺失，不回退静态阈值。
+
+`tools/check/bench_nightly.py` 驱动 `.github/workflows/nightly-bench.yml` 的独立夜间作业：同一运行器内构建父提交与当前提交两套产物，先跑同码标定再跑交错对照，机器可读报告与作业摘要上传为产物；跳过或不可信读数单独列为覆盖缺口，不混入有效读数。该作业不进持续集成测试注册、不进 `tools/check/declared_gates.txt` 现役声明清单，时间类超阈值只产生告警，不改变拉取请求状态与既有作业通过失败语义；计数类确定性判据仍由既有单元测试硬红守护。量化需求见 `SPEC.PERF.RUNTIME.FRAME-BUDGET.001`，运行配方见 `GUIDELINE.md` §14，下游恒开帧监控门面见 `include/aurora/perf/frame_monitor.h`。
 
 #### 7.4.1 空闲 / 叠加层刷新实测基线与复现
 
@@ -621,7 +628,7 @@ stdio JSON-RPC 2.0 语言服务，对 `au::<Type>(au::<Type>Props().set_<key>(..
 4. 结束进程后读回输出文件：统计 `idle` 计数的逐秒增量与 `(stale)` 出现的行数。
 5. 确认该载具进程已退出，避免占用目标导致下一次重编报占用错误。
 
-> 上述数字为单次实测（Windows / Win32 软件后端），与机型、构建配置强相关；引用时必须连同口径一起复述。**尚未纳入 CI 门禁**：时间类门槛历史上只作本地趋势对照（见 `tools/check/perf_gates.json` 的 `source` 字段），若要新增门槛，需先固定载具、采样窗口与判定阈值。另：叠加层空闲场景的自动覆盖由 `tests/integration/itest_perf_overlay_refresh.cpp` 承担（原人工用例 TC-PERF-008 随载具退役移除）。
+> 上述数字为单次实测（Windows / Win32 软件后端），与机型、构建配置强相关；引用时必须连同口径一起复述，**不得作为跨机器绝对阈值**。时间类门槛的权威判定已收口到本节的统一结果契约与夜间同机交错对照：本机 `perf_gates` 保留为趋势对照入口，阈值仍以 `tools/check/perf_gates.json` 为唯一登记册，两个既有读取方不动。另：叠加层空闲场景的自动覆盖由 `tests/integration/itest_perf_overlay_refresh.cpp` 承担（原人工用例 TC-PERF-008 随载具退役移除）。
 
 ### 7.4.2 构建期词表生成（`gen_i18n`）与 golden 门禁
 

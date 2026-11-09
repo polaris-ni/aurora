@@ -397,6 +397,8 @@ cmake --build build --target coverage -- -j $env:NUMBER_OF_PROCESSORS
 | 计数器级 | `AURORA_PROFILE_COUNT(field, n)` / `AURORA_PROFILE_SET(f, v)` | 展开为 `((void)0)`，`RenderCounters::current()` 不调用 |
 | 编译期查询 | `constexpr bool aurora::profiling_enabled()` | 返回 `false`（可用于 `if constexpr` 剪裁） |
 
+**下游订阅门面是第三层，且恒开**：`include/aurora/perf/frame_monitor.h` 的多订阅帧回调、命名指标注册与作用域计时入口不读 `AURORA_ENABLE_PROFILING`，在 `AUTO` / `ON` / `OFF` 三态与 Release 下都编译进库并可用。零订阅者时门面在入口即返回：不挂底层帧钩子、不分配、不读时钟、不写产物，底层钩子注册数、堆分配次数、时钟读取次数与产物字节数恒为零；该契约由确定性计数单测与一次真注入变异守护。深度作用域插桩仍由上表的作用域级 / 计数器级编译期归零承担，二者开销边界互不借用。独立 `AURORA_ENABLE_TRACING=ON` 隐含强制打开 `AURORA_ENABLE_PROFILING` 的既有关系不变。
+
 常用组合：
 
 ```powershell
@@ -867,6 +869,8 @@ target_link_libraries(my_app PRIVATE Aurora::aurora)
 - `AURORA_ENABLE_PROFILING=ON`（显式强制）→ 宏对全部配置生效，写入 `AURORA_EXPORTED_DEFINES`；
 - `AURORA_ENABLE_PROFILING=AUTO` → 宏由生成器表达式按**构建配置**决定，安装期无法用单一值表达，故**不导出**；消费者若需插桩接口，自行 `-DAURORA_ENABLE_PROFILING` 或安装 `=ON` 的构建；
 - `AURORA_ENABLE_TRACING=ON` → 写入 `AURORA_EXPORTED_DEFINES`（其隐含的 PROFILING 亦被强制为 `ON`，一并导出）。
+
+**下游性能脚手架不依赖上述导出**：恒开订阅门面 `include/aurora/perf/frame_monitor.h` 编在库内，消费者只需链接预编译库即可注册帧回调、命名指标与读取结构化快照，**无需重编库、无需 `AURORA_ENABLE_PROFILING` 宏、也不要求安装产物导出该宏**。安装态可用性契约由 `tools/verify/installed_consumer/` 的独立消费工程验证（`cmake --install` → `find_package(Aurora)` → 编译链接 → 运行），深度作用域插桩仍按 §4.1 的编译期归零口径使用。
 
 ### 9.4 最小验证示例
 

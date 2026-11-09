@@ -151,6 +151,8 @@
 
 > 命名消歧：文档交叉引用门禁 `tools/check/check_codespec_xref.py` 另有一套 `R1`–`R5`（链接可达 / 章节号格式 / 反引号路径 / 特性表落点），与本文 `TEST-RN` 无关，勿混用。
 
+> 性能验收另守三条纪律（不新增 `TEST-RN` 编号，由评审与注入变异自证承担）：判据必须有独立基准，并且**真注入一次变异看它转不转红**——判据全绿不是证据；零开销与生命周期类判据只能钉可确定性区分的量（底层钩子注册数、堆分配次数、时钟读取次数、产物字节数），不得用「多读几次」或单独的墙钟中位数差证明修好；时间类读数的回归判定须有同机交错对照、足量重复、噪声预算与并行指标族的多重比较校正，禁止用单次绝对值或本机多次取最小值代替统计判定。
+
 ### 3.3 覆盖率工作流
 
 行覆盖率以 GCC `--coverage` 构建（CMake 开关 `AURORA_ENABLE_COVERAGE=ON`）并跑完 CTest 后，用 `tools/coverage/coverage_report.sh`（Linux / macOS）或 `tools/coverage/coverage_report.ps1`（Windows）聚合为终端摘要 + `<build_dir>/coverage.csv`，此为唯一口径。
@@ -216,6 +218,8 @@
 | 功能输出 | `AURORA_LOG_RAW(category, ...)` | stdout | 无前缀、不受阈值 / 开关限制、始终输出，且 `fflush` 保证即时送达 |
 
 功能输出通道用于 CLI 的 JSON 结果与 usage 文本、benchmark 表格、LSP / MCP 等基于 stdio 的线协议帧等「程序产品」输出。
+
+基准类工具另有**落盘纪律**：每次运行必须额外写一份带契约版本、运行元数据、读数段与可信度结论的结构化结果文件（契约在 `tools/include/bench_result.h`），原标准输出表格逐项保持不变，既有解析方继续可用。采样不可信、后端不可用或场景跳过时仍须落盘带原因码的结果并判数据缺失，禁止静默不写，也禁止写成看似可用的读数；默认落在 `bench-results/`，由 `AURORA_BENCH_RESULT_DIR` 改向。落盘只产本库结构化数据与 Chrome Trace 兼容时间线，不接外部遥测或网络上报。
 
 遗留 `printf` 风格诊断用 `AURORA_TEST_PRINTF` / `AURORA_TEST_PRINTF_ERR` 桥接宏（先 `snprintf` 入**内存缓冲**再经 `Logger` 输出，非标准输出）。
 

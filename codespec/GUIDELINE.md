@@ -413,6 +413,59 @@ AURORA_LOG_RAW("bench", r.p99_ms(), " ", r.jitter_ms(), " ", r.full_redraw_frame
 AURORA_LOG_RAW("bench", "scroll_buffer_bytes peak=", r.counters_max().scroll_buffer_bytes, "\n");
 ```
 
+**统一结果文件**（六个基准工具每次运行都额外落盘一份 JSON，标准输出不变）：
+
+```bash
+# 指定本次运行的落盘目录与元数据；不指定时默认 bench-results/
+AURORA_BENCH_RESULT_DIR=bench-results/run-01 \
+AURORA_BENCH_TESTBED=win-release-headless \
+AURORA_BENCH_COMMIT="$(git rev-parse HEAD)" \
+./build/bench_scroll.exe --scene app --format csv
+# 产物：bench-results/run-01/bench_scroll.app.json
+```
+
+采样不可信、后端不可用或场景跳过时同样落盘，但 `status` 与 `data_status` 会带原因码，比较载体判数据缺失而非通过。契约字段见 `tools/include/bench_result.h`。
+
+**入库基线与统计判定**（`tools/check/bench_compare.py`，零第三方依赖）：
+
+```bash
+# 只有这个显式动作可以改写入库基线；普通比较永不改写
+python3 tools/check/bench_compare.py write-baseline \
+  --results bench-results/run-01 \
+  --baseline tools/check/perf_baselines.json \
+  --commit "$(git rev-parse HEAD)" --fingerprint release-headless
+
+# 同一份代码两臂同码对照标定噪声预算，再对两臂做判定
+python3 tools/check/bench_compare.py calibrate \
+  --base bench-results/aa-base --head bench-results/aa-head \
+  --out bench-results/noise-budget.json
+python3 tools/check/bench_compare.py compare \
+  --base bench-results/base --head bench-results/head \
+  --seed 20261109 --noise-budget bench-results/noise-budget.json \
+  --baseline tools/check/perf_baselines.json --out bench-results/verdict.json
+```
+
+`compare` 每臂有效重复不少于九次、交错顺序由 `--seed` 决定；结论为「通过 / 回归 / 噪声不足 / 数据缺失」四选一，非「通过」时退出码为 1。入库基线只作跨提交趋势，同次双构建交错对照才作回归判定。`tools/check/bench_nightly.py selftest` 可本地复验注入变异自证；夜间编排见 `.github/workflows/nightly-bench.yml`。
+
+**下游应用的最小监控配方**（恒开门面，预编译 Release 库直接可用，不需要 `AURORA_ENABLE_PROFILING`）：
+
+```cpp
+#include "aurora/aurora.h"
+
+const auto sub = au::FrameMonitor::subscribe([](const au::FrameBatch &batch) {
+    for (std::size_t i = 0; i < batch.count; ++i) {
+        AURORA_LOG_RAW("bench", batch.samples[i].index, " ", batch.samples[i].frame_delta, "\n");
+    }
+});
+const auto metric = au::FrameMonitor::register_metric("my-view-render-ms");
+au::FrameMonitor::set_metric(metric, 1.25);
+AURORA_LOG_RAW("bench", au::FrameMonitor::snapshot_json(), "\n");
+au::FrameMonitor::unregister_metric(metric);
+au::FrameMonitor::unsubscribe(sub);
+```
+
+零订阅者时 `au::FrameMonitor::diagnostics()` 的四项采集计数恒为零，`begin_scope` 返回空句柄且不读时钟。完整示例见 `examples/demos/demo_frame_monitor.cpp`，预编译库消费探针见 `tools/verify/installed_consumer/`。
+
 ---
 
 ## 15 序列化：树 ⇄ JSON

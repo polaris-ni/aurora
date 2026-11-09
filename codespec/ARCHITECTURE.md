@@ -375,7 +375,7 @@ drain_posted → pump_all_once → on_frame_ → 关闭闸门询问步 poll_clos
 
 ## 10 性能检测体系
 
-Aurora 内置轻量级运行时性能检测体系，提供帧级指标采集、分阶段计时、可视化叠加与日志导出。整个体系零外部依赖，所有组件默认关闭、按需启用。
+Aurora 内置轻量级运行时性能检测体系，提供帧级指标采集、分阶段计时、可视化叠加与日志导出。整个体系零外部依赖，开销按**分级**契约而非「所有组件默认关闭」：帧级采集（`FrameStats` / `PerfOverlay` / `PerfLog`）与恒开的下游订阅门面不受插桩开关控制；分阶段计时与深度作用域插桩由 `AURORA_ENABLE_PROFILING` 编译期归零；可视化叠加层默认 `set_visible(false)`。下游订阅门面在无订阅者时不挂底层采集、不分配、不读时钟，因此 Release 与预编译库都可用。
 
 ### 10.1 FrameStats
 
@@ -438,6 +438,12 @@ Aurora 内置轻量级运行时性能检测体系，提供帧级指标采集、�
 | 因果链 | 无（靠经验） | 无 | 无 | `why_trace`（mark-needs 触发因果链，含 `propagated` 根因 / 传播区分） |
 | 远程访问 | DevTools Server（WebSocket） | React DevTools 独立进程 | GammaRay 进程注入 | `InspectorServer` localhost REST（`/api/debug/*`） |
 | 平台限制 | Skia / Impeller 后端 | DOM / reconciler | 原生 Qt | 真实窗口截图在 Wayland / Headless 不支持（不破解合成器隐私边界） |
+
+### 10.7 基准读数契约与持续看护
+
+六个基准工具统一落盘结构化结果文件（契约在 `tools/include/bench_result.h`），保留原标准输出；结果按测试环境规格、构建口径、后端与场景分桶，跨桶读数不得互相比较。采样不可信、后端不可用或场景跳过时仍落盘带原因码的结果并判数据缺失，不把跳过当绿灯。阈值登记册 `tools/check/perf_gates.json` 与入库基线仓库 `tools/check/perf_baselines.json` 是两类数据：前者记 G-1 至 G-14 的阈值且读取方不动，后者记跨提交趋势读数且只允许显式写入动作更新。
+
+判定分两层：计数类与确定性指标继续由既有单元测试硬红守护；时间类由 `tools/check/bench_compare.py` 以同机同次双构建交错对照判定——每臂不少于九次有效重复、显式种子决定交错顺序、两臂同码对照标定噪声预算、双样本秩检验并对并行指标族做多重比较校正。入库基线只作趋势，同次对照才作回归判定，任一侧缺失即判数据缺失，不回退静态阈值。编排落在独立工作流 `.github/workflows/nightly-bench.yml`，由 `tools/check/bench_nightly.py` 在同一运行器内构建父提交与当前提交两套产物并产出报告与作业摘要；时间类超阈值只告警，不改动 `ci.yml` 全量矩阵的通过失败语义。权威口径见 `specification/08-tooling.md`（工具规格章节）。
 
 ---
 
@@ -582,6 +588,7 @@ CI 配置位于 `.github/workflows/`：
 |:---|:---|
 | `ci.yml` | 宏矩阵全量覆盖，push / PR 双触发经作业 0 `gate` 查重收口（分支推送的提交已被 open PR 收编时，push 腿重作业跳过、由 PR 腿承担全套；无 PR 的分支与 master/main 推送照旧全量，判据 fail-open），`concurrency` 取消旧运行以提速；所有 `cmake --build` 带 `--parallel` 取满 runner 核数（`lint` 目标内部按 `--jobs` 并行，口径相同）。共 15 组功能 job + gate：**core**（linux/gcc + linux/clang + windows/msvc + windows/mingw + windows/llvm（clang-cl）+ macos/clang，Release 与 Debug 各编一次覆盖 `AUTO` 三态的两个分支，Debug 覆盖 linux/gcc、windows/msvc 与 windows/llvm；linux-gcc-release、windows-llvm 与 macos-clang 额外构建 `demos` 聚合目标；macos-clang 是 Apple 的「能力开关全开」腿——音频（CoreAudio 在 Apple 随 `AURORA_ENABLE_AUDIO=ON` 自动）、三枚图片解码、SQLite、压缩、Tracing（强制连带 Profiling）、WebView 门面一并打开，让这些能力的 TU 在 Apple 上至少进一次编译面与全量 ctest；WebView 在 macOS 没有原生引擎（WEBVIEW2 仅 Windows、WebKitGTK 仅 Linux），该腿因此走的正是「有门面、无引擎即占位降级」那条真实路径）；**backends**（X11/Wayland/GLFW、D3D11/GLFW、macOS/GLFW 各编译一次；macOS 腿在双后端之上把能力开关开满，并补上与 linux / windows 腿同口径的 `AURORA_ENABLE_DEBUG=ON`（`Surface::data()` 读回随该宏门控）与 `AURORA_ENABLE_GLFW_GPU_GL=ON`，`AURORA_BUILD_VERIFY_TOOLS=ON` 另让九枚 AppKit / ObjC++ 探针进入 CI 编译面——只编不跑，探针里的窗口壳、拖放、菜单栏、剪贴板、通知、托盘、热键调用写错过去只有本机能发现）；**toggles**（优化三开关全关 / SIMD 关 / 图像编解码+Inspector 开 / PROFILING+TRACING+DEBUG 强制开 / DEBUG 强制关 / TLS provider 反极性（静态 mbedTLS 为全作业公共前缀，`tls-openssl-shared` 腿改动态 OpenSSL），均 ubuntu/gcc，另 HEADLESS 关分支仅验库与工具构建绿、跳过 Test 步骤）；**asan**（ASan+UBSan 全量 ctest，`-LE e2e` 排除真实后端 E2E）；**tsan**（全局编译标志注入 `-fsanitize=thread`，只跑四个网络用例的竞态定点红线，判定看落盘报告正文与 ctest 退出码的组合；只在 PR 与 master(+main) 推送跑，普通分支 push / 每周定时 / 手动触发都不跑；不装配网络能力公共前缀，理由见下文）；**coverage**（`coverage` 聚合目标：ctest + gcov 摘要，CSV/HTML 入 artifact，`-LE e2e` 同上）；**wasm**（emcmake + `AURORA_BACKEND_WASM=ON`，构建库与测试 runner 并全量 ctest，能力缺失用例走 SKIP 路径；两腿一并编出 Inspector Server——浏览器口径没有 TLS provider 安装根，故不给 provider）；**tls-providers**（`AURORA_NET_TLS_PROVIDERS` 与 `AURORA_ENABLE_NET_TLS_SYSTEM` 的构建面四腿：Linux 双 provider 共存（静态 mbedTLS 安装根 `static:/opt/aurora-tls-mbedtls` + 动态 OpenSSL `shared:/usr`）+ Windows 动态 OpenSSL（作业自建 vcpkg 安装根）与系统栈 Schannel 共存 + macOS 系统栈 SecureTransport 单腿 + macOS 动态 OpenSSL（homebrew keg-only 根）与系统栈共存，后三腿证明「给了 provider 也保住系统栈那条腿」而不是二选一；Windows 腿 `AURORA_BUILD_TESTS=OFF`（动态库不落测试可执行旁），其余三腿在两个进程里分别跑 `utest_net_tls_backend` 与 `utest_net_tls`）；**install-consumer**（`cmake --install` + `find_package(Aurora)` 最小消费端冒烟，GUIDELINE §1 配方；默认配置与 Release 下强制 `AURORA_ENABLE_DEBUG=ON` 的「非默认宏一致性」各一组）；**lint**（clang-tidy 门禁，矩阵 = DEBUG OFF / DEBUG ON / optimizations-off 三份扩面编译数据库 × TU 分片 4 片 = 12 个作业，去重后 0 finding 才过；编译库显式打开除 Windows / macOS 特有宏外的全部后端与能力开关，含 `AURORA_BACKEND_GPU_WGPU` / `AURORA_ENABLE_GLFW_GPU_GL`，其 wgpu 的 configure 期工具链探测由作业的 `libclang1-22` 安装与 `Ensure Rust toolchain` 步骤满足，`lint` 目标不 `DEPENDS` `wgpu_native_build` 故不触发真正的 cargo 编译）；**lint-wasm**（同一门禁的浏览器口径，`--emscripten` 重写后的 wasm 编译库分 4 片，只 configure 不构建）；**lint-incremental**（只在非 master / main 分支推送时跑：单 job 顺序跑 native(DEBUG OFF/ON) 与 wasm 三套编译库上「本次改动本身即 TU」的那批，`--changed-only` 不展开 include 闭包）；**lint-windows** / **lint-macos**（平台子作业：用各自平台编译库**只扫平台相关 TU**，`git grep` 按平台 token 现场选集，Windows 另在每周定时跑一遍全量；macOS 子作业只 configure 不 build，故 configure 显式关 PCH `-DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON`——clang 侧 `AURORA_PCH_ENABLED` 默认 ON 会让全 TU 因缺 `-include-pch` 产物而 broken；该子作业现跑两遍 configure（`AURORA_ENABLE_DEBUG=OFF` / `ON` 各一份编译数据库，复用同一平台 token 选集），能力串并补齐 GLFW 与其 GPU 特性、wgpu 宿主、Profiling + Tracing、内置 mbedTLS，使 DEBUG 分支与这些门下的 TU 也进 Apple 静态分析面，单遍 60 分钟余量按两遍翻倍为 90）；**fmt**（`format-check` 全量排版校验）。四道 lint 与排版均为**必过**位，各自清单逐片入 artifact；静态检查为什么按 TU 分片、分片改了判据没有，见 [`BUILD_OPTIONS.md`](BUILD_OPTIONS.md) §4.5。core 与 backends 的 Test 步骤按实际编译的后端面逐作业声明 E2E 期望集（`AURORA_E2E_EXPECT`；asan / coverage 以 `-LE e2e` 排除，wasm 在 CMake 层即无 E2E 面），逐作业期望集表与边界结论见 [`specification/08-tooling.md`](specification/08-tooling.md) §8.2「CI 作业口径」 |
 | `fuzz.yml` | 覆盖引导模糊测试短跑（独立工作流，按周 / 手动 / fuzz 资产变更 PR 触发；Clang 独立构建目录，不进 CTest，不改 `ci.yml` 的全量矩阵与四类出口） |
+| `nightly-bench.yml` | 运行时持续基准（独立工作流，按日 / 手动触发；同一运行器构建父提交与当前提交两套产物，先同码标定噪声预算再交错采样，机器可读报告与作业摘要入 artifact）。纯观测作业：时间类超阈值只告警，不注册 CTest、不进现役一票否决声明清单、不改 `ci.yml` 全量矩阵与四类出口 |
 | `release.yml` | 发布流程（构建产物 / 版本标签） |
 
 矩阵按「每个 feature 宏分支至少被一个 job 编译一次」设计；选项语义见 [`BUILD_OPTIONS.md`](BUILD_OPTIONS.md)。CI 只负责「拉起构建 + 跑 CTest」，不承载测试设计。
@@ -643,6 +650,7 @@ CI 配置位于 `.github/workflows/`：
 | `codespec/manual-test/*.md` | `check_manual_test_format` | — |
 | 仓库入口 `AGENTS.md` 本身 | `check_agents_size`（> 8 KiB 红灯；超限时把细节下沉 `codespec/`，不得放宽阈值） | 本表（把细则搬回这里） |
 | 版本号 / `CHANGELOG.md` | `check_version_consistency` | `CODING_STANDARDS.md` §7 |
+| 运行时基准结果契约、入库基线、比较载体与夜间编排 | `bench_compare_selftest`（普通 CTest 用例，非一票否决声明）、`utest_bench_result`、`check_workflow_yaml`（标准解析器完整读入且 `env:` 折叠标量值不含注释字符）、`check_declared_gates`（声明数与注册集合无差异）；夜间作业自身不进 CTest | `specification/08-tooling.md`（工具规格章节）、本文件 §10.7 / §14.4、`GUIDELINE.md` §14 |
 | 任何代码行为 | 相关 `ctest -R <stem>`、`--target docs` | 本文件 §15 流程表「回写」阶段 |
 | `tests/fuzz/`、模糊测试构建模块与独立工作流 | `check_workflow_yaml`（新增工作流的结构自检与完整解析）、`check_code_doc_sync`（设施目录白名单）、`check_no_cjk_literals`、`format-check`；夜间作业另跑判定脚本与有效性自证，不注册 CTest | `specification/08-tooling.md` §8.2、`BUILD_OPTIONS.md` §2 / §4 |
 | CI 静态检查编排（`tools/check/select_lint_tus.py`、`tools/check/run_clang_tidy.py`、`.github/workflows/`） | `check_change_proposals`、`check_no_cjk_literals`、`check_no_hardcoded_paths`；且**全量出口不得被削弱**——PR / master(+main) 推送 / 每周定时 / 手动触发四类事件下仍须走全量 18-job 矩阵遍；功能分支推送改由作业 8i `lint-incremental`（单 job 增量）覆盖，**不得反向把全量事件降级为增量**（判据见 `BUILD_OPTIONS.md` §4.5、作业编排见 `.github/workflows/ci.yml` 作业 8 / 8w / 8i / 8win / 8mac） | `BUILD_OPTIONS.md` §4.5 |
