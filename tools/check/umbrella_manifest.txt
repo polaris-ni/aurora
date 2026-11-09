@@ -266,6 +266,7 @@ aurora/window/*_surface.h -> 平台窗口后端，经 native_surfaces.h 按平�
 aurora/window/win32_host.h -> Win32 共享窗口宿主，平台后端内部设施
 aurora/window/wasm_aria.h -> Wasm ARIA 桥，平台后端内部设施
 aurora/render/detail/* -> 渲染内部实现细节（SIMD 表 / GPU 层缓存 / 计时）
+aurora/theming/detail/* -> 主题内部登记表（对比度档位 / 逐对归档 / 预设豁免），库内派生实现、gen_contrast 工具与单测共读，消费者不经伞头取用
 aurora/render/rhi/* -> RHI 后端内部契约（软件 / GL / wgpu）
 aurora/render/bidi.h -> 段落基准方向推断，渲染内部机制
 aurora/render/bitmap_font.h -> 内置位图字体，软件栅格后端内部资产

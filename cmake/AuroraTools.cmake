@@ -195,6 +195,11 @@ add_dependencies(aurora generate_error_codes)
 # 工具：反射 aurora 公共 API 生成 aurora_api.json。
 aurora_add_tool(gen_api_tools tools/gen/gen_api.cpp)
 
+# 工具：色角色对比度审计矩阵（唯一取数口，供 check_theme_contrast 门禁消费）。
+# 比值一律经库内 aurora::contrast_ratio 求出——门禁、测试、库三方各写一份 WCAG 公式正是本目标要
+# 消灭的形态，故本目标自身不得含任何颜色数学。运行：cmake --build build --target gen_contrast_tools
+aurora_add_tool(gen_contrast_tools tools/gen/gen_contrast.cpp)
+
 # 可复现生成：运行 gen_api_tools 直接写 aurora_api.json（跨平台，无需 shell 重定向）。
 # gen_api_tools 全量重写时保留既有 error_codes/debug 段（见 gen_api.cpp）；
 # 随后 gen_debug_api 以 codespec/debug_api.toml 为准重并 debug 段——单跑本目标即得完整文件，

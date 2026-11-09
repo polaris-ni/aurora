@@ -95,6 +95,18 @@ if (AURORA_BUILD_TESTS)
                         COMMAND ${PYTHON3_EXE} "${_check_dir}/check_i18n_gen_golden.py" "${CMAKE_BINARY_DIR}"
                         WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
             endif ()
+            # 色角色对比度三档门禁（specification/07-environment-modifier.md §5.1）：比值一律取自真实
+            # 构建产物 gen_contrast_tools——它调库内唯一的 aurora::contrast_ratio，经 Theme::from_style
+            # 与 with_accessibility 逐档实测（五个风格值 × 明暗 × 对比度两档 = 二十列），门禁判「登记表 ↔
+            # 产物 ↔ 文档」三方对号：表声明的枚数与实际行数与产物读数、列面是否穷举 enum class ThemeStyle
+            # × 明暗 × 对比度两档、色角色令牌表的 38 枚是否枚枚被工具读出且枚枚被审（期望集取自头内
+            # AURORA_TOKENS 而非产物读数）、档位下限是否仍是 WCAG 的 4.5 / 3.0 两条 SC、
+            # 逐格比值是否达标、豁免是否双向仍然成立（≥ 登记下限且仍 < 档位下限）、理由是否逐条非空 ASCII、
+            # §5.1 是否与表等集、派生列是否既不享豁免又只在原生未达标时才动手。
+            # 同 check_gen_api_merge 前提：交叉构建下生成器不是原生 exe，判据交给原生 job（本块不注册）。
+            add_test(NAME check_theme_contrast
+                    COMMAND ${PYTHON3_EXE} "${_check_dir}/check_theme_contrast.py" "${CMAKE_BINARY_DIR}"
+                    WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
         endif ()
         # codespec 文档内部一致性守护（断链 / 失效锚点 / 章节号 / 反引号路径 / 特性表落点）。
         add_test(NAME check_codespec_xref
