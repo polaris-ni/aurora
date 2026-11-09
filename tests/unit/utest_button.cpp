@@ -53,6 +53,7 @@ auto ensure_button_vocab() -> void {
 }
 
 using aurora::testing::require_field;
+using aurora::testing::require_value;
 
 namespace {
 
@@ -567,15 +568,15 @@ AURORA_TEST_CASE(button_state_overlays_follow_theme_roles) {
     // 状态层解析：无交互 ⇒ 空；悬停 ⇒ hover；按下压过悬停；禁用 ⇒ 空。
     AURORA_TEST_CHECK_FALSE(b.resolve_state_overlay(light).has_value());
     b.on_hover_change(true);
-    const auto overlay_light = b.resolve_state_overlay(light);
-    AURORA_TEST_REQUIRE_TRUE(overlay_light.has_value());
-    AURORA_TEST_CHECK(*overlay_light == light_roles.hover);
+    // 「断言持有值 + 取值」收进 `require_value`：判定交给报告器函数后，路径分析无法认定已检查，
+    // 调用点直接 `*opt` 会被 `bugprone-unchecked-optional-access` 判为未检查访问。
+    const auto overlay_light = require_value(b.resolve_state_overlay(light));
+    AURORA_TEST_CHECK(overlay_light == light_roles.hover);
     MouseEvent press;
     press.action = MouseAction::Press;
     b.on_pointer_event(press);
-    const auto overlay_dark = b.resolve_state_overlay(dark);
-    AURORA_TEST_REQUIRE_TRUE(overlay_dark.has_value());
-    AURORA_TEST_CHECK(*overlay_dark == dark_roles.pressed);
+    const auto overlay_dark = require_value(b.resolve_state_overlay(dark));
+    AURORA_TEST_CHECK(overlay_dark == dark_roles.pressed);
     // 基色不受状态影响：按下态下 resolve_background 仍等于 color 行。
     AURORA_TEST_CHECK(b.resolve_background(light) == b.color(light));
     b.set_enabled(false);
