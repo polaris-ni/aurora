@@ -4039,9 +4039,9 @@
         {
           "name": "font_size",
           "type": "float",
-          "default": 14.0,
-          "note": "Font size (pt)",
-          "minimum": "0"
+          "note": "Font size (pt; follows the theme body type scale when unset)",
+          "minimum": "0",
+          "default_expr": "type_scale.body_medium"
         },
         {
           "name": "color",

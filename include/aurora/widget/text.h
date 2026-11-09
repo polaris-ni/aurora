@@ -15,6 +15,8 @@
 #include "aurora/i18n/message_catalog.h"
 #include "aurora/state/read_only_state.h"
 #include "aurora/theming/color_roles.h"  // 活令牌回落点：roles.on_surface
+#include "aurora/theming/theme_scope.h"  // 派生档回落点：inherit_theme(ctx).type_scale
+#include "aurora/theming/type_scale.h"  // 非正字号兜底取字阶声明默认值，不另立常量
 #include "aurora/widget/props.h"
 #include "aurora/widget/widget.h"
 
@@ -29,11 +31,14 @@ namespace aurora {
 ///
 /// 回落点三档在本表里同时在场：
 /// - 活令牌档（`color`）：随作用域换肤而变，读件带 `BuildContext`；
-/// - 常量档（`font_size` / `text_align` / `max_lines` / `overflow` / `soft_wrap` / `line_height` /
+/// - 常量档（`text_align` / `max_lines` / `overflow` / `soft_wrap` / `line_height` /
 ///   `letter_spacing` / `word_spacing` / `font_weight` / `font_style` / `decoration` /
 ///   `background_color`）：全库唯一基线，读件无参；
-/// - 派生档（`decoration_color`）：回落点读同族 `color` 行的生效值再加工，读件带 `BuildContext`，
-///   schema 里的默认值只能以显示串给出，本行写 `.shows_token<&ColorRoles::on_surface>()`（名由登记表反查）。
+/// - 派生档（`font_size` / `decoration_color`）：回落点读作用域主题或同族他行的生效值再加工，读件带
+///   `BuildContext`，schema 里的默认值只能以显示串给出。`decoration_color` 读的是已登记令牌，故写
+///   `.shows_token<&ColorRoles::on_surface>()`（名由登记表反查）；`font_size` 读的是字阶正文档，而
+///   `TypeScale` 的值是 `Font` 而非标量档、不入 `theme_tokens` 登记表（理由见
+///   specification/07-environment-modifier.md §5.1），故只能就地写 `.shows("type_scale.body_medium")`。
 ///
 /// `direction` 的「继承」语义留在表外：本行回落基线是 `LTR`（读件无参），但控件判定方向时先问
 /// 表态位 `present(direction_row())`——未表态即走 `Environment` / 进程级继承，与迁移前 `nullopt` 等价。
@@ -51,6 +56,11 @@ class TextProps : public AbstractProps<TextProps> {
     }
 
     /// @brief 可空值件：字号（pt）。参与度量 ⇒ 布局档；下界 0。
+    ///
+    /// 未表态时取主题**正文档**（`type_scale.body_medium`）：于是风格档的正文基准（Windows 14、
+    /// macOS 13、GNOME 11、KDE 10）与无障碍字号缩放都经同一条字阶通道到达本控件，与读同一档的
+    /// 四枚图表控件逐位同值。表态过即以表态值为准 —— 缩放不二次作用于显式设值，这条与「显式设值
+    /// 压过主题」是同一句话（见 specification/07-environment-modifier.md §5.1）。
     /// @return 本行的表行对象。
     [[nodiscard]] static constexpr auto font_size_row() {
         return prop_row<&TextProps::font_size_>("font_size")
@@ -58,7 +68,8 @@ class TextProps : public AbstractProps<TextProps> {
             .paint()
             .bounds("0")
             .fallback(&TextProps::font_size_default)
-            .note("Font size (pt)");
+            .shows("type_scale.body_medium")
+            .note("Font size (pt; follows the theme body type scale when unset)");
     }
 
     /// @brief 可空来源件：文字色。未表态时取主题 `roles.on_surface`，换肤即随动。
@@ -213,9 +224,10 @@ class TextProps : public AbstractProps<TextProps> {
     /// @return 内容的本地化值（显示串仍须经 `MessageCatalog` 解析）。
     [[nodiscard]] auto content() const -> LocalizedString { return get(content_row()); }
 
-    /// @brief 当前生效字号（pt）：常量档回落点不随作用域变 ⇒ 无参读件。
-    /// @return 字号（pt）。
-    [[nodiscard]] auto font_size() const -> float { return stated(font_size_row()); }
+    /// @brief 当前作用域下生效的字号（pt）：回落点是主题正文档 ⇒ 带上下文读件。
+    /// @param ctx 构建上下文：未表态时据此解主题 `type_scale.body_medium`。
+    /// @return 生效字号（pt）；表态过即表态值，缩放不二次作用于它。
+    [[nodiscard]] auto font_size(const BuildContext &ctx) const -> float { return resolve(font_size_row(), ctx); }
 
     /// @brief 当前作用域下生效的文字色。
     /// @param ctx 构建上下文：未表态时据此解主题 `roles.on_surface`。
@@ -386,11 +398,21 @@ class TextProps : public AbstractProps<TextProps> {
     /// @return 引用本属性对象，便于链式续写。
     auto set_background_color(Color value) -> TextProps & { return assign(background_color_row(), value); }
 
-    // ---- 回落点提供者：常量档与派生档的唯一基线（同族互读只经读件） ----
+    // ---- 回落点提供者：派生档的唯一基线（同族互读只经读件） ----
 
-    /// @brief 字号回落基线（pt）。
-    /// @return 14.0F。
-    [[nodiscard]] static auto font_size_default() -> float { return 14.0F; }
+    /// @brief 字号回落点（派生档）：取当前作用域主题的正文档字号。
+    ///
+    /// 走主题而不是进程级 `AccessibilitySettings::font_scale` 是唯一口径：字号缩放已在主题物化点折进
+    /// 字阶，本回落点只读折好的快照，控件侧不再有任何第二次乘法（读同一档的四枚图表控件因此同值）。
+    /// 非正字号的兜底直接取 `TypeScale` 的声明默认值，不另立一份常量——那枚 14pt 的真源只有字阶本身。
+    /// @param self 本属性对象（本回落点不读同族他行，形参由派生档签名固定）。
+    /// @param ctx 构建上下文：提供主题作用域；裸上下文回落 Material 基线档。
+    /// @return 该作用域下 `theme.type_scale.body_medium` 的磅值。
+    [[nodiscard]] static auto font_size_default(const TextProps &self, const BuildContext &ctx) -> float {
+        static_cast<void>(self);
+        const float pt = inherit_theme(ctx).type_scale.body_medium.size_pt;
+        return pt > 0.0F ? pt : TypeScale{}.body_medium.size_pt;  // 主题被写成非正字号时不退化成零高度文本
+    }
 
     /// @brief 水平对齐回落基线。
     /// @return `TextAlign::Left`。
@@ -472,7 +494,7 @@ class TextProps : public AbstractProps<TextProps> {
 /// @brief 文本控件（叶 widget）：测量文字自然尺寸，绘制文本。
 ///
 /// 属性一律经 `TextProps` 的读写件访问（本类公有继承它，故 `txt.set_font_size(16.0F)` 与
-/// `txt.font_size()` 都直接可用）；链式便捷写法 `au::Text("Hi").font_size(14).color(...)` 保留在
+/// `txt.font_size(ctx)` 都直接可用）；链式便捷写法 `au::Text("Hi").font_size(14).color(...)` 保留在
 /// 本类上，`au::Text(au::TextProps().set_content("Hi").set_font_size(14.0F))` 亦等价。
 /// @note Thread: main-thread only
 /// @note Rebuildable: yes, via from_json
@@ -735,9 +757,10 @@ class Text : public LeafWidget, public TextProps {
     static constexpr size_t AURORA_NO_SEL = static_cast<size_t>(-1);
 
     /// @brief 生效字体：族名（本控件私有）＋ 字号行 ＋ 字重行拼装。
-    /// @return 供度量、绘制与命中测试共用的 `Font`。
-    [[nodiscard]] auto current_font() const -> Font {
-        return Font{.family = font_family_, .size_pt = font_size(), .weight = static_cast<int>(font_weight())};
+    /// @param ctx 构建上下文：字号未表态时据此取主题正文档。
+    /// @return 供度量与绘制共用的 `Font`（尚未过非正字号兜底，见 `effective_font`）。
+    [[nodiscard]] auto current_font(const BuildContext &ctx) const -> Font {
+        return Font{.family = font_family_, .size_pt = font_size(ctx), .weight = static_cast<int>(font_weight())};
     }
 
     std::string font_family_ = Font{}.family;  ///< 字体族名（不入属性表，从不参与序列化）
@@ -748,6 +771,9 @@ class Text : public LeafWidget, public TextProps {
     size_t caret_ = 0;  ///< 光标（caret 位置，0..码点数；用于键盘导航）
     bool selecting_ = false;  ///< 是否正在拖选
     std::string display_text_;  ///< 最近一次绘制所用显示文本（命中测试/选区使用）
+    Font layout_font_{};  ///< 最近一次布局所得生效字体：命中测试与键盘路径没有 `BuildContext`，
+                          ///< 只能复用产行时的那一份 —— 与 `display_text_` / `lines_` 同源，
+                          ///< 否则「按 A 字号产行、按 B 字号命中」会让选区落在错的字符上。
     std::string cached_resolved_text_;  ///< 缓存的 resolved_text 结果（避免每帧重复解析）
     bool resolved_dirty_ = true;  ///< resolved 缓存是否需重新计算
     std::vector<std::string> lines_;  ///< 最近一次布局所得折行结果（绘制复用）
@@ -763,11 +789,12 @@ class Text : public LeafWidget, public TextProps {
                                int max_lines, TextOverflow overflow, const render::TextLayoutOpts &opts) -> WrapResult;
     static auto wrap_lines(const std::string &text, const Font &f, float max_w, bool soft_wrap, int max_lines,
                            TextOverflow overflow, const render::TextLayoutOpts &opts) -> WrapResult;
-    /// @brief 生效字体：补齐非法字号并施加无障碍字号缩放（倍率取进程级设置）。
+    /// @brief 生效字体：非正字号兜底到正文基线，其余原样返回。
+    ///
+    /// 这里**不再**有任何字号缩放乘法：无障碍 `font_scale` 已在主题物化点折进字阶（见
+    /// `Theme::with_accessibility`），未表态字号经 `font_size` 行的派生回落点取折好的正文档，
+    /// 表态过则以表态值为准。控件侧第二次乘倍率正是本批要消灭的那条通道。
     static auto effective_font(const Font &base) -> Font;
-    /// @brief 生效字体（带上下文）：字号倍率优先取 `Environment` 注入的 `AccessibilitySettings`，
-    ///        未注入时回落进程级设置——即「树级覆盖 > 进程默认」。
-    static auto effective_font(const Font &base, const BuildContext &ctx) -> Font;
     /// @brief 生效书写方向：控件显式属性 > `Environment` 注入 > 进程级（host_set）；
     ///        无任何显式来源返回 nullopt（shaping 按内容 guess，默认行为不变）。
     ///        命中测试路径无 `BuildContext`，用无 ctx 版本（回落进程级）。

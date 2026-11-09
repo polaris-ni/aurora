@@ -7,6 +7,7 @@
 #include "aurora/core/utf8.h"
 #include "aurora/event/keycode.h"
 #include "aurora/render/font_engine.h"
+#include "aurora/theming/type_scale.h"
 #include "aurora/widget/descriptor.h"
 
 namespace aurora {
@@ -28,10 +29,14 @@ auto Text::deserialize_props(const Json &props) -> void {
 }
 
 auto Text::validate_props() const -> Result<void> {
-    if (font_size() <= 0.0F) {
-        return make_error(ErrorCode::WidgetInvalidProp,
-                          "Text.font_size must be > 0, got " + std::to_string(font_size()),
-                          "Use positive font size (e.g. 14)");
+    // 契约检查没有上下文，故只检**表态过**的字号：未表态时取值来自主题正文档，与宿主写入无关。
+    if (present(font_size_row())) {
+        const float stated_size = stated(font_size_row());
+        if (stated_size <= 0.0F) {
+            return make_error(ErrorCode::WidgetInvalidProp,
+                              "Text.font_size must be > 0, got " + std::to_string(stated_size),
+                              "Use positive font size (e.g. 14)");
+        }
     }
     return Result<void>{};
 }
@@ -40,11 +45,12 @@ auto Text::baseline_distance(const BuildContext &ctx) const -> std::optional<flo
     // 首行从内容盒顶起排（见 on_paint 的 `float y = bounds.origin.y;`），故基线即有效字体的 ascent。
     // 不做整像素 snap：容器按 cross_pos = max_above - baseline 定位后，绘制侧
     // pen_y = floor(top + ascent + 0.5) 里的 ascent 与之相消，各子项实绘基线像素一致。
-    return render::FontEngine::measure_ascent(effective_font(current_font(), ctx));
+    return render::FontEngine::measure_ascent(effective_font(current_font(ctx)));
 }
 
 auto Text::on_layout(const Constraints &c, const BuildContext &ctx) -> Size {
-    const Font f = effective_font(current_font(), ctx);
+    const Font f = effective_font(current_font(ctx));
+    layout_font_ = f;  // 命中测试/键盘路径无 ctx，与本行同源复用（见 layout_font_）
     // resolved_text 缓存：on_layout 在 content 变化时必被调用，此处计算并缓存
     cached_resolved_text_ = resolved_text(ctx);
     resolved_dirty_ = false;
@@ -86,7 +92,7 @@ auto Text::on_pointer_event(MouseEvent &e) -> void {
     if (display_text_.empty()) {
         return;
     }
-    const Font f = effective_font(current_font());
+    const Font f = layout_font_;
     const render::TextLayoutOpts opts{.letter_spacing = letter_spacing(),
                                       .word_spacing = word_spacing(),
                                       .italic = (font_style() == FontStyle::Italic),
@@ -149,7 +155,7 @@ auto Text::on_key_event(KeyEvent &e) -> void {
     if (!is_focused() || display_text_.empty() || e.action != KeyAction::Down) {
         return;
     }
-    const Font f = effective_font(current_font());
+    const Font f = layout_font_;
     const bool shift = (e.modifiers & ModifierKey::Shift) != 0U;  // NOLINT(*-redundant-parentheses)
     const bool ctrl = (e.modifiers & ModifierKey::Control) != 0U;  // NOLINT(*-redundant-parentheses)
     const size_t n = cp_count(display_text_);
@@ -365,22 +371,14 @@ auto Text::wrap_lines(const std::string &text, const Font &f, float max_w, bool 
 }
 
 auto Text::effective_font(const Font &base) -> Font {
+    // 唯一兜底：非正字号退化成正文基线，不让度量拿到零高度。
+    // 这里刻意**不**再乘 `AccessibilitySettings::font_scale` —— 缩放已在主题物化点折进字阶
+    // （`Theme::with_accessibility`），未表态字号经 `font_size` 行的派生回落点读那一份折好的快照；
+    // 控件侧再乘一次就是绕过 `TypeScale` 的第二条通道（读同一档的图表控件与本文本控件会不同值）。
     Font f = base;
     if (f.size_pt <= 0.0F) {
-        f.size_pt = 14.0F;
+        f.size_pt = TypeScale{}.body_medium.size_pt;
     }
-    // 无障碍字号缩放（`AccessibilitySettings::font_scale`）：默认 1.0 ⇒ 行为与接入前逐位一致。
-    f.size_pt *= current_accessibility_settings().resolved_font_scale();
-    return f;
-}
-
-auto Text::effective_font(const Font &base, const BuildContext &ctx) -> Font {
-    Font f = base;
-    if (f.size_pt <= 0.0F) {
-        f.size_pt = 14.0F;
-    }
-    // 带上下文版：先认 `Environment` 注入值，缺失再回落到进程级默认（见 core/accessibility.h）。
-    f.size_pt *= resolved_accessibility_settings(ctx).resolved_font_scale();
     return f;
 }
 
