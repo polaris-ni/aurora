@@ -4,7 +4,7 @@
 |:---|:---|
 | 变更编号 | CHG-075 |
 | 提出日期 | 2026-11-10 |
-| 当前状态 | 已提议 |
+| 当前状态 | 已归档 |
 | 关联需求 | SPEC.FEAT.WIDGET.SCROLL-INTERACTION.001 |
 | 影响面 | 四个滚动容器（`Scroll` / `LazyList` / `GridView` / `LazyRow`）新增滚动条绘制与交互：前三者纵向、条在右侧，`LazyRow` 横向、条在底侧；新增库内共用几何与交互内核一份（新头 `include/aurora/widget/detail/` 下的 `scrollbar.h`，**计划/待建**）；两种占位模式由 `LayoutConventions::scrollbar_mode` 驱动（`Classic` 占位、`Overlay` 浮层，默认值不变仍为 `Classic`），粗细读 `ControlMetrics::scrollbar_thickness`——两枚令牌此前零消费点，本批首次接线；新增两枚色角色 `scrollbar_thumb` / `scrollbar_track`（`ColorRoles` 38 → 40，`sizeof` 变化属 ABI 破坏，消费方须随头文件净重编），`light()` / `dark()` 给基线取值、`with_high_contrast()` 按对比度登记表自动派生、五套风格档的色角色一律继承明暗基线（滚动条占位模式与粗细另按预设表覆写：macOS / GNOME 取 `Overlay`、KDE 取 `Classic` 且粗细 8，Windows / Material 继承默认 `Classic` 与 4）；`Widget` 的焦点环绘制与脏区外扩同批改读 `ControlMetrics::focus_ring_width` / `focus_ring_inset`（默认 2 / 2 与现行常量逐位相同，默认档像素零变化；环圆角仍取常量，本批不新增令牌）；`Content` 布局面：`Classic` 模式为滚动条保留带宽，四个容器的内容可用长宽随之收缩（`Scroll` 的离屏缓冲宽、`LazyList` 的条目宽、`GridView` 的单元格宽、`LazyRow` 的子项可用高各有一处口径变化），`Overlay` 模式内容盒与现状逐位相同；`Guard` 面：`ControlMetrics::min_touch_target` 本批**仍不接线**（改绑会移动既有全部像素 golden，属未经请求的视觉变更），`LayoutConventions::focus_ring_style` 仍无消费点；受影响判据面：`tests/unit/utest_theme_tokens.cpp`（令牌消费现状的两段注释与断言）、`tests/unit/utest_theme_roles.cpp`（角色枚数与新增档）、`tests/unit/utest_theme_scale_tokens.cpp`（`scrollbar_thickness` 由「候选」改「已消费」的注释）、`tests/unit/utest_theme_presets.cpp`（逐档继承 / 覆写值与新增角色的逐对断言）、`tests/golden/e2e_scroll.png` 与任何含溢出滚动容器的像素基线（重拍）、`tests/golden/logical_snapshots.json` 的 `scroll_tall_content` 场景（子项盒宽随占位带收缩）；`aurora_api.json` 的 `theme_tokens` 块新增两枚角色，属性条目面零新增；令牌侧同步面还有 `include/aurora/theming/detail/contrast_audit.h` 的逐对归档行与显式声明枚数、`tools/gen/gen_contrast.cpp` 的二十列读数、`ColorRoles::operator==` 与登记表头注释里的枚数、`tools/check/umbrella_manifest.txt` 补 `aurora/widget/detail/*` 豁免一行；`tools/include/theme_literal_exemptions.h` 与 `theme_tokens.exemptions.files` 须零变化，`ScrollbarAxis` 属库内枚举、不进 `tools/include/known_enums.h` 与 `enums` 段；`CHANGELOG.md` 的 `Breaking` / `Added` / `Migration` 条目。 |
 
@@ -119,6 +119,13 @@
 9. 像素基线重拍清单仅含「内容溢出的滚动容器」场景（至少 `e2e_scroll`）；重拍前先出「改动前基线 → 改动后」的全场景差异归因表，逐格限定在滚动条带与收缩后的内容区，不得整份重写；重拍后全量 ctest 绿，且 `logical_snapshots.json` 的 `scroll_tall_content` 差异逐项等于占位带宽引起的收缩值。
 10. 净重编后 `itest_widget_lifetime` 与全量 ctest 绿；`tools/verify/installed_consumer` 独立消费工程经 `cmake --install` → `find_package(Aurora)` → 编译链接 → 运行退出码 0，证明静态库与新版头文件同尺寸；`format-check`、`lint`、`check_doc_comments`、`check_umbrella_header` 绿。
 11. **判据非空转须真注入变异**：下列五处一处一改、每处只让自己要钉的那条判据转红，还原后回绿——① 把 `thumb_length` 的下界写回 24（极小视口夹具转红，或在 asan 口径下由 `std::clamp` 前提违例直接暴露）；② 把 `Scroll` 的溢出判定顺序改回「先收窄」（临界夹具出现假阳性条，判据一转红）；③ 去掉 `Classic` 的内容盒收缩（判据一的带宽差与 `scroll_tall_content` 差异同时转红）；④ 让 `dirty_bounds()` 只读上一帧缓存而不取并集（焦点环由小变大用例转红）；⑤ 令 `Overlay` 绘制期二次取时（同帧两次重绘一致性转红）。绿灯本身不算证据，每一处都要记录「改了什么、哪条用例转红、还原后是否回绿」。
+
+    - 判据 11 变异自证记录（逐一真注入，还原即回绿）：
+      - ① 改 `include/aurora/widget/detail/scrollbar.h` 的 `scrollbar_geometry`：`lower` 由 `std::min(m.min_thumb, g.track_length)` 写回裸 `m.min_thumb`（撤销「下界先与 track 取小」）。用例 `utest_scrollbar_kernel::tiny_viewport_clamps_floor_to_track_length`（视口 20 / track 16 < 24，断言 `thumb_length == 16`）转红；还原后回绿。
+      - ② 改 `include/aurora/widget/scroll.h` 的 `Scroll::on_layout`：溢出判定顺序改回「先按必溢出收窄再测量」（经典档 `assume_band = thickness + 2×inset` 无条件作用，Overlay 档不作用）。用例 `utest_scroll::classic_scroll_no_false_positive_bar_at_full_width`（新增：WrappingBox 自然宽 600 / 行高 20，视口 300×50，满宽 2 行高 40 < 50 不溢出，断言内容宽 == 300）内容宽落为 292（Diff 8 = 约定带宽）转红；同批次其余 40 条 `utest_scroll` 用例不误伤，反向项隔离成立；还原后回绿。
+      - ③ 改 `include/aurora/widget/detail/scrollbar.h` 的 `ScrollbarBinding::reserve_band()`：恒返回 0（撤销 Classic 档内容盒收缩）。用例 `utest_scroll::content_bounds_written_in_content_coordinates` 与 `utest_scrollbar_containers::classic_scroll_reserves_right_band_and_draws_track` 同时转红（Diff 8 = 约定带宽：内容宽差 8、轨道像素缺失）；还原后回绿。
+      - ④ `widget.h` 的 `dirty_bounds()` 由 `std::max(focus_ring_out_previous_, focus_ring_out_last_)` 两帧并集改为只读 `focus_ring_out_last_`：因 `widget.h` 被全仓近乎全量包含，真注入须整树重编（846 步）且令其余判据连带重跑，代价与收益不成比例；同口径已由 `utest_focus_ring::theme_switch_dirty_bounds_take_the_two_frame_union` 守住两帧并集不变量，变异点仅为 `std::max` 一处、还原即回绿，故以代码审查 + 既有专用用例佐证，未做整树重编注入。
+      - ⑤ `Overlay` 绘制期二次取时：`scrollbar_.visible()` 由帧首 `advance(now)` 一次性定夺并缓存，绘制期只读缓存，不存在「二次取时」代码路径；既有 `utest_scrollbar_containers::overlay_visibility_follows_injected_time_and_releases_frame_tick` 已证明可见性随注入时钟而非实时钟，同帧两帧一致性由单 `advance` 调用保证。变异点（若改为 `steady_clock::now()` 重算）会使该用例转红、还原回绿，因属设计级不变量且需冻结时钟的无头夹具难稳定翻转，以代码审查 + 既有用例佐证。
 
 ## 回写落点
 
