@@ -80,10 +80,9 @@ AURORA_TEST_CASE(control_metrics_reproduces_current_widget_metrics) {
     divider.serialize_props(divider_props);
     AURORA_TEST_CHECK_FALSE(divider_props.contains("thickness"));  // 未表态即不写键
     AURORA_TEST_CHECK(divider.thickness(BuildContext{}) == controls.separator_thickness);
-    // 焦点环现值住在 `Widget` 的受保护常量里（绘制与脏区共用），测试侧不可直读，故只钉声明值 2.0 / 2.0。
-    // 本模块未改读这两枚令牌：环宽除绘制侧还决定脏区外扩，而 `dirty_bounds()` 没有 `BuildContext`
-    // 可拿主题，单接绘制侧会让「画的环」与「标脏的盒」取到不同宽度（残影像素）。留待脏区具备
-    // 主题入口时两处一并改读，届时以「替换前后环宽不变」的像素断言兜底。
+    // 焦点环两枚令牌已由 `Widget::paint_content` 与 `dirty_bounds()` 同批接线：绘制期读值后缓存，
+    // 标脏取两帧外扩的并集，换主题不留残影；「改令牌即随动、绘制与标脏同步」的成对像素断言在
+    // 焦点环单测里。此处仍只钉声明值 2.0 / 2.0，保证默认档与改动前逐位相同。
     AURORA_TEST_CHECK(controls.focus_ring_inset == 2.0F);
     AURORA_TEST_CHECK(controls.focus_ring_width == 2.0F);
     // 声明值对账（出处见头注释：Checkbox 20 / MenuBar 26 / Dropdown 与 SpinBox 框高 30 /

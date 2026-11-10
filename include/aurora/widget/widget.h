@@ -1782,9 +1782,14 @@ class Widget : public std::enable_shared_from_this<Widget>, public detail::Props
     bool painted_focus_ring_ = false;
 
     // ---- 统一焦点环几何（绘制与脏区外扩共用这一份常量，见 Widget::paint_content）----
-    static constexpr float AURORA_FOCUS_RING_GAP = 2.0F;  ///< 环与自身边框/内容的最小间距（dp），不得压在边缘像素上
-    static constexpr float AURORA_FOCUS_RING_THICKNESS = 2.0F;  ///< 环宽（dp）
-    static constexpr float AURORA_FOCUS_RING_RADIUS = 4.0F;  ///< 环圆角（dp）：小于常见控件圆角，故不与边框弧线相交
+    static constexpr float AURORA_FOCUS_RING_GAP = 2.0F;  ///< 环间距令牌的默认值（dp），也是两枚外扩缓存的初值
+    static constexpr float AURORA_FOCUS_RING_THICKNESS = 2.0F;  ///< 环宽令牌的默认值（dp），也是两枚外扩缓存的初值
+    static constexpr float AURORA_FOCUS_RING_RADIUS = 4.0F;  ///< 环圆角（dp）：本批不新增圆角令牌，仍取常量
+
+    /// @brief 最近一次画环实际使用的外扩距离（dp）；初值 2 + 2 = 4，与改动前常量逐位相同。
+    float focus_ring_out_last_ = AURORA_FOCUS_RING_GAP + AURORA_FOCUS_RING_THICKNESS;
+    /// @brief 上上次画环使用的外扩距离（dp）；换主题那帧的脏区取两帧并集，见 `dirty_bounds()`。
+    float focus_ring_out_previous_ = AURORA_FOCUS_RING_GAP + AURORA_FOCUS_RING_THICKNESS;
 
 #ifdef AURORA_ENABLE_DEBUG
     /// @brief 调试叠层（repaint_highlight）用：本控件最近一次实际重绘（render_into 入口）所在的
@@ -1853,17 +1858,20 @@ class Widget : public std::enable_shared_from_this<Widget>, public detail::Props
 
     /// @brief 读取本控件本次标脏应覆盖的绝对（窗口逻辑 dp）盒 = 自身绘制盒 ∪ 画在盒外的装饰。
     ///
-    /// 基类统一焦点环画在自身盒**外** `AURORA_FOCUS_RING_GAP + AURORA_FOCUS_RING_THICKNESS` 处
-    /// （见 `Widget::paint_content`），而 `paint_bounds()` 只含自身盒：只按自身盒标脏会使环带落在
-    /// 脏区裁剪之外——获焦那帧环画不上屏，失焦那帧上一帧的环残留成「盒外一圈环色」。
+    /// 基类统一焦点环画在自身盒**外** `inset + width` 处（两枚值来自 `ControlMetrics`，由
+    /// `Widget::paint_content` 在绘制期读取后缓存），而 `paint_bounds()` 只含自身盒：只按自身盒标脏
+    /// 会使环带落在脏区裁剪之外——获焦那帧环画不上屏，失焦那帧上一帧的环残留成「盒外一圈环色」。
+    /// 换主题那帧取「上上帧缓存的外扩、最近一帧绘制所用外扩」的并集：环宽由小变大时只按旧值标脏
+    /// 会裁掉新增环带，由大变小时同理要把旧环带擦掉。窗口脏区收集与 `Scroll` 离屏缓冲两处读取方
+    /// 都调本入口，天然同源，不得只改一处。
     /// @return 本帧要画环（`focus_ring_shown()`）或上一帧画过环时，为 `paint_bounds()` 四边各外扩
-    ///         环带宽的盒；其余情况与 `paint_bounds()` 逐位相同。
+    ///         两帧环带宽并集的盒；其余情况与 `paint_bounds()` 逐位相同。
     [[nodiscard]] auto dirty_bounds() const -> Rect {
         const Rect box = paint_bounds_;
         if (!focus_ring_shown() && !painted_focus_ring_) {
             return box;
         }
-        constexpr float out = AURORA_FOCUS_RING_GAP + AURORA_FOCUS_RING_THICKNESS;
+        const float out = std::max(focus_ring_out_previous_, focus_ring_out_last_);
         return Rect{.origin = Point{.x = box.origin.x - out, .y = box.origin.y - out},
                     .size = Size{.width = box.size.width + (2.0F * out), .height = box.size.height + (2.0F * out)}};
     }

@@ -588,9 +588,12 @@ auto Widget::paint_content(Painter &p, const Rect &visual_box, const Rect &conte
     // 自绘聚焦态外观的控件（TextInput 等）经 `wants_focus_ring()` 关闭，避免双环。
     painted_focus_ring_ = false;  // 本次是否留下盒外环带，由下方画环分支认定（见 dirty_bounds()）
     if (focus_ring_shown()) {
-        constexpr float ring_gap = Widget::AURORA_FOCUS_RING_GAP;  // 与自身边框/内容的最小间距
-        constexpr float ring_thickness = Widget::AURORA_FOCUS_RING_THICKNESS;  // 环宽
-        constexpr float ring_radius = Widget::AURORA_FOCUS_RING_RADIUS;  // 环圆角
+        // 环间距 / 环宽改读主题令牌（默认 2 / 2 与改动前常量逐位相同）；环圆角仍取常量。
+        // 本分支写下的 out 同时供 dirty_bounds() 使用，绘制与标脏因此不会取到两份宽度。
+        const Theme &theme = inherit_theme(ctx);
+        const float ring_gap = std::max(0.0F, theme.controls.focus_ring_inset);
+        const float ring_thickness = std::max(0.0F, theme.controls.focus_ring_width);
+        constexpr float ring_radius = Widget::AURORA_FOCUS_RING_RADIUS;
         Rect ring_box = visual_box;  // 链上无盒收缩节点 → 与历史行为逐位一致
         if (!paint_boxes.empty()) {
             ring_box = content_box;  // 有收缩但无 Paint 节点 → 罩住实际内容盒
@@ -601,16 +604,18 @@ auto Widget::paint_content(Painter &p, const Rect &visual_box, const Rect &conte
                 }
             }
         }
-        constexpr float out = ring_gap + ring_thickness;
+        const float out = ring_gap + ring_thickness;
         const Rect ring{
             .origin = Point{.x = ring_box.origin.x - out, .y = ring_box.origin.y - out},
             .size = Size{.width = ring_box.size.width + (2.0F * out), .height = ring_box.size.height + (2.0F * out)}};
 
         if (ring.size.width > 0.0F && ring.size.height > 0.0F) {
             // 焦点环取极性色角色（旧 "focus.ring" 令牌的类型化承接）。
-            const Theme &theme = inherit_theme(ctx);
             p.draw_rounded_border(ring, ring_radius, ring_thickness, theme.roles.focus_ring);
             painted_focus_ring_ = true;  // 环像素落在自身盒外：标脏须按外扩盒，见 Widget::dirty_bounds()
+            // 缓存两帧外扩：换主题那帧的脏区取并集，环宽由小变大 / 由大变小都不留残影。
+            focus_ring_out_previous_ = focus_ring_out_last_;
+            focus_ring_out_last_ = out;
         }
     }
 }
