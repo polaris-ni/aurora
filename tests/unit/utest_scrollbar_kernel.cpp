@@ -28,6 +28,7 @@ using aurora::detail::ScrollbarAxis;
 using aurora::detail::ScrollbarInteraction;
 using aurora::detail::ScrollbarMetrics;
 using aurora::detail::ScrollbarPointerAction;
+using aurora::testing::require_value;
 
 using Clock = std::chrono::steady_clock;
 
@@ -90,9 +91,10 @@ AURORA_TEST_CASE(drag_mapping_uses_max_offset_over_free_track) {
     const auto m = vertical_metrics(200.0F);
     const auto g = scrollbar_geometry(m, ScrollbarAxis::Vertical, vertical_box());
     // free track = 96 - 48 = 48；指针移 24 ⇒ 偏移 24 × 100 / 48 = 50。
-    const auto delta = scrollbar_drag_delta(g, ScrollbarAxis::Vertical, 24.0F);
-    AURORA_TEST_REQUIRE_TRUE(delta.has_value());
-    AURORA_TEST_CHECK_NEAR(*delta, 50.0F, 1e-4F);
+    // 「断言持有值 + 取值」收进 `require_value`：判定交给报告器函数后，路径分析无法认定已检查，
+    // 调用点直接 `*opt` 会被 `bugprone-unchecked-optional-access` 判为未检查访问。
+    const auto delta = require_value(scrollbar_drag_delta(g, ScrollbarAxis::Vertical, 24.0F));
+    AURORA_TEST_CHECK_NEAR(delta, 50.0F, 1e-4F);
 }
 
 AURORA_TEST_CASE(horizontal_axis_uses_the_same_formulas_along_x) {
