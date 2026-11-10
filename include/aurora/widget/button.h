@@ -17,6 +17,7 @@
 #include "aurora/theming/shape_scale.h"  // 活令牌回落点：shapes.small
 #include "aurora/theming/spacing_scale.h"  // 派生回落点读 spacing.large / spacing.small
 #include "aurora/theming/theme_scope.h"  // inherit_theme
+#include "aurora/theming/type_scale.h"  // 非正字号兜底取字阶声明默认值，不另立常量
 #include "aurora/widget/props.h"
 #include "aurora/widget/widget.h"
 
@@ -33,14 +34,18 @@ namespace aurora {
 /// 回落点三档在本表里同时在场：
 /// - 活令牌档（`color` / `on_color` / `corner_radius` / `hover_color` / `pressed_color` /
 ///   `disabled_color` / `disabled_text_color`）：随作用域换肤而变，读件带 `BuildContext`；
-/// - 常量档（`font_size` / `enabled` / `border_*` / `min_*`）：全库唯一基线，读件无参；
-/// - 派生档（`padding`）：回落点读同族他行或主题间距档再加工，读件带 `BuildContext`，
+/// - 常量档（`enabled` / `border_*` / `min_*`）：全库唯一基线，读件无参；
+/// - 派生档（`font_size` / `padding`）：回落点读同族他行或主题档再加工，读件带 `BuildContext`，
 ///   schema 里的默认值只能以显示串给出：只读已登记令牌的行写
 ///   `.shows_token<&SpacingScale::large, &SpacingScale::small>()`（名由登记表反查），其余写 `.shows("auto")`。
 ///
 /// `padding` 落派生档而非活令牌档：四边结构与单一标量档不同型（`SpacingScale` 的档位说明同口径），
 /// 故未表态时按「水平 `spacing.large`、垂直 `spacing.small`」现场拼装——与令牌层落地前的字面量
 /// 12/6/12/6 逐值相同，切风格档只换档、不换拼装规则。
+///
+/// `font_size` 也落派生档：回落点是主题字阶正文档，而 `TypeScale` 的值是 `Font` 而非标量档、
+/// 不入 `theme_tokens` 登记表（理由见 specification/07-environment-modifier.md §5.1），故只能就地
+/// 写 `.shows("type_scale.body_medium")`。
 ///
 /// @note Thread: main-thread only
 /// @note Side-effects: 写入经宿主链接位标脏并重建订阅；未挂载时是纯 DTO
@@ -71,6 +76,10 @@ class ButtonProps : public AbstractProps<ButtonProps> {
     }
 
     /// @brief 可空值件：字号（pt）。参与度量 ⇒ 布局档；下界 0。
+    ///
+    /// 未表态时取主题**正文档**（`type_scale.body_medium`）：风格档的正文基准与无障碍字号缩放都经
+    /// 同一条字阶通道到达本控件，与 `Text` 读同一档逐位同值。表态过即以表态值为准 —— 缩放不二次
+    /// 作用于显式设值（见 specification/07-environment-modifier.md §5.1）。
     /// @return 本行的表行对象。
     [[nodiscard]] static constexpr auto font_size_row() {
         return prop_row<&ButtonProps::font_size_>("font_size")
@@ -78,7 +87,8 @@ class ButtonProps : public AbstractProps<ButtonProps> {
             .paint()
             .bounds("0")
             .fallback(&ButtonProps::font_size_default)
-            .note("Font size (pt)");
+            .shows("type_scale.body_medium")
+            .note("Font size (pt; follows the theme body type scale when unset)");
     }
 
     /// @brief 可空值件：圆角半径（dp）。未表态时取主题 `shapes.small`；下界 0。
@@ -213,9 +223,10 @@ class ButtonProps : public AbstractProps<ButtonProps> {
     /// @return 生效文字色。
     [[nodiscard]] auto on_color(const BuildContext &ctx) const -> Color { return resolve(on_color_row(), ctx); }
 
-    /// @brief 当前生效字号（pt）：常量档回落点不随作用域变 ⇒ 无参读件。
-    /// @return 字号（pt）。
-    [[nodiscard]] auto font_size() const -> float { return stated(font_size_row()); }
+    /// @brief 当前作用域下生效的字号（pt）：回落点是主题正文档 ⇒ 带上下文读件。
+    /// @param ctx 构建上下文：未表态时据此解主题 `type_scale.body_medium`。
+    /// @return 生效字号（pt）；表态过即表态值，缩放不二次作用于它。
+    [[nodiscard]] auto font_size(const BuildContext &ctx) const -> float { return resolve(font_size_row(), ctx); }
 
     /// @brief 当前作用域下生效的圆角半径（dp）。
     /// @param ctx 构建上下文：未表态时据此解主题 `shapes.small`。
@@ -314,7 +325,7 @@ class ButtonProps : public AbstractProps<ButtonProps> {
     /// @return 引用本属性对象，便于链式续写。
     auto set_on_color(Color value) -> ButtonProps & { return assign(on_color_row(), value); }
 
-    /// @brief 装入字号（pt）。
+    /// @brief 装入字号（pt）；表态即脱离主题正文档，且不再随无障碍字号缩放二次变化。
     /// @param value 新字号。
     /// @return 引用本属性对象，便于链式续写。
     auto set_font_size(float value) -> ButtonProps & { return assign(font_size_row(), value); }
@@ -376,9 +387,17 @@ class ButtonProps : public AbstractProps<ButtonProps> {
 
     // ---- 回落点提供者：常量档与派生档的唯一基线（同族互读只经读件） ----
 
-    /// @brief 字号回落基线（pt）。
-    /// @return 14.0F。
-    [[nodiscard]] static auto font_size_default() -> float { return 14.0F; }
+    /// @brief 字号回落点（派生档）：读当前作用域主题的字阶正文档。
+    ///
+    /// 非正读数的兜底直接取 `TypeScale` 的声明默认值，不另立一份磅值常量——那枚数值的真源只有字阶本身。
+    /// @param self 本属性对象（本回落点不读同族他行，形参由派生档签名固定）。
+    /// @param ctx 构建上下文：提供主题作用域。
+    /// @return 该作用域下 `theme.type_scale.body_medium` 的磅值。
+    [[nodiscard]] static auto font_size_default(const ButtonProps &self, const BuildContext &ctx) -> float {
+        (void)self;
+        const float pt = inherit_theme(ctx).type_scale.body_medium.size_pt;
+        return pt > 0.0F ? pt : TypeScale{}.body_medium.size_pt;  // 主题被写成非正字号时不退化成零高度文本
+    }
 
     /// @brief 启用位回落基线。
     /// @return true（默认可点击）。
@@ -494,8 +513,8 @@ class Button : public LeafWidget, public ButtonProps {
 
     /// @brief 首行基线（内容盒顶 → 基线）：与 `paint_label` 同源——标签在内容盒内垂直居中
     ///        （`ty = top + (h - th) / 2`），故基线 = 居中偏移 + 有效字体 ascent。
-    /// @param ctx 构建上下文；形参保留自基类钩子签名，本实现未使用
-    /// @return `(size().height - th) / 2 + ascent`：th/ascent 按有效字号（`font_size()`，非正时兜底 14）实测
+    /// @param ctx 构建上下文：有效字体经它解作用域主题的正文档（与 `paint_label` 同一份回落口径）
+    /// @return `(size().height - th) / 2 + ascent`：th/ascent 按有效字号（`font_size(ctx)`，非正时兜底字阶正文档）实测
     [[nodiscard]] auto baseline_distance(const BuildContext &ctx) const -> std::optional<float> override;
 
     /// @brief 无障碍名称：取按钮文字（经 i18n 表解析后的最终显示串）。
@@ -581,10 +600,11 @@ class Button : public LeafWidget, public ButtonProps {
   protected:
     /// @brief 度量：文字实测 + 四边内边距，再与最小尺寸取大。
     /// @param c 父级约束
-    /// @param ctx 构建上下文：内边距与标签解析都取当前作用域
+    /// @param ctx 构建上下文：字号、内边距与标签解析都取当前作用域
     /// @return 约束后的按钮尺寸
     auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
-        const Font f = effective_font();
+        const Font f = effective_font(ctx);
+        layout_font_ = f;  // 绘制与命中路径按这份缓存取值，与本轮度量同源（见 layout_font_）
         // 显示串唯一来源：与绘制共用 resolved_label()，不直读 label().text。
         const std::string display = resolved_label(ctx);
         // 内边距与绘制同源：表态过用表态值，未表态随主题间距档（见 padding_default）。
@@ -680,13 +700,22 @@ class Button : public LeafWidget, public ButtonProps {
     float cached_text_height_ = 0.0F;  ///< 缓存的显示串高度（dp）
     // NOLINTNEXTLINE(*-non-private-member-variables-in-classes)
     std::string cached_display_text_;  ///< 上次测量所用的显示串：与缓存宽度配套，串变即重测
+    // 生效字体缓存供没有 BuildContext 的 `paint_label` 扩展点复用——与 `cached_text_width_` 同源，
+    // 否则「按 A 字号度量、按 B 字号落笔」会让文字溢出按钮盒。
+    // NOLINTNEXTLINE(*-non-private-member-variables-in-classes)
+    Font layout_font_{};  ///< 最近一次布局所得的生效字体（族名 / 字号 / 字重）
 
   private:
-    /// @brief 有效字体：字号取 `font_size` 行的生效值，非正时兜底 14pt。
+    /// @brief 有效字体：字号取 `font_size` 行在该作用域下的生效值，非正时兜底字阶正文档。
+    ///
+    /// 这里**不**有任何字号缩放乘法：无障碍 `font_scale` 已在主题物化点折进字阶（见
+    /// `Theme::with_accessibility`），未表态字号经 `font_size` 行的派生回落点取那一份折好的快照；
+    /// 控件侧再乘一次就是绕过 `TypeScale` 的第二条通道。
+    /// @param ctx 构建上下文：字号未表态时据此解主题正文档。
     /// @return 供度量与绘制共用的 `Font`（字号是本控件唯一的字体属性，族名/字重另有 `Text` 一族承载）
-    [[nodiscard]] auto effective_font() const -> Font {
-        const float fs = font_size();
-        return Font{.size_pt = fs > 0.0F ? fs : 14.0F};
+    [[nodiscard]] auto effective_font(const BuildContext &ctx) const -> Font {
+        const float fs = font_size(ctx);
+        return Font{.size_pt = fs > 0.0F ? fs : TypeScale{}.body_medium.size_pt};
     }
 };
 

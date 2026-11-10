@@ -317,9 +317,9 @@
         {
           "name": "font_size",
           "type": "float",
-          "default": 14.0,
-          "note": "Font size (pt)",
-          "minimum": "0"
+          "note": "Font size (pt; follows the theme body type scale when unset)",
+          "minimum": "0",
+          "default_expr": "type_scale.body_medium"
         },
         {
           "name": "corner_radius",
@@ -554,9 +554,9 @@
         {
           "name": "font_size",
           "type": "float",
-          "default": 13.0,
-          "note": "Font size (pt)",
-          "minimum": "0"
+          "note": "Font size (pt; follows the theme body type scale when unset)",
+          "minimum": "0",
+          "default_expr": "type_scale.body_medium"
         },
         {
           "name": "corner_radius",
@@ -1102,9 +1102,9 @@
         {
           "name": "font_size",
           "type": "float",
-          "default": 13.0,
-          "note": "Font size (pt)",
-          "minimum": "0"
+          "note": "Font size (pt; follows the theme body type scale when unset)",
+          "minimum": "0",
+          "default_expr": "type_scale.body_medium"
         },
         {
           "name": "corner_radius",
@@ -2669,9 +2669,9 @@
         {
           "name": "font_size",
           "type": "float",
-          "default": 13.0,
-          "note": "Option font size (pt)",
-          "minimum": "0"
+          "note": "Option font size (pt; follows the theme body type scale when unset)",
+          "minimum": "0",
+          "default_expr": "type_scale.body_medium"
         },
         {
           "name": "enabled",
@@ -3103,9 +3103,9 @@
         {
           "name": "font_size",
           "type": "float",
-          "default": 14.0,
-          "note": "Font size (pt)",
-          "minimum": "0"
+          "note": "Font size (pt; follows the theme body type scale when unset)",
+          "minimum": "0",
+          "default_expr": "type_scale.body_medium"
         },
         {
           "name": "corner_radius",
@@ -3532,9 +3532,9 @@
         {
           "name": "font_size",
           "type": "float",
-          "default": 13.0,
-          "note": "Value font size (pt)",
-          "minimum": "0"
+          "note": "Value font size (pt; follows the theme body type scale when unset)",
+          "minimum": "0",
+          "default_expr": "type_scale.body_medium"
         },
         {
           "name": "enabled",
@@ -3975,9 +3975,9 @@
         {
           "name": "font_size",
           "type": "float",
-          "default": 13.0,
-          "note": "Tab font size (pt)",
-          "minimum": "0"
+          "note": "Tab font size (pt; follows the theme body type scale when unset)",
+          "minimum": "0",
+          "default_expr": "type_scale.body_medium"
         },
         {
           "name": "tab_padding",
@@ -4218,9 +4218,9 @@
         {
           "name": "font_size",
           "type": "float",
-          "default": 14.0,
-          "note": "Font size (pt)",
-          "minimum": "0"
+          "note": "Font size (pt; follows the theme body type scale when unset)",
+          "minimum": "0",
+          "default_expr": "type_scale.body_medium"
         },
         {
           "name": "corner_radius",

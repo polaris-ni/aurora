@@ -14,6 +14,7 @@
 #include "aurora/state/state.h"
 #include "aurora/theming/theme.h"
 #include "aurora/theming/theme_scope.h"
+#include "aurora/theming/type_scale.h"  // 未显式设字号时取字阶正文档；非正字号的兜底也来自它的声明默认值
 #include "aurora/widget/descriptor.h"
 #include "aurora/widget/widget.h"
 
@@ -118,9 +119,9 @@ class TabBar : public Widget {
                      .min_value = "0"},
                     {.name = "font_size",
                      .type = "float",
-                     .default_value = "13.0",
+                     .default_value = "type_scale.body_medium",
                      .required = false,
-                     .note = "Tab font size (pt)",
+                     .note = "Tab font size (pt; follows the theme body type scale when unset)",
                      .json_type = "number",
                      .enum_values = {},
                      .min_value = "0"},
@@ -281,12 +282,21 @@ class TabBar : public Widget {
     }
 
     /// @brief 设置标签字号 pt（链式）。
-    /// @param s 字号；<=0 回落默认 13，变更触发重排
+    /// @param s 字号；> 0 才记为显式表态，<= 0 视作清除表态、回落主题字阶（不另立常量），变更触发重排
     /// @return 引用 `*this` 以继续链式配置
     auto set_font_size(float s) -> TabBar & {
-        font_size_ = s > 0.0F ? s : 13.0F;
+        font_size_ = s > 0.0F ? std::optional<float>{s} : std::nullopt;
         mark_needs_layout();
         return *this;
+    }
+
+    /// @brief 解析生效字号：未显式设字号时经 ctx 取主题字阶**正文档**（风格档基准与无障碍字号缩放
+    ///        都只在这一处生效，控件侧不再乘第二次）。
+    /// @param ctx 构建上下文：供主题取字阶；无注入时 `inherit_theme` 回落 light。
+    /// @return 生效字号（pt）。主题正文档被写成非正数时兜底取 `TypeScale{}` 的声明默认值。
+    [[nodiscard]] auto effective_font_size(const BuildContext &ctx) const -> float {
+        const float pt = font_size_.value_or(inherit_theme(ctx).type_scale.body_medium.size_pt);
+        return pt > 0.0F ? pt : TypeScale{}.body_medium.size_pt;
     }
 
     /// @brief 设置标签左右内边距 dp（链式）。
@@ -351,7 +361,10 @@ class TabBar : public Widget {
             props.set("text_color", color_to_json(*text_color_));  // 未设置不输出：保留「跟随主题」语义
         }
         props.set("indicator_thickness", indicator_thickness_);
-        props.set("font_size", font_size_);
+        // 字号「只写意图」：缺键 ≡ 未表态 ≡ 取主题字阶正文档（旧 JSON 里显式的 13.0 仍逐字复原）
+        if (font_size_.has_value()) {
+            props.set("font_size", *font_size_);
+        }
         props.set("tab_padding", tab_padding_);
     }
 
@@ -381,7 +394,8 @@ class TabBar : public Widget {
             indicator_thickness_ = props.at("indicator_thickness")->as_or<float>(0.0F);
         }
         if (props.contains("font_size")) {
-            font_size_ = props.at("font_size")->as_or<float>(0.0F);
+            const auto s = props.at("font_size")->as_or<float>(0.0F);
+            font_size_ = s > 0.0F ? std::optional<float>{s} : std::nullopt;  // 非法值 ⇒ 退出表态，回落主题字阶
         }
         if (props.contains("tab_padding")) {
             tab_padding_ = props.at("tab_padding")->as_or<float>(0.0F);
@@ -432,6 +446,9 @@ class TabBar : public Widget {
     }
 
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
+        // 每帧必过的主写入点：`on_layout` 不量标签宽、命中路径（`tab_width`）又没有 BuildContext，
+        // 字号只能由这里解好后递过去（见 layout_font_size_）。
+        layout_font_size_ = effective_font_size(ctx);
         // 标签栏背景：显式设置优先，否则跟随主题 surface_container_low。
         const Rect bar{.origin = bounds.origin, .size = Size{.width = bounds.size.width, .height = tab_height_}};
         p.fill_rect(bar, bar_background_.value_or(inherit_theme(ctx).roles.surface_container_low));
@@ -439,7 +456,7 @@ class TabBar : public Widget {
         // 选中色：显式设置优先，否则跟随主题 primary（ThemeScope 换肤即生效）。
         const Color accent = active_color_.value_or(inherit_theme(ctx).roles.primary);
         Font label_font;
-        label_font.size_pt = font_size_;
+        label_font.size_pt = layout_font_size_;
 
         float x = bounds.origin.x;
         for (std::size_t i = 0; i < tabs_.size(); ++i) {
@@ -578,7 +595,7 @@ class TabBar : public Widget {
     /// @return 标签宽度（dp），不小于 60。
     [[nodiscard]] auto tab_width(std::size_t i) const -> float {
         Font f;
-        f.size_pt = font_size_;
+        f.size_pt = layout_font_size_;  // 本路径没有 BuildContext：用绘制期解好的字号，与标签度量同源
         float w = render::FontEngine::measure_width(tabs_[i].label, f) + (tab_padding_ * 2.0F);
         if (tabs_[i].closable) {
             w += AURORA_CLOSE_ZONE;
@@ -599,8 +616,9 @@ class TabBar : public Widget {
     std::optional<Color> tab_background_;  ///< 选中标签背景色；空 = 跟随主题 surface_container_lowest
     std::optional<Color> text_color_;  ///< 未选中标签文本色；空 = 跟随主题 on_surface_variant
     float indicator_thickness_ = 2.0F;  ///< 选中指示器厚度 dp；0 = 不画
-    float font_size_ = 13.0F;  ///< 标签字号 pt
+    std::optional<float> font_size_;  ///< 标签字号 pt；空 = 跟随主题字阶正文档 `type_scale.body_medium`
     float tab_padding_ = 12.0F;  ///< 标签左右内边距 dp
+    float layout_font_size_ = TypeScale{}.body_medium.size_pt;  ///< 绘制期解出的字号（pt）：供无 ctx 的命中路径复用
     // NOLINTEND(*-non-private-member-variables-in-classes)
 };
 

@@ -212,10 +212,10 @@ auto Button::paint_background(Painter &p, const Rect &bounds, Color bg, float ra
     }
 }
 
-auto Button::baseline_distance(const BuildContext & /*ctx*/) const -> std::optional<float> {
+auto Button::baseline_distance(const BuildContext &ctx) const -> std::optional<float> {
     // 与 paint_label 同源：标签在内容盒内垂直居中（ty = top + (h - th) / 2），
-    // 故基线 = 居中偏移 + 字体 ascent。有效字体（含字号兜底）与 th 的口径均取自 paint_label。
-    const Font f = effective_font();
+    // 故基线 = 居中偏移 + 字体 ascent。有效字体（含字阶正文档兜底）与 th 的口径均取自 paint_label。
+    const Font f = effective_font(ctx);
     const float th = render::FontEngine::measure_height(f);
     return ((size().height - th) * 0.5F) + render::FontEngine::measure_ascent(f);
 }
@@ -235,7 +235,7 @@ auto Button::paint_border(Painter &p, const Rect &bounds, float radius) -> void 
 }
 
 auto Button::paint_label(Painter &p, const Rect &bounds, Color text_color, const std::string &display) -> void {
-    const Font f = effective_font();
+    const Font f = layout_font_;  // 与 on_layout 度量同一份字体：本扩展点没有 BuildContext，不得另解一次
     // 缓存失效：显示串变了（或尚未测过）就重测，避免复用另一 locale 下的旧宽。
     if (cached_display_text_ != display || cached_text_width_ <= 0.0F || cached_text_height_ <= 0.0F) {
         cached_display_text_ = display;
@@ -262,6 +262,8 @@ auto Button::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -
         paint_background(p, bounds, *overlay, radius);
     }
     paint_border(p, bounds, radius);
+    // 未经布局也要让文字绘制拿到本轮作用域的生效字体（见 layout_font_）。
+    layout_font_ = effective_font(ctx);
     // 本帧只解析一次：量宽与落笔共用 display 这一份副本。
     paint_label(p, bounds, resolve_text_color(ctx), resolved_label(ctx));
 }

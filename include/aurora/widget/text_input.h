@@ -23,6 +23,7 @@
 #include "aurora/theming/color_roles.h"  // 活令牌回落点：roles.on_surface / on_surface_variant / outline ...
 #include "aurora/theming/control_metrics.h"  // 活令牌回落点：controls.border_thickness
 #include "aurora/theming/theme_scope.h"  // inherit_theme
+#include "aurora/theming/type_scale.h"  // 非正字号兜底取字阶声明默认值，不另立常量
 #include "aurora/widget/props.h"
 #include "aurora/widget/widget.h"
 
@@ -44,10 +45,13 @@ namespace aurora {
 /// - 活令牌档（`cursor_color` / `text_color` / `placeholder_color` / `background` /
 ///   `focused_background` / `border_color` / `focused_border_color` / `selection_color` 之外的
 ///   `border_width`）：随作用域换肤或切风格档而变，读件带 `BuildContext`；
-/// - 常量档（`placeholder` / `font_size` / `corner_radius` / `padding` / `enabled` / `max_length` /
+/// - 常量档（`placeholder` / `corner_radius` / `padding` / `enabled` / `max_length` /
 ///   `read_only` / `obscure_text` / `direction`）：全库唯一基线，读件无参；
-/// - 派生档（`selection_color`）：回落点由当前作用域的 `roles.primary` 调出半透明高亮，读件带
-///   `BuildContext`，schema 里的默认值只能是以 `.shows()` 给出的显示串。
+/// - 派生档（`selection_color` / `font_size`）：回落点由当前作用域的主题档加工出来，读件带
+///   `BuildContext`，schema 里的默认值只能是以 `.shows()` 给出的显示串。`selection_color` 读
+///   `roles.primary` 调出半透明高亮；`font_size` 读字阶正文档，而 `TypeScale` 的值是 `Font` 而非
+///   标量档、不入 `theme_tokens` 登记表（理由见 specification/07-environment-modifier.md §5.1），
+///   故只能就地写 `.shows("type_scale.body_medium")`。
 ///
 /// `direction` 的「继承」语义留在表外（与 `Text` 同口径）：本行回落基线是 `LTR`（读件无参），控件
 /// 判定生效方向时先问表态位 `present(direction_row())`——未表态即走 `Environment` / 进程级继承，
@@ -76,6 +80,10 @@ class TextInputProps : public AbstractProps<TextInputProps> {
     }
 
     /// @brief 可空值件：字号（pt）。参与度量 ⇒ 布局档；下界 0。
+    ///
+    /// 未表态时取主题**正文档**（`type_scale.body_medium`）：风格档的正文基准与无障碍字号缩放都经
+    /// 同一条字阶通道到达本控件，与 `Text` / `Button` 读同一档逐位同值。表态过即以表态值为准 ——
+    /// 缩放不二次作用于显式设值（见 specification/07-environment-modifier.md §5.1）。
     /// @return 本行的表行对象。
     [[nodiscard]] static constexpr auto font_size_row() {
         return prop_row<&TextInputProps::font_size_>("font_size")
@@ -83,7 +91,8 @@ class TextInputProps : public AbstractProps<TextInputProps> {
             .paint()
             .bounds("0")
             .fallback(&TextInputProps::font_size_default)
-            .note("Font size (pt)");
+            .shows("type_scale.body_medium")
+            .note("Font size (pt; follows the theme body type scale when unset)");
     }
 
     /// @brief 可空值件：圆角半径（dp）；0 = 直角。只改背景与裁剪形状，不改度量 ⇒ 绘制档。
@@ -257,9 +266,10 @@ class TextInputProps : public AbstractProps<TextInputProps> {
     /// @return 占位文本；未表态时为空串。
     [[nodiscard]] auto placeholder() const -> std::string { return stated(placeholder_row()); }
 
-    /// @brief 当前生效字号（pt）：常量档回落点不随作用域变 ⇒ 无参读件。
-    /// @return 字号（pt）。
-    [[nodiscard]] auto font_size() const -> float { return stated(font_size_row()); }
+    /// @brief 当前作用域下生效的字号（pt）：回落点是主题正文档 ⇒ 带上下文读件。
+    /// @param ctx 构建上下文：未表态时据此解主题 `type_scale.body_medium`。
+    /// @return 生效字号（pt）；表态过即表态值，缩放不二次作用于它。
+    [[nodiscard]] auto font_size(const BuildContext &ctx) const -> float { return resolve(font_size_row(), ctx); }
 
     /// @brief 当前生效圆角半径（dp）。
     /// @return 半径；0 = 直角。
@@ -370,7 +380,7 @@ class TextInputProps : public AbstractProps<TextInputProps> {
     auto set_placeholder(const std::string &value) -> TextInputProps & { return assign(placeholder_row(), value); }
 
     /// @brief 装入字号（pt）。
-    /// @param value 新字号；<= 0 时绘制/度量按 14pt 兜底（见 `TextInput::effective_font_size`）。
+    /// @param value 新字号；<= 0 时绘制/度量按字阶正文档兜底（见 `TextInput::effective_font_size`）。
     /// @return 引用本属性对象，便于链式续写。
     auto set_font_size(float value) -> TextInputProps & { return assign(font_size_row(), value); }
 
@@ -460,10 +470,6 @@ class TextInputProps : public AbstractProps<TextInputProps> {
     /// @return 空串（无占位）。
     [[nodiscard]] static auto placeholder_default() -> std::string { return {}; }
 
-    /// @brief 字号回落基线（pt）。
-    /// @return 14.0F。
-    [[nodiscard]] static auto font_size_default() -> float { return 14.0F; }
-
     /// @brief 圆角回落基线。
     /// @return 0.0F（直角）。
     [[nodiscard]] static auto corner_radius_default() -> float { return 0.0F; }
@@ -493,6 +499,18 @@ class TextInputProps : public AbstractProps<TextInputProps> {
     /// @brief 方向回落基线：仅作读件取值，继承语义由表态位判定（见类注释）。
     /// @return `TextDirection::LTR`。
     [[nodiscard]] static auto direction_default() -> TextDirection { return TextDirection::LTR; }
+
+    /// @brief 字号回落点（派生档）：读当前作用域主题的字阶正文档。
+    ///
+    /// 非正读数的兜底直接取 `TypeScale` 的声明默认值，不另立一份磅值常量——那枚数值的真源只有字阶本身。
+    /// @param self 本属性对象（本回落点不读同族他行，形参由派生档签名固定）。
+    /// @param ctx 构建上下文：提供主题作用域。
+    /// @return 该作用域下 `theme.type_scale.body_medium` 的磅值。
+    [[nodiscard]] static auto font_size_default(const TextInputProps &self, const BuildContext &ctx) -> float {
+        (void)self;
+        const float pt = inherit_theme(ctx).type_scale.body_medium.size_pt;
+        return pt > 0.0F ? pt : TypeScale{}.body_medium.size_pt;  // 主题被写成非正字号时不退化成零高度文本
+    }
 
     /// @brief 选区高亮色回落点（派生档）：取当前作用域主色、压到迁移前那枚字面量的透明度档。
     /// @param self 本属性对象（本回落点不读同族他行，形参由派生档签名固定）。
@@ -609,11 +627,10 @@ class TextInput : public LeafWidget, public TextInputProps {
 
     /// @brief 首行基线（内容盒顶 → 基线）：与 `on_paint` 的文本原点 `ty` 同源——
     ///        上内边距 + 文本在左右内边距之内的垂直居中偏移 + 有效字体 ascent。
-    /// @param ctx 构建上下文（未使用；签名与协议保持一致）。
+    /// @param ctx 构建上下文：字号未表态时据此解主题正文档。
     /// @return 按当前盒尺寸与字体度量算出的基线距离（恒有值）。
-    [[nodiscard]] auto baseline_distance([[maybe_unused]] const BuildContext &ctx) const
-        -> std::optional<float> override {
-        const Font f{.size_pt = effective_font_size()};
+    [[nodiscard]] auto baseline_distance(const BuildContext &ctx) const -> std::optional<float> override {
+        const Font f{.size_pt = effective_font_size(ctx)};
         const float th = render::FontEngine::measure_height(f);
         const EdgeInsets pad = padding();
         return pad.top + ((size().height - pad.top - pad.bottom - th) * 0.5F) +
@@ -1175,12 +1192,18 @@ class TextInput : public LeafWidget, public TextInputProps {
     /// @return 当前文本的常引用（不含组合期 preedit）。
     [[nodiscard]] auto value_ref() const -> const std::string & { return read(value_row()).get(); }
 
-    /// @brief 有效字号（pt）：非正值降级为该行回落基线，供绘制/度量/命中共用。
-    /// @return 严格为正的字号（pt）。
-    [[nodiscard]] auto effective_font_size() const -> float {
-        const float fs = font_size();
-        return fs > 0.0F ? fs : TextInputProps::font_size_default();
+    /// @brief 本作用域下的有效字号（pt）：未表态时经 ctx 解主题正文档，非正读数兜底字阶正文档。
+    /// @param ctx 构建上下文：布局 / 绘制 / 基线钩子都有它。
+    /// @return 严格为正的字号（pt）；布局/绘制侧解出后即写入 `layout_font_size_`，供无 ctx 路径复用。
+    [[nodiscard]] auto effective_font_size(const BuildContext &ctx) const -> float {
+        const float fs = font_size(ctx);
+        return fs > 0.0F ? fs : TypeScale{}.body_medium.size_pt;
     }
+
+    /// @brief 最近一次布局/绘制所得的有效字号（pt）：事件与命中路径没有 `BuildContext`，
+    ///        只能复用那份缓存 —— 与 `cached_direction_` 同模式（见 `on_layout`）。
+    /// @return 严格为正的字号（pt）。
+    [[nodiscard]] auto effective_font_size() const -> float { return layout_font_size_; }
 
     // ---- 继承扩展点 ----
 
@@ -1248,11 +1271,12 @@ class TextInput : public LeafWidget, public TextInputProps {
     }
 
     auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
-        // 缓存生效方向：事件路径（on_pointer_event/on_key_event）拿不到 BuildContext，
+        // 缓存生效方向与生效字号：事件路径（on_pointer_event/on_key_event）拿不到 BuildContext，
         // 与 Text 缓存 resolved_text 同模式——布局期解析一次，事件/绘制共用。
         cached_direction_ =
             present(direction_row()) ? std::optional<TextDirection>{direction()} : explicit_text_direction(ctx);
-        const float fs = effective_font_size();
+        layout_font_size_ = effective_font_size(ctx);
+        const float fs = layout_font_size_;
         const Font f{.size_pt = fs};
         const std::string shown = composed_text(value_ref().empty() ? placeholder() : display_value());
         const float tw = render::FontEngine::measure_width(shown, f) + padding().left + padding().right;
@@ -1265,7 +1289,8 @@ class TextInput : public LeafWidget, public TextInputProps {
     }
 
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
-        const float fs = effective_font_size();
+        layout_font_size_ = effective_font_size(ctx);  // 未经布局也要让事件路径拿到本轮作用域的字号
+        const float fs = layout_font_size_;
         const Font f{.size_pt = fs};
         const bool disabled = !enabled();
 
@@ -1499,12 +1524,15 @@ class TextInput : public LeafWidget, public TextInputProps {
 
     // NOLINTBEGIN(*-non-private-member-variables-in-classes)
     // 19 行属性已全数收进 `TextInputProps` 权威表；此处只留表外字段：组合串配色（从不参与序列化，
-    // 未成行）与控件自己的运行态（方向缓存、两枚回调、选区/光标/视口、IME 组合态）。
+    // 未成行）与控件自己的运行态（方向与字号缓存、两枚回调、选区/光标/视口、IME 组合态）。
     std::optional<Color> preedit_underline_color_;  ///< 组合串（preedit）下划线色；空 = 跟随主题 primary
     std::optional<Color> preedit_selection_color_;  ///< preedit 内选区高亮色；空 = 主题 primary 加 96 透明度
     /// @brief 生效方向缓存：on_layout 解析（显式属性 > Environment > 进程级 > 无来源），
     ///        供无 BuildContext 的事件路径与绘制路径共用。
     std::optional<TextDirection> cached_direction_;
+    /// @brief 生效字号缓存（pt）：on_layout / on_paint 经 ctx 解析一次（未表态取主题正文档），
+    ///        供无 BuildContext 的事件、命中与滚动路径共用；初值取字阶声明默认值，未布局也不为 0。
+    float layout_font_size_ = TypeScale{}.body_medium.size_pt;
     std::function<void(const std::string &)> on_changed_;  ///< 每次编辑后触发
     std::function<void(const std::string &)> on_submit_;  ///< Enter 提交触发
 

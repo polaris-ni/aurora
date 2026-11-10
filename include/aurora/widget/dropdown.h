@@ -15,6 +15,7 @@
 #include "aurora/state/state.h"
 #include "aurora/theming/theme.h"
 #include "aurora/theming/theme_scope.h"
+#include "aurora/theming/type_scale.h"  // 未显式设字号时取字阶正文档；非正字号的兜底也来自它的声明默认值
 #include "aurora/widget/descriptor.h"
 #include "aurora/widget/widget.h"
 
@@ -189,12 +190,21 @@ class Dropdown : public Widget {
     }
 
     /// @brief 设置字号 pt（链式）。
-    /// @param s 主框与选项行文本字号（pt）；<= 0 时回退默认 13.0。
+    /// @param s 主框与选项行文本字号（pt）；> 0 才记为显式表态，<= 0 视作清除表态、回落主题字阶。
     /// @return 引用 *this。
     auto set_font_size(float s) -> Dropdown & {
-        font_size_ = s > 0.0F ? s : 13.0F;
+        font_size_ = s > 0.0F ? std::optional<float>{s} : std::nullopt;
         mark_needs_layout();
         return *this;
+    }
+
+    /// @brief 解析生效字号：未显式设字号时经 ctx 取主题字阶**正文档**（风格档基准与无障碍字号缩放
+    ///        都只在这一处生效，控件侧不再乘第二次）。
+    /// @param ctx 构建上下文：供主题取字阶；无注入时 `inherit_theme` 回落 light。
+    /// @return 生效字号（pt）。主题正文档被写成非正数时兜底取 `TypeScale{}` 的声明默认值。
+    [[nodiscard]] auto effective_font_size(const BuildContext &ctx) const -> float {
+        const float pt = font_size_.value_or(inherit_theme(ctx).type_scale.body_medium.size_pt);
+        return pt > 0.0F ? pt : TypeScale{}.body_medium.size_pt;
     }
 
     /// @brief 设置主框圆角半径 dp（链式；0 = 直角）。
@@ -328,7 +338,10 @@ class Dropdown : public Widget {
         }
         props.set("box_height", box_height_);
         props.set("item_height", item_height_);
-        props.set("font_size", font_size_);
+        // 字号「只写意图」：缺键 ≡ 未表态 ≡ 取主题字阶正文档（旧 JSON 里显式的 13.0 仍逐字复原）
+        if (font_size_.has_value()) {
+            props.set("font_size", *font_size_);
+        }
         props.set("corner_radius", corner_radius_);
         props.set("enabled", Json{enabled_});
     }
@@ -372,7 +385,8 @@ class Dropdown : public Widget {
             item_height_ = props.at("item_height")->as_or<float>(0.0F);
         }
         if (props.contains("font_size")) {
-            font_size_ = props.at("font_size")->as_or<float>(0.0F);
+            const auto s = props.at("font_size")->as_or<float>(0.0F);
+            font_size_ = s > 0.0F ? std::optional<float>{s} : std::nullopt;  // 非法值 ⇒ 退出表态，回落主题字阶
         }
         if (props.contains("corner_radius")) {
             corner_radius_ = props.at("corner_radius")->as_or<float>(0.0F);
@@ -407,7 +421,7 @@ class Dropdown : public Widget {
         env_ = ctx.env;  // 环境链兜底写入（主写入点在 on_paint，见 PanelGeometry 文档）
         // 主框宽度 = 最长选项宽 + 箭头区；下拉为覆盖绘制不占布局
         Font f;
-        f.size_pt = font_size_;
+        f.size_pt = effective_font_size(ctx);
         float w = 80.0F;
         for (const auto &o : options_) {
             w = std::max(w, render::FontEngine::measure_width(o, f) + (AURORA_PAD * 2.0F) + AURORA_ARROW_ZONE);
@@ -442,7 +456,7 @@ class Dropdown : public Widget {
         // 更新，故事件侧查链读到的视口高恒新鲜，不像「采样成标量」那样滞后一帧。
         env_ = ctx.env;
         Font f;
-        f.size_pt = font_size_;
+        f.size_pt = effective_font_size(ctx);
         // 状态色解析：显式设置优先，否则跟随主题 primary；禁用态统一灰化。
         Color accent = accent_color_.value_or(inherit_theme(ctx).roles.primary);
         Color box = box_color_.value_or(inherit_theme(ctx).roles.surface_container_lowest);
@@ -663,7 +677,7 @@ class Dropdown : public Widget {
     float item_height_ = 26.0F;  ///< 选项行高 dp
     float panel_scroll_ = 0.0F;  ///< 面板内部滚动偏移 dp（仅面板被限高时非零；见 panel_geometry）
     const Environment *env_ = nullptr;  ///< 环境链（on_layout 从 ctx.env 存；窗口期恒定，事件阶段读视口用）
-    float font_size_ = 13.0F;  ///< 字号 pt
+    std::optional<float> font_size_;  ///< 字号 pt；空 = 跟随主题字阶正文档 `type_scale.body_medium`
     float corner_radius_ = 4.0F;  ///< 主框圆角半径 dp；0 = 直角
     bool enabled_ = true;  ///< 禁用态灰化并忽略点击
     // NOLINTEND(*-non-private-member-variables-in-classes)
@@ -745,9 +759,9 @@ inline auto Dropdown::describe_static() -> WidgetDescriptor {
                  .min_value = "0"},
                 {.name = "font_size",
                  .type = "float",
-                 .default_value = "13.0",
+                 .default_value = "type_scale.body_medium",
                  .required = false,
-                 .note = "Font size (pt)",
+                 .note = "Font size (pt; follows the theme body type scale when unset)",
                  .json_type = "number",
                  .enum_values = {},
                  .min_value = "0"},

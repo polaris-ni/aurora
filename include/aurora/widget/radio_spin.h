@@ -16,6 +16,7 @@
 #include "aurora/state/state.h"
 #include "aurora/theming/theme.h"
 #include "aurora/theming/theme_scope.h"
+#include "aurora/theming/type_scale.h"  // 未显式设字号时取字阶正文档；非正字号的兜底也来自它的声明默认值
 #include "aurora/widget/descriptor.h"
 #include "aurora/widget/widget.h"
 
@@ -121,9 +122,9 @@ class RadioGroup : public Widget {
                      .min_value = "0"},
                     {.name = "font_size",
                      .type = "float",
-                     .default_value = "13.0",
+                     .default_value = "type_scale.body_medium",
                      .required = false,
-                     .note = "Option font size (pt)",
+                     .note = "Option font size (pt; follows the theme body type scale when unset)",
                      .json_type = "number",
                      .enum_values = {},
                      .min_value = "0"},
@@ -224,12 +225,21 @@ class RadioGroup : public Widget {
     }
 
     /// @brief 设置选项字号 pt（链式）。
-    /// @param s 字号；非正值回落默认 13pt。标脏布局。
+    /// @param s 字号；> 0 才记为显式表态，<= 0 视作清除表态、回落主题字阶。标脏布局。
     /// @return 自身引用（链式调用）。
     auto set_font_size(float s) -> RadioGroup & {
-        font_size_ = s > 0.0F ? s : 13.0F;
+        font_size_ = s > 0.0F ? std::optional<float>{s} : std::nullopt;
         mark_needs_layout();
         return *this;
+    }
+
+    /// @brief 解析生效字号：未显式设字号时经 ctx 取主题字阶**正文档**（风格档基准与无障碍字号缩放
+    ///        都只在这一处生效，控件侧不再乘第二次）。
+    /// @param ctx 构建上下文：供主题取字阶；无注入时 `inherit_theme` 回落 light。
+    /// @return 生效字号（pt）。主题正文档被写成非正数时兜底取 `TypeScale{}` 的声明默认值。
+    [[nodiscard]] auto effective_font_size(const BuildContext &ctx) const -> float {
+        const float pt = font_size_.value_or(inherit_theme(ctx).type_scale.body_medium.size_pt);
+        return pt > 0.0F ? pt : TypeScale{}.body_medium.size_pt;
     }
 
     /// @brief 设置是否启用（链式）；禁用态灰化绘制并忽略点击。
@@ -289,7 +299,10 @@ class RadioGroup : public Widget {
         }
         props.set("dot_size", dot_size_);
         props.set("row_height", row_height_);
-        props.set("font_size", font_size_);
+        // 字号「只写意图」：缺键 ≡ 未表态 ≡ 取主题字阶正文档（旧 JSON 里显式的 13.0 仍逐字复原）
+        if (font_size_.has_value()) {
+            props.set("font_size", *font_size_);
+        }
         props.set("enabled", Json{enabled_});
     }
 
@@ -328,7 +341,8 @@ class RadioGroup : public Widget {
             row_height_ = props.at("row_height")->as_or<float>(0.0F);
         }
         if (props.contains("font_size")) {
-            font_size_ = props.at("font_size")->as_or<float>(0.0F);
+            const auto s = props.at("font_size")->as_or<float>(0.0F);
+            font_size_ = s > 0.0F ? std::optional<float>{s} : std::nullopt;  // 非法值 ⇒ 退出表态，回落主题字阶
         }
         if (props.contains("enabled")) {
             enabled_ = props.at("enabled")->as_or<bool>(false);
@@ -336,9 +350,11 @@ class RadioGroup : public Widget {
     }
 
   protected:
-    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
+    auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
+        layout_font_size_ =
+            effective_font_size(ctx);  // 命中路径没有 BuildContext，按这份缓存取值（见 layout_font_size_）
         Font f;
-        f.size_pt = font_size_;
+        f.size_pt = layout_font_size_;
         if (horizontal_) {
             float w = 0.0F;
             for (const auto &o : options_) {
@@ -358,8 +374,10 @@ class RadioGroup : public Widget {
     /// @param bounds 绘制区域。
     /// @param ctx 构建上下文（用于主题解析）。
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
+        // 每帧必过的主写入点：`on_layout` 在布局缓存命中时整段被跳过，不可作为唯一写入点。
+        layout_font_size_ = effective_font_size(ctx);
         Font f;
-        f.size_pt = font_size_;
+        f.size_pt = layout_font_size_;
         // 状态色解析：显式设置优先，否则跟随主题角色；禁用态统一灰化。
         Color accent = active_color_.value_or(inherit_theme(ctx).roles.primary);
         Color idle = border_color_.value_or(inherit_theme(ctx).roles.outline_variant);
@@ -439,7 +457,7 @@ class RadioGroup : public Widget {
     /// @return 命中的选项序号；不落在任何行时为 -1。
     [[nodiscard]] auto hit_index_horizontal(float x) const -> int {
         Font f;
-        f.size_pt = font_size_;
+        f.size_pt = layout_font_size_;  // 本路径没有 BuildContext：用布局/绘制期解好的字号，与量宽同源
         float acc = 0.0F;
         for (std::size_t i = 0; i < options_.size(); ++i) {
             const float w = item_width(render::FontEngine::measure_width(options_[i], f));
@@ -462,8 +480,10 @@ class RadioGroup : public Widget {
     std::optional<Color> text_color_;  ///< 选项文本色；空 = 跟随主题 on_surface
     float dot_size_ = 16.0F;  ///< 圆点外径 dp
     float row_height_ = 28.0F;  ///< 行高 dp
-    float font_size_ = 13.0F;  ///< 选项字号 pt
+    std::optional<float> font_size_;  ///< 选项字号 pt；空 = 跟随主题字阶正文档 `type_scale.body_medium`
     bool enabled_ = true;  ///< 禁用态灰化并忽略点击
+    float layout_font_size_ =
+        TypeScale{}.body_medium.size_pt;  ///< 布局/绘制期解出的字号（pt）：供无 ctx 的命中路径复用
     // NOLINTEND(*-non-private-member-variables-in-classes)
 };
 
@@ -592,9 +612,9 @@ class SpinBox : public Widget {
                      .min_value = "0"},
                     {.name = "font_size",
                      .type = "float",
-                     .default_value = "13.0",
+                     .default_value = "type_scale.body_medium",
                      .required = false,
-                     .note = "Value font size (pt)",
+                     .note = "Value font size (pt; follows the theme body type scale when unset)",
                      .json_type = "number",
                      .enum_values = {},
                      .min_value = "0"},
@@ -729,12 +749,21 @@ class SpinBox : public Widget {
     }
 
     /// @brief 设置数值字号 pt（链式）。
-    /// @param s 字号；非正值回落默认 13pt。标脏绘制。
+    /// @param s 字号；> 0 才记为显式表态，<= 0 视作清除表态、回落主题字阶。标脏绘制。
     /// @return 自身引用（链式调用）。
     auto set_font_size(float s) -> SpinBox & {
-        font_size_ = s > 0.0F ? s : 13.0F;
+        font_size_ = s > 0.0F ? std::optional<float>{s} : std::nullopt;
         mark_needs_paint();
         return *this;
+    }
+
+    /// @brief 解析生效字号：未显式设字号时经 ctx 取主题字阶**正文档**（风格档基准与无障碍字号缩放
+    ///        都只在这一处生效，控件侧不再乘第二次）。
+    /// @param ctx 构建上下文：供主题取字阶；无注入时 `inherit_theme` 回落 light。
+    /// @return 生效字号（pt）。主题正文档被写成非正数时兜底取 `TypeScale{}` 的声明默认值。
+    [[nodiscard]] auto effective_font_size(const BuildContext &ctx) const -> float {
+        const float pt = font_size_.value_or(inherit_theme(ctx).type_scale.body_medium.size_pt);
+        return pt > 0.0F ? pt : TypeScale{}.body_medium.size_pt;
     }
 
     /// @brief 设置是否启用（链式）；禁用态灰化绘制并忽略交互。
@@ -824,7 +853,10 @@ class SpinBox : public Widget {
             props.set("arrow_color", color_to_json(*arrow_color_));  // 未设置不输出：保留「跟随主题」语义
         }
         props.set("corner_radius", corner_radius_);
-        props.set("font_size", font_size_);
+        // 字号「只写意图」：缺键 ≡ 未表态 ≡ 取主题字阶正文档（旧 JSON 里显式的 13.0 仍逐字复原）
+        if (font_size_.has_value()) {
+            props.set("font_size", *font_size_);
+        }
         props.set("enabled", Json{enabled_});
     }
 
@@ -866,7 +898,8 @@ class SpinBox : public Widget {
             corner_radius_ = props.at("corner_radius")->as_or<float>(0.0F);
         }
         if (props.contains("font_size")) {
-            font_size_ = props.at("font_size")->as_or<float>(0.0F);
+            const auto s = props.at("font_size")->as_or<float>(0.0F);
+            font_size_ = s > 0.0F ? std::optional<float>{s} : std::nullopt;  // 非法值 ⇒ 退出表态，回落主题字阶
         }
         if (props.contains("enabled")) {
             enabled_ = props.at("enabled")->as_or<bool>(false);
@@ -890,6 +923,8 @@ class SpinBox : public Widget {
     /// @param bounds 绘制区域。
     /// @param ctx 构建上下文（用于主题解析）。
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
+        // 每帧必过的主写入点：`paint_value` 是可覆写扩展点、没有 BuildContext，字号只能由这里递过去。
+        layout_font_size_ = effective_font_size(ctx);
         Color bg = background_.value_or(inherit_theme(ctx).roles.surface_container_lowest);
         Color border = border_color_.value_or(inherit_theme(ctx).roles.outline_variant);
         Color text = text_color_.value_or(inherit_theme(ctx).roles.on_surface);
@@ -927,7 +962,7 @@ class SpinBox : public Widget {
     /// @param text 文本色。
     virtual auto paint_value(Painter &p, const Rect &bounds, Color text) -> void {
         Font f;
-        f.size_pt = font_size_;
+        f.size_pt = layout_font_size_;  // 与 on_paint 同源：本扩展点没有 BuildContext，不再另解一次字号
         const Rect text_box{
             .origin = Point{.x = bounds.origin.x + 8.0F, .y = bounds.origin.y + 8.0F},
             .size = Size{.width = bounds.size.width - AURORA_ARROW_ZONE - 12.0F, .height = bounds.size.height - 16.0F}};
@@ -973,8 +1008,9 @@ class SpinBox : public Widget {
     std::optional<Color> text_color_;  ///< 数值文本色；空 = 跟随主题 on_surface
     std::optional<Color> arrow_color_;  ///< 箭头颜色；空 = 跟随主题 on_surface_variant
     float corner_radius_ = 4.0F;  ///< 圆角半径 dp；0 = 直角
-    float font_size_ = 13.0F;  ///< 数值字号 pt
+    std::optional<float> font_size_;  ///< 数值字号 pt；空 = 跟随主题字阶正文档 `type_scale.body_medium`
     bool enabled_ = true;  ///< 禁用态灰化并忽略交互
+    float layout_font_size_ = TypeScale{}.body_medium.size_pt;  ///< 绘制期解出的字号（pt）：供无 ctx 的扩展点复用
     // NOLINTEND(*-non-private-member-variables-in-classes)
 };
 

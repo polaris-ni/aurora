@@ -13,6 +13,7 @@
 #include "aurora/render/painter.h"
 #include "aurora/theming/theme.h"
 #include "aurora/theming/theme_scope.h"  // inherit_theme：未显式设色时取主题角色
+#include "aurora/theming/type_scale.h"  // 未显式设字号时取字阶正文档；非正字号的兜底也来自它的声明默认值
 #include "aurora/widget/widget.h"
 
 namespace aurora {
@@ -21,7 +22,7 @@ namespace aurora {
 ///
 /// `Chip{label, avatar?, on_delete?}` — 带可选头像图标与删除按钮的紧凑标签。
 /// 胶囊圆角背景（`corner_radius < 0` 自动 = 高度一半）；悬停调暗反馈；
-/// 文本色 / 字号 / 删除钮颜色均可配。
+/// 文本色 / 字号 / 删除钮颜色均可配；未显式设置时颜色跟随主题角色、字号跟随字阶正文档。
 ///
 /// 继承扩展点（protected 虚函数）：`paint_background` / `paint_foreground`。
 /// 对标 Flutter `Chip`、SwiftUI `Label`、WPF 徽章模式。
@@ -118,10 +119,10 @@ class Chip : public LeafWidget {
         return *this;
     }
     /// @brief 设置字号 pt（链式）。
-    /// @param s 字号；<=0 时回落默认 13pt，变更触发重排
+    /// @param s 字号；>0 才记为显式表态，<=0 视作清除表态、回落主题字阶（不另立常量），变更触发重排
     /// @return 引用 `*this` 以继续链式配置
     auto set_font_size(float s) -> Chip & {
-        font_size_ = s > 0.0F ? s : 13.0F;
+        font_size_ = s > 0.0F ? std::optional<float>{s} : std::nullopt;
         mark_needs_layout();
         return *this;
     }
@@ -153,6 +154,16 @@ class Chip : public LeafWidget {
     /// @return 生效删除钮颜色。
     [[nodiscard]] auto resolve_delete_color(const BuildContext &ctx) const -> Color {
         return delete_color_.value_or(inherit_theme(ctx).roles.on_surface_variant);
+    }
+
+    /// @brief 解析生效字号：未显式设字号时经 ctx 取主题字阶**正文档**（风格档基准与无障碍字号缩放
+    ///        都只在这一处生效，控件侧不再乘第二次）。
+    /// @param ctx 构建上下文：供主题取字阶；无注入时 `inherit_theme` 回落 light。
+    /// @return 生效字号（pt）。主题正文档被写成非正数时兜底取 `TypeScale{}` 的声明默认值，
+    ///         不退化成零高度文本。
+    [[nodiscard]] auto resolve_font_size(const BuildContext &ctx) const -> float {
+        const float pt = font_size_.value_or(inherit_theme(ctx).type_scale.body_medium.size_pt);
+        return pt > 0.0F ? pt : TypeScale{}.body_medium.size_pt;
     }
 
     /// @brief 静态自描述（规格附录 B）：可序列化属性/事件/子策略的运行时描述表。
@@ -194,9 +205,9 @@ class Chip : public LeafWidget {
                      .json_type = "array"},
                     {.name = "font_size",
                      .type = "float",
-                     .default_value = "13.0",
+                     .default_value = "type_scale.body_medium",
                      .required = false,
-                     .note = "Font size (pt)",
+                     .note = "Font size (pt; follows the theme body type scale when unset)",
                      .json_type = "number",
                      .enum_values = {},
                      .min_value = "0"},
@@ -274,7 +285,10 @@ class Chip : public LeafWidget {
         if (delete_color_.has_value()) {
             props.set("delete_color", color_to_json(*delete_color_));
         }
-        props.set("font_size", font_size_);
+        // 字号同样「只写意图」：缺键 ≡ 未表态 ≡ 取主题字阶正文档（旧 JSON 里显式的 13.0 仍逐字复原）
+        if (font_size_.has_value()) {
+            props.set("font_size", *font_size_);
+        }
         props.set("corner_radius", corner_radius_);
     }
 
@@ -298,7 +312,8 @@ class Chip : public LeafWidget {
             delete_color_ = json_to_color(*props.at("delete_color"));
         }
         if (props.contains("font_size")) {
-            font_size_ = props.at("font_size")->as_or<float>(0.0F);
+            const auto s = props.at("font_size")->as_or<float>(0.0F);
+            font_size_ = s > 0.0F ? std::optional<float>{s} : std::nullopt;  // 非法值 ⇒ 退出表态，回落主题字阶
         }
         if (props.contains("corner_radius")) {
             corner_radius_ = props.at("corner_radius")->as_or<float>(0.0F);
@@ -311,8 +326,9 @@ class Chip : public LeafWidget {
         paint_foreground(p, bounds, ctx);
     }
 
-    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
-        const Font f{.size_pt = font_size_};
+    auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
+        const float fs = resolve_font_size(ctx);
+        const Font f{.size_pt = fs};
         constexpr float h_pad = 10.0F;
         constexpr float v_pad = 4.0F;
         float w = h_pad * 2.0F;
@@ -320,7 +336,7 @@ class Chip : public LeafWidget {
             w += render::FontEngine::measure_width(avatar_, f) + 4.0F;
         }
         if (avatar_icon_.has_value()) {
-            w += font_size_ + 4.0F;  // 图标盒占一行字高
+            w += fs + 4.0F;  // 图标盒占一行字高
         }
         w += render::FontEngine::measure_width(label_, f);
         if (on_delete_) {
@@ -361,7 +377,8 @@ class Chip : public LeafWidget {
     ///       （`paint()` → `render_into()` → `paint_content()`），签名完全一致会被**意外覆盖**，
     ///       导致管线绕过 `on_paint`，胶囊背景永不绘制（历史缺陷）。
     virtual auto paint_foreground(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void {
-        const Font f{.size_pt = font_size_};
+        const float fs = resolve_font_size(ctx);
+        const Font f{.size_pt = fs};
         const Color tc = resolve_text_color(ctx);
         const Color dc = resolve_delete_color(ctx);
         float x = bounds.origin.x + 10.0F;
@@ -372,11 +389,10 @@ class Chip : public LeafWidget {
             x += render::FontEngine::measure_width(avatar_, f) + 4.0F;
         }
         if (avatar_icon_.has_value()) {
-            const Rect icon_box{
-                .origin = Point{.x = x, .y = bounds.origin.y + ((bounds.size.height - font_size_) / 2.0F)},
-                .size = Size{.width = font_size_, .height = font_size_}};
+            const Rect icon_box{.origin = Point{.x = x, .y = bounds.origin.y + ((bounds.size.height - fs) / 2.0F)},
+                                .size = Size{.width = fs, .height = fs}};
             paint_icon_data(p, icon_box, *avatar_icon_, tc, 0.0F);
-            x += font_size_ + 4.0F;
+            x += fs + 4.0F;
         }
         p.draw_text(Rect{.origin = Point{.x = x, .y = y}, .size = Size{.width = 200.0F, .height = 20.0F}}, label_, f,
                     tc);
@@ -395,7 +411,7 @@ class Chip : public LeafWidget {
     std::function<void()> on_delete_;
     std::optional<Color> text_color_;  ///< 标签/头像文字色；空 = 跟随主题 on_surface
     std::optional<Color> delete_color_;  ///< 删除钮颜色；空 = 跟随主题 on_surface_variant
-    float font_size_ = 13.0F;  ///< 字号 pt
+    std::optional<float> font_size_;  ///< 字号 pt；空 = 跟随主题字阶正文档 `type_scale.body_medium`
     float corner_radius_ = -1.0F;  ///< 圆角半径 dp；< 0 自动 = 高度一半
     // NOLINTEND(*-non-private-member-variables-in-classes)
 };
