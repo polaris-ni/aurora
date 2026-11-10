@@ -5513,7 +5513,7 @@
         "field": "roles",
         "prefix": "theme",
         "type": "Color",
-        "count": 38,
+        "count": 40,
         "consumed": true,
         "tokens": [
           "theme.primary",
@@ -5553,7 +5553,9 @@
           "theme.surface_tint",
           "theme.focus_ring",
           "theme.hover",
-          "theme.pressed"
+          "theme.pressed",
+          "theme.scrollbar_thumb",
+          "theme.scrollbar_track"
         ]
       },
       {

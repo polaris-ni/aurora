@@ -55,6 +55,8 @@ AURORA_TEST_CASE(light_roles_preserve_consumed_baseline) {
     AURORA_TEST_CHECK(r.hover == Color{0, 0, 0, 32});  // 承接 hover 令牌
     AURORA_TEST_CHECK(r.pressed == Color{0, 0, 0, 56});  // 承接 pressed 令牌
     AURORA_TEST_CHECK(r.error == Color{0xE0, 0x1B, 0x24});  // 承接 danger 令牌
+    AURORA_TEST_CHECK(r.scrollbar_thumb == Color{0x6E, 0x6E, 0x6E});
+    AURORA_TEST_CHECK(r.scrollbar_track == Color{0, 0, 0, 20});
 }
 
 AURORA_TEST_CASE(dark_roles_preserve_consumed_baseline_except_wcag_fix) {
@@ -68,6 +70,18 @@ AURORA_TEST_CASE(dark_roles_preserve_consumed_baseline_except_wcag_fix) {
     AURORA_TEST_CHECK(r.pressed == Color{255, 255, 255, 56});
     AURORA_TEST_CHECK(r.primary == Color{0xC0, 0xC1, 0xFF});  // tone-80 提亮
     AURORA_TEST_CHECK(r.on_primary == Color{0x00, 0x2B, 0x73});  // tone-20 深色
+    AURORA_TEST_CHECK(r.scrollbar_thumb == Color{0x9A, 0x9A, 0x9A});
+    AURORA_TEST_CHECK(r.scrollbar_track == Color{255, 255, 255, 20});
+}
+
+AURORA_TEST_CASE(scrollbar_roles_join_both_registries) {
+    // 两枚滚动条角色必须同时进入令牌表与判据登记表；漏登记一侧即本用例转红。
+    AURORA_TEST_CHECK(ColorRoles::AURORA_TOKENS.size() == 40U);
+    AURORA_TEST_CHECK(detail::AURORA_CONTRAST_AUDITS.size() == 32U);
+    AURORA_TEST_CHECK(!ColorRoles::token_name(&ColorRoles::scrollbar_thumb).empty());
+    AURORA_TEST_CHECK(!ColorRoles::token_name(&ColorRoles::scrollbar_track).empty());
+    AURORA_TEST_CHECK(contrast_ratio(ColorRoles::light().scrollbar_thumb, ColorRoles::light().surface) >= 3.0);
+    AURORA_TEST_CHECK(contrast_ratio(ColorRoles::dark().scrollbar_thumb, ColorRoles::dark().surface) >= 3.0);
 }
 
 AURORA_TEST_CASE(tier_floors_are_the_wcag_numbers) {

@@ -202,7 +202,9 @@ AURORA_TEST_CASE(color_roles_token_table_covers_all_roles) {
                                              "surface_tint",
                                              "focus_ring",
                                              "hover",
-                                             "pressed"});
+                                             "pressed",
+                                             "scrollbar_thumb",
+                                             "scrollbar_track"});
 }
 
 }  // namespace aurora::test_cases::utest_theme_scale_tokens

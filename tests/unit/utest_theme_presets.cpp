@@ -204,6 +204,18 @@ AURORA_TEST_CASE(uncalibrated_roles_stay_on_material_baseline) {
     }
 }
 
+AURORA_TEST_CASE(scrollbar_roles_inherit_the_scheme_baseline_in_every_style) {
+    // 五套风格档均不覆写滚动条配色：色值只随明暗列切换，风格轴只改占位模式与粗细。
+    for (const ThemeStyle style : AURORA_STYLES) {
+        for (const ColorScheme scheme : {ColorScheme::Light, ColorScheme::Dark}) {
+            const Theme t = Theme::from_style(style, scheme);
+            const ColorRoles base = scheme == ColorScheme::Light ? ColorRoles::light() : ColorRoles::dark();
+            AURORA_TEST_CHECK(t.roles.scrollbar_thumb == base.scrollbar_thumb);
+            AURORA_TEST_CHECK(t.roles.scrollbar_track == base.scrollbar_track);
+        }
+    }
+}
+
 AURORA_TEST_CASE(all_five_styles_resolve_for_every_scheme) {
     // 五枚风格 × 三枚明暗档共十五格全部有值（无「未实现」空返回）。
     for (const ThemeStyle style : AURORA_STYLES) {

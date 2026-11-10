@@ -79,13 +79,13 @@ inline constexpr std::array<ContrastTierFloor, 3> AURORA_CONTRAST_TIERS{{
     {.tier = ContrastTier::NotApplicable, .min_ratio = 0.0, .criterion = "not a contrast-carrying pair"},
 }};
 
-/// @brief Registered audit pairs. Every one of the 38 color roles must appear here, as a foreground,
+/// @brief Registered audit pairs. Every one of the 40 color roles must appear here, as a foreground,
 ///        as a background, or in a not_applicable row -- that coverage is a gate leg, not a comment.
 ///
 /// The declared size is checked by the gate against the number of rows it parses out of this table,
 /// so a row added without bumping the count (or the reverse: a dangling default-initialized row whose
-/// pair reads as `/`) turns the gate red instead of silently auditing 30 of 31 pairs.
-inline constexpr std::array<ContrastPairAudit, 30> AURORA_CONTRAST_AUDITS{{
+/// pair reads as `/`) turns the gate red instead of silently auditing 32 of 33 pairs.
+inline constexpr std::array<ContrastPairAudit, 32> AURORA_CONTRAST_AUDITS{{
     // -- the ten on_* pairings the base columns are built around ----------------------------------
     {.fg = &ColorRoles::on_primary,
      .bg = &ColorRoles::primary,
@@ -186,6 +186,10 @@ inline constexpr std::array<ContrastPairAudit, 30> AURORA_CONTRAST_AUDITS{{
      .bg = &ColorRoles::surface,
      .tier = ContrastTier::NonText,
      .reason = "active-track and thumb graphics of the interactive controls"},
+    {.fg = &ColorRoles::scrollbar_thumb,
+     .bg = &ColorRoles::surface,
+     .tier = ContrastTier::NonText,
+     .reason = "scrollbar thumb; its shape carries the current scroll position"},
     // -- not applicable: recorded, reasoned, never silently skipped ------------------------------
     {.fg = &ColorRoles::outline_variant,
      .bg = &ColorRoles::surface,
@@ -211,6 +215,10 @@ inline constexpr std::array<ContrastPairAudit, 30> AURORA_CONTRAST_AUDITS{{
      .bg = &ColorRoles::surface,
      .tier = ContrastTier::NotApplicable,
      .reason = "state overlay ships a partial alpha; same reason as hover"},
+    {.fg = &ColorRoles::scrollbar_track,
+     .bg = &ColorRoles::surface,
+     .tier = ContrastTier::NotApplicable,
+     .reason = "decorative groove; painted through a fixed partial alpha chosen at the call site"},
 }};
 
 /// @brief Preset columns that copy an upstream accent value which does not reach the tier floor.

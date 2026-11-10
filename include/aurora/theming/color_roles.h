@@ -68,8 +68,10 @@ struct ColorRoles {
     Color focus_ring;  ///< 焦点环取极性色，与主色拉开（承接旧 `focus.ring` 令牌）。
     Color hover;  ///< 交互态悬停叠色（含 alpha）。
     Color pressed;  ///< 交互态按压叠色（含 alpha）。
+    Color scrollbar_thumb;  ///< 滚动条滑块（形状承载当前滚动位置，非文本档）。
+    Color scrollbar_track;  ///< 滚动条轨道凹槽（半透明叠层，登记为不适用）。
 
-    /// @brief 逐字段相等比较（三十八项全等）；供主题解析、「风格档 ≡ 基线档」断言与快照的同值守卫。
+    /// @brief 逐字段相等比较（四十项全等）；供主题解析、「风格档 ≡ 基线档」断言与快照的同值守卫。
     /// @param other 比较对象。
     /// @return 全部字段相等时为 true。
     [[nodiscard]] auto operator==(const ColorRoles &other) const -> bool = default;
@@ -118,6 +120,8 @@ struct ColorRoles {
         {&ColorRoles::focus_ring, "theme.focus_ring"},
         {&ColorRoles::hover, "theme.hover"},
         {&ColorRoles::pressed, "theme.pressed"},
+        {&ColorRoles::scrollbar_thumb, "theme.scrollbar_thumb"},
+        {&ColorRoles::scrollbar_track, "theme.scrollbar_track"},
     });
 
     /// @brief 反查一枚色角色的令牌短名（编译期与运行期同形，零分配）。
@@ -178,6 +182,9 @@ struct ColorRoles {
             .focus_ring = Color{0x00, 0x00, 0x00},
             .hover = Color{0, 0, 0, 32},
             .pressed = Color{0, 0, 0, 56},
+            // 滚动条：滑块取中性灰（白底约 5.1:1），轨道是调用点按固定 alpha 合成的凹槽。
+            .scrollbar_thumb = Color{0x6E, 0x6E, 0x6E},
+            .scrollbar_track = Color{0, 0, 0, 20},
         };
     }
 
@@ -227,6 +234,9 @@ struct ColorRoles {
             .focus_ring = Color{0xFF, 0xFF, 0xFF},
             .hover = Color{255, 255, 255, 32},
             .pressed = Color{255, 255, 255, 56},
+            // 滚动条：滑块取中性灰（#202124 底约 5.7:1），轨道是调用点按固定 alpha 合成的凹槽。
+            .scrollbar_thumb = Color{0x9A, 0x9A, 0x9A},
+            .scrollbar_track = Color{255, 255, 255, 20},
         };
     }
 
