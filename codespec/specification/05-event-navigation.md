@@ -205,6 +205,8 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 
 `TouchDispatcher`（`dispatcher.h`）处理触控路径：实体方法 `dispatch(Widget& root, TouchEvent&, FocusManager* = nullptr) -> bool`，按 `TouchPoint::id` 做指针捕获，原始多点流全链广播 + 合成 `MouseEvent` 手势流冒泡，焦点行为与鼠标路径一致。合成事件同样过 `ClickTracker`，因此**触摸支持双 tap**（`click_count` 达 2），与鼠标双击同口径；`click_window_ms` / `click_radius_dp` 在 `TouchDispatcher` 上有同名的公开可调成员。
 
+**滚动条拖拽是 `dispatch_mouse` 指针捕获的又一消费者**（CHG-075）：四容器（`Scroll` / `LazyList` / `GridView` / `LazyRow`）在条带内的 Press 走同一条捕获机制——Press 命中条带即缓存命中链、后续 Move / Release 持续派发给按下时目标直到 Release 解除，与 `Splitter` 拖拽、`ReorderableList` 抓取同径，**不新增第二套拖拽通道**；条带外的 Press 仍按常规命中链下降给内容子树。拖拽映射的几何换算（`Δoffset = Δpointer × max_offset/(track − thumb)`）在控件内完成，派发层无新增代码。
+
 ### 3.2 命中测试
 
 `Widget::hit_test(local, bounds, ctx)` 返回命中的子节点：`local` 相对本组件原点，`bounds` 为绝对矩形，`ctx` 为构建上下文。
@@ -214,6 +216,8 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 **可滚动容器自动进入命中链**：`Widget::hit_test_chain` 在「无命中的后代、自身不可点击」时仍会把 `wants_scroll()` 为真且命中点落在内容盒内的控件自身纳入链尾——内容全非可点击时滚动容器也必须在链内，否则滚轮落空。容器**无需**再覆写 `on_hit_test` 返回 `this`。
 
 **自带拖拽区的容器必须把自身显式入链**：基类 `Widget::hit_test_chain`（`src/aurora/widget/widget.cpp`）只在「后代链非空 / `wants_click()` / `wants_scroll()` / 带 Input 修饰」之一成立时才把控件自身追加进链尾。因此靠 `on_pointer_event` 自绘拖拽带、又不 `wants_click()` 的容器（典型为 `Splitter` 的分隔条）若在其拖拽带上返回**空**后代链，就会整条链为空，被派发器判为「点在空白处」而根本不投递 Press——拖拽在任何后端都失效，且与 `on_hit_test`（点命中）口径不一致而难以察觉。此类控件须在拖拽带内返回 `std::vector{HitNode{this, weak_from_this(), bounds.origin}}`，并在带内无交互后代的空白点同样自入链，否则拖拽过程中指针一旦越出拖拽带，后续 Move 会因链空被丢弃。契约由 `utest_splitter` 的 `hit_chain_at_divider_includes_splitter` 与 `divider_drag_via_dispatcher_updates_ratio_and_clamps` 守护。
+
+**滚动条带自交自身、不下降**（CHG-075）：带滚动条的容器在条带（轨道 / 滑块）内必须把自身纳入命中链（否则 Press 落空、拖拽失效），且 `on_pointer_event` 在条带内**不下降**给内容子树——拖拽与轨道翻页只在条带内消费，条带外才照常命中内容。这与「自带拖拽区的容器必须把自身显式入链」同构（拖动带 = 滚动条带），由 `utest_scrollbar_containers` 的 `drag_within_band_does_not_descend_to_content` 守护。
 
 ### 3.2.1 覆盖绘制与命中链（追加命中盒）
 
@@ -488,7 +492,7 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 - **Move 确认与回滚**：目标接收成功后源删除回调（`DragOffer::on_move_confirmed`）被调用一次，且**严格早于** `on_system_drag_end(Succeeded, Move)` 投递（事件驱动下该顺序从外部可断言；源不得在收到确认前删除数据）。删除回调返回 `Error` ⇒ 会话终态改写为 `Failed` + `Move` 并上报 `system-drag-move-rollback`，目标侧数据保持不动。
 - **修饰键翻译归属（唯一翻译点）**：`proposed` 由宿主 / 后端在派发前经 `system_drag::proposed_action_for(modifiers, default_action)` 一次写定；控件只读 `proposed` 与 `allowed`、不做翻译（控件侧不存在第二处翻译）。Ctrl → Copy、Shift → Move、Ctrl+Shift → Link（Windows 惯例）；无有效修饰键 ⇒ 取源侧缺省动作（`DragOffer::default_action`，缺省 `Copy`）——`ModifierKey::None` 两义（没按 / 程序化合成），不可靠修饰键缺席推定。比对前按 `AURORA_MODIFIER_PRESSABLE_MASK` 摘除锁定态位（NumLock 常开的实现上 Win32 `GetKeyState` 一类返回含锁定态位，不摘会让 Ctrl 组合静默失配且本地难复现）。
 - **非阻塞读取契约**：`DragPayload::read_async` 与 `SystemDropEvent` 的 `*_async` 便利读取登记在途项，结果经帧循环排空兑现（宿主不排空 ⇒ 回调不到，不谎报）；同一 const 句柄可并发读取、各自独立兑现一次、不互相取消；墙钟超时兑现 `system-drag-read-failed`；会话收口就地兑现，不悬挂。同步 `bytes()` 一族保留供小载荷与同步后端；事件层便利读取与 `DragPayload` 直连两条路结果一致。
-- **自动滚边协议**：拖放悬停近边缘的滚动由 `DragAutoScroll` 内核驱动（`scroll_viewport.h`）——时间戳全部由调用方帧计时供给（内核不自读时钟，宿主可冻结 / 快进）；按侵入深度比例给速，带宽 clamp 到视口半高；共享常量 `AURORA_AUTO_SCROLL_THRESHOLD_DP = 48.0`（与 `ReorderableList` 同名缺省值相等——进程内拖拽与跨进程拖放两条路径手感一致的锚点）与 `AURORA_AUTO_SCROLL_MAX_SPEED = 600.0`；带外 / 视口未定尺 / 新鲜度超时（`AURORA_DRAG_AUTO_SCROLL_STALE_S = 1.0`，意图沉默即收车）就地收车。派发落点 `Widget::on_system_drag_auto_scroll(position)`：基类沿祖先链上溯至**最近可滚动祖先**（覆写并返回 true 者即可滚动），`Over` 态给落点、`Leave` / `Drop` 给 `nullopt`；本契约不新增滚动实现，只补「拖入时谁驱动滚动」。滚边态与收位滑动态是**两个互不抢占的独立状态**：宿主帧计时里先推进滚边、再推进滑动，且**没有滑动在途时不得进入滑动块**（`Scroll` 与 `LazyList` 两宿主同形）——未激活的 `ScrollGlide::tick` 返回的是上一目标，若滚边在途时仍走那条块，刚由滚边推进的偏移会被拽回那个旧值（从未滑过即为 0，表现为「拖文件到列表边缘，列表反而跳回开头」）。帧计时的去留按「两者都空闲」判，写段只归激活的那条驱动。
+- **自动滚边协议**：拖放悬停近边缘的滚动由 `DragAutoScroll` 内核驱动（`scroll_viewport.h`）——时间戳全部由调用方帧计时供给（内核不自读时钟，宿主可冻结 / 快进）；按侵入深度比例给速，带宽 clamp 到视口半高；共享常量 `AURORA_AUTO_SCROLL_THRESHOLD_DP = 48.0`（与 `ReorderableList` 同名缺省值相等——进程内拖拽与跨进程拖放两条路径手感一致的锚点）与 `AURORA_AUTO_SCROLL_MAX_SPEED = 600.0`；带外 / 视口未定尺 / 新鲜度超时（`AURORA_DRAG_AUTO_SCROLL_STALE_S = 1.0`，意图沉默即收车）就地收车。派发落点 `Widget::on_system_drag_auto_scroll(position)`：基类沿祖先链上溯至**最近可滚动祖先**（覆写并返回 true 者即可滚动），`Over` 态给落点、`Leave` / `Drop` 给 `nullopt`；本契约不新增滚动实现，只补「拖入时谁驱动滚动」。滚边态与收位滑动态是**两个互不抢占的独立状态**：宿主帧计时里先推进滚边、再推进滑动，且**没有滑动在途时不得进入滑动块**（`Scroll` 与 `LazyList` 两宿主同形）——未激活的 `ScrollGlide::tick` 返回的是上一目标，若滚边在途时仍走那条块，刚由滚边推进的偏移会被拽回那个旧值（从未滑过即为 0，表现为「拖文件到列表边缘，列表反而跳回开头」）。帧计时的去留按「两者都空闲」判，写段只归激活的那条驱动。**Overlay 滚动条保持窗口是第三条驱动**（CHG-075）：滚轮 / 程序化滚动后容器进入 1 秒保持窗口、`needs_gesture_tick_` 持续置位直到到期摘除；三者（收位滑动 / 拖入滚边 / Overlay 保持窗口）都空闲才摘帧计时——`LazyRow` 此前无帧计时入口、本次补齐以承载这条驱动。
 - **无障碍替代路径**：可接收拖放的控件（`accepts_system_drag()` 为 true）须同时提供 `system_drag_alternative_path()`（人类可读描述，如「上下文菜单的『移动到』项」）；缺省为空 = 该控件只有拖拽一条路，无障碍树构建时把节点标记为「仅拖拽可达」（`AccessibilityNode::is_drag_only_reachable()` = `drag_reachable && 替代路径为空`），桥与工具链据此告警。粘贴、文件对话框等非拖拽入口在 UI 上须可达；放置反馈不得只靠光标形态表达（颜色 / 高亮 / 文案同时给）。
 - **平台后端映射（四后端事件翻译）**：后端只做五件事——坐标、formats、proposed、allowed、载荷，其余全在本节已冻结的契约里。平台无关的那一层是**零平台头折算层** `src/aurora/window/detail/system_drag_translate.h`（可无头单测），平台桥只把 OS 原生值搬进 `DragInFrame`、再把写定的 `allowed` 搬回 OS 光标反馈：
 

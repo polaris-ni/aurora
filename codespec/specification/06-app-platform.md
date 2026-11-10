@@ -324,6 +324,8 @@ drain_posted → pump_all_once → on_frame → 逐宿主 tick → 共享 anim/s
 
 > `Application` 的帧序是唯一驱动面：`Widget::tick`（长按阈值、甩动惯性、`VideoPlayer` 播放时钟等每帧计时）与 `system_drag::pump_reads()` 都在其中，迁移后的低阶调用方无需再自行补这两步。`examples/demos/demo_common.h` 的 `run_demo` 已按 `Application` 驱动接线。值班租约的领取 / 归还时序见 §3.3。
 
+**控件的每帧计时去留（CHG-075）**：`Widget::tick_gestures` 经 `needs_gesture_tick_` 向帧循环申领「下一帧仍唤醒」，三条独立驱动任一在途即持续申领——收位滑动（`ScrollGlide`）、拖入滚边（`DragAutoScroll`）、Overlay 滚动条保持窗口（滚轮 / 程序化滚动后 1 秒保持，`LazyRow` 本次补齐该入口以承载）；三者都空闲才摘帧计时、回到 §3.3 的零开销 idle 口径。内核不自读时钟、时间戳由帧首 `now` 注入，故宿主可冻结 / 快进验证（见 [`05-event-navigation.md`](05-event-navigation.md) §5.2）。
+
 **异步结果排空点（帧内兑现通则）**：三类异步结果在同一时点集中排空——平台事件抽取之后、`on_frame` 回调之前：通知激活（`NotificationCenter::pump_events()`）、热键命中（`OsHotkeyRegistry::drain_pending()`）、系统拖放的终结回调与在途读取（`system_drag::pump_reads()`，契约见 §8.9）。通则：**异步结果在帧内排空兑现、不在平台消息泵内同步回调**——回调可能重建页面 / 触发重排，在消息泵内重入会把布局与绘制切到半途的状态（热键与通知激活两条既有路径同此，本批把系统拖放并入同一时点）。宿主不调用对应排空入口 ⇒ 回调不到，库**不谎报**成功（与 `NotificationCenter` 既有口径一致）。⚠ **自拼帧循环不含这一步**：不经 `Application::run` 而自行驱动的低阶循环若承载拖出会话或 `read_async` 在途读取，须每帧自行调用 `system_drag::pump_reads()`（无在途项时近零开销），否则终态与读取结果永远不到；`Application::run` 已含此步。
 
 ### 3.2 脏区追踪（默认开启）
