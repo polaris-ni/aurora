@@ -2,17 +2,22 @@
 /// 目标单元: include/aurora/widget/radio_spin.h
 /// 测试说明: 覆盖 RadioGroup——选项列表与初始索引钳制、select 边界（同值/越界不触发）、
 /// 纵向点击选行、行列布局、序列化往返；以及 SpinBox——构造钳制、set_value/increment/decrement、
-/// display_text 与上下方向键、序列化往返
+/// display_text 与上下方向键、序列化往返。两者的字号均未表态时取作用域主题的字阶正文档（RadioGroup
+/// 另测主框度量随之变化），显式表态钉住两档作用域，序列化「只写意图」且非法值回填退出表态
 
+#include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "aurora/core/color.h"
 #include "aurora/environment/build_context.h"
+#include "aurora/environment/environment.h"
 #include "aurora/event/event.h"
 #include "aurora/event/keycode.h"
 #include "aurora/layout/layout_engine.h"
 #include "aurora/render/painter.h"
+#include "aurora/theming/theme.h"
 #include "aurora/widget/radio_spin.h"
 #include "framework/aurora_test.h"
 #include "framework/json_access.h"
@@ -25,6 +30,17 @@ namespace {
 
 auto bounded(float w, float h) -> Constraints {
     return Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = w, .height = h}};
+}
+
+/// @brief 造一个注入了指定主题的构建上下文（根级环境，无父指针）。
+/// @param t 要注入的主题（按值拷进 holder 内的 Environment）。
+/// @return holder + ctx：`ctx.env` 指向 holder 内的 Environment，二者须在同作用域内使用。
+auto themed_ctx(const Theme &t) -> std::pair<std::shared_ptr<Environment>, BuildContext> {
+    auto env = std::make_shared<Environment>();
+    env->set_local(t);
+    BuildContext ctx;
+    ctx.env = env.get();
+    return {std::move(env), ctx};
 }
 
 }  // namespace
@@ -301,6 +317,63 @@ AURORA_TEST_CASE(spinbox_paint_rounded_square_disabled) {
     off.set_enabled(false);
     LayoutEngine::layout(off, bounded(200.0F, 100.0F));
     off.paint(painter, bounds, BuildContext{});
+}
+
+AURORA_TEST_CASE(font_size_follows_type_scale_when_unset) {
+    Theme tuned;
+    tuned.type_scale.body_medium.size_pt = 24.0F;
+    const auto [env, ctx] = themed_ctx(tuned);
+    (void)env;
+
+    // ① RadioGroup 未表态 ⇒ 取作用域主题的字阶正文档（进程级 light 档 = Material 正文基准 14pt）。
+    RadioGroup rg({"Alpha", "Beta"});
+    AURORA_TEST_CHECK_NEAR(rg.effective_font_size(BuildContext{}), 14.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(rg.effective_font_size(ctx), 24.0F, 1e-4F);
+
+    // ② 回落点确实进了度量路径：同一组选项，字阶调大 ⇒ 纵向行宽实测变宽。
+    // 两个独立实例各排一次——同实例连排会命中布局缓存、整段跳过 `on_layout`（见 `Widget::layout`）。
+    RadioGroup scaled({"Alpha", "Beta"});
+    RadioGroup bare_layout({"Alpha", "Beta"});
+    LayoutEngine::layout(scaled, bounded(600.0F, 300.0F), ctx);
+    LayoutEngine::layout(bare_layout, bounded(600.0F, 300.0F));
+    AURORA_TEST_CHECK_GT(scaled.size().width, bare_layout.size().width);
+
+    // ③ 显式表态钉住：两档作用域都读显式值，主题覆盖不了它。
+    rg.set_font_size(11.0F);
+    AURORA_TEST_CHECK_NEAR(rg.effective_font_size(ctx), 11.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(rg.effective_font_size(BuildContext{}), 11.0F, 1e-4F);
+
+    // ④ 只写意图：表态过才落键，未表态不落键。
+    Json stated = Json::object();
+    rg.serialize_props(stated);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(stated, "font_size"), 11.0F, 1e-4F);
+    Json bare = Json::object();
+    RadioGroup{}.serialize_props(bare);
+    AURORA_TEST_CHECK_FALSE(bare.contains("font_size"));
+
+    // ⑤ SpinBox 同口径：未表态取字阶、表态钉住、非正字号退出表态且不落键。
+    SpinBox sb(50.0, 0.0, 100.0, 5.0);
+    AURORA_TEST_CHECK_NEAR(sb.effective_font_size(BuildContext{}), 14.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(sb.effective_font_size(ctx), 24.0F, 1e-4F);
+    sb.set_font_size(11.0F);
+    AURORA_TEST_CHECK_NEAR(sb.effective_font_size(ctx), 11.0F, 1e-4F);
+    Json sb_stated = Json::object();
+    sb.serialize_props(sb_stated);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(sb_stated, "font_size"), 11.0F, 1e-4F);
+    sb.set_font_size(0.0F);
+    Json sb_cleared = Json::object();
+    sb.serialize_props(sb_cleared);
+    AURORA_TEST_CHECK_FALSE(sb_cleared.contains("font_size"));
+    AURORA_TEST_CHECK_NEAR(sb.effective_font_size(BuildContext{}), 14.0F, 1e-4F);
+
+    // ⑥ 回填降级：非法值退出表态（交回主题，不退化成零高度文本）。
+    SpinBox restored(50.0, 0.0, 100.0, 5.0);
+    restored.deserialize_props(sb_stated);
+    AURORA_TEST_CHECK_NEAR(restored.effective_font_size(BuildContext{}), 11.0F, 1e-4F);
+    Json junk = Json::object();
+    junk.set("font_size", Json{"not-a-number"});
+    restored.deserialize_props(junk);
+    AURORA_TEST_CHECK_NEAR(restored.effective_font_size(BuildContext{}), 14.0F, 1e-4F);
 }
 
 }  // namespace aurora::test_cases::utest_radio_spin

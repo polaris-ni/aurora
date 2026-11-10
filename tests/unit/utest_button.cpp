@@ -61,11 +61,12 @@ auto bounded(float w, float h) -> Constraints {
     return Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = w, .height = h}};
 }
 
-/// 有效字号：与 `on_layout` / `paint_label` 的兜底口径一致（`font_size` 行未表态或表态非正时按 14）。
+/// 有效字号：与 `on_layout` / `paint_label` 的兜底口径一致（`font_size` 行未表态或表态非正时取主题正文档）。
 /// 本件只从公共读件取值，不再直读字段——迁移后 `Button` 已无聚合 `font` 可读。
 auto probe_font(const Button &b) -> Font {
-    const float stated_size = b.font_size();
-    return Font{.size_pt = stated_size > 0.0F ? stated_size : 14.0F};
+    const BuildContext ctx;  // 缺省作用域 ⇒ 未表态时解进程默认主题的字阶正文档
+    const float stated_size = b.font_size(ctx);
+    return Font{.size_pt = stated_size > 0.0F ? stated_size : TypeScale{}.body_medium.size_pt};
 }
 
 /// 探针：把只在库内 / 控件内部消费的读件提到可读位置（`present` 表态位、`resolve` 带上下文解析、
@@ -199,7 +200,7 @@ AURORA_TEST_CASE(button_defaults_and_type_name) {
     // `defaults()` 就是「一行都没表态」那份属性对象：读面照常给生效值，表态位全为假。
     const ButtonProps d = Button::defaults();
     AURORA_TEST_CHECK_TRUE(d.enabled());
-    AURORA_TEST_CHECK_NEAR(d.font_size(), 14.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(d.font_size(BuildContext{}), 14.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(d.min_width(), 0.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(d.min_height(), 0.0F, 1e-4F);
     AURORA_TEST_CHECK_TRUE(d.label().text.empty());
@@ -591,6 +592,7 @@ AURORA_TEST_CASE(button_metrics_default_to_material_baseline) {
     const BuildContext bare;
     PropsProbe b;
     AURORA_TEST_CHECK_NEAR(b.corner_radius(bare), 6.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(b.font_size(bare), 14.0F, 1e-4F);  // 字号取 Material 档正文基准（字阶声明默认值）
     const EdgeInsets pad = b.padding(bare);
     AURORA_TEST_CHECK_NEAR(pad.left, 12.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(pad.right, 12.0F, 1e-4F);
@@ -604,9 +606,11 @@ AURORA_TEST_CASE(button_metrics_follow_theme_tokens_when_unset) {
     t.shapes.small = 11.5F;
     t.spacing.large = 20.0F;
     t.spacing.small = 7.0F;
+    t.type_scale.body_medium.size_pt = 17.5F;
     const auto [env, ctx] = themed_ctx(t);
     PropsProbe b;
     AURORA_TEST_CHECK_NEAR(b.corner_radius(ctx), 11.5F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(b.font_size(ctx), 17.5F, 1e-4F);
     const EdgeInsets pad = b.padding(ctx);
     AURORA_TEST_CHECK_NEAR(pad.left, 20.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(pad.right, 20.0F, 1e-4F);
@@ -617,20 +621,23 @@ AURORA_TEST_CASE(button_metrics_follow_theme_tokens_when_unset) {
 AURORA_TEST_CASE(button_metrics_follow_style_arm) {
     // 两轴的风格轴同样驱动度量：Windows/Gnome/Kde 的 `shapes.small` 与基线档实测不同值，
     // 若解析仍回 6（未接线）本用例即红——四档取值互异，同时钉住「不是巧合相等」。
+    // 字号同轴：正文基准分别是 14 / 10.5（14px × 0.75）/ 11 / 10pt，见 theme_presets.cpp 的 retarget 调用。
     struct Arm {
         ThemeStyle style;
         float expected;
+        float body_pt;
     };
     static constexpr Arm ARMS[] = {
-        {.style = ThemeStyle::Material, .expected = 6.0F},
-        {.style = ThemeStyle::Windows, .expected = 4.0F},
-        {.style = ThemeStyle::Gnome, .expected = 9.0F},
-        {.style = ThemeStyle::Kde, .expected = 5.0F},
+        {.style = ThemeStyle::Material, .expected = 6.0F, .body_pt = 14.0F},
+        {.style = ThemeStyle::Windows, .expected = 4.0F, .body_pt = 10.5F},
+        {.style = ThemeStyle::Gnome, .expected = 9.0F, .body_pt = 11.0F},
+        {.style = ThemeStyle::Kde, .expected = 5.0F, .body_pt = 10.0F},
     };
     PropsProbe b;
     for (const Arm &arm : ARMS) {
         const auto [env, ctx] = themed_ctx(Theme::from_style(arm.style, ColorScheme::Light));
         AURORA_TEST_CHECK_NEAR(b.corner_radius(ctx), arm.expected, 1e-4F);
+        AURORA_TEST_CHECK_NEAR(b.font_size(ctx), arm.body_pt, 1e-4F);
     }
 }
 
@@ -769,8 +776,6 @@ AURORA_TEST_CASE(button_constant_rows_read_identically_under_light_and_dark) {
 
     AURORA_TEST_CHECK(b.enabled() == b.resolve(ButtonProps::enabled_row(), light));
     AURORA_TEST_CHECK(b.enabled() == b.resolve(ButtonProps::enabled_row(), dark));
-    AURORA_TEST_CHECK_NEAR(b.font_size(), b.resolve(ButtonProps::font_size_row(), light), 1e-6F);
-    AURORA_TEST_CHECK_NEAR(b.font_size(), b.resolve(ButtonProps::font_size_row(), dark), 1e-6F);
     AURORA_TEST_CHECK(b.border_color() == b.resolve(ButtonProps::border_color_row(), light));
     AURORA_TEST_CHECK(b.border_color() == b.resolve(ButtonProps::border_color_row(), dark));
     AURORA_TEST_CHECK_NEAR(b.border_width(), b.resolve(ButtonProps::border_width_row(), light), 1e-6F);
@@ -781,6 +786,37 @@ AURORA_TEST_CASE(button_constant_rows_read_identically_under_light_and_dark) {
     b.set_min_width(64.0F);
     AURORA_TEST_CHECK_NEAR(b.min_width(), b.resolve(ButtonProps::min_width_row(), light), 1e-6F);
     AURORA_TEST_CHECK_NEAR(b.min_width(), 64.0F, 1e-6F);
+}
+
+AURORA_TEST_CASE(button_font_size_follows_type_scale_when_unset) {
+    // 字号行落派生档的四半：未表态随字阶、换档随动、表态钉住（缩放不二次作用）、撤表态再度随动。
+    Theme tuned = Theme::light();
+    tuned.type_scale.body_medium.size_pt = 17.5F;
+    const auto [env, ctx] = themed_ctx(tuned);
+    const BuildContext bare;  // 无注入 = Material 档正文基准 14pt
+
+    PropsProbe b;
+    AURORA_TEST_CHECK_NEAR(b.font_size(bare), 14.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(b.font_size(ctx), 17.5F, 1e-4F);
+
+    b.set_font_size(12.0F);  // 表态即钉住：后续换档不动它
+    Theme again = Theme::light();
+    again.type_scale.body_medium.size_pt = 22.0F;
+    const auto [env2, ctx2] = themed_ctx(again);
+    AURORA_TEST_CHECK_NEAR(b.font_size(ctx2), 12.0F, 1e-4F);
+
+    b.clear(ButtonProps::font_size_row());
+    AURORA_TEST_CHECK_FALSE(b.present(ButtonProps::font_size_row()));
+    AURORA_TEST_CHECK_NEAR(b.font_size(ctx2), 22.0F, 1e-4F);  // 撤的是表态位，不是把当时的值烘进字段
+
+    // 序列化只写意图：未表态 ⇒ 该键退出意图集合；表态 ⇒ 回到集合里（反面对照防空转）。
+    Json unstated = Json::object();
+    b.serialize_props(unstated);
+    AURORA_TEST_CHECK_FALSE(unstated.contains("font_size"));
+    b.set_font_size(9.0F);
+    Json stated = Json::object();
+    b.serialize_props(stated);
+    AURORA_TEST_CHECK_TRUE(stated.contains("font_size"));
 }
 
 AURORA_TEST_CASE(button_serialize_emits_required_plus_stated_only) {
@@ -916,7 +952,7 @@ AURORA_TEST_CASE(button_full_key_json_restores_every_effective_value) {
     AURORA_TEST_CHECK_EQ(dst.label().text, src.label().text);
     AURORA_TEST_CHECK(dst.color(ctx) == src.color(ctx));
     AURORA_TEST_CHECK(dst.on_color(ctx) == src.on_color(ctx));
-    AURORA_TEST_CHECK_NEAR(dst.font_size(), src.font_size(), 1e-6F);
+    AURORA_TEST_CHECK_NEAR(dst.font_size(ctx), src.font_size(ctx), 1e-6F);
     AURORA_TEST_CHECK_NEAR(dst.corner_radius(ctx), src.corner_radius(ctx), 1e-6F);
     const EdgeInsets pad = dst.padding(ctx);
     const EdgeInsets src_pad = src.padding(ctx);
@@ -969,14 +1005,14 @@ AURORA_TEST_CASE(button_invalid_json_degrades_to_row_fallback_without_stating) {
     b.serialize_props(after_bad);
     AURORA_TEST_CHECK_FALSE(after_bad.contains("corner_radius"));  // 未表态 ⇒ 该键退出意图集合
 
-    // ② 常量行类型不符（`font_size` 应为 number，喂串）⇒ 退回该行基线 14。
+    // ② 数值行类型不符（`font_size` 应为 number，喂串）⇒ 退回该行回落点（字阶正文档）。
     PropsProbe c;
     c.set_font_size(18.0F);
     Json wrong_type = Json::object();
     wrong_type.set("font_size", Json{"not-a-number"});
     c.deserialize_props(wrong_type);
     AURORA_TEST_CHECK_FALSE(c.present(ButtonProps::font_size_row()));
-    AURORA_TEST_CHECK_NEAR(c.font_size(), 14.0F, 1e-4F);  // 基线来自回落点，不是零值兜底
+    AURORA_TEST_CHECK_NEAR(c.font_size(light), 14.0F, 1e-4F);  // 基线来自回落点，不是零值兜底
     AURORA_TEST_CHECK_NEAR(c.resolve(ButtonProps::font_size_row(), light), 14.0F, 1e-4F);
 
     // ③ 必填行（无表态位）吃到非法值 ⇒ 保留现值，绝不清空。
@@ -997,7 +1033,7 @@ AURORA_TEST_CASE(button_invalid_json_degrades_to_row_fallback_without_stating) {
     d.deserialize_props(good);
     AURORA_TEST_CHECK_TRUE(d.present(ButtonProps::corner_radius_row()));
     AURORA_TEST_CHECK_NEAR(d.corner_radius(light), 9.0F, 1e-4F);
-    AURORA_TEST_CHECK_NEAR(d.font_size(), 20.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(d.font_size(light), 20.0F, 1e-4F);
     AURORA_TEST_CHECK_EQ(d.label().text, std::string{"Fine"});
 
     Diagnostics::take();

@@ -10,6 +10,9 @@
 /// 回归背景：修复前 Dropdown 只覆写 `on_hit_test`（兼容入口），派发入口 `on_hit_test_chain`
 /// 恒返回空 ⇒ 面板看得见、点不中（选中回调永不触发）。
 ///
+/// 另覆盖字号面：未表态时取作用域主题的字阶正文档（主框宽度实测随之变化）、显式表态钉住、
+/// 序列化「只写意图」与非法值回填降级。
+///
 /// 探针取点纪律：面板矩形由**公开状态实测**重建（主框高 / 行高 / 选项数 / 布局宽），不读私有
 /// 成员；取点前先断言「该点确实在布局盒之外」，否则覆盖区前提不成立、判据会退化成空转。
 
@@ -18,11 +21,13 @@
 #include <string>
 #include <vector>
 
+#include "aurora/environment/environment.h"
 #include "aurora/environment/media_query.h"
 #include "aurora/event/dispatcher.h"
 #include "aurora/layout/layout_engine.h"
 #include "aurora/modifier/modifier.h"
 #include "aurora/render/painter.h"
+#include "aurora/theming/theme.h"
 #include "aurora/widget/button.h"
 #include "aurora/widget/containers.h"
 #include "aurora/widget/dropdown.h"
@@ -49,6 +54,17 @@ auto host_box() -> Rect {
 auto host_constraints() -> Constraints {
     return Constraints{.min = Size{.width = 0.0F, .height = 0.0F},
                        .max = Size{.width = AURORA_HOST_WIDTH, .height = AURORA_HOST_HEIGHT}};
+}
+
+/// @brief 造一个注入了指定主题的构建上下文（根级环境，无父指针）。
+/// @param t 要注入的主题（按值拷进 holder 内的 Environment）。
+/// @return holder + ctx：`ctx.env` 指向 holder 内的 Environment，二者须在同作用域内使用。
+auto themed_ctx(const Theme &t) -> std::pair<std::shared_ptr<Environment>, BuildContext> {
+    auto env = std::make_shared<Environment>();
+    env->set_local(t);
+    BuildContext ctx;
+    ctx.env = env.get();
+    return {std::move(env), ctx};
 }
 
 auto press(float x, float y) -> MouseEvent {
@@ -753,6 +769,48 @@ AURORA_TEST_CASE(scroll_handles_limited_panel_and_falls_through_otherwise) {
         dd.on_scroll(sc2);
         AURORA_TEST_CHECK_TRUE(sc2.is_handled);
     }
+}
+
+AURORA_TEST_CASE(font_size_follows_type_scale_when_unset) {
+    Dropdown dd{std::vector<std::string>{"Alpha", "Beta", "Gamma"}};
+
+    // ① 未表态 ⇒ 取作用域主题的字阶正文档（进程级 light 档 = Material 正文基准 14pt）。
+    AURORA_TEST_CHECK_NEAR(dd.effective_font_size(BuildContext{}), 14.0F, 1e-4F);
+
+    // ② 换档 ⇒ 未表态的下拉跟着字阶走；宽度实测同步变化说明回落点进了布局路径，不只停在解析器。
+    Theme tuned;
+    tuned.type_scale.body_medium.size_pt = 24.0F;
+    const auto [env, ctx] = themed_ctx(tuned);
+    (void)env;
+    AURORA_TEST_CHECK_NEAR(dd.effective_font_size(ctx), 24.0F, 1e-4F);
+    // 两个独立实例各排一次：同实例连排两次会命中布局缓存、整段跳过 `on_layout`（见 `Widget::layout`），
+    // 那样宽度相等只证明缓存生效，证不了字号进了布局路径。
+    Dropdown wide{std::vector<std::string>{"Alpha", "Beta", "Gamma"}};
+    Dropdown narrow{std::vector<std::string>{"Alpha", "Beta", "Gamma"}};
+    LayoutEngine::layout(wide, host_constraints(), ctx);
+    LayoutEngine::layout(narrow, host_constraints(), BuildContext{});
+    AURORA_TEST_CHECK_GT(wide.size().width, narrow.size().width);
+
+    // ③ 显式表态钉住：两档作用域都读显式值，主题覆盖不了它。
+    dd.set_font_size(11.0F);
+    AURORA_TEST_CHECK_NEAR(dd.effective_font_size(ctx), 11.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(dd.effective_font_size(BuildContext{}), 11.0F, 1e-4F);
+
+    // ④ 只写意图 + 回填降级：表态过才落键；未表态/非法值都不落键，回落点交回主题。
+    Json stated = Json::object();
+    dd.serialize_props(stated);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(stated, "font_size"), 11.0F, 1e-4F);
+    Dropdown unstated{std::vector<std::string>{"Alpha"}};
+    Json bare = Json::object();
+    unstated.serialize_props(bare);
+    AURORA_TEST_CHECK_FALSE(bare.contains("font_size"));
+    Json junk = Json::object();
+    junk.set("font_size", Json{"not-a-number"});
+    dd.deserialize_props(junk);
+    AURORA_TEST_CHECK_NEAR(dd.effective_font_size(BuildContext{}), 14.0F, 1e-4F);
+    Json cleared = Json::object();
+    dd.serialize_props(cleared);
+    AURORA_TEST_CHECK_FALSE(cleared.contains("font_size"));  // 对照：非法值确实清了表态
 }
 
 }  // namespace aurora::test_cases::utest_dropdown

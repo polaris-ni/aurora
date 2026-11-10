@@ -3,7 +3,8 @@
 /// 测试说明: 覆盖 TabBar 的 API 面与交互分支——构造钳制、select/close_tab 的回调与选中修正、
 /// 全部 set_* 链式配置、on_pointer_event 的标签命中/关闭钮命中/内容区下沉、serialize/deserialize
 /// 往返（含 active_color 未设置时省略）、for_each_child/child_nodes 内容遍历、on_layout/on_paint/
-/// paint_tab 渲染与 tab_width 计算、on_hit_test/on_hit_test_chain、on_mount/on_unmount/tick 转发。
+/// paint_tab 渲染与 tab_width 计算、on_hit_test/on_hit_test_chain、on_mount/on_unmount/tick 转发；
+/// 另有字号未表态时取主题字阶正文档（含标签命中区与量宽同源）、显式表态钉住与「只写意图」序列化的成对断言。
 ///
 /// 与 utest_tab_bar.cpp（运行期 add_tab 补挂时机）互补：本文件覆盖静态 API 与其余运行期分支。
 
@@ -11,16 +12,23 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "aurora/core/color.h"
+#include "aurora/environment/environment.h"
 #include "aurora/event/event.h"
 #include "aurora/layout/layout_engine.h"
+#include "aurora/render/font_engine.h"
+#include "aurora/theming/theme.h"
 #include "aurora/widget/tab_bar.h"
 #include "aurora/widget/widget.h"
 #include "framework/aurora_test.h"
+#include "framework/json_access.h"
 
 namespace aurora::test_cases::utest_tab_bar_api {
+
+using aurora::testing::require_field;
 
 namespace {
 
@@ -56,6 +64,17 @@ auto bounded(float w, float h) -> Constraints {
 // 各调用点以行尾豁免标注；改动本文件后请复跑 scoped tidy 确认豁免与告警行一一对齐。
 auto make_tab(const std::string &label, bool closable = false) -> Tab {
     return Tab{.label = label, .content = Node{std::make_shared<LeafProbe>()}, .closable = closable};
+}
+
+/// @brief 造一个注入了指定主题的构建上下文（根级环境，无父指针）。
+/// @param t 要注入的主题（按值拷进 holder 内的 Environment）。
+/// @return holder + ctx：`ctx.env` 指向 holder 内的 Environment，二者须在同作用域内使用。
+auto themed_ctx(const Theme &t) -> std::pair<std::shared_ptr<Environment>, BuildContext> {
+    auto env = std::make_shared<Environment>();
+    env->set_local(t);
+    BuildContext ctx;
+    ctx.env = env.get();
+    return {std::move(env), ctx};
 }
 
 }  // namespace
@@ -191,7 +210,7 @@ AURORA_TEST_CASE(setters_chain_and_store) {
     // 边界回落：非正/负值取默认。
     bar.set_tab_height(-1.0F);  // -> 36
     bar.set_indicator_thickness(-1.0F);  // -> 2
-    bar.set_font_size(0.0F);  // -> 13
+    bar.set_font_size(0.0F);  // -> 退出表态，回落主题字阶正文档（见 font_size_follows_type_scale_when_unset）
     bar.set_tab_padding(-4.0F);  // -> 12
 
     int change_hits = 0;
@@ -341,6 +360,89 @@ AURORA_TEST_CASE(children_traversal_and_mount_lifecycle) {
     bar.unmount();
     AURORA_TEST_CHECK_EQ(a->unmounts, 1);
     AURORA_TEST_CHECK_EQ(b->unmounts, 1);
+}
+
+AURORA_TEST_CASE(font_size_follows_type_scale_when_unset) {
+    Theme tuned;
+    tuned.type_scale.body_medium.size_pt = 24.0F;
+    const auto [env, ctx] = themed_ctx(tuned);
+    (void)env;
+
+    auto fill_bar = [](TabBar &bar) -> void {  // 标签取宽文本，理由见 ②
+        bar.add_tab(make_tab("WWWWWWWWWW"));  // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
+        bar.add_tab(make_tab("WWWWWWWWWW"));  // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
+        bar.set_active_color(Color{1, 2, 3, 255});  // 显式色：绘制路径不回头去查主题角色
+    };
+
+    TabBar probe;
+    fill_bar(probe);
+
+    // ① 未表态 ⇒ 取作用域主题的字阶正文档（进程级 light 档 = Material 正文基准 14pt）。
+    AURORA_TEST_CHECK_NEAR(probe.effective_font_size(BuildContext{}), 14.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(probe.effective_font_size(ctx), 24.0F, 1e-4F);
+
+    // ② 标签度量与命中区同源走这份字号。两枚标签都取宽文本：既避开 `tab_width` 的 60dp 下限
+    //    （字号差才体现在命中区上），又保证取点稳落在第二标签跨度内（贴着边界会因末点开区间翻车）。
+    //    同一点在两档下命中不同标签，才证明命中区随字阶走（而非按常量字号硬编码）。
+    const float w14 = render::FontEngine::measure_width("WWWWWWWWWW", Font{.size_pt = 14.0F}) + 24.0F;
+    const float w24 = render::FontEngine::measure_width("WWWWWWWWWW", Font{.size_pt = 24.0F}) + 24.0F;
+    const float probe_x = w14 + ((w24 - w14) * 0.5F);
+    AURORA_TEST_REQUIRE_GT(w24, w14);
+
+    auto press_at = [probe_x]() -> MouseEvent {
+        MouseEvent e;
+        e.action = MouseAction::Press;
+        e.button = MouseButton::Left;
+        e.local_position = Point{.x = probe_x, .y = 5.0F};
+        return e;
+    };
+
+    const BuildContext bare_ctx;
+    Painter painter;
+    Rect bounds{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 640.0F, .height = 240.0F}};
+
+    TabBar scaled;
+    fill_bar(scaled);
+    scaled.select(1);
+    scaled.mount(ctx);
+    LayoutEngine::layout(scaled, bounded(640.0F, 240.0F), ctx);
+    scaled.paint(painter, bounds, ctx);  // 绘制期解字号：`layout_font_size_` 的主写入点
+    MouseEvent hit_scaled = press_at();
+    scaled.on_pointer_event(hit_scaled);
+    AURORA_TEST_CHECK_TRUE(hit_scaled.is_handled);
+    AURORA_TEST_CHECK_EQ(scaled.selected(), 0);  // 24pt 档：该点仍在首标签内 → 切回首标签
+
+    TabBar bare;
+    fill_bar(bare);
+    bare.mount(bare_ctx);
+    LayoutEngine::layout(bare, bounded(640.0F, 240.0F), bare_ctx);
+    bare.paint(painter, bounds, bare_ctx);
+    MouseEvent hit_bare = press_at();
+    bare.on_pointer_event(hit_bare);
+    AURORA_TEST_CHECK_TRUE(hit_bare.is_handled);
+    AURORA_TEST_CHECK_EQ(bare.selected(), 1);  // 14pt 档：同一点已过首标签 → 命中第二个标签
+
+    // ③ 显式表态钉住：两档作用域都读显式值，主题覆盖不了它。
+    probe.set_font_size(11.0F);
+    AURORA_TEST_CHECK_NEAR(probe.effective_font_size(ctx), 11.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(probe.effective_font_size(BuildContext{}), 11.0F, 1e-4F);
+
+    // ④ 只写意图 + 回填降级：表态过才落键；非正/非法值都不落键，回落点交回主题。
+    probe.set_font_size(0.0F);  // 非正字号 = 退出表态
+    Json unstated = Json::object();
+    probe.serialize_props(unstated);
+    AURORA_TEST_CHECK_FALSE(unstated.contains("font_size"));
+    probe.set_font_size(11.0F);
+    Json stated = Json::object();
+    probe.serialize_props(stated);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(stated, "font_size"), 11.0F, 1e-4F);
+    Json junk = Json::object();
+    junk.set("font_size", Json{"not-a-number"});
+    probe.deserialize_props(junk);
+    AURORA_TEST_CHECK_NEAR(probe.effective_font_size(BuildContext{}), 14.0F, 1e-4F);
+    Json cleared = Json::object();
+    probe.serialize_props(cleared);
+    AURORA_TEST_CHECK_FALSE(cleared.contains("font_size"));  // 对照：非法值确实清了表态
 }
 
 }  // namespace aurora::test_cases::utest_tab_bar_api
