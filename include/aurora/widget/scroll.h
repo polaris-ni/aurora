@@ -21,7 +21,9 @@
 #include "aurora/render/font_engine.h"
 #include "aurora/render/painter.h"
 #include "aurora/state/state.h"
+#include "aurora/theming/theme_scope.h"  // inherit_theme
 #include "aurora/widget/descriptor.h"
+#include "aurora/widget/detail/scrollbar.h"
 #include "aurora/widget/props.h"
 #include "aurora/widget/props_io.h"
 #include "aurora/widget/scroll_viewport.h"
@@ -388,6 +390,7 @@ class Scroll : public Container, public ScrollProps {
         const float unit = step();
         const float target = ScrollViewport::clamp_offset(offset_y_, e.delta_y, unit, content_h_, viewport_h_);
         e.is_handled = true;
+        note_scrollbar_scroll();  // 浮层档：滚动后保持窗口，由帧首注入的 now 兑现
         // 余量回传（嵌套滚动协调）：端点被夹掉的部分上冒给更浅可滚动祖先。
         e.remaining_y = ScrollViewport::remaining_offset(before, target, e.delta_y, unit);
         if (target != offset_y_) {
@@ -485,6 +488,7 @@ class Scroll : public Container, public ScrollProps {
             return false;
         }
         glide_.active = false;  // 外部程序化跳转：作废进行中的收位滑动
+        note_scrollbar_scroll();  // 滚动条翻页 / 拖拽 / 无障碍定位同样走保持窗口
         offset_y_ = target;
         scroll_restored_ = true;  // 外部程序化设置：视为已就位，不再被键恢复覆盖
         write_back_offset();
@@ -507,6 +511,7 @@ class Scroll : public Container, public ScrollProps {
         if (!animate || current_accessibility_settings().reduce_motion) {
             return set_offset(target);
         }
+        note_scrollbar_scroll();  // 程序化滑动同样刷新浮层档保持窗口
         scroll_restored_ = true;  // 同 set_offset：外部程序化设置视为已就位
         glide_.start(offset_y_, target);
         needs_gesture_tick_ = true;
@@ -541,7 +546,9 @@ class Scroll : public Container, public ScrollProps {
     auto on_system_drag_auto_scroll(const std::optional<Point> &position) -> bool override {
         if (!position.has_value()) {
             drag_auto_scroll_.stop();
-            if (!glide_.active) {
+            // 收车路径没有帧首时刻：取 epoch 作保守下界，保持窗口 / 悬停 / 待兑现滚动在途时
+            // needs_frame_tick 恒真，帧计时留给下一次 tick_gestures(now) 按真实时刻裁决。
+            if (!glide_.active && !scrollbar_.needs_frame_tick(std::chrono::steady_clock::time_point{})) {
                 needs_gesture_tick_ = false;  // 无收位滑动在途：摘除帧计时，回到空闲节流
             }
             return true;
@@ -550,6 +557,39 @@ class Scroll : public Container, public ScrollProps {
         needs_gesture_tick_ = true;
         request_frame(false);
         return true;
+    }
+
+    /// @brief 悬停进出通知：浮层档据此定夺滚动条显隐，经典档恒可见、无需帧计时唤醒。
+    /// @param entered true = 指针进入本控件（命中链 diff 判定）；false = 离开。
+    auto on_hover_change(bool entered) -> void override {
+        Widget::on_hover_change(entered);
+        if (!scrollbar_.overlay) {
+            return;
+        }
+        scrollbar_.set_pointer_inside(entered);
+        needs_gesture_tick_ = true;
+        request_frame(false);
+    }
+
+    /// @brief 指针事件入口：条带内或拖拽在途时消费事件，新偏移交给既有 set_offset 路径。
+    /// @param e 鼠标事件；命中条时置 `is_handled` 且不再冒泡，未命中条时原样交基类。
+    auto on_pointer_event(MouseEvent &e) -> void override {
+        const bool was_hovered = scrollbar_.interaction.hovered;
+        const auto action = e.action == MouseAction::Press  ? detail::ScrollbarPointerAction::Press
+                            : e.action == MouseAction::Move ? detail::ScrollbarPointerAction::Move
+                                                            : detail::ScrollbarPointerAction::Release;
+        const auto result = scrollbar_.pointer(action, e.local_position);
+        if (result.handled) {
+            e.is_handled = true;
+            if (result.offset_changed) {
+                (void)set_offset(result.offset);
+            }
+        } else {
+            Widget::on_pointer_event(e);
+        }
+        if (was_hovered != scrollbar_.interaction.hovered) {
+            mark_needs_paint();  // 悬停加粗的进出帧须重绘条带
+        }
     }
 
   protected:
@@ -563,12 +603,33 @@ class Scroll : public Container, public ScrollProps {
             return (viewport_w_ > 0.0F) ? viewport_w_ : 1.0F;
         }();
 
-        Size content{.width = viewport_w, .height = 0.0F};
-        if (!children_.empty()) {
+        const Theme &theme = inherit_theme(ctx);
+        scrollbar_.configure(detail::ScrollbarAxis::Vertical,
+                             theme.conventions.scrollbar_mode == ScrollbarMode::Overlay,
+                             theme.controls.scrollbar_thickness);
+
+        // 满宽排一次、先判溢出，再决定是否为经典档的条收窄内容列。反过来先收窄会产生
+        // 假阳性条：满宽放得下、收窄后换行变多反而溢出，条凭空出现还把内容无谓收窄。
+        const auto measure = [this, &ctx](float width) -> Size {
+            if (children_.empty()) {
+                return Size{.width = width, .height = 0.0F};
+            }
             Constraints cc;
-            cc.min = Size{.width = viewport_w, .height = 0.0F};
-            cc.max = Size{.width = viewport_w, .height = Size::infinity().height};
-            content = children_[0].widget().layout(cc, ctx);
+            cc.min = Size{.width = width, .height = 0.0F};
+            cc.max = Size{.width = width, .height = Size::infinity().height};
+            return children_[0].widget().layout(cc, ctx);
+        };
+        Size content = measure(viewport_w);
+        const float vh = (c.max.height != Size::infinity().height) ? c.max.height : content.height;
+        const Size self_box{.width = viewport_w, .height = vh};
+        scrollbar_.refresh(content.height, vh, offset_y_, self_box);
+        const float band = scrollbar_.reserve_band();
+        if (band > 0.0F) {
+            // 最坏两次测量且只在真溢出时发生；条几何一律取重排后的最终内容高，
+            // 与 accessibility_scroll() 申报的 content 同源，不取测量中间值。
+            content = measure(std::max(1.0F, viewport_w - band));
+        }
+        if (!children_.empty()) {
             // 几何权威写入 Node::bounds_（内容坐标，见类注释「几何与命中契约」）：
             // 命中链按此盒下降并自行换算偏移。不写则内容子树停留在默认零盒，
             // 其内按钮/输入框一个都点不到，且命中链只剩本控件（点击被容器吞掉）。
@@ -580,11 +641,11 @@ class Scroll : public Container, public ScrollProps {
         }
         content_h_ = content.height;
         content_w_ = content.width;
+        scrollbar_.refresh(content_h_, vh, offset_y_, self_box);
         // 吸顶节点发现（布局帧一次，绘制帧 O(1) 短路）：树形变化必经布局，缓存不会漏新头部。
         sticky_nodes_.clear();
         collect_stickies(children_, 0.0F, sticky_nodes_);
 
-        const float vh = (c.max.height != Size::infinity().height) ? c.max.height : content.height;
         viewport_h_ = vh;
         viewport_w_ = viewport_w;
         // 内容脏由 on_descendant_dirty 结构式接收（后代 request_frame 沿布局父链上溯），
@@ -758,6 +819,9 @@ class Scroll : public Container, public ScrollProps {
 
         paint_sticky_overlay(p, bounds, ctx);  // 吸顶覆盖层：blit 后重绘，不触发内容重录
 
+        scrollbar_.refresh(content_h_, viewport_h_, offset_y_, bounds.size);
+        paint_scrollbar(p, bounds, ctx);  // 条画在内容之后、容器自身盒内
+
         p.pop_clip();
         scrolling_ = false;  // 消费本帧滚动标记
     }
@@ -803,6 +867,12 @@ class Scroll : public Container, public ScrollProps {
     /// @return 命中内容的子树链；点在可视区外或无子节点时为空链。
     auto on_hit_test_chain(const Point &local, const Rect &bounds, const BuildContext &ctx)
         -> std::vector<HitNode> override {
+        // 条带命中即「本容器接管此点」：返回空后代链，基类因 `wants_scroll()` 把自身记入命中链。
+        // 不拦这一下，浮层档的轨道点击会穿过条带落到下面的内容子树。
+        scrollbar_.refresh(content_h_, viewport_h_, offset_y_, bounds.size);
+        if (scrollbar_.hit(local)) {
+            return {};
+        }
         if (children_.empty()) {
             return {};
         }
@@ -864,6 +934,11 @@ class Scroll : public Container, public ScrollProps {
         if (!viewport.contains(local)) {
             return false;
         }
+        // 与 on_hit_test_chain 同口径：条带区不申报后代覆盖，避免「闸认、自身不认」分叉。
+        // 该入口是 const，只读最近一次布局 / 绘制刷新的几何，不在此重算。
+        if (scrollbar_.hit(local)) {
+            return false;
+        }
         const Rect content_box = children_[0].bounds();
         const Point content_local{.x = local.x, .y = local.y + offset_y_};
         // 内容子树的祖先偏移：`ancestor_offset` + 内容盒原点。**刻意不扣 `offset_y_`**——
@@ -888,10 +963,14 @@ class Scroll : public Container, public ScrollProps {
     /// @param now 本帧时刻（单调时钟），与上一滑动时刻求差推进收位滑动插值。
     auto tick_gestures(std::chrono::steady_clock::time_point now) -> void override {
         Container::tick_gestures(now);  // 子树手势照常计时
+        if (scrollbar_.tick(now)) {
+            mark_needs_paint();  // 浮层档显隐翻转：瞬时切换，同帧两次重绘像素一致
+        }
         if (drag_auto_scroll_.active) {
             tick_drag_auto_scroll(now);  // 拖入自动滚边：Over 态驱动、按帧推进
         }
-        if (!glide_.active && !drag_auto_scroll_.active) {
+        // 三者都空闲才摘除共用帧计时，滚动条不得单独掐掉在途的收位滑动或滚边。
+        if (!glide_.active && !drag_auto_scroll_.active && !scrollbar_.needs_frame_tick(now)) {
             needs_gesture_tick_ = false;  // 静止后摘除每帧计时，回到空闲节流
             return;
         }
@@ -917,7 +996,8 @@ class Scroll : public Container, public ScrollProps {
         float v = glide_.tick(dt);
         // 布局可能在滑动中改变内容/视口尺寸：目标随动夹取，防滑出可滚范围。
         v = std::clamp(v, 0.0F, std::max(0.0F, content_h_ - viewport_h_));
-        if (!glide_.active && !drag_auto_scroll_.active) {  // 本帧抵达终点且无滚边在途：摘除帧计时
+        // 本帧抵达终点、无滚边在途且滚动条保持窗口已到期：摘除帧计时。
+        if (!glide_.active && !drag_auto_scroll_.active && !scrollbar_.needs_frame_tick(now)) {
             glide_last_.reset();
             needs_gesture_tick_ = false;
         }
@@ -1051,7 +1131,7 @@ class Scroll : public Container, public ScrollProps {
             const_cast<Node *>(s.node)->widget().paint(
                 p,
                 Rect{.origin = Point{.x = bounds.origin.x, .y = bounds.origin.y + pin_y},
-                     .size = Size{.width = bounds.size.width, .height = h}},
+                     .size = Size{.width = content_w_ > 0.0F ? content_w_ : bounds.size.width, .height = h}},
                 ctx);
             stack_bottom = pin_y + h;
         }
@@ -1130,6 +1210,35 @@ class Scroll : public Container, public ScrollProps {
         }
     }
 
+    /// @brief 在内容之后绘制滚动条：轨道凹槽 + 滑块，颜色只经两枚色角色取。
+    /// @param p 视口画笔。
+    /// @param bounds 本帧自身盒（条几何为局部坐标，须加其原点）。
+    /// @param ctx 构建上下文：读取 `scrollbar_thumb` / `scrollbar_track`。
+    auto paint_scrollbar(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void {
+        if (!scrollbar_.visible()) {
+            return;
+        }
+        const Theme &theme = inherit_theme(ctx);
+        const Rect track{.origin = bounds.origin + scrollbar_.geometry.track.origin,
+                         .size = scrollbar_.geometry.track.size};
+        const Rect thumb{.origin = bounds.origin + scrollbar_.paint_thumb().origin,
+                         .size = scrollbar_.paint_thumb().size};
+        const float radius = 0.5F * std::min(track.size.width, track.size.height);
+        p.fill_rounded_rect(track, radius, theme.roles.scrollbar_track);
+        p.fill_rounded_rect(thumb, radius, theme.roles.scrollbar_thumb);
+    }
+
+    /// @brief 滚动发生后登记浮层档保持窗口并唤醒一次帧计时；经典档零开销。
+    auto note_scrollbar_scroll() -> void {
+        if (!scrollbar_.overlay) {
+            return;
+        }
+        scrollbar_.note_scroll();
+        needs_gesture_tick_ = true;
+        request_frame(false);
+    }
+
+    detail::ScrollbarBinding scrollbar_;  ///< 滚动条几何、交互与显隐状态（四容器共用内核的接线层）。
     float offset_y_ = 0.0F;  ///< 当前滚动偏移（内容坐标下的视口顶位置；经 `offset` 属性对外可见）
     std::optional<float> pending_offset_;  ///< 显式反序列化的偏移（优先于 restore_key 恢复，布局后应用）
     bool scroll_restored_ = false;  ///< 是否已就位（恢复过一次 / 用户或外部程序化设置过）

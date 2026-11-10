@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <functional>
 #include <optional>
@@ -11,6 +12,8 @@
 #include "aurora/app/scroll_storage.h"
 #include "aurora/core/platform.h"  // NOLINT
 #include "aurora/event/event.h"
+#include "aurora/theming/theme_scope.h"  // inherit_theme
+#include "aurora/widget/detail/scrollbar.h"
 #include "aurora/widget/props.h"
 #include "aurora/widget/widget.h"
 
@@ -321,6 +324,7 @@ class LazyRow : public Widget, public LazyRowProps {
         if (clamped == offset_) {
             return;
         }
+        note_scrollbar_scroll();  // 拖拽 / 翻页 / 程序化定位同样刷新浮层保持窗口
         offset_ = clamped;
         scroll_restored_ = true;  // 外部程序化设置：视为已就位，不再被键恢复覆盖
         write_back_offset();
@@ -337,6 +341,7 @@ class LazyRow : public Widget, public LazyRowProps {
         const float before = offset_;
         offset_ = std::max(0.0F, std::min(max_off, before + (e.delta_y * ext * 0.5F)));
         e.is_handled = true;
+        note_scrollbar_scroll();  // 浮层档：滚轮后保持窗口，由帧首注入的 now 兑现
         scroll_restored_ = true;  // 用户主动滚动：放弃尚未生效的键恢复
         // 余量回传（嵌套滚动协调）：横向消费系数 item_extent×0.5/单位，端点夹掉的部分上冒。
         const float factor = ext * 0.5F;
@@ -358,9 +363,36 @@ class LazyRow : public Widget, public LazyRowProps {
         return AccessibilityScrollRange{.min = 0.0, .max = 0.0, .position = 0.0, .viewport = vh, .content = vh};
     }
 
-    /// @brief 指针事件入口：按下记录命中子项，横向拖拽推进滚动偏移，抬起未拖拽则回调子项点击。
+    /// @brief 悬停进出通知：浮层档据此定夺滚动条显隐，经典档恒可见、无需帧计时唤醒。
+    /// @param entered true = 指针进入本控件（命中链 diff 判定）；false = 离开。
+    auto on_hover_change(bool entered) -> void override {
+        Widget::on_hover_change(entered);
+        if (!scrollbar_.overlay) {
+            return;
+        }
+        scrollbar_.set_pointer_inside(entered);
+        needs_gesture_tick_ = true;
+        request_frame(false);
+    }
+
+    /// @brief 指针事件入口：条带内或拖拽在途时消费事件；其余仍是横向拖拽与子项点击。
     /// @param e 鼠标事件（就地读写：拖拽消费其 `local_position.x` 增量，消费后把 `is_handled` 置 true）。
     auto on_pointer_event(MouseEvent &e) -> void override {
+        const bool was_hovered = scrollbar_.interaction.hovered;
+        const auto action = e.action == MouseAction::Press  ? detail::ScrollbarPointerAction::Press
+                            : e.action == MouseAction::Move ? detail::ScrollbarPointerAction::Move
+                                                            : detail::ScrollbarPointerAction::Release;
+        const auto result = scrollbar_.pointer(action, e.local_position);
+        if (result.handled) {
+            e.is_handled = true;
+            if (result.offset_changed) {
+                set_scroll_offset(result.offset);
+            }
+            if (was_hovered != scrollbar_.interaction.hovered) {
+                mark_needs_paint();  // 悬停加粗的进出帧须重绘条带
+            }
+            return;  // 命中条：不再落到本控件自身的横向拖拽与子项点击
+        }
         if (e.action == MouseAction::Press) {
             pressed_ = true;
             dragging_ = false;
@@ -395,6 +427,9 @@ class LazyRow : public Widget, public LazyRowProps {
             pressed_ = false;
             dragging_ = false;
         }
+        if (was_hovered != scrollbar_.interaction.hovered) {
+            mark_needs_paint();  // 悬停加粗的进出帧须重绘条带
+        }
     }
 
   protected:
@@ -402,7 +437,7 @@ class LazyRow : public Widget, public LazyRowProps {
         return Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = bounds.size}.contains(local) ? this : nullptr;
     }
 
-    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
+    auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
         const EdgeInsets pad = padding();
         const float ext = item_extent();
         const float h_pad = pad.left + pad.right;
@@ -415,6 +450,15 @@ class LazyRow : public Widget, public LazyRowProps {
         viewport_w_ = std::max(1.0F, constrained.width - h_pad);
         // 纵向视口高同样取自本次约束结果（纯横向列表纵向不可滚，视口高 == 内容高 ⇒ 跨度 0）。
         viewport_h_ = constrained.height;
+        const Theme &theme = inherit_theme(ctx);
+        scrollbar_.configure(detail::ScrollbarAxis::Horizontal,
+                             theme.conventions.scrollbar_mode == ScrollbarMode::Overlay,
+                             theme.controls.scrollbar_thickness);
+        scrollbar_.box_origin = Point{.x = pad.left, .y = 0.0F};  // 轨道与内容同起点，不跨左右内边距
+        // 内容总宽布局前即可算出，一次定夺；Classic 溢出时带宽从**既有固有高**里扣除，
+        // 不向父级多要高度，与纵向三容器的内容列收缩对称。
+        scrollbar_.refresh(full_content_, viewport_w_, offset_, Size{.width = viewport_w_, .height = viewport_h_});
+        scrollbar_band_ = scrollbar_.reserve_band();
         // 滚动位置恢复（首次可滚动布局时生效；显式反序列化的 offset 优先）。
         maybe_restore_scroll();
         return constrained;
@@ -428,7 +472,9 @@ class LazyRow : public Widget, public LazyRowProps {
         const float cache = cache_extent();
         const int count = item_count();
         const float v_pad = pad.top + pad.bottom;
-        const float ch = std::max(1.0F, bounds.size.height - v_pad);
+        scrollbar_.refresh(full_content_, viewport_w_, offset_,
+                           Size{.width = viewport_w_, .height = bounds.size.height});
+        const float ch = std::max(1.0F, bounds.size.height - v_pad - scrollbar_band_);
         const int first = std::max(0, static_cast<int>(std::floor((offset_ - cache) / ext)));
         const int last =
             std::min(count - 1, static_cast<int>(std::floor((offset_ + bounds.size.width - pad.left + cache) / ext)));
@@ -459,6 +505,7 @@ class LazyRow : public Widget, public LazyRowProps {
             built_[i].widget().layout(Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = cb.size}, ctx);
             built_[i].widget().paint(p, Rect{.origin = bounds.origin + cb.origin, .size = cb.size}, ctx);
         }
+        paint_scrollbar(p, bounds, ctx);  // 条画在内容之后、容器自身盒内
         p.pop_clip();
     }
 
@@ -473,6 +520,12 @@ class LazyRow : public Widget, public LazyRowProps {
             return {};
         }
         (void)ctx;
+        // 条带命中即「本容器接管此点」：返回空后代链，基类因 `wants_scroll()` 把自身记入命中链。
+        scrollbar_.refresh(full_content_, viewport_w_, offset_,
+                           Size{.width = viewport_w_, .height = bounds.size.height});
+        if (scrollbar_.hit(local)) {
+            return {};
+        }
         // 虚拟化子项不以稳定控件形态参与命中链：横向列表自身作为点击/滚动叶。
         return std::vector{HitNode{this, weak_from_this(), bounds.origin}};
     }
@@ -480,7 +533,47 @@ class LazyRow : public Widget, public LazyRowProps {
 #pragma GCC diagnostic pop
 #endif
 
+    /// @brief 帧计时：浮层档显隐只由帧首注入的 now 定夺一次，空闲即摘除帧计时。
+    /// @param now 本帧时刻（单调时钟）。
+    auto tick_gestures(std::chrono::steady_clock::time_point now) -> void override {
+        Widget::tick_gestures(now);
+        if (scrollbar_.tick(now)) {
+            mark_needs_paint();  // 瞬时切换：同帧两次重绘像素一致
+        }
+        if (!scrollbar_.needs_frame_tick(now)) {
+            needs_gesture_tick_ = false;  // 保持窗口到期且指针已离开：回到空闲节流
+        }
+    }
+
   private:
+    /// @brief 在内容之后绘制滚动条：轨道凹槽 + 滑块，颜色只经两枚色角色取。
+    /// @param p 视口画笔。
+    /// @param bounds 本帧自身盒（条几何为局部坐标，须加其原点）。
+    /// @param ctx 构建上下文：读取 `scrollbar_thumb` / `scrollbar_track`。
+    auto paint_scrollbar(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void {
+        if (!scrollbar_.visible()) {
+            return;
+        }
+        const Theme &theme = inherit_theme(ctx);
+        const Rect track{.origin = bounds.origin + scrollbar_.geometry.track.origin,
+                         .size = scrollbar_.geometry.track.size};
+        const Rect thumb{.origin = bounds.origin + scrollbar_.paint_thumb().origin,
+                         .size = scrollbar_.paint_thumb().size};
+        const float radius = 0.5F * std::min(track.size.width, track.size.height);
+        p.fill_rounded_rect(track, radius, theme.roles.scrollbar_track);
+        p.fill_rounded_rect(thumb, radius, theme.roles.scrollbar_thumb);
+    }
+
+    /// @brief 滚动发生后登记浮层档保持窗口并唤醒一次帧计时；经典档零开销。
+    auto note_scrollbar_scroll() -> void {
+        if (!scrollbar_.overlay) {
+            return;
+        }
+        scrollbar_.note_scroll();
+        needs_gesture_tick_ = true;
+        request_frame(false);
+    }
+
     /// @brief 恢复路径专用：夹取 → 赋值 → 标绘制脏（不写回、不改归属标记）。
     auto apply_restored_offset(float raw) -> void {
         const float clamped = std::clamp(raw, 0.0F, max_scroll_offset());
@@ -538,6 +631,8 @@ class LazyRow : public Widget, public LazyRowProps {
     float offset_ = 0.0F;
     float viewport_w_ = 0.0F;  ///< 最近一次布局得到的视口宽（`size()` 在 on_layout 内尚是旧值）
     float viewport_h_ = 0.0F;  ///< 最近一次布局得到的视口高（纵向不可滚，仅供无障碍 ViewSize 申报）
+    detail::ScrollbarBinding scrollbar_;  ///< 滚动条几何、交互与显隐状态（四容器共用内核的接线层）。
+    float scrollbar_band_ = 0.0F;  ///< 经典档本帧为底侧条预留的带宽（子项可用高据此收缩）。
     std::optional<float> pending_offset_;  ///< 显式反序列化的偏移（优先于 restore_key 恢复）
     bool scroll_restored_ = false;  ///< 是否已就位（恢复过一次 / 用户或外部程序化设置过）
     std::vector<Node> built_;

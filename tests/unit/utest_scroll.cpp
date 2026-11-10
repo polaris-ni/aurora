@@ -29,7 +29,9 @@
 #include "aurora/layout/layout_engine.h"
 #include "aurora/perf/counters.h"
 #include "aurora/perf/scroll_bench.h"
+#include "aurora/theming/theme.h"
 #include "aurora/widget/containers.h"
+#include "aurora/widget/detail/scrollbar.h"
 #include "aurora/widget/scroll.h"
 #include "framework/aurora_test.h"
 #include "framework/json_access.h"
@@ -58,6 +60,32 @@ class FixedBox final : public Widget {
   private:
     float w_;
     float h_;
+};
+
+/// 宽度相关哑控件：自然内容总宽固定，按可用宽度折算换行行数（行高固定）。
+/// 越窄换行越多、内容越高——用于验证经典档「满宽放得下时不凭空出条」（判据二反向项）。
+class WrappingBox final : public Widget {
+  public:
+    WrappingBox(float content_w, float line_h) : content_w_(content_w), line_h_(line_h) {}
+
+    [[nodiscard]] auto type_name() const -> const char * override { return "WrappingBox"; }
+
+  protected:
+    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
+        const float w = c.max.width;
+        const float eff = std::max(1.0F, w);
+        int lines = static_cast<int>(content_w_ / eff);
+        if (content_w_ - (static_cast<float>(lines) * eff) > 1e-3F) {
+            ++lines;
+        }
+        const float h = static_cast<float>(lines) * line_h_;
+        return c.constrain(Size{.width = w, .height = h});
+    }
+    auto on_paint(Painter & /*p*/, const Rect & /*bounds*/, const BuildContext & /*ctx*/) -> void override {}
+
+  private:
+    float content_w_;
+    float line_h_;
 };
 
 auto box(float w, float h) -> Node { return Node{std::make_shared<FixedBox>(w, h)}; }
@@ -867,11 +895,29 @@ AURORA_TEST_CASE(content_bounds_written_in_content_coordinates) {
     const std::vector<Node> &kids = f.scroll->child_nodes();
     AURORA_TEST_REQUIRE(!kids.empty());
     const Rect cb = kids.front().bounds();
-    // 修复前此盒为默认 Rect{}（宽高皆 0）。
-    AURORA_TEST_CHECK_NEAR(cb.size.width, AURORA_VIEW_W, 1e-3F);
+    // 修复前此盒为默认 Rect{}（宽高皆 0）。默认主题为经典档：内容溢出时右侧条带预留
+    // 「粗细 + 两侧内缩」，内容列随之收窄；坐标系与原点仍严格是内容坐标。
+    const float band = Theme::light().controls.scrollbar_thickness + (2.0F * detail::AURORA_SCROLLBAR_INSET);
+    AURORA_TEST_CHECK_NEAR(cb.size.width, AURORA_VIEW_W - band, 1e-3F);
     AURORA_TEST_CHECK_NEAR(cb.size.height, AURORA_CONTENT_H, 1e-3F);
     AURORA_TEST_CHECK_NEAR(cb.origin.x, 0.0F, 1e-3F);
     AURORA_TEST_CHECK_NEAR(cb.origin.y, 0.0F, 1e-3F);
+}
+
+AURORA_TEST_CASE(classic_scroll_no_false_positive_bar_at_full_width) {
+    // 判据二反向项：经典档必须「先满宽测量判溢出、再决定是否收窄内容列」。
+    // 若颠倒为先按「必溢出」收窄再测量，满宽本放得下的内容因换行变多而凭空溢出，
+    // 内容被无谓收窄（内容宽落到 视口宽 - 带宽）且条凭空出现。
+    // WrappingBox 自然宽 600dp、行高 20：视口 300×50 下满宽只换 2 行（高 40 < 50）不溢出；
+    // 误判后窄到 292 则换 3 行（高 60 > 50）溢出。
+    auto scroll = std::make_shared<Scroll>();
+    scroll->add(Node{std::make_shared<WrappingBox>(600.0F, 20.0F)});
+    LayoutEngine::layout(*scroll, bounded(300.0F, 50.0F));
+    const std::vector<Node> &kids = scroll->child_nodes();
+    AURORA_TEST_REQUIRE(!kids.empty());
+    const Rect cb = kids.front().bounds();
+    // 正确实现：满宽测量不溢出 → 不收窄 → 内容宽 == 视口宽 300。
+    AURORA_TEST_CHECK_NEAR(cb.size.width, 300.0F, 1e-3F);
 }
 
 AURORA_TEST_CASE(scrolled_content_still_hits_visual_row) {

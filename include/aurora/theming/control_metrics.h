@@ -27,11 +27,11 @@ struct ControlMetrics {
     float control_height_small = 24.0F;  ///< 紧凑控件基准高（复现现值：`Switch` 轨高 24）。
     float min_touch_target = 40.0F;  ///< 命中盒下限（候选：库内无该常量；图标按钮点击区现按 24 + 8×2 自然得 40）。
     float menu_item_height = 26.0F;  ///< 菜单 / 列表项行高（复现现值：`MenuBar` 行高与 `Dropdown` 选项行同为 26）。
-    float focus_ring_width = 2.0F;  ///< 焦点环宽（复现现值：`Widget` 的焦点环厚度常量）。
-    float focus_ring_inset = 2.0F;  ///< 焦点环与控件边框的间距（复现现值：`Widget` 的环间距常量；正值 = 向外）。
+    float focus_ring_width = 2.0F;  ///< 焦点环宽（复现现值：`Widget` 绘制前的常量 2；现由绘制期读取）。
+    float focus_ring_inset = 2.0F;  ///< 焦点环与控件边框的间距（复现现值：`Widget` 绘制前的常量 2；正值 = 向外）。
     float indicator_size =
         20.0F;  ///< 勾选基准盒边长（复现现值：`Checkbox` 方框边长；单选外径现值 16，接线批各自对齐）。
-    float scrollbar_thickness = 4.0F;  ///< 滚动条粗细（候选：库内尚未绘制滚动条，无既有实现可复现）。
+    float scrollbar_thickness = 4.0F;  ///< 滚动条粗细（复现现值：四容器轨道与滑块的盒宽，默认 4）。
     float separator_thickness = 1.0F;  ///< 分隔线厚度（复现现值：`Divider` 默认线厚，另有五处同值硬编码）。
     float border_thickness = 1.0F;  ///< 控件默认描边宽（复现现值：`TextInput` / `Dropdown` 描边宽；勾选框 1.5 单列）。
     float icon_default_size = 24.0F;  ///< 图标默认边长（复现现值：`Icon` / `IconButton` 盒边长）。

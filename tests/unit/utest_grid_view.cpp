@@ -20,6 +20,8 @@
 #include "aurora/app/scroll_storage.h"
 #include "aurora/core/accessibility.h"
 #include "aurora/layout/layout_engine.h"
+#include "aurora/theming/theme.h"
+#include "aurora/widget/detail/scrollbar.h"
 #include "aurora/widget/grid_view.h"
 #include "framework/aurora_test.h"
 #include "framework/json_access.h"
@@ -239,10 +241,12 @@ AURORA_TEST_CASE(layout_fills_viewport_and_sizes_cells) {
     LayoutEngine::layout(grid, bounded(300.0F, 300.0F));
     AURORA_TEST_CHECK_NEAR(grid.size().width, 300.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(grid.size().height, 300.0F, 1e-4F);
-    // 单元格被格约束（min == max = 视口宽/列数 × 格高）强制整形。
-    AURORA_TEST_CHECK_NEAR(rec.items.at(0)->size().width, 100.0F, 1e-4F);
+    // 单元格被格约束强制整形；默认主题为经典档，溢出时总宽先扣滚动条带宽再按列数均分。
+    const float band = Theme::light().controls.scrollbar_thickness + (2.0F * detail::AURORA_SCROLLBAR_INSET);
+    const float cell_w = (300.0F - band) / 3.0F;
+    AURORA_TEST_CHECK_NEAR(rec.items.at(0)->size().width, cell_w, 1e-4F);
     AURORA_TEST_CHECK_NEAR(rec.items.at(0)->size().height, 96.0F, 1e-4F);
-    AURORA_TEST_CHECK_NEAR(rec.items.at(11)->size().width, 100.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(rec.items.at(11)->size().width, cell_w, 1e-4F);
 }
 
 AURORA_TEST_CASE(virtualization_builds_visible_rows_only) {
@@ -319,14 +323,16 @@ AURORA_TEST_CASE(cell_positions_follow_grid) {
     p.begin(300, 300);
     grid.paint(p, Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 300.0F, .height = 300.0F}},
                BuildContext{});
-    // 索引 → (行, 列)：0 → (0,0)，2 → (0,2)，5 → (1,2)；列宽 100，格高 96。
+    // 索引 → (行, 列)：0 → (0,0)，2 → (0,2)，5 → (1,2)；格高 96，列宽按收缩后的总宽均分。
+    const float band = Theme::light().controls.scrollbar_thickness + (2.0F * detail::AURORA_SCROLLBAR_INSET);
+    const float cell_w = (300.0F - band) / 3.0F;
     AURORA_TEST_CHECK_NEAR(rec.items.at(0)->paint_bounds().origin.x, 0.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(rec.items.at(0)->paint_bounds().origin.y, 0.0F, 1e-4F);
-    AURORA_TEST_CHECK_NEAR(rec.items.at(2)->paint_bounds().origin.x, 200.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(rec.items.at(2)->paint_bounds().origin.x, 2.0F * cell_w, 1e-4F);
     AURORA_TEST_CHECK_NEAR(rec.items.at(2)->paint_bounds().origin.y, 0.0F, 1e-4F);
-    AURORA_TEST_CHECK_NEAR(rec.items.at(5)->paint_bounds().origin.x, 200.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(rec.items.at(5)->paint_bounds().origin.x, 2.0F * cell_w, 1e-4F);
     AURORA_TEST_CHECK_NEAR(rec.items.at(5)->paint_bounds().origin.y, 96.0F, 1e-4F);
-    AURORA_TEST_CHECK_NEAR(rec.items.at(5)->paint_bounds().size.width, 100.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(rec.items.at(5)->paint_bounds().size.width, cell_w, 1e-4F);
 }
 
 AURORA_TEST_CASE(serialize_and_describe) {

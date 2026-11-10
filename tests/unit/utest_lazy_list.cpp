@@ -19,6 +19,8 @@
 #include "aurora/app/scroll_storage.h"
 #include "aurora/core/accessibility.h"
 #include "aurora/layout/layout_engine.h"
+#include "aurora/theming/theme.h"
+#include "aurora/widget/detail/scrollbar.h"
 #include "aurora/widget/lazy_list.h"
 #include "framework/aurora_test.h"
 #include "framework/json_access.h"
@@ -249,8 +251,9 @@ AURORA_TEST_CASE(cache_extent_zero_builds_exact_window) {
     AURORA_TEST_CHECK_EQ(list.visible_range().first, 0);
     AURORA_TEST_CHECK_EQ(list.visible_range().second, 9);  // ceil(400 / 48)
     AURORA_TEST_CHECK_EQ(list.live_item_count(), 9U);
-    // 存活条目被条目约束（min == max = 视口宽 × 行高）强制整形。
-    AURORA_TEST_CHECK_NEAR(rec.items.at(0)->size().width, 300.0F, 1e-4F);
+    // 存活条目被条目约束强制整形；默认主题为经典档，溢出时条目宽 = 视口宽 − 滚动条带宽。
+    const float band = Theme::light().controls.scrollbar_thickness + (2.0F * detail::AURORA_SCROLLBAR_INSET);
+    AURORA_TEST_CHECK_NEAR(rec.items.at(0)->size().width, 300.0F - band, 1e-4F);
     AURORA_TEST_CHECK_NEAR(rec.items.at(0)->size().height, 48.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(rec.items.at(8)->size().height, 48.0F, 1e-4F);
 }

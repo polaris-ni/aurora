@@ -18,7 +18,9 @@
 #include "aurora/core/diagnostics.h"
 #include "aurora/render/painter.h"
 #include "aurora/state/state.h"
+#include "aurora/theming/theme_scope.h"  // inherit_theme
 #include "aurora/widget/descriptor.h"
+#include "aurora/widget/detail/scrollbar.h"
 #include "aurora/widget/props_io.h"
 #include "aurora/widget/scroll_viewport.h"
 #include "aurora/widget/widget.h"
@@ -301,7 +303,9 @@ class LazyList : public Widget {
     auto on_system_drag_auto_scroll(const std::optional<Point> &position) -> bool override {
         if (!position.has_value()) {
             drag_auto_scroll_.stop();
-            if (!glide_.active) {
+            // 收车路径没有帧首时刻：取 epoch 作保守下界，保持窗口 / 悬停 / 待兑现滚动在途时
+            // needs_frame_tick 恒真，帧计时留给下一次 tick_gestures(now) 按真实时刻裁决。
+            if (!glide_.active && !scrollbar_.needs_frame_tick(std::chrono::steady_clock::time_point{})) {
                 needs_gesture_tick_ = false;  // 无收位滑动在途：摘除帧计时，回到空闲节流
             }
             return true;
@@ -434,6 +438,39 @@ class LazyList : public Widget {
     /// @return 恒为 true。
     [[nodiscard]] auto wants_scroll() const -> bool override { return true; }
 
+    /// @brief 悬停进出通知：浮层档据此定夺滚动条显隐，经典档恒可见、无需帧计时唤醒。
+    /// @param entered true = 指针进入本控件（命中链 diff 判定）；false = 离开。
+    auto on_hover_change(bool entered) -> void override {
+        Widget::on_hover_change(entered);
+        if (!scrollbar_.overlay) {
+            return;
+        }
+        scrollbar_.set_pointer_inside(entered);
+        needs_gesture_tick_ = true;
+        request_frame(false);
+    }
+
+    /// @brief 指针事件入口：条带内或拖拽在途时消费事件，新偏移交给既有 apply_offset 路径。
+    /// @param e 鼠标事件；命中条时置 `is_handled` 且不再冒泡，未命中条时原样交基类。
+    auto on_pointer_event(MouseEvent &e) -> void override {
+        const bool was_hovered = scrollbar_.interaction.hovered;
+        const auto action = e.action == MouseAction::Press  ? detail::ScrollbarPointerAction::Press
+                            : e.action == MouseAction::Move ? detail::ScrollbarPointerAction::Move
+                                                            : detail::ScrollbarPointerAction::Release;
+        const auto result = scrollbar_.pointer(action, e.local_position);
+        if (result.handled) {
+            e.is_handled = true;
+            if (result.offset_changed) {
+                apply_offset(result.offset, /*cancel_glide=*/true);
+            }
+        } else {
+            Widget::on_pointer_event(e);
+        }
+        if (was_hovered != scrollbar_.interaction.hovered) {
+            mark_needs_paint();  // 悬停加粗的进出帧须重绘条带
+        }
+    }
+
     /// @brief 无障碍滚动量：{0, 最大偏移, 当前偏移} + 视口高/内容高两量。
     /// 供 UIA `IScrollProvider::get_VerticalViewSize` 按几何算百分比（而非按跨度反解）。
     /// @note Side-effects: reads state
@@ -537,6 +574,15 @@ class LazyList : public Widget {
             self = Size{.width = 320.0F, .height = 480.0F};
         }
         viewport_height_ = self.height;
+        const Theme &theme = inherit_theme(ctx);
+        scrollbar_.configure(detail::ScrollbarAxis::Vertical,
+                             theme.conventions.scrollbar_mode == ScrollbarMode::Overlay,
+                             theme.controls.scrollbar_thickness);
+        // 内容高 = count × item_extent，与宽度无关，故一次定夺即可；Classic 溢出时
+        // 只为右侧条带收窄条目宽，不改内容高（条几何与 accessibility_scroll 同源）。
+        scrollbar_.refresh(content_height(), self.height, offset_, self);
+        content_width_ = std::max(1.0F, self.width - scrollbar_.reserve_band());
+        const float item_width = content_width_;
         // 滚动位置恢复（首次可滚动布局时生效）——须在计算可见窗口之前，使恢复在本帧即生效。
         maybe_restore_scroll();
 
@@ -572,14 +618,14 @@ class LazyList : public Widget {
         }
         // 布局存活实例（固定行高，宽度撑满视口）
         Constraints item_c;
-        item_c.min = Size{.width = self.width, .height = item_extent_};
-        item_c.max = Size{.width = self.width, .height = item_extent_};
+        item_c.min = Size{.width = item_width, .height = item_extent_};
+        item_c.max = Size{.width = item_width, .height = item_extent_};
         for (auto &kv : live_) {
             kv.second.widget().set_layout_parent(this);
             kv.second.widget().layout(item_c, ctx);
             const float y = (static_cast<float>(kv.first) * item_extent_) - offset_;
             kv.second.set_bounds(
-                Rect{.origin = Point{.x = 0.0F, .y = y}, .size = Size{.width = self.width, .height = item_extent_}});
+                Rect{.origin = Point{.x = 0.0F, .y = y}, .size = Size{.width = item_width, .height = item_extent_}});
         }
         return c.constrain(self);
     }
@@ -613,7 +659,8 @@ class LazyList : public Widget {
             }
             node.widget().paint(p,
                                 Rect{.origin = Point{.x = bounds.origin.x, .y = bounds.origin.y + pin_y},
-                                     .size = Size{.width = bounds.size.width, .height = node.bounds().size.height}},
+                                     .size = Size{.width = content_width_ > 0.0F ? content_width_ : bounds.size.width,
+                                                  .height = node.bounds().size.height}},
                                 ctx);
             stack = pin_y + h;
         }
@@ -642,6 +689,8 @@ class LazyList : public Widget {
         }
         // 覆盖层最后绘制：钉驻头部压在滚动内容之上（与 Scroll 的 blit-后-压顶同序）。
         paint_sticky_overlay(p, bounds, ctx);
+        scrollbar_.refresh(content_height(), viewport_height_, offset_, bounds.size);
+        paint_scrollbar(p, bounds, ctx);  // 条画在内容之后、容器自身盒内
         p.pop_clip();
     }
 
@@ -654,6 +703,11 @@ class LazyList : public Widget {
 
     auto on_hit_test_chain(const Point &local, const Rect &bounds, const BuildContext &ctx)
         -> std::vector<HitNode> override {
+        // 条带命中即「本容器接管此点」：返回空后代链，基类因 `wants_scroll()` 把自身记入命中链。
+        scrollbar_.refresh(content_height(), viewport_height_, offset_, bounds.size);
+        if (scrollbar_.hit(local)) {
+            return {};
+        }
         // 视口钳位与本控件 on_hit_test / on_paint 同口径：点在视口外一律不命中。虚拟化使 live_
         // 里留有视口外的缓存条目（cache_extent 预取），不加钳位时「条目已滚出视口、其覆盖绘制
         // 区却仍被祖先的闸认」⇒ 肉眼不可见的区域变得可点。
@@ -697,6 +751,11 @@ class LazyList : public Widget {
         if (!viewport.contains(local)) {
             return false;
         }
+        // 与 on_hit_test_chain 同口径：条带区不申报后代覆盖，避免「闸认、自身不认」分叉。
+        // 该入口是 const，只读最近一次布局 / 绘制刷新的几何，不在此重算。
+        if (scrollbar_.hit(local)) {
+            return false;
+        }
         // live_ 是 std::map：any_of 直接吃 associative_range，无需物化 values 视图
         // （Node 不可拷贝构造，物化那条路走不通）。
         return std::ranges::any_of(live_, [&local, &ctx, &ancestor_offset](const auto &kv) {
@@ -712,13 +771,17 @@ class LazyList : public Widget {
     /// @param now 本次 tick 的墙钟时刻（推进滑动步进与子控件节拍）。
     auto tick_gestures(std::chrono::steady_clock::time_point now) -> void override {
         Widget::tick_gestures(now);
+        if (scrollbar_.tick(now)) {
+            mark_needs_paint();  // 浮层档显隐翻转：瞬时切换，同帧两次重绘像素一致
+        }
         for (auto &kv : live_ | std::views::values) {
             kv.widget().tick(now);
         }
         if (drag_auto_scroll_.active) {
             tick_drag_auto_scroll(now);  // 拖入自动滚边：Over 态驱动、按帧推进
         }
-        if (!glide_.active && !drag_auto_scroll_.active) {
+        // 三者都空闲才摘除共用帧计时，滚动条不得单独掐掉在途的收位滑动或滚边。
+        if (!glide_.active && !drag_auto_scroll_.active && !scrollbar_.needs_frame_tick(now)) {
             needs_gesture_tick_ = false;  // 静止后摘除每帧计时，回到空闲节流
             return;
         }
@@ -742,7 +805,8 @@ class LazyList : public Widget {
         float v = glide_.tick(dt);
         // 布局可能在滑动中改变内容/视口尺寸：目标随动夹取，防滑出可滚范围。
         v = std::clamp(v, 0.0F, max_scroll_offset());
-        if (!glide_.active && !drag_auto_scroll_.active) {  // 本帧抵达终点且无滚边在途：摘除帧计时
+        // 本帧抵达终点、无滚边在途且滚动条保持窗口已到期：摘除帧计时。
+        if (!glide_.active && !drag_auto_scroll_.active && !scrollbar_.needs_frame_tick(now)) {
             glide_last_.reset();
             needs_gesture_tick_ = false;
         }
@@ -804,6 +868,7 @@ class LazyList : public Widget {
         if (cancel_glide) {
             glide_.active = false;
         }
+        note_scrollbar_scroll();  // 滚轮 / 拖拽 / 程序化 / 滑动帧统一在此登记浮层保持窗口
         offset_ = clamped;
         scroll_restored_ = true;  // 外部程序化设置 / 用户滚动：视为已就位，不再被键恢复覆盖
         write_back_offset();
@@ -876,6 +941,34 @@ class LazyList : public Widget {
         ScrollStorage::instance().write(restore_key_, offset_);
     }
 
+    /// @brief 在内容之后绘制滚动条：轨道凹槽 + 滑块，颜色只经两枚色角色取。
+    /// @param p 视口画笔。
+    /// @param bounds 本帧自身盒（条几何为局部坐标，须加其原点）。
+    /// @param ctx 构建上下文：读取 `scrollbar_thumb` / `scrollbar_track`。
+    auto paint_scrollbar(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void {
+        if (!scrollbar_.visible()) {
+            return;
+        }
+        const Theme &theme = inherit_theme(ctx);
+        const Rect track{.origin = bounds.origin + scrollbar_.geometry.track.origin,
+                         .size = scrollbar_.geometry.track.size};
+        const Rect thumb{.origin = bounds.origin + scrollbar_.paint_thumb().origin,
+                         .size = scrollbar_.paint_thumb().size};
+        const float radius = 0.5F * std::min(track.size.width, track.size.height);
+        p.fill_rounded_rect(track, radius, theme.roles.scrollbar_track);
+        p.fill_rounded_rect(thumb, radius, theme.roles.scrollbar_thumb);
+    }
+
+    /// @brief 滚动发生后登记浮层档保持窗口并唤醒一次帧计时；经典档零开销。
+    auto note_scrollbar_scroll() -> void {
+        if (!scrollbar_.overlay) {
+            return;
+        }
+        scrollbar_.note_scroll();
+        needs_gesture_tick_ = true;
+        request_frame(false);
+    }
+
     static constexpr float AURORA_SCROLL_STEP = 40.0F;  ///< 每单位滚轮增量对应的 dp
 
     /// @brief 「末尾」在待定偏移单槽里的表达形态：一枚不可达的大偏移，由首次可滚动布局
@@ -889,6 +982,8 @@ class LazyList : public Widget {
     float offset_ = 0.0F;
     float cache_extent_ = 200.0F;
     float viewport_height_ = 0.0F;
+    float content_width_ = 0.0F;  ///< 经典档收缩后的条目宽（钉驻覆盖层同宽，不越到条带里）。
+    detail::ScrollbarBinding scrollbar_;  ///< 滚动条几何、交互与显隐状态（四容器共用内核的接线层）。
     std::string restore_key_;  ///< 滚动位置保存键（空 = 不参与恢复）
     std::optional<float> pending_offset_;  ///< 显式反序列化的偏移（优先于 restore_key 恢复）
     bool scroll_restored_ = false;  ///< 是否已就位（恢复过一次 / 用户或外部程序化设置过）

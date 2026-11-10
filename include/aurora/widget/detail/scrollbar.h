@@ -292,4 +292,106 @@ struct ScrollbarInteraction {
     }
 };
 
+/// @brief 容器侧接线状态：把「布局期占位、绘制期几何、事件期交互、帧首显隐」收在同一处。
+///
+/// 值语义、零分配、不自读时钟，四容器各持一份；几何口径仍全部取自本文件的自由函数。
+/// 坐标约定：`refresh` 传零原点自身盒，故 track / thumb 恒为容器局部坐标；绘制时由容器
+/// 加上自身盒原点，命中时直接与 `MouseEvent::local_position` 比较，不做第二套换算。
+struct ScrollbarBinding {
+    ScrollbarAxis axis = ScrollbarAxis::Vertical;  ///< 轴向（布局期定）。
+    bool overlay = false;  ///< 是否浮层档（布局期读主题）。
+    float thickness = 0.0F;  ///< 条粗细（dp，布局期读主题）。
+    ScrollbarMetrics metrics{};  ///< 本帧最终度量。
+    ScrollbarGeometry geometry{};  ///< 本帧几何（局部坐标）。
+    ScrollbarInteraction interaction{};  ///< 绘制 / 交互期状态。
+    Point box_origin{};  ///< 条带所在内容区的局部原点（横向列表扣左右内边距时用，其余为 0）。
+    bool hold_pending = false;  ///< 有滚动待转成保持窗口，等帧首注入 now 后兑现。
+
+    /// @brief 布局期登记轴向、模式与粗细；Classic 档条恒可见，无需帧计时唤醒。
+    /// @param ax 轴向。
+    /// @param is_overlay 是否浮层档。
+    /// @param t 条粗细（dp）；负值夹到 0。
+    auto configure(ScrollbarAxis ax, bool is_overlay, float t) noexcept -> void {
+        axis = ax;
+        overlay = is_overlay;
+        thickness = std::max(0.0F, t);
+        metrics.thickness = thickness;
+        if (!overlay) {
+            interaction.visible = true;
+        }
+    }
+
+    /// @brief 用本帧布局完成后的最终值重算几何；条不该绘制时仍如实更新溢出读数。
+    /// @param content_length 内容总长（dp）。
+    /// @param viewport_length 视口长（dp）。
+    /// @param offset 当前偏移（dp）。
+    /// @param box 条带所在内容区的局部盒尺寸（纵向三容器即自身盒；横向列表扣掉左右内边距）。
+    auto refresh(float content_length, float viewport_length, float offset, const Size &box) noexcept -> void {
+        metrics.content_length = content_length;
+        metrics.viewport_length = viewport_length;
+        metrics.offset = offset;
+        geometry = scrollbar_geometry(metrics, axis, Rect{.origin = box_origin, .size = box});
+    }
+
+    /// @brief Classic 档溢出时应为条预留的带宽（粗细 + 两侧内缩）；不溢出或浮层档恒 0。
+    /// @return 带宽（dp）。
+    [[nodiscard]] auto reserve_band() const noexcept -> float {
+        return (!overlay && geometry.overflowing) ? (thickness + (2.0F * metrics.inset)) : 0.0F;
+    }
+
+    /// @brief 本帧是否应绘制条（浮层档须待显隐翻转后才可见）。
+    /// @return 可见且几何可绘制为 true。
+    [[nodiscard]] auto visible() const noexcept -> bool { return interaction.visible && geometry.drawable; }
+
+    /// @brief 指针是否落在条带内且条当前可见；隐藏时不得吞掉内容点击。
+    /// @param p 容器局部坐标。
+    /// @return 命中条带为 true。
+    [[nodiscard]] auto hit(Point p) const noexcept -> bool {
+        return visible() && scrollbar_contains(geometry, axis, p);
+    }
+
+    /// @brief 绘制用滑块矩形（悬停 / 拖拽时按轨道中轴对中加粗）。
+    /// @return 局部坐标的滑块盒。
+    [[nodiscard]] auto paint_thumb() const noexcept -> Rect {
+        return (interaction.hovered || interaction.dragging)
+                   ? scrollbar_hover_thumb(geometry, axis, AURORA_SCROLLBAR_HOVER_GROWTH)
+                   : geometry.thumb;
+    }
+
+    /// @brief 由 `on_hover_change` 写入「指针是否悬停在本容器内」。
+    /// @param inside 指针在本容器内为 true。
+    auto set_pointer_inside(bool inside) noexcept -> void { interaction.pointer_inside_container = inside; }
+
+    /// @brief 派发一次指针动作；时间不参与判定，显隐只由帧首 tick 定夺。
+    /// @param action 动作种类。
+    /// @param p 容器局部坐标。
+    /// @return 事件消费与偏移写入结论。
+    [[nodiscard]] auto pointer(ScrollbarPointerAction action, Point p) noexcept -> ScrollbarPointerResult {
+        // 内核的 now / inside 形参只作记录，传入当前值与零时刻，避免容器侧另设一份时钟或悬停真值源。
+        return interaction.on_pointer(action, p, geometry, metrics, axis, overlay,
+                                      std::chrono::steady_clock::time_point{}, interaction.pointer_inside_container);
+    }
+
+    /// @brief 滚轮 / 程序化滚动后登记一次待兑现的保持窗口；到期时刻由帧首注入的 now 决定。
+    auto note_scroll() noexcept -> void { hold_pending = true; }
+
+    /// @brief 帧首定夺一次显隐，返回可见性是否翻转（供宿主标脏）。绘制期不得再调用。
+    /// @param now 帧首注入时间。
+    /// @return 可见性相对上一帧是否变化。
+    [[nodiscard]] auto tick(std::chrono::steady_clock::time_point now) noexcept -> bool {
+        if (hold_pending) {
+            hold_pending = false;
+            interaction.on_scroll(now, overlay);
+        }
+        return interaction.advance(now, overlay);
+    }
+
+    /// @brief 本控件是否还需共用帧计时（保持窗口在途 / 指针仍悬停 / 有待兑现滚动）。
+    /// @param now 帧首注入时间。
+    /// @return 仍需计时为 true；为假且收位滑动、滚边同样空闲时方可摘除帧计时。
+    [[nodiscard]] auto needs_frame_tick(std::chrono::steady_clock::time_point now) const noexcept -> bool {
+        return hold_pending || (overlay && (interaction.pointer_inside_container || now < interaction.hold_until));
+    }
+};
+
 }  // namespace aurora::detail

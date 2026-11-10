@@ -106,7 +106,7 @@ AURORA_TEST_CASE(layout_conventions_default_to_current_behavior) {
     AURORA_TEST_CHECK(conventions.dialog_title_alignment == DialogTitleAlignment::Leading);
     // 现状：菜单栏在窗口内自绘（原生菜单栏是能力位而非默认惯例）。
     AURORA_TEST_CHECK(conventions.menu_bar_placement == MenuBarPlacement::InWindow);
-    // 现状：无覆盖式滚动条实现，滚动条模式取经典占位。
+    // 默认档取经典占位；Overlay 档由四容器在布局期读本值切换为浮层。
     AURORA_TEST_CHECK(conventions.scrollbar_mode == ScrollbarMode::Classic);
     // 现状：焦点环为沿缘描边（Widget 统一画环），动效倍率不缩放。
     AURORA_TEST_CHECK(conventions.focus_ring_style == FocusRingStyle::Outline);
