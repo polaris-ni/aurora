@@ -1,7 +1,6 @@
 #pragma once
 
 #include <functional>
-#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -168,7 +167,7 @@ struct TabPage {
 /// @param pages 标签页列表（标题 + 内容），按序各生成一个标签按钮。
 /// @return 组合完成的选项卡节点（Row 标签行在上、内容体在下）。
 inline auto tab_view(std::vector<TabPage> pages) -> Node {
-    State<int> selected{0};
+    State<int> const selected{0};
     std::vector<Node> tab_buttons;
     tab_buttons.reserve(pages.size());
     for (std::size_t i = 0; i < pages.size(); ++i) {

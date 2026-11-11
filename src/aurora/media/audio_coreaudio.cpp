@@ -281,9 +281,7 @@ struct CoreAudioDeviceBackend::Impl {
     }
 
     /// @brief 默认输出设备变更监听（CoreAudio 通知线程）：只置位，不做设备级操作。
-    /// @param 设备 id 未使用（监听只关心「默认输出变了」这一事实）。
-    /// @param 属性地址数未使用。
-    /// @param 属性地址数组未使用。
+    /// @note 形参 device / address_count / addresses 未使用（监听只关心「默认输出变了」这一事实）。
     /// @param client Impl 地址（CoreAudio 的 clientData 在**形参末位**，与 AudioQueue 回调相反）。
     /// @return noErr（本回调不消费属性，无需返回具体状态）。
     static auto on_device_changed(AudioObjectID /*device*/, UInt32 /*address_count*/,
@@ -510,9 +508,8 @@ struct CoreAudioCaptureBackend::Impl {
     /// @param client Impl 地址。
     /// @param in_queue 回调所属队列。
     /// @param buffer 已填入的队列缓冲。
-    /// @param 首帧时间戳未使用（本后端不外露采集时钟）。
-    /// @param 包描述数未使用（线性 PCM 恒 0）。
-    /// @param 包描述数组未使用（同上）。
+    /// @note 形参 timestamp / number_packet_descriptions / packet_descriptions 未使用
+    ///       （本后端不外露采集时钟；线性 PCM 包描述恒 0）。
     static auto on_capture(void *client, AudioQueueRef in_queue, AudioQueueBufferRef buffer,
                            const AudioTimeStamp /*timestamp*/ *, UInt32 /*number_packet_descriptions*/,
                            const AudioStreamPacketDescription /*packet_descriptions*/ *) -> void {
@@ -536,9 +533,7 @@ struct CoreAudioCaptureBackend::Impl {
     }
 
     /// @brief 默认输入设备变更监听：置 stale，由控制线程按中段失败处理（采集不自动重开）。
-    /// @param 设备 id 未使用。
-    /// @param 属性地址数未使用。
-    /// @param 属性地址数组未使用。
+    /// @note 形参 device / address_count / addresses 未使用。
     /// @param client Impl 地址（同渲染端：clientData 在形参末位）。
     /// @return noErr。
     static auto on_input_device_changed(AudioObjectID /*device*/, UInt32 /*address_count*/,

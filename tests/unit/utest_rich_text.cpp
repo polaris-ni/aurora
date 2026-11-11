@@ -129,7 +129,7 @@ AURORA_TEST_CASE(layout_carries_per_span_style) {
 
 AURORA_TEST_CASE(serialize_concatenates_and_deserialize_reloads) {
     // 序列化把全部 span 的字面文本拼接为 "text"；反序列化重建为单 span。
-    RichText src{std::vector<TextSpan>{
+    RichText const src{std::vector<TextSpan>{
         TextSpan{.text = LocalizedString{"Hel"}, .color = Color::red()},
         TextSpan{.text = LocalizedString{"lo"}, .color = Color::blue()},
     }};
@@ -148,7 +148,7 @@ AURORA_TEST_CASE(rich_text_colors_follow_theme_when_unset) {
     // 未显式设置 text_color 时，resolve_text_color 经 ctx 取主题 on_surface：
     // 裸 ctx 回落 light（黑），注入 dark 主题翻面为白。
     const BuildContext bare;
-    RichText rt;
+    RichText const rt;
     AURORA_TEST_CHECK(rt.resolve_text_color(bare) == Color{0, 0, 0});  // light on_surface = 黑
 
     const auto [env, dark] = themed_ctx(Theme::dark());

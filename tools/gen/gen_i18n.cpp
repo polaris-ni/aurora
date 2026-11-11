@@ -307,7 +307,7 @@ auto is_identifier_segment(std::string_view seg) -> bool {
     if (seg.empty() || (std::isalpha(static_cast<unsigned char>(seg[0])) == 0 && seg[0] != '_')) {
         return false;
     }
-    for (char c : seg) {
+    for (char const c : seg) {
         const bool ok = (std::isalnum(static_cast<unsigned char>(c)) != 0) || c == '_';
         if (!ok) {
             return false;
@@ -362,7 +362,7 @@ auto ns_prefix(std::string_view key) -> std::string {
         return {};
     }
     std::string out;
-    for (std::string_view seg : split(key.substr(0, dot), '.')) {
+    for (std::string_view const seg : split(key.substr(0, dot), '.')) {
         if (!out.empty()) {
             out += "::";
         }
@@ -623,7 +623,7 @@ auto reachable_categories(const aurora::Locale &loc, bool ordinal) -> std::set<s
     }
     constexpr std::string_view decimal_probes[] = {"1000", "10000", "100000", "1000000", "0.0",  "0.5",
                                                    "1.0",  "1.5",   "2.0",    "10.0",    "100.0"};
-    for (std::string_view probe : decimal_probes) {
+    for (std::string_view const probe : decimal_probes) {
         add(probe);
     }
     return out;
@@ -862,7 +862,7 @@ auto compare_structure(const std::string &file, const std::string &base_name, st
 
 /// @brief 读文件原始字节；失败记 error。
 auto read_bytes(const std::string &path, Diags &diags) -> std::optional<std::string> {
-    std::ifstream in(path, std::ios::binary);
+    std::ifstream const in(path, std::ios::binary);
     if (!in) {
         diags.error(path, "cannot open file");
         return std::nullopt;
@@ -1072,7 +1072,7 @@ auto load_locale_file(const std::string &path, Diags &diags) -> std::optional<Lo
 auto builtin_id_map() -> std::map<std::string, std::uint32_t> {
     std::map<std::string, std::uint32_t> out;
     std::uint32_t k = 0;
-    for (std::string_view name : aurora::detail::AURORA_BUILTIN_MESSAGE_NAMES) {
+    for (std::string_view const name : aurora::detail::AURORA_BUILTIN_MESSAGE_NAMES) {
         out[std::string(name)] = aurora::detail::AURORA_BUILTIN_MESSAGE_ID_BASE + k;
         ++k;
     }
@@ -1213,7 +1213,7 @@ auto write_file(const std::string &path, const std::vector<std::byte> &content, 
 /// @brief C++ 字符串字面量转义。
 auto cpp_escape(std::string_view text) -> std::string {
     std::string out;
-    for (char c : text) {
+    for (char const c : text) {
         switch (c) {
             case '"':
                 out += "\\\"";
@@ -1427,7 +1427,7 @@ auto run_app(const std::vector<std::string> &args, Diags &diags) -> int {
         err("at least one base.json is required");
         return 2;
     }
-    for (std::string_view seg : split(cpp_namespace, ':')) {
+    for (std::string_view const seg : split(cpp_namespace, ':')) {
         if (seg.empty()) {
             continue;  // `a::::b` 之类由段数校验兜住
         }

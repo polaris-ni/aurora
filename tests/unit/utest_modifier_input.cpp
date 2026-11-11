@@ -57,7 +57,7 @@ AURORA_TEST_CASE(draggable_fires_start_drag_end_sequence) {
     int ends = 0;
     Point last_delta;
     Point last_pos;
-    Draggable d(
+    Draggable const d(
         [&](Point delta, Point pos) -> void {
             ++drags;
             last_delta = delta;
@@ -108,7 +108,7 @@ AURORA_TEST_CASE(long_press_cancel_prevents_firing) {
 }
 
 AURORA_TEST_CASE(long_press_pointer_binding) {
-    LongPress lp([]() -> void {}, 100.0F);
+    LongPress const lp([]() -> void {}, 100.0F);
     lp.bind(std::optional<int>(1));
     AURORA_TEST_CHECK_TRUE(lp.matches(std::optional<int>(1)));
     AURORA_TEST_CHECK_FALSE(lp.matches(std::optional<int>(2)));

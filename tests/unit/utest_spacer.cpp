@@ -109,7 +109,7 @@ AURORA_TEST_CASE(spacer_describe_and_serialize_roundtrip) {
     Json props = Json::object();
     Spacer().serialize_props(props);
     AURORA_TEST_CHECK_EQ(require_field<bool>(props, "expand"), true);
-    Spacer off(false);
+    Spacer const off(false);
     off.serialize_props(props);
     AURORA_TEST_CHECK_EQ(require_field<bool>(props, "expand"), false);
 

@@ -172,7 +172,7 @@ auto themed_ctx(const Theme &t) -> std::pair<std::shared_ptr<Environment>, Build
 AURORA_TEST_CASE(skeleton_colors_follow_theme_when_unset) {
     // 两态语义：未显式设色时 resolve 取主题角色；主题翻转 ⇒ 解析值翻转（换肤生效）。
     const BuildContext bare;  // 无注入：inherit_theme 回落 light
-    Skeleton s;
+    Skeleton const s;
     AURORA_TEST_CHECK(s.resolve_base(bare) == Color(226, 226, 226));  // light surface_variant
     AURORA_TEST_CHECK(s.resolve_highlight(bare) == Color(255, 255, 255));  // light surface_container_lowest
     const auto [env, dark] = themed_ctx(Theme::dark());

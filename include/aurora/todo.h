@@ -29,7 +29,7 @@ struct TODO {
     template <typename Signature>
     operator std::function<Signature>() const  // NOLINT：故意的隐式转换
     {
-        std::string desc = what;
+        std::string const desc = what;
         using Ret = std::function<Signature>::result_type;
         return std::function<Signature>{[desc](auto &&...) -> Ret {
             Diagnostics::warn("TODO", desc);

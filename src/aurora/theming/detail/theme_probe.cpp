@@ -27,7 +27,6 @@
 #include <string>
 #include <string_view>
 
-#include "aurora/core/platform.h"
 #include "aurora/theming/theme.h"
 #include "aurora/theming/theme_style.h"
 #include "aurora/window/platform.h"

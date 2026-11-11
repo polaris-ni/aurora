@@ -63,7 +63,7 @@ AURORA_TEST_CASE(backend_compiled_tracks_feature_macros) {
 #ifdef AURORA_BACKEND_WIN32
     win32 = true;
 #endif
-    bool d3d11 = false;
+    bool const d3d11 = false;
 #ifdef AURORA_BACKEND_D3D11
     d3d11 = true;
 #endif
@@ -71,19 +71,19 @@ AURORA_TEST_CASE(backend_compiled_tracks_feature_macros) {
 #ifdef AURORA_BACKEND_GLFW
     glfw = true;
 #endif
-    bool x11 = false;
+    bool const x11 = false;
 #ifdef AURORA_BACKEND_X11
     x11 = true;
 #endif
-    bool wayland = false;
+    bool const wayland = false;
 #ifdef AURORA_BACKEND_WAYLAND
     wayland = true;
 #endif
-    bool wgpu = false;
+    bool const wgpu = false;
 #ifdef AURORA_BACKEND_GPU_WGPU
     wgpu = true;
 #endif
-    bool macos = false;
+    bool const macos = false;
 #ifdef AURORA_BACKEND_MACOS
     macos = true;
 #endif
@@ -158,7 +158,7 @@ AURORA_TEST_CASE(session_without_window_reports_error_shape) {
 AURORA_TEST_CASE(capture_frame_rejects_surface_without_pixel_buffer) {
     // 读回能力缺失不是「空帧」：须返回 unsupported 且消息沿用 `save_snapshot` 的既有措辞，
     // 使 E2E 适配层能把「不可读回」与「建窗失败」按同一口径记账。
-    NoPixelBufferSurface surface;
+    NoPixelBufferSurface const surface;
     const auto frame = e2e::capture_frame(surface);
     AURORA_TEST_REQUIRE_FALSE(frame.ok());
     AURORA_TEST_CHECK_EQ(code_of(frame.error()), code_of(au::ErrorCode::GeneralNotSupported));

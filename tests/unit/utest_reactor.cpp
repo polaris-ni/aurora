@@ -267,7 +267,7 @@ AURORA_TEST_CASE(reactor_destroyed_terminal_unlinks) {
         (void)src->read();
     });
     rec->run_first();
-    std::weak_ptr<RunRecord> weak = rec;
+    std::weak_ptr<RunRecord> const weak = rec;
     rec.reset();
     AURORA_TEST_CHECK(weak.expired());
     src->assign(1);

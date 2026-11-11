@@ -88,8 +88,8 @@ class RecordingRhi final : public rhi::RhiBackend {
 AURORA_TEST_CASE(backend_name_identifies_implementation) {
     Painter painter;
     painter.begin(4, 4);
-    rhi::SoftwareRhi software{painter};
-    RecordingRhi recording;
+    rhi::SoftwareRhi const software{painter};
+    RecordingRhi const recording;
     AURORA_TEST_CHECK_EQ(std::string{software.name()}, std::string{"software"});
     AURORA_TEST_CHECK_EQ(std::string{recording.name()}, std::string{"recording"});
 }

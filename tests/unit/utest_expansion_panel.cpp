@@ -82,7 +82,7 @@ AURORA_TEST_CASE(pointer_event_on_header_toggles) {
 AURORA_TEST_CASE(layout_paint_hit_roundtrip) {
     auto content = std::make_shared<LeafProbe>();
     ExpansionPanel ep{"Details", Node{content}, false};
-    BuildContext ctx;
+    BuildContext const ctx;
     const Constraints c{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = 200.0F, .height = 400.0F}};
 
     // 收起：高度仅头部。
@@ -104,7 +104,7 @@ AURORA_TEST_CASE(layout_paint_hit_roundtrip) {
 }
 
 AURORA_TEST_CASE(serialize_deserialize_roundtrip) {
-    ExpansionPanel ep{"Title", Node{std::make_shared<LeafProbe>()}, true};
+    ExpansionPanel const ep{"Title", Node{std::make_shared<LeafProbe>()}, true};
     Json props = Json::object();
     ep.serialize_props(props);
     AURORA_TEST_CHECK_TRUE(props.contains("header"));

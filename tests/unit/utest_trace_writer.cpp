@@ -218,7 +218,7 @@ AURORA_TEST_CASE(frame_scope_auto_feed_matches_tracing_flag) {
     const std::size_t before_samples = tw.counter_sample_count();
     const std::size_t before_events = tw.event_count();
     {
-        aurora::FrameScope frame;
+        aurora::FrameScope const frame;
         (void)frame;
     }
     const bool fed = tw.counter_sample_count() == before_samples + 1;

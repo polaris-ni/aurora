@@ -149,7 +149,7 @@ Node::~Node() {
         notify_accessibility_widget_destroying(widget_.get());
         // 目标取**宿主容器**而非正在析构的控件自身：后者的 `Widget*` 返回后即失效（悬垂）。
         // 宿主未知（控件尚未接入树）时传 nullptr —— UIA ChildrenInvalidated 不要求具体节点。
-        Widget *host = widget_->layout_parent();
+        Widget *const host = widget_->layout_parent();
         notify_accessibility_structure_changed(host);
     }
     // **不再**在此清 `layout_parent_`。
@@ -662,7 +662,7 @@ auto Widget::paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> v
 #ifdef AURORA_ENABLE_DEBUG
     // 渲染纯度守卫接线（GUIDELINE.md §27.5）：进入绘制上下文即递增 g_paint_depth，
     // 配合 current_timestamp() 的 !g_paint_depth 断言捕获「绘制中读全局时钟」的反模式。
-    debug::PaintPurityGuard aurora_paint_purity_guard;
+    debug::PaintPurityGuard const aurora_paint_purity_guard;
     debug::check_render_purity();
 #endif
     if (!show()) {

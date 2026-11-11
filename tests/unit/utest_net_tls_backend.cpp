@@ -273,7 +273,7 @@ AURORA_TEST_CASE(registration_rejects_an_empty_id_or_an_empty_factory) {
     no_id.priority = 10;
     no_id.create = ok_creator("utest-tls-no-id", nullptr);
     const auto rejected_id = aurora::net::register_tls_backend(no_id);
-    AURORA_TEST_REQUIRE(bool(!rejected_id));
+    AURORA_TEST_REQUIRE(static_cast<bool>(!rejected_id));
     AURORA_TEST_CHECK_STREQ(rejected_id.error().code, "general-invalid-argument");
     // 拒绝必须说得出「拒的是哪一项」：这枚码的表模板没有 detail 槽位，文本只能由构造点给全。
     AURORA_TEST_CHECK(rejected_id.error().message.find("non-empty id") != std::string::npos);
@@ -281,7 +281,7 @@ AURORA_TEST_CASE(registration_rejects_an_empty_id_or_an_empty_factory) {
     TlsBackendRegistration no_factory;
     no_factory.id = std::string{AURORA_STUB_PREFIX} + "no-factory";
     const auto rejected_factory = aurora::net::register_tls_backend(no_factory);
-    AURORA_TEST_REQUIRE(bool(!rejected_factory));
+    AURORA_TEST_REQUIRE(static_cast<bool>(!rejected_factory));
     AURORA_TEST_CHECK_STREQ(rejected_factory.error().code, "general-invalid-argument");
     AURORA_TEST_CHECK(rejected_factory.error().message.find("without a factory") != std::string::npos);
 
@@ -299,14 +299,14 @@ AURORA_TEST_CASE(duplicate_id_is_refused_without_replacing_the_original) {
     again.priority = 90;
     again.create = ok_creator("utest-tls-replacement", &log);
     const auto conflict = aurora::net::register_tls_backend(again);
-    AURORA_TEST_REQUIRE(bool(!conflict));
+    AURORA_TEST_REQUIRE(static_cast<bool>(!conflict));
     AURORA_TEST_CHECK_STREQ(conflict.error().code, "net-option-conflict");
     AURORA_TEST_CHECK(!conflict.error().retryable);
     AURORA_TEST_CHECK(conflict.error().message.find("unregister it first") != std::string::npos);
 
     use_chain({"utest-tls-original"});
     const auto resolved = run_resolve(TlsContext{});
-    AURORA_TEST_REQUIRE(bool(resolved));
+    AURORA_TEST_REQUIRE(static_cast<bool>(resolved));
     AURORA_TEST_CHECK_STREQ(resolved.value().second, "utest-tls-original");
     AURORA_TEST_CHECK_STREQ(tag_of(resolved), "utest-tls-original");
     AURORA_TEST_CHECK_EQ(log.order.size(), std::size_t{1});
@@ -338,7 +338,7 @@ AURORA_TEST_CASE(unregistering_a_builtin_id_removes_it_from_the_surface) {
     TlsContext context;
     context.backend = target;
     const auto resolved = run_resolve(context);
-    AURORA_TEST_REQUIRE(bool(!resolved));
+    AURORA_TEST_REQUIRE(static_cast<bool>(!resolved));
     AURORA_TEST_CHECK_STREQ(resolved.error().code, "net-tls-engine-unavailable");
     AURORA_TEST_CHECK(resolved.error().message.find("is not registered") != std::string::npos);
 }
@@ -378,7 +378,7 @@ AURORA_TEST_CASE(explicit_chain_is_used_verbatim_not_resorted) {
     AURORA_TEST_CHECK_STREQ(aurora::net::default_tls_backends().front(), "utest-tls-priority-low");
 
     const auto resolved = run_resolve(TlsContext{});
-    AURORA_TEST_REQUIRE(bool(resolved));
+    AURORA_TEST_REQUIRE(static_cast<bool>(resolved));
     AURORA_TEST_CHECK_STREQ(resolved.value().second, "utest-tls-priority-low");
     AURORA_TEST_CHECK_EQ(log.order.size(), std::size_t{1});
     AURORA_TEST_CHECK(!log.called("utest-tls-priority-high"));
@@ -390,12 +390,12 @@ AURORA_TEST_CASE(chain_validation_checks_shape_only) {
     RegistryGuard guard;
 
     const auto empty_item = aurora::net::set_default_tls_backends({"utest-tls-a", ""});
-    AURORA_TEST_REQUIRE(bool(!empty_item));
+    AURORA_TEST_REQUIRE(static_cast<bool>(!empty_item));
     AURORA_TEST_CHECK_STREQ(empty_item.error().code, "general-invalid-argument");
     AURORA_TEST_CHECK(empty_item.error().message.find("at index 1") != std::string::npos);
 
     const auto duplicated = aurora::net::set_default_tls_backends({"utest-tls-a", "utest-tls-b", "utest-tls-a"});
-    AURORA_TEST_REQUIRE(bool(!duplicated));
+    AURORA_TEST_REQUIRE(static_cast<bool>(!duplicated));
     AURORA_TEST_CHECK_STREQ(duplicated.error().code, "general-invalid-argument");
 
     const auto unknown = aurora::net::set_default_tls_backends({"not-loaded-yet"});
@@ -421,7 +421,7 @@ AURORA_TEST_CASE(unavailable_candidate_is_skipped_and_the_next_one_serves) {
     use_chain({"utest-tls-refuses", "utest-tls-serves"});
 
     const auto resolved = run_resolve(TlsContext{});
-    AURORA_TEST_REQUIRE(bool(resolved));
+    AURORA_TEST_REQUIRE(static_cast<bool>(resolved));
     AURORA_TEST_CHECK_STREQ(resolved.value().second, "utest-tls-serves");
     AURORA_TEST_CHECK_EQ(log.count("utest-tls-refuses"), std::size_t{1});
     AURORA_TEST_CHECK_EQ(log.count("utest-tls-serves"), std::size_t{1});
@@ -435,7 +435,7 @@ AURORA_TEST_CASE(unknown_id_inside_the_chain_is_skipped) {
     use_chain({"utest-tls-not-loaded", "utest-tls-after-gap"});
 
     const auto resolved = run_resolve(TlsContext{});
-    AURORA_TEST_REQUIRE(bool(resolved));
+    AURORA_TEST_REQUIRE(static_cast<bool>(resolved));
     AURORA_TEST_CHECK_STREQ(resolved.value().second, "utest-tls-after-gap");
     AURORA_TEST_CHECK_EQ(log.order.size(), std::size_t{1});
 }
@@ -450,7 +450,7 @@ AURORA_TEST_CASE(engine_unavailable_code_also_continues_the_chain) {
     use_chain({"utest-tls-no-engine", "utest-tls-next"});
 
     const auto resolved = run_resolve(TlsContext{});
-    AURORA_TEST_REQUIRE(bool(resolved));
+    AURORA_TEST_REQUIRE(static_cast<bool>(resolved));
     AURORA_TEST_CHECK_STREQ(tag_of(resolved), "utest-tls-next");
 }
 
@@ -463,7 +463,7 @@ AURORA_TEST_CASE(configuration_error_terminates_the_whole_chain) {
     use_chain({"utest-tls-bad-config", "utest-tls-never-called"});
 
     const auto resolved = run_resolve(TlsContext{});
-    AURORA_TEST_REQUIRE(bool(!resolved));
+    AURORA_TEST_REQUIRE(static_cast<bool>(!resolved));
     AURORA_TEST_CHECK_STREQ(resolved.error().code, "net-option-conflict");
     AURORA_TEST_CHECK(!log.called("utest-tls-never-called"));
     AURORA_TEST_CHECK_EQ(log.order.size(), std::size_t{1});
@@ -482,7 +482,7 @@ AURORA_TEST_CASE(designated_backend_never_falls_back) {
     TlsContext context;
     context.backend = "utest-tls-designated-bad";
     const auto resolved = run_resolve(context);
-    AURORA_TEST_REQUIRE(bool(!resolved));
+    AURORA_TEST_REQUIRE(static_cast<bool>(!resolved));
     AURORA_TEST_CHECK_STREQ(resolved.error().code, "net-platform-unavailable");
     AURORA_TEST_CHECK(!log.called("utest-tls-good"));
     AURORA_TEST_CHECK_EQ(log.count("utest-tls-designated-bad"), std::size_t{1});
@@ -499,7 +499,7 @@ AURORA_TEST_CASE(designated_unknown_id_fails_without_consulting_the_chain) {
     TlsContext context;
     context.backend = "utest-tls-not-in-case";
     const auto resolved = run_resolve(context);
-    AURORA_TEST_REQUIRE(bool(!resolved));
+    AURORA_TEST_REQUIRE(static_cast<bool>(!resolved));
     AURORA_TEST_CHECK_STREQ(resolved.error().code, "net-tls-engine-unavailable");
     AURORA_TEST_CHECK(resolved.error().message.find("utest-tls-not-in-case") != std::string::npos);
     AURORA_TEST_CHECK(resolved.error().message.find("utest-tls-in-case") != std::string::npos);
@@ -514,7 +514,7 @@ AURORA_TEST_CASE(empty_chain_is_decided_before_any_factory_runs) {
     use_chain({});
 
     const auto resolved = run_resolve(TlsContext{});
-    AURORA_TEST_REQUIRE(bool(!resolved));
+    AURORA_TEST_REQUIRE(static_cast<bool>(!resolved));
     AURORA_TEST_CHECK_STREQ(resolved.error().code, "net-tls-engine-unavailable");
     AURORA_TEST_CHECK(resolved.error().message.find("empty") != std::string::npos);
     AURORA_TEST_CHECK(log.order.empty());
@@ -529,7 +529,7 @@ AURORA_TEST_CASE(designated_backend_overrides_an_empty_chain) {
     TlsContext context;
     context.backend = "utest-tls-designated";
     const auto resolved = run_resolve(context);
-    AURORA_TEST_REQUIRE(bool(resolved));
+    AURORA_TEST_REQUIRE(static_cast<bool>(resolved));
     AURORA_TEST_CHECK_STREQ(resolved.value().second, "utest-tls-designated");
 }
 
@@ -544,7 +544,7 @@ AURORA_TEST_CASE(whole_chain_unavailable_reports_the_last_skip_reason) {
     use_chain({"utest-tls-first-refuses", "utest-tls-last-refuses"});
 
     const auto resolved = run_resolve(TlsContext{});
-    AURORA_TEST_REQUIRE(bool(!resolved));
+    AURORA_TEST_REQUIRE(static_cast<bool>(!resolved));
     AURORA_TEST_CHECK_STREQ(resolved.error().code, "net-tls-engine-unavailable");
     AURORA_TEST_CHECK(resolved.error().message.find("utest-tls-last-refuses refuses this request") !=
                       std::string::npos);
@@ -587,9 +587,9 @@ AURORA_TEST_CASE(factory_receives_the_handshake_inputs_verbatim) {
     context.alpn_protocols = {"h3", "h2"};
     context.backend = "utest-tls-inspector";
     const auto resolved = run_resolve(context);
-    AURORA_TEST_REQUIRE(bool(resolved));
+    AURORA_TEST_REQUIRE(static_cast<bool>(resolved));
     AURORA_TEST_CHECK_STREQ(log.server_name, "registry.invalid");
-    AURORA_TEST_REQUIRE(bool(log.designated_backend.has_value()));
+    AURORA_TEST_REQUIRE(static_cast<bool>(log.designated_backend.has_value()));
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access) 上一行 REQUIRE 已断言持有值，其宏展开对路径分析不透明
     AURORA_TEST_CHECK_STREQ(*log.designated_backend, "utest-tls-inspector");
     AURORA_TEST_CHECK(log.insecure);

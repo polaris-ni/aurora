@@ -6,7 +6,6 @@
 #include "aurora/window/detail/aria_protocol.h"
 
 #include <cmath>
-#include <cstdlib>
 #include <string>
 #include <unordered_set>
 

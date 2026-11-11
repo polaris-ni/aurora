@@ -22,7 +22,7 @@ namespace {
 
 /// 挂载并按给定上限布局，返回测得尺寸（无头环境：BuildContext + 约束）。
 auto laid_out(Widget &w, float max_w, float max_h) -> Size {
-    BuildContext ctx;
+    BuildContext const ctx;
     w.mount(ctx);
     const Constraints c{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = max_w, .height = max_h}};
     return w.layout(c, ctx);
@@ -37,8 +37,8 @@ AURORA_TEST_CASE(toolbar_type_contract) {
     static_assert(!std::is_copy_constructible_v<aurora::ToolBar>);
     static_assert(!std::is_copy_constructible_v<aurora::StatusBar>);
 
-    ToolBar tb;
-    StatusBar sb;
+    ToolBar const tb;
+    StatusBar const sb;
     AURORA_TEST_CHECK_EQ(std::string{tb.type_name()}, "ToolBar");
     AURORA_TEST_CHECK_EQ(std::string{sb.type_name()}, "StatusBar");
 
@@ -129,7 +129,7 @@ AURORA_TEST_CASE(toolbar_gap_zero_joins_children) {
 
 AURORA_TEST_CASE(toolbar_constructors_and_empty_bar) {
     // 初始化列表构造。
-    ToolBar listed{Node{Button{"A"}}, Node{Button{"B"}}};
+    ToolBar const listed{Node{Button{"A"}}, Node{Button{"B"}}};
     AURORA_TEST_CHECK_EQ(listed.child_nodes().size(), 2U);
 
     // 默认构造无子项；空栏布局仍返回整栏尺寸。
@@ -143,7 +143,7 @@ AURORA_TEST_CASE(toolbar_constructors_and_empty_bar) {
     std::vector<Node> texts;
     texts.emplace_back(Text{"Ready"});
     texts.emplace_back(Text{"Ln 1"});
-    StatusBar sb{std::move(texts)};
+    StatusBar const sb{std::move(texts)};
     AURORA_TEST_CHECK_EQ(sb.child_nodes().size(), 2U);
 }
 
@@ -231,7 +231,7 @@ AURORA_TEST_CASE(toolbar_statusbar_paint_smoke) {
 
     Painter p;
     p.begin(320, 240);
-    BuildContext ctx;
+    BuildContext const ctx;
     tb.paint(p, Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 320.0F, .height = 40.0F}}, ctx);
     sb.paint(p, Rect{.origin = Point{.x = 0.0F, .y = 216.0F}, .size = Size{.width = 320.0F, .height = 24.0F}}, ctx);
     AURORA_TEST_CHECK_EQ(p.width(), 320);

@@ -86,7 +86,7 @@ void install_fake_backend(FakeLoginItem &state) {
 }  // namespace
 
 AURORA_TEST_CASE(tri_state_is_not_collapsed_to_bool) {
-    RunAtLoginBackendGuard guard;
+    RunAtLoginBackendGuard const guard;
     FakeLoginItem state;
     install_fake_backend(state);
 
@@ -114,7 +114,7 @@ AURORA_TEST_CASE(tri_state_is_not_collapsed_to_bool) {
 }
 
 AURORA_TEST_CASE(query_passes_the_identity_through) {
-    RunAtLoginBackendGuard guard;
+    RunAtLoginBackendGuard const guard;
     FakeLoginItem state;
     install_fake_backend(state);
 
@@ -128,11 +128,11 @@ AURORA_TEST_CASE(query_passes_the_identity_through) {
 }
 
 AURORA_TEST_CASE(set_requires_an_identity) {
-    RunAtLoginBackendGuard guard;
+    RunAtLoginBackendGuard const guard;
     FakeLoginItem state;
     install_fake_backend(state);
 
-    AppIdentity empty;
+    AppIdentity const empty;
     auto result = set_run_at_login(true, empty);
     AURORA_TEST_REQUIRE(!result.ok());
     AURORA_TEST_CHECK_EQ(result.error().code_enum, ErrorCode::GeneralInvalidArgument);
@@ -148,7 +148,7 @@ AURORA_TEST_CASE(set_requires_an_identity) {
 }
 
 AURORA_TEST_CASE(set_forwards_the_requested_state) {
-    RunAtLoginBackendGuard guard;
+    RunAtLoginBackendGuard const guard;
     FakeLoginItem state;
     install_fake_backend(state);
 
@@ -167,7 +167,7 @@ AURORA_TEST_CASE(set_forwards_the_requested_state) {
 }
 
 AURORA_TEST_CASE(degradation_reports_unsupported_without_a_wired_bridge) {
-    RunAtLoginBackendGuard guard;
+    RunAtLoginBackendGuard const guard;
 #if defined(AURORA_PLATFORM_WINDOWS) || defined(AURORA_PLATFORM_LINUX) || \
     (defined(AURORA_PLATFORM_MACOS) && defined(AURORA_BACKEND_MACOS))
     // 这三条腿有可按需自举的真桥：清空槽位后公共入口会去碰真实注册表 / 自动启动目录，不适合无头断言。

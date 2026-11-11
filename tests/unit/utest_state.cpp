@@ -49,17 +49,17 @@ static_assert(HasUpdate<State<int>>);
 
 AURORA_TEST_CASE(state_default_and_value_construction) {
     // 默认构造：值取 T{}；值构造：get() 返回初值。
-    State<int> s{};
-    State<int> t{3};
+    State<int> const s{};
+    State<int> const t{3};
     AURORA_TEST_CHECK_EQ(s.get(), 0);
     AURORA_TEST_CHECK_EQ(t.get(), 3);
 
     // 单步隐式转换构造：字面量直接落到 T。
-    State<std::string> word{"hi"};
+    State<std::string> const word{"hi"};
     AURORA_TEST_CHECK_EQ(word.get(), std::string{"hi"});
 
     // get() 返回存储引用：set 后旧引用观察到新值。
-    State<std::string> str{std::string{"a"}};
+    State<std::string> const str{std::string{"a"}};
     const std::string &alias = str.get();
     str.set(std::string{"b"});
     AURORA_TEST_CHECK_EQ(alias, std::string{"b"});
@@ -67,7 +67,7 @@ AURORA_TEST_CASE(state_default_and_value_construction) {
 
 AURORA_TEST_CASE(state_set_dedupes_equal_values) {
     // 默认等价策略：可观察等价的写入不替换、不通知。
-    State<int> s{1};
+    State<int> const s{1};
     int runs = 0;
     auto sub = s.subscribe([&](const int &) { ++runs; });
     AURORA_TEST_CHECK_EQ(runs, 1);  // 订阅建立即交付首值
@@ -80,14 +80,14 @@ AURORA_TEST_CASE(state_set_dedupes_equal_values) {
 
 AURORA_TEST_CASE(state_always_publish_and_custom_equivalence) {
     // always_publish：关闭去重，等值提交照样通知。
-    State<int> s{1, always_publish};
+    State<int> const s{1, always_publish};
     int runs = 0;
     auto sub = s.subscribe([&](const int &) { ++runs; });
     s.set(1);
     AURORA_TEST_CHECK_EQ(runs, 2);
 
     // 自定义等价：按十位取整比较，视为等价时不通知。
-    State<int> coarse{10, [](int left, int right) -> bool { return left / 10 == right / 10; }};
+    State<int> const coarse{10, [](int left, int right) -> bool { return left / 10 == right / 10; }};
     int coarse_runs = 0;
     auto coarse_sub = coarse.subscribe([&](const int &) { ++coarse_runs; });
     coarse.set(19);  // 与 10 同十位：等价
@@ -122,7 +122,7 @@ AURORA_TEST_CASE(state_update_isolates_inner_reads_from_outer_effect) {
 
 AURORA_TEST_CASE(state_notify_publishes_in_place_mutation) {
     // notify 不替换值：原地修改载荷后用它让修改对订阅者可见。
-    State<std::vector<int>> list{std::vector<int>{1}};
+    State<std::vector<int>> const list{std::vector<int>{1}};
     int runs = 0;
     std::size_t last_size = 0;
     auto sub = list.subscribe([&](const std::vector<int> &v) {
@@ -144,10 +144,10 @@ AURORA_TEST_CASE(state_notify_publishes_in_place_mutation) {
 
 AURORA_TEST_CASE(state_copy_shares_source_and_assignment_rebinds) {
     // 拷贝即共享来源；拷贝赋值只重绑本句柄。
-    State<int> a{1};
+    State<int> const a{1};
     // 本用例刻意按值复制以验证共享语义，复制本身就是被测行为。
     // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-    State<int> b = a;
+    State<int> const b = a;
     b.set(2);
     AURORA_TEST_CHECK_EQ(a.get(), 2);
 
@@ -164,8 +164,8 @@ AURORA_TEST_CASE(state_copy_shares_source_and_assignment_rebinds) {
     AURORA_TEST_CHECK_EQ(c.get(), 8);
 
     // 只读句柄共享同一来源：写经可写句柄，读句柄即时可见。
-    State<int> src{5};
-    ReadOnlyState<int> ro = src;
+    State<int> const src{5};
+    ReadOnlyState<int> const ro = src;
     src.set(6);
     AURORA_TEST_CHECK_EQ(ro.get(), 6);
 }
@@ -173,7 +173,7 @@ AURORA_TEST_CASE(state_copy_shares_source_and_assignment_rebinds) {
 AURORA_TEST_CASE(read_only_state_assign_rebinds_without_touching_shared_source) {
     // 只读句柄的赋值是重绑：其他副本仍指向原来源，原来源的值不受影响。
     ReadOnlyState<int> a{1};
-    ReadOnlyState<int> b = a;  // 共享来源
+    ReadOnlyState<int> const b = a;  // 共享来源
     a = 2;  // 只是本句柄换到新的常量来源
     AURORA_TEST_CHECK_EQ(a.get(), 2);
     AURORA_TEST_CHECK_EQ(b.get(), 1);
@@ -181,8 +181,8 @@ AURORA_TEST_CASE(read_only_state_assign_rebinds_without_touching_shared_source) 
 
 AURORA_TEST_CASE(handle_write_through_updates_current_source_without_rebinding) {
     // 库内写通道：改的是当前来源的现值，句柄不换源，可写侧与既有订阅照常看见。
-    State<int> owner{1};
-    ReadOnlyState<int> view = owner;  // 与 owner 同一来源
+    State<int> const owner{1};
+    ReadOnlyState<int> const view = owner;  // 与 owner 同一来源
     StateSink sink;
     sink.push(view);
     const auto source_before = sink.sources().front()->id();
@@ -212,7 +212,7 @@ AURORA_TEST_CASE(handle_write_through_updates_current_source_without_rebinding) 
 
 AURORA_TEST_CASE(handle_write_through_owns_constant_source_and_dedupes_equal_values) {
     // 未绑定外部状态的句柄持有自有常量来源：写通道落在这份来源上；提交口径与 set 一致，等值不去通知。
-    ReadOnlyState<int> view{7};
+    ReadOnlyState<int> const view{7};
     AURORA_TEST_CHECK(detail::HandleAccess::write_through(view, 8));
     AURORA_TEST_CHECK_EQ(view.get(), 8);
 
@@ -228,7 +228,7 @@ AURORA_TEST_CASE(handle_write_through_owns_constant_source_and_dedupes_equal_val
 
 AURORA_TEST_CASE(handle_write_through_refuses_derived_sources_and_leaves_them_untouched) {
     // 派生来源（`computed` 的结果）无独立存储：写通道返回 false 且不改动任何东西，重算照常。
-    State<int> input{2};
+    State<int> const input{2};
     auto doubled = computed([input] { return input.get() * 2; });
     AURORA_TEST_CHECK_EQ(doubled.get(), 4);
 
@@ -246,7 +246,7 @@ AURORA_TEST_CASE(handle_write_through_refuses_derived_sources_and_leaves_them_un
 }
 
 AURORA_TEST_CASE(state_subscribe_delivers_first_value_and_supports_cancel) {
-    State<int> s{0};
+    State<int> const s{0};
     std::vector<int> seen;
     auto sub = s.subscribe([&](const int &v) { seen.push_back(v); });
     AURORA_TEST_CHECK_EQ(seen.size(), static_cast<std::size_t>(1));
@@ -262,7 +262,7 @@ AURORA_TEST_CASE(state_subscribe_delivers_first_value_and_supports_cancel) {
 AURORA_TEST_CASE(state_subscription_stays_fixed_to_original_source_after_rebind) {
     // 订阅固定到建立时的来源：句柄换源后，旧订阅仍跟随旧来源。
     State<int> s{0};
-    State<int> old_writer = s;  // 仍指向旧来源的写句柄
+    State<int> const old_writer = s;  // 仍指向旧来源的写句柄
     int runs = 0;
     int last = -1;
     auto sub = s.subscribe([&](const int &v) {
@@ -271,7 +271,7 @@ AURORA_TEST_CASE(state_subscription_stays_fixed_to_original_source_after_rebind)
     });
     AURORA_TEST_CHECK_EQ(runs, 1);
 
-    State<int> other{100};
+    State<int> const other{100};
     s = other;  // 重绑：订阅不跟走
     other.set(101);  // 新来源的写入不触发旧订阅
     AURORA_TEST_CHECK_EQ(runs, 1);
@@ -284,7 +284,7 @@ AURORA_TEST_CASE(state_subscription_stays_fixed_to_original_source_after_rebind)
 
 AURORA_TEST_CASE(state_writes_inside_subscriber_queue_next_round) {
     // 回调内的写入排到后续轮：当前回调读到旧值，外层入口返回后新值落定。
-    State<int> s{0};
+    State<int> const s{0};
     State<int> t{0};
     std::string order;
     auto sub_s = s.subscribe([&](const int &v) {
@@ -301,8 +301,8 @@ AURORA_TEST_CASE(state_writes_inside_subscriber_queue_next_round) {
 
 AURORA_TEST_CASE(state_sink_collects_sources_and_watch_fans_out) {
     // 采集按来源身份去重；watch 为每个来源建一条订阅并各首跑一次。
-    State<int> a{1};
-    State<int> b{2};
+    State<int> const a{1};
+    State<int> const b{2};
     StateSink sink;
     sink.push(a);
     sink.push(a);  // 重复登记同一来源

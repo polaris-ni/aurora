@@ -14,7 +14,6 @@
 #include "aurora/render/font_engine.h"
 #include "aurora/render/painter.h"
 #include "aurora/theming/color_roles.h"  // 活令牌回落点：roles.primary / surface / on_surface_variant
-#include "aurora/theming/theme_scope.h"
 #include "aurora/widget/descriptor.h"
 #include "aurora/widget/props.h"
 #include "aurora/widget/scroll_viewport.h"

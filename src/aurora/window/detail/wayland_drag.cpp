@@ -20,8 +20,6 @@
 
 #include "aurora/window/detail/wayland_drag.h"
 
-#include "aurora/core/platform.h"
-
 #if defined(AURORA_PLATFORM_LINUX) && !defined(AURORA_PLATFORM_ANDROID) && defined(AURORA_BACKEND_WAYLAND)
 
 // aurora 头先于 wayland 头（与 `x11_drag.cpp` 同款纪律：平台协议头关在单个 TU 内，

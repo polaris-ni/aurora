@@ -108,7 +108,7 @@ class HotReload {
         if (!f.is_open()) {
             return {};
         }
-        std::string content{std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
+        std::string const content{std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
         const auto parsed = json::parse(content);
         return parsed.ok() ? parsed.value() : Json{};
     }

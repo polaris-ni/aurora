@@ -8,7 +8,6 @@
 ///           本机 IPC 路径的长度与 NUL 约束、默认构造的无效占位语义、`to_string()` 三族形态。
 ///           解析器为仓内手写、不依赖 libc（`inet_pton`），故三平台必须逐值同色，用例不设平台分支。
 
-#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <string_view>

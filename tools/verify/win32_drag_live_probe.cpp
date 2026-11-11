@@ -73,7 +73,6 @@
 // clang-format off
 #include <windows.h>
 #include <ole2.h>
-#include <oleidl.h>
 // clang-format on
 
 #include <algorithm>

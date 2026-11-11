@@ -46,7 +46,7 @@ struct QueueGuard {
 }  // namespace
 
 AURORA_TEST_CASE(duty_is_exclusive_and_reusable_after_release) {
-    QueueGuard guard;
+    QueueGuard const guard;
     auto first = MainQueue::on_duty([]() -> void {});
     auto &first_lease = require_ref(first);
     // CAS：此刻已有人 → 第二家领取被拒。
@@ -67,7 +67,7 @@ AURORA_TEST_CASE(duty_is_exclusive_and_reusable_after_release) {
 }
 
 AURORA_TEST_CASE(lease_moves_and_release_is_idempotent) {
-    QueueGuard guard;
+    QueueGuard const guard;
     auto lease = MainQueue::on_duty([]() -> void {});
     auto &held = require_ref(lease);
     const std::uint64_t epoch = MainQueue::current_epoch();
@@ -83,7 +83,7 @@ AURORA_TEST_CASE(lease_moves_and_release_is_idempotent) {
 }
 
 AURORA_TEST_CASE(post_acceptance_matrix) {
-    QueueGuard guard;
+    QueueGuard const guard;
     // 落地相的一切拒绝（无值班 / 旧世）只记诊断与计数，绝不惊动进程级失败处理器：
     // 处理器抛出即把「静默失败」的缺席变成可断言的失败。
     auto handler_hits = std::make_shared<std::atomic<int>>(0);
@@ -135,7 +135,7 @@ AURORA_TEST_CASE(post_acceptance_matrix) {
 }
 
 AURORA_TEST_CASE(close_race_release_then_drain_catches_all) {
-    QueueGuard guard;
+    QueueGuard const guard;
     auto woke = std::make_shared<std::atomic<int>>(0);
     auto lease = MainQueue::on_duty([woke]() -> void { woke->fetch_add(1, std::memory_order_relaxed); });
     auto &held = require_ref(lease);
@@ -161,7 +161,7 @@ AURORA_TEST_CASE(close_race_release_then_drain_catches_all) {
 }
 
 AURORA_TEST_CASE(closing_scope_is_bounded_flag) {
-    QueueGuard guard;
+    QueueGuard const guard;
     AURORA_TEST_CHECK_FALSE(MainQueue::is_closing());
     {
         auto window = MainQueue::closing_scope();
@@ -180,7 +180,7 @@ AURORA_TEST_CASE(closing_scope_is_bounded_flag) {
 }
 
 AURORA_TEST_CASE(has_on_duty_iff_epoch_nonzero) {
-    QueueGuard guard;
+    QueueGuard const guard;
     AURORA_TEST_CHECK_FALSE(MainQueue::has_on_duty());
     AURORA_TEST_CHECK_EQ(MainQueue::current_epoch(), 0U);
     auto lease = MainQueue::on_duty([]() -> void {});
@@ -193,7 +193,7 @@ AURORA_TEST_CASE(has_on_duty_iff_epoch_nonzero) {
 
 AURORA_TEST_CASE(concurrent_producers_exactly_once) {
     AURORA_TEST_REQUIRE_THREADS();
-    QueueGuard guard;
+    QueueGuard const guard;
     auto lease = MainQueue::on_duty([]() -> void {});
     auto &held = require_ref(lease);
 

@@ -130,7 +130,7 @@ AURORA_TEST_CASE(checkbox_shared_source_writes_through_to_upstream) {
     static_assert(!std::is_constructible_v<Checkbox, ReadOnlyState<bool>>,
                   "editable value property must not accept a read-only handle");
 
-    State<bool> up{false};
+    State<bool> const up{false};
     Checkbox c{up};  // 共享同一来源：控件与上游是同一个值
     AURORA_TEST_CHECK_FALSE(c.value());
 
@@ -222,7 +222,7 @@ AURORA_TEST_CASE(checkbox_serialize_deserialize_roundtrip) {
 AURORA_TEST_CASE(checkbox_size_default_to_material_baseline) {
     // 无注入 = Material 基线档：接线前后实测同为 20dp，观感零回归的锚点。
     const BuildContext bare;
-    SizeProbe c;
+    SizeProbe const c;
     AURORA_TEST_CHECK_NEAR(c.resolve_size(bare), 20.0F, 1e-4F);
 }
 

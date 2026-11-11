@@ -31,7 +31,7 @@ struct FallbackRegistry {
     FocusManager unowned_root;
 
     [[nodiscard]] auto resolve(Widget &root) -> FocusManager * {
-        std::weak_ptr<Widget> guard = root.weak_from_this();
+        std::weak_ptr<Widget> const guard = root.weak_from_this();
         if (guard.lock() == nullptr) {
             unowned_root.set_root(&root);
             return &unowned_root;

@@ -102,7 +102,7 @@ void install_fake_backend(FakeUrlScheme &state) {
 }  // namespace
 
 AURORA_TEST_CASE(grammar_and_reserved_schemes_are_rejected_before_any_os_work) {
-    UrlSchemeBackendGuard guard;
+    UrlSchemeBackendGuard const guard;
     FakeUrlScheme state;
     install_fake_backend(state);
 
@@ -136,11 +136,11 @@ AURORA_TEST_CASE(grammar_and_reserved_schemes_are_rejected_before_any_os_work) {
 }
 
 AURORA_TEST_CASE(registration_requires_an_executable_path) {
-    UrlSchemeBackendGuard guard;
+    UrlSchemeBackendGuard const guard;
     FakeUrlScheme state;
     install_fake_backend(state);
 
-    AppIdentity no_path;
+    AppIdentity const no_path;
     auto result = register_url_scheme("myapp", "My App", no_path);
     AURORA_TEST_REQUIRE(!result.ok());
     AURORA_TEST_CHECK_EQ(result.error().code_enum, ErrorCode::GeneralInvalidArgument);
@@ -153,7 +153,7 @@ AURORA_TEST_CASE(registration_requires_an_executable_path) {
 }
 
 AURORA_TEST_CASE(registration_normalizes_and_forwards_to_the_backend) {
-    UrlSchemeBackendGuard guard;
+    UrlSchemeBackendGuard const guard;
     FakeUrlScheme state;
     install_fake_backend(state);
 
@@ -174,7 +174,7 @@ AURORA_TEST_CASE(registration_normalizes_and_forwards_to_the_backend) {
 }
 
 AURORA_TEST_CASE(owner_lookup_and_is_registered) {
-    UrlSchemeBackendGuard guard;
+    UrlSchemeBackendGuard const guard;
     FakeUrlScheme state;
     install_fake_backend(state);
 
@@ -206,7 +206,7 @@ AURORA_TEST_CASE(owner_lookup_and_is_registered) {
 }
 
 AURORA_TEST_CASE(unregister_propagates_ownership_conflicts) {
-    UrlSchemeBackendGuard guard;
+    UrlSchemeBackendGuard const guard;
     FakeUrlScheme state;
     install_fake_backend(state);
 
@@ -228,7 +228,7 @@ AURORA_TEST_CASE(unregister_propagates_ownership_conflicts) {
 }
 
 AURORA_TEST_CASE(degradation_reports_unsupported_without_a_wired_bridge) {
-    UrlSchemeBackendGuard guard;
+    UrlSchemeBackendGuard const guard;
 #if defined(AURORA_PLATFORM_WINDOWS) || defined(AURORA_PLATFORM_LINUX) || \
     (defined(AURORA_PLATFORM_MACOS) && defined(AURORA_BACKEND_MACOS))
     // 这三条腿有可按需自举的真桥：清空槽位后公共入口会去碰真实注册表 / 桌面条目，不适合无头断言。

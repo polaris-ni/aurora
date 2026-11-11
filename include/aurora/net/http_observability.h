@@ -1,7 +1,7 @@
 #pragma once
 
 /// @brief 网络活动记账：进程级活动存储、事件总线、交换时间线与有界预算。
-/// @file net/http_observability.h
+/// @file http_observability.h
 ///
 /// 本头回答一个问题：**「刚才那一批 HTTP 交换各自走到了哪一步、花了多久、失败在哪一阶段」**。
 /// 它只记事实、不做判定：记账点在发起侧（`Client::send` / `open_stream` / `connect_websocket`），

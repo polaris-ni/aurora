@@ -21,8 +21,6 @@
 
 #include "x11_clipboard.h"
 
-#include "aurora/core/platform.h"
-
 #if defined(AURORA_PLATFORM_LINUX) && !defined(AURORA_PLATFORM_ANDROID) && defined(AURORA_BACKEND_X11)
 
 // aurora 头先于 Xlib 头（与 `x11_drag.cpp` 同款纪律：平台协议头关在单个 TU 内，并拿回「包含顺序

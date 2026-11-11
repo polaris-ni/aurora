@@ -181,7 +181,7 @@ AURORA_TEST_CASE(the_two_directions_have_independent_slots) {
 AURORA_TEST_CASE(an_unarmed_gate_does_nothing_at_all) {
     // 空回调 = 整个闸不工作：连回合号都不推进。这是「无观测需求的调用方零行为改动」那条口径的判据——
     // 挂了个空回调不该让状态机白转一圈。
-    std::vector<Progress> seen;
+    std::vector<Progress> const seen;
     ProgressGate gate{aurora::net::http::ProgressHandler{}};
     AURORA_TEST_CHECK_FALSE(gate.armed());
     gate.observe(sample(ProgressPhase::Download, 1, 2));

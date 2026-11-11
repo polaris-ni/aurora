@@ -560,7 +560,7 @@ auto InspectorServer::Impl::marshal_json(const char *endpoint, const F &fn) -> s
 
 auto InspectorServer::Impl::on_tree(const std::function<std::string(Node &)> &fn) -> std::string {
     auto body = marshal_opt<std::string>([&]() -> std::string {
-        std::scoped_lock lock(tree_mutex);
+        std::scoped_lock const lock(tree_mutex);
         Node root = root_getter();
         if (!root) {
             return error_response(500, "Widget tree root is null");
@@ -870,7 +870,7 @@ auto InspectorServer::Impl::handle_debug_snapshot(const RouteCall &call) -> std:
             return error_response(500, "snapshot produced empty PNG");
         }
         // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
-        std::string body_bytes(reinterpret_cast<const char *>(png->data()), png->size());
+        std::string const body_bytes(reinterpret_cast<const char *>(png->data()), png->size());
         return make_response(200, "OK", "image/png", body_bytes);
     } catch (const std::exception &e) {
         return error_response(500, std::string("snapshot failed: ") + e.what());
@@ -1145,8 +1145,8 @@ auto InspectorServer::Impl::handle_tree(const RouteCall &call) -> std::string {
         bool found = false;
         try {
             auto tree = marshal_opt<Json>([&]() -> Json {
-                std::scoped_lock lock(tree_mutex);
-                Node root = window_tree_getter(wid);
+                std::scoped_lock const lock(tree_mutex);
+                Node const root = window_tree_getter(wid);
                 if (!root) {
                     return Json{};  // 标记窗口不存在
                 }
@@ -1330,7 +1330,7 @@ auto InspectorServer::Impl::handle_input(const RouteCall &call) -> std::string {
 
     try {
         const auto outcome = marshal_opt<Json>([&]() -> Json {
-            std::scoped_lock lock(tree_mutex);
+            std::scoped_lock const lock(tree_mutex);
             Node root = root_getter();
             if (!root) {
                 Json o = Json::object();
@@ -1423,8 +1423,8 @@ auto InspectorServer::Impl::handle_find(const RouteCall &call) -> std::string {
     }
     try {
         const auto outcome = marshal_opt<Json>([&]() -> Json {
-            std::scoped_lock lock(tree_mutex);
-            Node root = root_getter();
+            std::scoped_lock const lock(tree_mutex);
+            Node const root = root_getter();
             if (!root) {
                 Json o = Json::object();
                 o.set("error", "Widget tree root is null");

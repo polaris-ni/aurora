@@ -115,7 +115,7 @@ using aurora::testing::require_field;
 AURORA_TEST_CASE(live_state_appears_as_source_node) {
     // 活来源：构造即入登记表，按角色报告为 `source`，id 取稳定身份而非对象地址。
     const auto sources_before = count_kind(StateGraph::nodes(), "source");
-    State<int> s{0};
+    State<int> const s{0};
     const auto id = source_id(*detail::HandleAccess::source_of(s));
 
     const auto nodes = StateGraph::nodes();
@@ -125,13 +125,13 @@ AURORA_TEST_CASE(live_state_appears_as_source_node) {
 
 AURORA_TEST_CASE(copied_handle_shares_one_node) {
     // 复制句柄共享来源：不新增节点；同一 id 在图上仍可见。
-    State<int> s{1};
+    State<int> const s{1};
     const auto id = source_id(*detail::HandleAccess::source_of(s));
     const auto sources_before = count_kind(StateGraph::nodes(), "source");
 
     // 本用例刻意按值复制以验证「不新增节点」的共享语义，复制本身就是被测行为。
     // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-    State<int> copy = s;
+    State<int> const copy = s;
     AURORA_TEST_CHECK_EQ(copy.get(), 1);
     AURORA_TEST_CHECK_EQ(count_kind(StateGraph::nodes(), "source"), sources_before);
     AURORA_TEST_CHECK_TRUE(has_node(StateGraph::nodes(), id));

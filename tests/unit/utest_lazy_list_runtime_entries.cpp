@@ -397,7 +397,7 @@ AURORA_TEST_CASE(scroll_changed_parameter_matches_the_readback) {
     // 回调在偏移与脏标记都落定之后调用：回调内读 scroll_offset() 等于刚送出的那个值。
     LazyList list{100, {}, 48.0F};
     LayoutEngine::layout(list, bounded(300.0F, 400.0F));
-    LazyList *self = &list;
+    LazyList *const self = &list;
     bool consistent = true;
     int calls = 0;
     list.set_on_scroll_changed([self, &consistent, &calls](float offset) -> void {

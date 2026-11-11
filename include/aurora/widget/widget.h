@@ -26,7 +26,6 @@
 #include "aurora/render/display_list.h"
 #include "aurora/render/painter.h"
 #include "aurora/state/read_only_state.h"
-#include "aurora/state/state.h"
 #include "aurora/state/subscription.h"
 #include "aurora/widget/descriptor.h"
 #include "aurora/widget/node.h"

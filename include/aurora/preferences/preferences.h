@@ -180,7 +180,7 @@ class Preferences {
     /// @brief 最近一次文件加载（`flush`/`reload` 不涉及）产生的错误；无错误则为 nullopt。
     /// @return 加载错误副本（打开失败/JSON 解析失败）；无错误或内存模式为 nullopt。
     [[nodiscard]] auto last_load_error() const -> std::optional<Error> {
-        std::unique_lock lock(mutex_);
+        std::unique_lock const lock(mutex_);
         return load_error_;
     }
 
@@ -446,7 +446,7 @@ class Preferences {
 
 template <typename T>
 auto Preferences::get_impl(const std::string &scope, const std::string &key, T fallback) const -> T {
-    std::unique_lock lock(mutex_);
+    std::unique_lock const lock(mutex_);
     const std::string composite = scope.empty() ? key : scope + "." + key;
     json::Value j = resolve_get(root_, composite);  // 非 const：return j 才能走移动而非拷贝
     if (j.is_null()) {
@@ -467,7 +467,7 @@ auto Preferences::set_impl(const std::string &scope, const std::string &key, T v
     json::Value snapshot;
     std::shared_ptr<IStateHolder> holder;
     {
-        std::unique_lock lock(mutex_);
+        std::unique_lock const lock(mutex_);
         // 恒等分支：T 为整值时原样存入（不做任何类型推断）；其余 T 由入向构造落成标量 / 字符串。
         if constexpr (std::is_same_v<T, json::Value>) {
             resolve_set(root_, composite, std::move(value));
@@ -490,7 +490,7 @@ auto Preferences::set_impl(const std::string &scope, const std::string &key, T v
 template <typename T>
 auto Preferences::watch_impl(const std::string &scope, const std::string &key, T fallback) -> ReadOnlyState<T> {
     const std::string composite = scope.empty() ? key : scope + "." + key;
-    std::unique_lock lock(mutex_);
+    std::unique_lock const lock(mutex_);
     if (const auto it = states_.find(composite); it != states_.end()) {
         if (auto *h = dynamic_cast<StateHolder<T> *>(it->second.get())) {
             return h->state;

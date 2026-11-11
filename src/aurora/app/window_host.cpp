@@ -101,7 +101,7 @@ auto WindowHost::attach_surface() -> void {
     // 文本录入焦点」，基类 composition_caret_bounds 的 focus_bounds_ 兜底会让按钮也返回非零盒）；
     // 非文本焦点返回零盒 = 「无有效定位」，Win32/X11 侧行为退化为系统默认位置，不变。
     sf.set_composition_caret_provider([this]() -> Rect {
-        Widget *focused = focus_.focused();
+        Widget *const focused = focus_.focused();
         if (focused == nullptr || focused->accessibility_role() != AccessibilityRole::TextInput) {
             return Rect{};
         }

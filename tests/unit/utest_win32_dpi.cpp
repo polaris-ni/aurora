@@ -123,7 +123,7 @@ AURORA_TEST_CASE(creation_time_reads_the_monitor_the_window_will_land_on) {
     using detail::DpiSource;
     using detail::read_dpi;
     const DpiApi api{.for_window = nullptr, .for_system = &fake_for_system, .for_monitor = &fake_for_monitor};
-    RECT work_area{.left = 0, .top = 0, .right = 1920, .bottom = 1080};
+    RECT const work_area{.left = 0, .top = 0, .right = 1920, .bottom = 1080};
     const auto r = read_dpi(nullptr, &work_area, api);
     AURORA_TEST_CHECK(r.source == DpiSource::Monitor);
     AURORA_TEST_CHECK_EQ(r.dpi, 192);

@@ -28,7 +28,6 @@
 #include "framework/aurora_test.h"
 #include "framework/golden.h"
 #include "framework/json_access.h"
-#include "framework/json_literals.h"
 
 namespace aurora::test_cases::utest_sparkline {
 using aurora::testing::require_child;
@@ -152,11 +151,11 @@ AURORA_TEST_CASE(describe_static_is_complete) {
 }
 
 AURORA_TEST_CASE(props_roundtrip_and_factory) {
-    Sparkline src{SparklineProps()
-                      .set_values({1.0, 3.0, 2.0, 5.0})
-                      .set_color(Color{10, 20, 30, 255})
-                      .set_line_width(2.5F)
-                      .set_show_end_dot(false)};
+    Sparkline const src{SparklineProps()
+                            .set_values({1.0, 3.0, 2.0, 5.0})
+                            .set_color(Color{10, 20, 30, 255})
+                            .set_line_width(2.5F)
+                            .set_show_end_dot(false)};
     Json props = Json::object();
     src.serialize_props(props);
     const Json *values = require_child(props, "values");
@@ -265,7 +264,7 @@ AURORA_TEST_CASE(sparkline_empty_array_stated_differs_from_unstated) {
     AURORA_TEST_CHECK_EQ(arr->size(), 0U);
     AURORA_TEST_CHECK_TRUE(stated.values().empty());
 
-    SparklineProbe bare;
+    SparklineProbe const bare;
     AURORA_TEST_CHECK_FALSE(bare.present(SparklineProps::values_row()));
     Json without_key = Json::object();
     bare.serialize_props(without_key);

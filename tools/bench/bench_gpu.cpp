@@ -160,7 +160,7 @@ struct VideoResult {
 /// @brief 视频场景：预生成 N 帧唯一内容，计时回放（含 begin/replay/end 全帧路径）。
 auto bench_video(bool streaming) -> VideoResult {
     const std::vector<Image> frames = make_video_frames();
-    testing::FakeGl fake;
+    testing::FakeGl const fake;
     rhi::GpuGlRhi rhi_obj(fake.fn);
     rhi::RhiFrameSink &sink = rhi_obj;
     if (!rhi_obj.valid()) {

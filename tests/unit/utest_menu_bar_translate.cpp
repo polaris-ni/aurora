@@ -221,7 +221,7 @@ AURORA_TEST_CASE(capability_bit_is_true_only_where_bridge_landed) {
 // ---------- 门面契约（进程级单槽 + 点击路由）----------
 
 AURORA_TEST_CASE(install_sets_installed_and_uninstall_clears) {
-    BackendGuard guard;
+    BackendGuard const guard;
     auto &nb = NativeMenuBar::instance();
     nb.uninstall();  // 起点清零
     auto &obs = install_fake_backend();
@@ -240,7 +240,7 @@ AURORA_TEST_CASE(install_sets_installed_and_uninstall_clears) {
 
 AURORA_TEST_CASE(install_replaces_previous_tree) {
     // 重复 install 替换旧树（不叠加）：伪造后端被再次调用一次，调用计数 == 2。
-    BackendGuard guard;
+    BackendGuard const guard;
     auto &nb = NativeMenuBar::instance();
     nb.uninstall();
     auto &obs = install_fake_backend();
@@ -254,7 +254,7 @@ AURORA_TEST_CASE(install_replaces_previous_tree) {
 
 AURORA_TEST_CASE(empty_id_items_are_forwarded_to_backend) {
     // 空 id 项经门面照常进入扁平表、交给后端；点击路由由后端/桥侧按空 id 留 WARN 处理。
-    BackendGuard guard;
+    BackendGuard const guard;
     auto &nb = NativeMenuBar::instance();
     nb.uninstall();
     auto &obs = install_fake_backend();
@@ -272,7 +272,7 @@ AURORA_TEST_CASE(empty_id_items_are_forwarded_to_backend) {
 
 AURORA_TEST_CASE(click_routes_to_command_registry_by_id) {
     // 点击经门面 route_click → CommandRegistry::invoke(id)：验证稳定 id 正确路由到对应命令。
-    BackendGuard guard;
+    BackendGuard const guard;
     auto &nb = NativeMenuBar::instance();
     nb.uninstall();
     auto &obs = install_fake_backend();
@@ -296,7 +296,7 @@ AURORA_TEST_CASE(click_routes_to_command_registry_by_id) {
 
 AURORA_TEST_CASE(empty_id_click_is_not_routed) {
     // 空 id 点击不路由（留 WARN 而非调用未知命令）：fired 不增。
-    BackendGuard guard;
+    BackendGuard const guard;
     auto &nb = NativeMenuBar::instance();
     nb.uninstall();
     auto &obs = install_fake_backend();

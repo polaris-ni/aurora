@@ -53,7 +53,7 @@ class HookScope {
 /// @return 端点；构造失败即用例致命失败（测试数据本身写错）。
 auto literal(std::string_view text, std::uint16_t port) -> Endpoint {
     auto built = Endpoint::from_ip(text, port);
-    AURORA_TEST_REQUIRE(bool(built));
+    AURORA_TEST_REQUIRE(static_cast<bool>(built));
     return std::move(built.value());
 }
 
@@ -92,18 +92,18 @@ AURORA_TEST_CASE(numeric_literal_short_circuits_before_the_hook) {
     });
 
     const auto v4 = Resolver::lookup("127.0.0.1", 80);
-    AURORA_TEST_REQUIRE(bool(v4));
+    AURORA_TEST_REQUIRE(static_cast<bool>(v4));
     AURORA_TEST_CHECK_EQ(v4.value().size(), std::size_t{1});
     AURORA_TEST_CHECK_EQ(v4.value().at(0).host(), "127.0.0.1");
     AURORA_TEST_CHECK_EQ(v4.value().at(0).port(), std::uint16_t{80});
 
     const auto v6 = Resolver::lookup("[::1]", 443);
-    AURORA_TEST_REQUIRE(bool(v6));
+    AURORA_TEST_REQUIRE(static_cast<bool>(v6));
     AURORA_TEST_CHECK_EQ(v6.value().at(0).host(), "::1");
 
     // 作用域号也是字面量的一部分：带它的地址同样不该走 DNS（DNS 回报里没有 zone 这个字段）。
     const auto scoped = Resolver::lookup("fe80::1%2", 80);
-    AURORA_TEST_REQUIRE(bool(scoped));
+    AURORA_TEST_REQUIRE(static_cast<bool>(scoped));
     AURORA_TEST_CHECK_EQ(scoped.value().at(0).zone(), "2");
 
     AURORA_TEST_CHECK_EQ(calls.load(), 0);
@@ -111,7 +111,7 @@ AURORA_TEST_CASE(numeric_literal_short_circuits_before_the_hook) {
 
 AURORA_TEST_CASE(empty_host_is_a_usage_error_not_a_dns_failure) {
     const auto result = Resolver::lookup("", 80);
-    AURORA_TEST_REQUIRE_FALSE(bool(result));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(result));
     AURORA_TEST_CHECK_EQ(result.error().code_enum, ErrorCode::NetEndpointInvalid);
 }
 
@@ -123,7 +123,7 @@ AURORA_TEST_CASE(answers_are_deduplicated_in_first_seen_order) {
     });
 
     const auto result = Resolver::lookup("example.com", 80);
-    AURORA_TEST_REQUIRE(bool(result));
+    AURORA_TEST_REQUIRE(static_cast<bool>(result));
     AURORA_TEST_REQUIRE_EQ(result.value().size(), std::size_t{3});
     AURORA_TEST_CHECK_EQ(result.value().at(0).to_string(), "203.0.113.1:80");
     AURORA_TEST_CHECK_EQ(result.value().at(1).to_string(), "[2001:db8::1]:80");
@@ -135,13 +135,13 @@ AURORA_TEST_CASE(resolver_failure_and_empty_answer_both_fail_as_dns) {
         return make_error(ErrorCode::NetDnsFailed, "host=svc.example, resolver code=8");
     });
     const auto failed = Resolver::lookup("svc.example", 443);
-    AURORA_TEST_REQUIRE_FALSE(bool(failed));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(failed));
     AURORA_TEST_CHECK_EQ(failed.error().code_enum, ErrorCode::NetDnsFailed);
 
     HookScope empty(
         [](std::string_view, std::uint16_t) -> Result<std::vector<Endpoint>> { return std::vector<Endpoint>{}; });
     const auto no_answer = Resolver::lookup("gone.example", 443);
-    AURORA_TEST_REQUIRE_FALSE(bool(no_answer));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(no_answer));
     AURORA_TEST_CHECK_EQ(no_answer.error().code_enum, ErrorCode::NetDnsFailed);
     // 「查表成功但零条可用记录」等同不可用：诊断必须带上主机名，否则调用方只能靠猜。
     AURORA_TEST_CHECK_TRUE(no_answer.error().message.find("gone.example") != std::string::npos);
@@ -156,7 +156,7 @@ AURORA_TEST_CASE(platform_leg_fails_for_the_reserved_invalid_tld) {
     // 真实平台腿：`.invalid` 由 RFC 6761 保留，合规解析器必须回 NXDOMAIN；完全没有网络的机器
     // 同样回失败。两条路径的判据一致，故此用例不依赖 DNS 可达性。
     const auto result = Resolver::lookup("aurora.invalid", 443);
-    AURORA_TEST_REQUIRE_FALSE(bool(result));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(result));
     AURORA_TEST_CHECK_EQ(result.error().code_enum, ErrorCode::NetDnsFailed);
     AURORA_TEST_CHECK_TRUE(result.error().message.find("aurora.invalid") != std::string::npos);
 #endif

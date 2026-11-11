@@ -18,7 +18,6 @@
 #include <vector>
 
 #include "aurora/app/file_dialog.h"
-#include "aurora/core/log.h"
 #include "aurora/widget/dialog.h"
 #include "aurora/widget/widget.h"
 

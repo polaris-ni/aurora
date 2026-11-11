@@ -177,27 +177,27 @@ AURORA_TEST_CASE(paint_covers_theme_clip_and_disabled_branches) {
     SegmentedControl sc({"A", "B", "C"}, 1);
     sc.set_active_color(Color{10, 20, 30, 255});
     LayoutEngine::layout(sc, bounded(400.0F, 100.0F));
-    Rect bounds{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = sc.size()};
+    Rect const bounds{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = sc.size()};
     sc.paint(painter, bounds, BuildContext{});
 
     // 圆角路径：push/pop clip + draw_rounded_border。
     SegmentedControl rounded({"X", "Y"});
     rounded.set_corner_radius(8.0F);
     LayoutEngine::layout(rounded, bounded(400.0F, 100.0F));
-    Rect rb{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = rounded.size()};
+    Rect const rb{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = rounded.size()};
     rounded.paint(painter, rb, BuildContext{});
 
     // 禁用态灰化分支。
     SegmentedControl dis({"P", "Q"});
     dis.set_enabled(false);
     LayoutEngine::layout(dis, bounded(400.0F, 100.0F));
-    Rect db{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = dis.size()};
+    Rect const db{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = dis.size()};
     dis.paint(painter, db, BuildContext{});
 
     // 默认主题：active_color 空 → inherit_theme(ctx).primary。
     SegmentedControl def({"M", "N"});
     LayoutEngine::layout(def, bounded(400.0F, 100.0F));
-    Rect fb{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = def.size()};
+    Rect const fb{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = def.size()};
     def.paint(painter, fb, BuildContext{});
 }
 

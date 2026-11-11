@@ -581,7 +581,7 @@ AURORA_TEST_CASE(pull_to_refresh_live_token_rows_follow_theme_when_unstated) {
     static_assert(!BareIndicatorReader<PullToRefresh>);
 
     const BuildContext bare;  // 无注入：inherit_theme 回落 light（与 OS 未表态同口径）
-    PullToRefresh ptr{Node{std::make_shared<RedBox>()}};
+    PullToRefresh const ptr{Node{std::make_shared<RedBox>()}};
     AURORA_TEST_CHECK(ptr.indicator_color(bare) == Color::blue());  // light primary = (0,0,255)
     AURORA_TEST_CHECK(ptr.band_color(bare) == Color::white());  // light surface = white
     AURORA_TEST_CHECK(ptr.refreshing_text_color(bare) == Color{0x47, 0x47, 0x47});  // light on_surface_variant
@@ -796,7 +796,7 @@ AURORA_TEST_CASE(pull_to_refresh_setback_freeze_holds_progress_and_emits_no_redr
 
     anim.set_time_scale(0.0);
     AURORA_TEST_CHECK_EQ(anim.time_scale(), 0.0);
-    ScopedDirtyCounter dirty{ptr};
+    ScopedDirtyCounter const dirty{ptr};
     for (int i = 0; i < 8; ++i) {
         pump_scaled_frame(ptr);
     }

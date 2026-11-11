@@ -36,7 +36,6 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -45,7 +44,6 @@
 #include "aurora/core/result.h"
 #include "aurora/net/cancellation.h"
 #include "aurora/net/engine.h"
-#include "aurora/net/poll.h"
 #include "aurora/net/transport.h"
 #include "framework/async_wait.h"
 #include "framework/aurora_test.h"

@@ -126,7 +126,7 @@ AURORA_TEST_CASE(corrupt_file_yields_error_and_empty_store) {
     AURORA_TEST_CHECK(p.keys().empty());
     AURORA_TEST_CHECK_EQ(p.get<int>("any", -1), -1);
     AURORA_TEST_REQUIRE(p.flush().ok());  // 以空内存覆盖损坏文件
-    prefs::Preferences fresh{file};
+    prefs::Preferences const fresh{file};
     AURORA_TEST_CHECK(!fresh.last_load_error().has_value());
     std::filesystem::remove_all(dir, ec);
 }
@@ -147,7 +147,7 @@ AURORA_TEST_CASE(remove_and_clear_tombstone_semantics) {
     AURORA_TEST_CHECK(!p.contains("gone"));
     AURORA_TEST_REQUIRE(p.flush().ok());  // 墓碑随 flush 持久化
     {
-        prefs::Preferences fresh{file};
+        prefs::Preferences const fresh{file};
         AURORA_TEST_CHECK(!fresh.contains("gone"));  // 墓碑阻止复活
         AURORA_TEST_CHECK(fresh.contains("kept"));
     }
@@ -155,7 +155,7 @@ AURORA_TEST_CASE(remove_and_clear_tombstone_semantics) {
     AURORA_TEST_CHECK(p.contains("gone"));
     AURORA_TEST_REQUIRE(p.flush().ok());
     {
-        prefs::Preferences fresh{file};
+        prefs::Preferences const fresh{file};
         AURORA_TEST_CHECK_EQ(fresh.get<int>("gone", -1), 42);
     }
 
@@ -170,7 +170,7 @@ AURORA_TEST_CASE(remove_and_clear_tombstone_semantics) {
     q.set("post", 3);
     AURORA_TEST_REQUIRE(q.flush().ok());
     {
-        prefs::Preferences fresh{dir / "clear.json"};
+        prefs::Preferences const fresh{dir / "clear.json"};
         const auto keys = fresh.keys();
         AURORA_TEST_CHECK_THAT(keys, m::contains(std::string{"post"}));  // 纪元后新键存活
         AURORA_TEST_CHECK_THAT(keys, m::negated(m::contains(std::string{"a"})));  // 旧键被清空纪元清除

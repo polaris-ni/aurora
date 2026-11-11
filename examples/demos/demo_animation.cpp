@@ -107,16 +107,16 @@ static auto chip_modifier(float w, bool active) -> au::Modifier {
 auto main() -> int {
     // —— 背景色呼吸动画 ——
     au::AnimationController pulse{1.6};
-    au::Tween tint{au::Color{59, 130, 246}, au::Color{236, 72, 153}};
+    au::Tween const tint{au::Color{59, 130, 246}, au::Color{236, 72, 153}};
     au::State tinted{au::Color{59, 130, 246}};
     // —— 来回缩放动画 ——
     au::AnimationController scale_pulse{1.2};
-    au::Tween scaler{0.6F, 1.4F};
+    au::Tween const scaler{0.6F, 1.4F};
     au::State scale_v{0.6F};
 
     // —— 场景一：repeat() 的三条对照（无限同向 / 无限往复 / repeat(3) 有限计数）——
     // 三条轨道共用「进度 0..1 直写 State」的补间，差别只在控制器的循环形态。
-    au::Tween<double> unit_ramp{0.0, 1.0};
+    au::Tween<double> const unit_ramp{0.0, 1.0};
     au::AnimationController loop_same{1.0};
     au::AnimationController loop_alt{1.0};
     au::State<double> s_same{0.0};
@@ -193,9 +193,9 @@ auto main() -> int {
     animator.bind(kf_plain_ctrl, kf_plain, s_kf_plain);
 
     // 一次性计算的演示值（静态展示，不参与动画循环）。
-    au::Curve curve{au::CurveKind::EaseInOut};
-    au::SpringSimulation spring{au::SpringDescription{.stiffness = 180.0, .damping = 20.0}, 0.0, 1.0};
-    au::Keyframes<au::Color> kf{std::vector<au::Keyframes<au::Color>::Stop>{
+    au::Curve const curve{au::CurveKind::EaseInOut};
+    au::SpringSimulation const spring{au::SpringDescription{.stiffness = 180.0, .damping = 20.0}, 0.0, 1.0};
+    au::Keyframes<au::Color> const kf{std::vector<au::Keyframes<au::Color>::Stop>{
         {.time = 0.0, .value = au::Color{59, 130, 246}},
         {.time = 0.5, .value = au::Color{236, 72, 153}},
         {.time = 1.0, .value = au::Color{34, 197, 94}},

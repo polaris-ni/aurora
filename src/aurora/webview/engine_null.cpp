@@ -28,7 +28,7 @@ class NullEngine final : public NativeViewEngine {
     }
 
     /// @brief 创建视图：Null 引擎无原生视图可给。
-    /// @param parent_window 未使用。
+    /// @note 形参 parent_window 未使用。
     /// @return 恒为空指针。
     [[nodiscard]] auto create_view(void * /*parent_window*/) -> std::unique_ptr<WebViewSink> override {
         return nullptr;

@@ -69,7 +69,7 @@ AURORA_TEST_CASE(mount_layout_rebuild_unmount_covers_all_breakpoints) {
         [](Breakpoint /*b*/) -> Node { return Node{std::make_shared<LeafProbe>()}; });
     AURORA_TEST_CHECK_EQ(bp->wants_focus(), false);
 
-    BuildContext ctx;
+    BuildContext const ctx;
     bp->mount(ctx);  // on_mount：订阅 builder 信号
 
     // 宽 → Expanded，并构建子节点。

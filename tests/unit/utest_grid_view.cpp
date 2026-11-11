@@ -190,7 +190,7 @@ class ReduceMotionGuard final {
 }  // namespace
 
 AURORA_TEST_CASE(default_grid_view_invariants) {
-    GridView grid;
+    GridView const grid;
     AURORA_TEST_CHECK_EQ(std::string{grid.type_name()}, "GridView");
     AURORA_TEST_CHECK_EQ(grid.count(), 0);
     AURORA_TEST_CHECK_EQ(grid.columns(), 1);
@@ -203,33 +203,33 @@ AURORA_TEST_CASE(default_grid_view_invariants) {
 
 AURORA_TEST_CASE(ctor_degrades_invalid_arguments) {
     // 非正列数降级为 1（经 Diagnostics::degraded 上报）。
-    GridView zero_columns{9, 0, {}, 96.0F};
+    GridView const zero_columns{9, 0, {}, 96.0F};
     AURORA_TEST_CHECK_EQ(zero_columns.columns(), 1);
 
     // 非正格高降级为 96。
-    GridView bad_extent{9, 3, {}, -1.0F};
+    GridView const bad_extent{9, 3, {}, -1.0F};
     AURORA_TEST_CHECK_NEAR(bad_extent.cell_extent(), 96.0F, 1e-4F);
 
     // 负 count 钳为 0。
-    GridView negative{-2, 3, {}, 96.0F};
+    GridView const negative{-2, 3, {}, 96.0F};
     AURORA_TEST_CHECK_EQ(negative.count(), 0);
 
-    GridView normal{30, 3, {}, 96.0F};
+    GridView const normal{30, 3, {}, 96.0F};
     AURORA_TEST_CHECK_EQ(normal.count(), 30);
     AURORA_TEST_CHECK_EQ(normal.columns(), 3);
     AURORA_TEST_CHECK_NEAR(normal.cell_extent(), 96.0F, 1e-4F);
 }
 
 AURORA_TEST_CASE(row_count_rounds_up_and_content_height) {
-    GridView full{30, 3, {}, 96.0F};
+    GridView const full{30, 3, {}, 96.0F};
     AURORA_TEST_CHECK_EQ(full.row_count(), 10);
     AURORA_TEST_CHECK_NEAR(full.content_height(), 960.0F, 1e-4F);
 
-    GridView remainder{10, 3, {}, 96.0F};
+    GridView const remainder{10, 3, {}, 96.0F};
     AURORA_TEST_CHECK_EQ(remainder.row_count(), 4);  // ceil(10 / 3)
     AURORA_TEST_CHECK_NEAR(remainder.content_height(), 384.0F, 1e-4F);
 
-    GridView exact{9, 3, {}, 96.0F};
+    GridView const exact{9, 3, {}, 96.0F};
     AURORA_TEST_CHECK_EQ(exact.row_count(), 3);
     AURORA_TEST_CHECK_NEAR(exact.content_height(), 288.0F, 1e-4F);
 }
@@ -336,7 +336,7 @@ AURORA_TEST_CASE(cell_positions_follow_grid) {
 }
 
 AURORA_TEST_CASE(serialize_and_describe) {
-    GridView src{9, 2, {}, 80.0F};
+    GridView const src{9, 2, {}, 80.0F};
     Json props = Json::object();
     src.serialize_props(props);
     AURORA_TEST_CHECK_EQ(require_field<int>(props, "count"), 9);
@@ -486,7 +486,7 @@ AURORA_TEST_CASE(snap_paging_pages_by_viewport_height) {
 }
 
 AURORA_TEST_CASE(reduce_motion_snaps_and_jumps_without_intermediate_frames) {
-    ReduceMotionGuard guard;
+    ReduceMotionGuard const guard;
     GridView grid{30, 3, {}, 96.0F};
     grid.set_snap(ScrollSnap{.extent = 192.0F});
     LayoutEngine::layout(grid, bounded(300.0F, 300.0F));
@@ -530,7 +530,7 @@ AURORA_TEST_CASE(snap_properties_are_serialized) {
 
     // 吸附开关的可观测性：本控件以 set_snap 接线（builder 属运行时回调，from_json 不重建条目）。
     AURORA_TEST_CHECK_TRUE(src.snap().enabled(300.0F));
-    GridView off{9, 3, {}, 96.0F};
+    GridView const off{9, 3, {}, 96.0F};
     AURORA_TEST_CHECK_FALSE(off.snap().enabled(300.0F));
 }
 
@@ -600,7 +600,7 @@ AURORA_TEST_CASE(grid_view_glide_freeze_holds_progress_and_emits_no_redraw) {
 
     anim.set_time_scale(0.0);
     AURORA_TEST_CHECK_EQ(anim.time_scale(), 0.0);
-    ScopedDirtyCounter dirty{grid};
+    ScopedDirtyCounter const dirty{grid};
     for (int i = 0; i < 8; ++i) {
         pump_scaled_frame(grid);
     }

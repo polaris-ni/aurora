@@ -102,7 +102,7 @@ AURORA_TEST_CASE(combine_runs_in_order_and_skips_null) {
     AURORA_TEST_CHECK_EQ(v("abc"), std::string{});
 
     // 含空条目：被跳过，不报错也不崩溃。
-    Validator none;
+    Validator const none;
     auto with_null = combine({none, required()});
     AURORA_TEST_CHECK_EQ(with_null("x"), std::string{});
     AURORA_TEST_CHECK_EQ(with_null(""), std::string{"This field is required"});
@@ -163,7 +163,7 @@ AURORA_TEST_CASE(formfield_layout_grows_with_error_and_paints) {
     AURORA_TEST_CHECK_GT(f->size().height, ok_h);  // 错误文本额外高度
 
     Painter painter;
-    Rect bounds{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = f->size()};
+    Rect const bounds{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = f->size()};
     f->paint(painter, bounds, BuildContext{});  // 子控件 + 红框 + 错误文本
 
     // 清除错误后再绘制：仅子控件分支。

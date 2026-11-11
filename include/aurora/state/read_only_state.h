@@ -108,7 +108,7 @@ class ReadOnlyState {
         auto source = source_;
         auto record = detail::make_record([source, callback = std::forward<F>(fn)]() mutable {
             const T &value = source->read();  // 固定来源：登记且只登记本来源
-            detail::SuspendCollection suspended;  // 回调读取其他句柄不扩充本订阅
+            detail::SuspendCollection const suspended;  // 回调读取其他句柄不扩充本订阅
             std::invoke(callback, value);
         });
         source->add_observer(*record);

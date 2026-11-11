@@ -173,7 +173,7 @@ AURORA_TEST_CASE(computed_conditional_reads_replace_dependencies) {
 AURORA_TEST_CASE(computed_keeps_upstream_source_alive) {
     // 派生节点保活其上游来源：源句柄全部释放后仍可读取派生结果。
     auto derived = [&]() -> ReadOnlyState<int> {
-        State<int> local{41};
+        State<int> const local{41};
         return computed([local]() -> int { return local.get() + 1; });
     }();
     AURORA_TEST_CHECK_EQ(derived.get(), 42);
@@ -216,7 +216,7 @@ AURORA_TEST_CASE(computed_feeds_display_property_with_selective_repaint) {
 
     PaintProbe a{left_ratio};  // 只读句柄直接填展示属性
     PaintProbe b{right_ratio};
-    BuildContext ctx;
+    BuildContext const ctx;
     a.mount(ctx);
     b.mount(ctx);
     // 订阅成功即交付首值一次：两个派生各求值一次（惰性只在无人订阅时成立）。

@@ -10,7 +10,6 @@
 #include "aurora/core/result.h"
 #include "aurora/core/types.h"
 #include "aurora/state/read_only_state.h"
-#include "aurora/state/state.h"
 
 /// @brief Aurora 公共命名空间：本头在其中声明视频源抽象（VideoSource/AudioSink/VideoController）。
 namespace aurora {

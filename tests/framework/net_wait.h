@@ -24,7 +24,6 @@
 #include <optional>
 #include <string_view>
 #include <thread>
-#include <utility>
 #include <vector>
 
 #include "async_wait.h"

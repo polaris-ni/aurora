@@ -212,7 +212,7 @@ AURORA_TEST_CASE(async_completed_before_timeout_delivers_value) {
 
 AURORA_TEST_CASE(timeout_guard_sweep_fires_only_due_entries) {
     // 登记式看守（deferred 路径的机制层）与线程无关，故在任意构建都要真跑。
-    TimeoutGuardsDrain drain;
+    TimeoutGuardsDrain const drain;
     auto due_flag = std::make_shared<std::atomic<bool>>(false);
     auto far_flag = std::make_shared<std::atomic<bool>>(false);
     const auto now = std::chrono::steady_clock::now();
@@ -232,7 +232,7 @@ AURORA_TEST_CASE(timeout_guard_sweep_fires_only_due_entries) {
 }
 
 AURORA_TEST_CASE(timeout_guard_deadline_reports_none_and_clamps_past) {
-    TimeoutGuardsDrain drain;
+    TimeoutGuardsDrain const drain;
     const auto now = std::chrono::steady_clock::now();
     AURORA_TEST_CHECK_EQ(detail::next_timeout_deadline_ms(now), -1.0);  // 空表 = 无看守
     auto noop = []() -> void {};

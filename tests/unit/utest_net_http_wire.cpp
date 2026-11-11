@@ -38,7 +38,7 @@ namespace wire = aurora::net::wire;
 /// @param parsed 解析结果（`Result<optional<ResponseHead>>`）。
 /// @return 完整解析出的头部块副本。
 [[nodiscard]] auto completed(const Result<std::optional<wire::ResponseHead>> &parsed) -> wire::ResponseHead {
-    AURORA_TEST_REQUIRE_MSG(bool(parsed), parsed ? std::string{} : parsed.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(parsed), parsed ? std::string{} : parsed.error().message);
     return require_value(parsed.value());
 }
 
@@ -60,7 +60,7 @@ namespace wire = aurora::net::wire;
 /// @param rendered `render_request_head` 的产出。
 /// @return 序列化后的请求字节。
 [[nodiscard]] auto unwrapped_render(const Result<std::string> &rendered) -> std::string {
-    AURORA_TEST_REQUIRE_MSG(bool(rendered), rendered ? std::string{} : rendered.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(rendered), rendered ? std::string{} : rendered.error().message);
     return rendered.value();
 }
 
@@ -69,7 +69,7 @@ namespace wire = aurora::net::wire;
 /// @return 解析成功的 Url 副本。
 [[nodiscard]] auto url_of(std::string_view text) -> Url {
     const auto parsed = Url::parse(text);
-    AURORA_TEST_REQUIRE_MSG(bool(parsed), parsed ? std::string{} : parsed.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(parsed), parsed ? std::string{} : parsed.error().message);
     return parsed.value();
 }
 
@@ -80,7 +80,7 @@ namespace wire = aurora::net::wire;
 [[nodiscard]] auto run_decoder(const std::vector<std::string> &segments, wire::ChunkedDecoder &decoder) -> std::string {
     for (const auto &segment : segments) {
         const auto pushed = decoder.push(segment);
-        AURORA_TEST_REQUIRE_MSG(bool(pushed), pushed ? std::string{} : pushed.error().message);
+        AURORA_TEST_REQUIRE_MSG(static_cast<bool>(pushed), pushed ? std::string{} : pushed.error().message);
     }
     std::vector<char> out;
     decoder.drain(out);
@@ -92,7 +92,7 @@ namespace wire = aurora::net::wire;
 AURORA_TEST_CASE(response_head_is_three_state_and_preserves_fields) {
     // 还没读到空行：成功且值缺失，不是错误——调用方据此继续喂字节。
     const auto pending = wire::parse_response_head("HTTP/1.1 200 OK\r\nX-A: 1\r\n");
-    AURORA_TEST_REQUIRE(bool(pending));
+    AURORA_TEST_REQUIRE(static_cast<bool>(pending));
     AURORA_TEST_CHECK_TRUE(!pending.value().has_value());
 
     const std::string_view complete =
@@ -127,7 +127,7 @@ AURORA_TEST_CASE(response_head_rejects_malformed_and_oversized) {
           "HTTP/1.1 200 OK\r\nX A: 1\r\n\r\n", "HTTP/1.1 200 OK\r\n: no-name\r\n\r\n",
           "HTTP/1.1 200 OK\r\n  folded-before-any-field\r\n\r\n"}) {
         const auto rejected = wire::parse_response_head(bad);
-        AURORA_TEST_REQUIRE_FALSE(bool(rejected));
+        AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(rejected));
         AURORA_TEST_CHECK_EQ(rejected.error().code_enum, ErrorCode::HttpProtocolError);
     }
 
@@ -137,39 +137,39 @@ AURORA_TEST_CASE(response_head_rejects_malformed_and_oversized) {
         bloated += "X-Padding: a great many bytes of nothing at all\r\n";
     }
     const auto capped = wire::parse_response_head(bloated);
-    AURORA_TEST_REQUIRE_FALSE(bool(capped));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(capped));
     AURORA_TEST_CHECK_EQ(capped.error().code_enum, ErrorCode::HttpProtocolError);
 
     // 未超上限且确实没读到空行 → 仍是「还没读够」。
     const auto still_pending_view = bloated.substr(0, 40);
     const auto still_pending = wire::parse_response_head(still_pending_view);
-    AURORA_TEST_REQUIRE(bool(still_pending));
+    AURORA_TEST_REQUIRE(static_cast<bool>(still_pending));
     AURORA_TEST_CHECK_TRUE(!still_pending.value().has_value());
 }
 
 AURORA_TEST_CASE(framing_rules_are_normative) {
     using F = wire::BodyFraming;
     const auto chunked = wire::framing_of(make_head(200, {{"Transfer-Encoding", "chunked"}}), false);
-    AURORA_TEST_REQUIRE(bool(chunked));
+    AURORA_TEST_REQUIRE(static_cast<bool>(chunked));
     AURORA_TEST_CHECK_TRUE(chunked.value() == F::Chunked);
 
     const auto length = wire::framing_of(make_head(200, {{"Content-Length", "42"}}), false);
-    AURORA_TEST_REQUIRE(bool(length));
+    AURORA_TEST_REQUIRE(static_cast<bool>(length));
     AURORA_TEST_CHECK_TRUE(length.value() == F::Length);
 
     const auto until_close = wire::framing_of(make_head(200, {}), false);
-    AURORA_TEST_REQUIRE(bool(until_close));
+    AURORA_TEST_REQUIRE(static_cast<bool>(until_close));
     AURORA_TEST_CHECK_TRUE(until_close.value() == F::UntilClose);
 
     // 无体形态：1xx / 204 / 304，以及 HEAD 请求的应答恒无体（即便状态码带体）。
     for (const auto &no_body : {make_head(100, {{"Content-Length", "5"}}), make_head(204, {{"Content-Length", "5"}}),
                                 make_head(304, {{"Transfer-Encoding", "chunked"}})}) {
         const auto framed = wire::framing_of(no_body, false);
-        AURORA_TEST_REQUIRE(bool(framed));
+        AURORA_TEST_REQUIRE(static_cast<bool>(framed));
         AURORA_TEST_CHECK_TRUE(framed.value() == F::None);
     }
     const auto head_reply = wire::framing_of(make_head(200, {{"Content-Length", "9"}}), true);
-    AURORA_TEST_REQUIRE(bool(head_reply));
+    AURORA_TEST_REQUIRE(static_cast<bool>(head_reply));
     AURORA_TEST_CHECK_TRUE(head_reply.value() == F::None);
 
     // 两条长度声明并存即走私；不一致的多个 Content-Length 即歧义；本库不实现的传输编码即畸形。
@@ -179,13 +179,13 @@ AURORA_TEST_CASE(framing_rules_are_normative) {
           make_head(200, {{"Content-Length", "3"}, {"Content-Length", "4"}}),
           make_head(200, {{"Content-Length", "0x10"}}), make_head(200, {{"Content-Length", "-1"}})}) {
         const auto framed = wire::framing_of(ambiguous, false);
-        AURORA_TEST_REQUIRE_FALSE(bool(framed));
+        AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(framed));
         AURORA_TEST_CHECK_EQ(framed.error().code_enum, ErrorCode::HttpProtocolError);
     }
 
     // 同名且取值一致的 Content-Length 重复不是歧义，仍是确切长度。
     const auto consistent = wire::framing_of(make_head(200, {{"Content-Length", "7"}, {"Content-Length", "7"}}), false);
-    AURORA_TEST_REQUIRE(bool(consistent));
+    AURORA_TEST_REQUIRE(static_cast<bool>(consistent));
     AURORA_TEST_CHECK_TRUE(consistent.value() == F::Length);
 }
 
@@ -194,7 +194,7 @@ AURORA_TEST_CASE(render_request_head_fills_and_validates) {
     Headers fields;
     fields.set("Accept", "text/plain");
     const auto rendered = wire::render_request_head("GET", target, fields);
-    AURORA_TEST_REQUIRE(bool(rendered));
+    AURORA_TEST_REQUIRE(static_cast<bool>(rendered));
     // 缺 Host 按目标补齐（缺省端口 80 不写出），请求目标带查询串，末尾空行收尾。
     AURORA_TEST_CHECK_EQ(rendered.value(),
                          "GET /a/b?x=1&q=2 HTTP/1.1\r\nHost: example.com\r\nAccept: text/plain\r\n\r\n");
@@ -226,14 +226,14 @@ AURORA_TEST_CASE(render_request_head_fills_and_validates) {
     Headers injected;
     injected.set("X-Evil", "ok\r\nInjected: yes");
     const auto rejected_value = wire::render_request_head("GET", target, injected);
-    AURORA_TEST_REQUIRE_FALSE(bool(rejected_value));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(rejected_value));
     AURORA_TEST_CHECK_EQ(rejected_value.error().code_enum, ErrorCode::HttpRequestInvalid);
 
     // 方法 / 字段名不合 token 即拒。
-    AURORA_TEST_CHECK_FALSE(bool(wire::render_request_head("GE T", target, {})));
+    AURORA_TEST_CHECK_FALSE(static_cast<bool>(wire::render_request_head("GE T", target, {})));
     Headers bad_name;
     bad_name.set("Bad Name", "1");
-    AURORA_TEST_CHECK_FALSE(bool(wire::render_request_head("GET", target, bad_name)));
+    AURORA_TEST_CHECK_FALSE(static_cast<bool>(wire::render_request_head("GET", target, bad_name)));
 }
 
 AURORA_TEST_CASE(chunked_decoder_handles_split_and_trailers) {
@@ -264,7 +264,7 @@ AURORA_TEST_CASE(chunked_decoder_handles_split_and_trailers) {
 
     // drain 只追加不清调用方缓冲，且取完即从内部移除（重复 drain 不重复产出）。
     wire::ChunkedDecoder partial;
-    AURORA_TEST_REQUIRE(bool(partial.push("3\r\nabc")));
+    AURORA_TEST_REQUIRE(static_cast<bool>(partial.push("3\r\nabc")));
     std::vector<char> sink{'Z'};
     partial.drain(sink);
     partial.drain(sink);  // 第二次应为空
@@ -275,25 +275,25 @@ AURORA_TEST_CASE(chunked_decoder_handles_split_and_trailers) {
 AURORA_TEST_CASE(chunked_decoder_rejects_malformed) {
     // 长度字段非十六进制。
     wire::ChunkedDecoder not_hex;
-    AURORA_TEST_CHECK_FALSE(bool(not_hex.push("XYZ\r\n")));
+    AURORA_TEST_CHECK_FALSE(static_cast<bool>(not_hex.push("XYZ\r\n")));
 
     // 块数据之后缺 CRLF。
     wire::ChunkedDecoder missing_crlf;
-    AURORA_TEST_CHECK_FALSE(bool(missing_crlf.push("2\r\nabXY\r\n")));
+    AURORA_TEST_CHECK_FALSE(static_cast<bool>(missing_crlf.push("2\r\nabXY\r\n")));
 
     // 长度字段越单块上限（防巨大数被回绕成负数或极小值）。
     wire::ChunkedDecoder oversized;
-    AURORA_TEST_CHECK_FALSE(bool(oversized.push("FFFFFFFFFFFFFFFF\r\n")));
+    AURORA_TEST_CHECK_FALSE(static_cast<bool>(oversized.push("FFFFFFFFFFFFFFFF\r\n")));
 
     // trailer 字段畸形（缺冒号）。
     wire::ChunkedDecoder bad_trailer;
-    AURORA_TEST_CHECK_FALSE(bool(bad_trailer.push("1\r\nx\r\n0\r\nnot-a-trailer\r\n\r\n")));
+    AURORA_TEST_CHECK_FALSE(static_cast<bool>(bad_trailer.push("1\r\nx\r\n0\r\nnot-a-trailer\r\n\r\n")));
 
     // 终止块与 trailer 空行之后仍有字节 → 那是下一条消息的开头，本层不越界解释。
     wire::ChunkedDecoder trailing_bytes;
     const auto terminator = trailing_bytes.push("0\r\n\r\n");
-    AURORA_TEST_REQUIRE_MSG(bool(terminator), terminator ? std::string{} : terminator.error().message);
-    AURORA_TEST_CHECK_FALSE(bool(trailing_bytes.push("GET / HTTP/1.1")));
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(terminator), terminator ? std::string{} : terminator.error().message);
+    AURORA_TEST_CHECK_FALSE(static_cast<bool>(trailing_bytes.push("GET / HTTP/1.1")));
 }
 
 namespace {
@@ -313,7 +313,7 @@ namespace {
 auto feed(wire::ResponseAssembler &assembler, const std::vector<std::string> &segments) -> void {
     for (const auto &segment : segments) {
         const auto pushed = assembler.push(segment);
-        AURORA_TEST_REQUIRE_MSG(bool(pushed), pushed ? std::string{} : pushed.error().message);
+        AURORA_TEST_REQUIRE_MSG(static_cast<bool>(pushed), pushed ? std::string{} : pushed.error().message);
     }
 }
 
@@ -350,7 +350,7 @@ AURORA_TEST_CASE(assembler_head_response_carries_no_body) {
 AURORA_TEST_CASE(assembler_enforces_body_limit) {
     wire::ResponseAssembler assembler{std::uint64_t{4}, false};
     const auto pushed = assembler.push("HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello");
-    AURORA_TEST_REQUIRE_FALSE(bool(pushed));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(pushed));
     AURORA_TEST_CHECK_EQ(pushed.error().code_enum, aurora::ErrorCode::HttpBodyTooLarge);
     AURORA_TEST_CHECK_TRUE(!assembler.complete());
 }
@@ -362,7 +362,7 @@ AURORA_TEST_CASE(assembler_until_close_needs_peer_closed) {
     AURORA_TEST_CHECK(assembler.framing() == wire::BodyFraming::UntilClose);
     AURORA_TEST_CHECK_TRUE(!assembler.complete());
     const auto closed = assembler.peer_closed();
-    AURORA_TEST_REQUIRE(bool(closed));
+    AURORA_TEST_REQUIRE(static_cast<bool>(closed));
     AURORA_TEST_CHECK_TRUE(assembler.complete());
     AURORA_TEST_CHECK_EQ(assembled_body(assembler), "body");
 }
@@ -372,7 +372,7 @@ AURORA_TEST_CASE(assembler_rejects_bytes_after_complete) {
     feed(assembler, {"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nab"});
     AURORA_TEST_REQUIRE(assembler.complete());
     // 完整之后再喂字节属下一条消息（流水线不在本库面内），本层判畸形而不是悄悄吞下。
-    AURORA_TEST_CHECK_FALSE(bool(assembler.push("HTTP/1.1 204 No Content\r\n\r\n")));
+    AURORA_TEST_CHECK_FALSE(static_cast<bool>(assembler.push("HTTP/1.1 204 No Content\r\n\r\n")));
 }
 
 AURORA_TEST_CASE(assembler_keeps_reading_after_an_informational_response) {
@@ -424,7 +424,7 @@ AURORA_TEST_CASE(assembler_refuses_a_protocol_upgrade) {
     wire::ResponseAssembler assembler{std::nullopt, false};
     // 101 要求这条连接此后改说另一套协议（WebSocket 的升级形态），HTTP 客户端收下它就等于拿两套文法读一条流。
     const auto pushed = assembler.push("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n\r\n");
-    AURORA_TEST_REQUIRE_FALSE(bool(pushed));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(pushed));
     AURORA_TEST_CHECK_EQ(pushed.error().code_enum, aurora::ErrorCode::HttpProtocolError);
     // 它是被**拒**的，不是被当成信息应答交出的：否则发起侧会据它发体，而那正是升级后不该再发的东西。
     AURORA_TEST_CHECK_TRUE(!assembler.has_informational());
@@ -442,9 +442,9 @@ AURORA_TEST_CASE(render_request_chunk_is_the_minimal_framing) {
 
     // 产出与解码器对偶：泵出的块喂回 `ChunkedDecoder` 必须原样收回明文，终止块判完。
     wire::ChunkedDecoder decoder;
-    AURORA_TEST_REQUIRE(bool(decoder.push(wire::render_request_chunk("abc"))));
-    AURORA_TEST_REQUIRE(bool(decoder.push(wire::render_request_chunk("de"))));
-    AURORA_TEST_REQUIRE(bool(decoder.push(wire::render_request_chunk(""))));
+    AURORA_TEST_REQUIRE(static_cast<bool>(decoder.push(wire::render_request_chunk("abc"))));
+    AURORA_TEST_REQUIRE(static_cast<bool>(decoder.push(wire::render_request_chunk("de"))));
+    AURORA_TEST_REQUIRE(static_cast<bool>(decoder.push(wire::render_request_chunk(""))));
     std::vector<char> out;
     decoder.drain(out);
     const std::string round_trip{out.begin(), out.end()};

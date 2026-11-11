@@ -93,7 +93,7 @@ class PosterQueue {
             if (batch.empty()) {
                 break;
             }
-            for (std::function<void()> &fn : batch) {
+            for (std::function<void()> const &fn : batch) {
                 if (fn) {
                     fn();
                 }

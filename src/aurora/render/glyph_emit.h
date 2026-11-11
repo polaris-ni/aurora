@@ -37,7 +37,8 @@ using GlyphEmitSink = std::function<void(const GlyphAtlas::Entry &entry, GlyphAt
 /// @param scale      设备像素 / 逻辑 dp（决定光栅 px 尺寸与间距换算，同 `Painter::scale`）
 /// @param aa         抗锯齿策略（GPU 路径传 `Supersample` 强制灰度，规避 LCD 子像素着色）
 /// @param c          文本色（仅参与 ClearType 模式判定；着色由消费方自理）
-/// @param origin_x/y 绘制原点（物理像素；行盒顶语义）
+/// @param origin_x   绘制原点 x（物理像素；行盒顶语义）
+/// @param origin_y   绘制原点 y（物理像素；行盒顶语义）
 /// @param sink       逐字形回调（含零位图字形——空格等，消费方自行跳过）
 /// @return false = 无可用字体面（调用方自行兜底；软件路径回退 BitmapFont）
 auto emit_text_glyphs(const std::string &text, const Font &f, const TextLayoutOpts &opts, float scale, TextAAMode aa,

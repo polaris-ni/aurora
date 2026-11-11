@@ -1,6 +1,5 @@
 #pragma once
 
-#include <chrono>
 #include <functional>
 #include <optional>
 #include <string>
@@ -321,7 +320,7 @@ class ImageView : public Widget, public ImageViewProps {
         load_state_ = ImageLoadState::Loading;
         // 弱引用守卫：实例可能先于任务完成被销毁；回调线程见 Task 主线程投递器契约。
         // Widget 基类持有 enable_shared_from_this<Widget>，锁回后安全下转回 ImageView。
-        std::weak_ptr<Widget> guard = weak_from_this();
+        std::weak_ptr<Widget> const guard = weak_from_this();
         fetcher(url_).then([guard, url = url_](const Result<std::vector<std::uint8_t>> &r) -> void {
             auto base = guard.lock();
             if (base == nullptr) {

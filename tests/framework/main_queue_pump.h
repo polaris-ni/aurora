@@ -23,11 +23,9 @@
 
 #include <atomic>
 #include <chrono>
-#include <cstddef>
 #include <functional>
 #include <optional>
 #include <thread>
-#include <utility>
 #include <vector>
 
 #include "aurora/core/main_queue.h"

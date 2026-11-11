@@ -159,7 +159,7 @@ AURORA_TEST_CASE(defaults_match_declared_property_defaults) {
     AURORA_TEST_CHECK_TRUE(d.legend().position == LegendPosition::Top);
     AURORA_TEST_CHECK_NEAR(static_cast<double>(d.padding().left), 8.0, 1e-6);
 
-    BarChart c{};
+    BarChart const c{};
     AURORA_TEST_CHECK_TRUE(c.type_name() == std::string{"BarChart"});
     AURORA_TEST_CHECK_TRUE(c.hovered_point() == std::nullopt);
     AURORA_TEST_CHECK_TRUE(c.wants_click());
@@ -217,16 +217,17 @@ AURORA_TEST_CASE(describe_static_lists_all_props_and_events) {
 }
 
 AURORA_TEST_CASE(props_roundtrip_including_series_array) {
-    BarChart src{BarChartProps()
-                     .set_series({ChartSeries{.name = "A", .values = {1.0, 2.0, 3.0}, .color = Color{10, 20, 30, 255}},
-                                  ChartSeries{.name = "B", .values = {4.0, 5.0}}})
-                     .set_categories({"Mon", "Tue", "Wed"})
-                     .set_stacked(true)
-                     .set_bar_width_ratio(0.5F)
-                     .set_bar_corner_radius(4.0F)
-                     .set_axis_y(ChartAxisSpec{.label = "k", .tick_count = 4, .min = 0.0, .show_grid_lines = false})
-                     .set_legend(ChartLegendSpec{.visible = true, .position = LegendPosition::Right})
-                     .set_padding(EdgeInsets{.left = 2.0F, .top = 3.0F, .right = 4.0F, .bottom = 5.0F})};
+    BarChart const src{
+        BarChartProps()
+            .set_series({ChartSeries{.name = "A", .values = {1.0, 2.0, 3.0}, .color = Color{10, 20, 30, 255}},
+                         ChartSeries{.name = "B", .values = {4.0, 5.0}}})
+            .set_categories({"Mon", "Tue", "Wed"})
+            .set_stacked(true)
+            .set_bar_width_ratio(0.5F)
+            .set_bar_corner_radius(4.0F)
+            .set_axis_y(ChartAxisSpec{.label = "k", .tick_count = 4, .min = 0.0, .show_grid_lines = false})
+            .set_legend(ChartLegendSpec{.visible = true, .position = LegendPosition::Right})
+            .set_padding(EdgeInsets{.left = 2.0F, .top = 3.0F, .right = 4.0F, .bottom = 5.0F})};
     Json props = Json::object();
     src.serialize_props(props);
     AURORA_TEST_REQUIRE_TRUE(props.contains("series"));
@@ -443,7 +444,7 @@ AURORA_TEST_CASE(barchart_empty_array_stated_differs_from_unstated) {
     AURORA_TEST_CHECK_EQ(cats->size(), 0U);
     AURORA_TEST_CHECK_TRUE(stated.series().empty());
 
-    BarChartProbe bare;
+    BarChartProbe const bare;
     AURORA_TEST_CHECK_FALSE(bare.present(BarChartProps::series_row()));
     Json without_key = Json::object();
     bare.serialize_props(without_key);

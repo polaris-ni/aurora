@@ -185,7 +185,7 @@ AURORA_TEST_CASE(surface_state_reflects_surface_when_enabled) {
     if (!probe_debug_enabled()) {
         AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG is not enabled: surface_state is compiled out and returns unavailable");
     }
-    StubSurface surface;
+    StubSurface const surface;
     const Json j = surface_state(surface);
     AURORA_TEST_CHECK_EQ(require_field<bool>(j, "available"), true);
     AURORA_TEST_CHECK_EQ(require_field<int>(j, "width"), 4);
@@ -207,7 +207,7 @@ AURORA_TEST_CASE(surface_state_unavailable_when_disabled) {
     if (probe_debug_enabled()) {
         AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG is enabled: the disabled-state unavailable semantics do not apply");
     }
-    StubSurface surface;
+    StubSurface const surface;
     const Json j = surface_state(surface);
     AURORA_TEST_CHECK_EQ(require_field<bool>(j, "available"), false);
     AURORA_TEST_CHECK_TRUE(require_field<std::string>(j, "reason").find("AURORA_ENABLE_DEBUG") != std::string::npos);

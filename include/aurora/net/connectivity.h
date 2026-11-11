@@ -1,7 +1,7 @@
 #pragma once
 
 /// @brief 网络链路态：同步采集的事实、不对称状态机与变更订阅。
-/// @file net/connectivity.h
+/// @file connectivity.h
 ///
 /// 本头回答一个问题：**「本机现在有没有一条能出去的缺省链路」**。它只报事实，不做编排，
 /// 也**不是发起侧的闸**——`RetryPolicy` 与 `Scheduler` 的地盘一寸不变（见下「边界」段）。

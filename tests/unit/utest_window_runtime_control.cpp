@@ -70,7 +70,7 @@ class RecordingSurface final : public Surface {
 
 /// @brief 产出一枚无头窗口（可独立断言其 `HeadlessSurface` seam）。
 /// @param title 窗口标题（日志归因用）。
-/// @param opts  可见性档（默认 `Normal`）。
+/// @param visibility 可见性档（默认 `Normal`）。
 auto make_headless_window(std::string title, WindowVisibility visibility = WindowVisibility::Normal)
     -> std::unique_ptr<Window> {
     HeadlessOptions opts;
@@ -285,7 +285,7 @@ AURORA_TEST_CASE(visibility_aggregates_to_application_state) {
     // 主窗投影是既有口径（`set_state_sink` 只装主窗），本条只证新开关落进同一条链、不另立通路。
     auto window = make_headless_window("runtime_app_state");
     AURORA_TEST_REQUIRE_NOT_NULL(window);
-    Application app{make_scene(), std::move(window)};
+    Application const app{make_scene(), std::move(window)};
     Window *const win = app.window();
     AURORA_TEST_REQUIRE_NOT_NULL(win);
 

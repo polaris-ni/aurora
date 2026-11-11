@@ -46,7 +46,7 @@ void Diagnostics::report(std::string_view message, std::string_view where, std::
         d.kind = ErrorKind::Internal;
     }
 
-    std::string line = d.to_json_line();
+    std::string const line = d.to_json_line();
     const LogLevel lvl = (d.severity == ErrorSeverity::Error) ? LogLevel::Error : LogLevel::Warn;
     Logger::instance().log(AURORA_FILE_NAME, __LINE__, lvl, "diagnostics", line);
 

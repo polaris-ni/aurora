@@ -206,7 +206,7 @@ AURORA_TEST_CASE(button_defaults_and_type_name) {
     AURORA_TEST_CHECK_TRUE(d.label().text.empty());
     // 圆角与内边距的「默认值」不再是本件字面量，而是「未表态」这一态：取值随主题形状 / 间距档
     // 解算（Material 基线下实测为 6 与 12/6，由 button_radius_and_padding_follow_the_theme 逐档核）。
-    PropsProbe probe;
+    PropsProbe const probe;
     AURORA_TEST_CHECK_FALSE(probe.present(ButtonProps::corner_radius_row()));
     AURORA_TEST_CHECK_FALSE(probe.present(ButtonProps::padding_row()));
     // 背景 / 文字色同样未表态：跟随主题角色（roles.primary / roles.on_primary），换肤即生效。
@@ -508,7 +508,7 @@ AURORA_TEST_CASE(button_literal_label_output_is_unchanged) {
 
 AURORA_TEST_CASE(cursor_shape_hook_defaults_to_pointing_hand) {
     // Button 悬停默认 PointingHand（控件级虚钩子）；修饰链显式声明在派发器解析时优先。
-    Button b;
+    Button const b;
     AURORA_TEST_CHECK(b.cursor_shape() == std::optional{CursorShape::PointingHand});
 }
 
@@ -528,7 +528,7 @@ auto themed_ctx(const Theme &t) -> std::pair<std::shared_ptr<Environment>, Build
 AURORA_TEST_CASE(button_colors_follow_theme_when_unset) {
     // 两态语义：未表态时取主题角色；主题翻转 ⇒ 解析值翻转（换肤生效）。
     const BuildContext bare;  // 无注入：inherit_theme 回落 light（与 OS 未表态同口径）
-    PropsProbe b;
+    PropsProbe const b;
     AURORA_TEST_CHECK(b.resolve_background(bare) == Color::blue());  // light primary = (0,0,255)
     AURORA_TEST_CHECK(b.resolve_text_color(bare) == Color::white());  // light on_primary
 
@@ -590,7 +590,7 @@ AURORA_TEST_CASE(button_state_overlays_follow_theme_roles) {
 AURORA_TEST_CASE(button_metrics_default_to_material_baseline) {
     // 无注入 = Material 基线档：迁移前后实测同为圆角 6、内边距 12/6，观感零回归的锚点。
     const BuildContext bare;
-    PropsProbe b;
+    PropsProbe const b;
     AURORA_TEST_CHECK_NEAR(b.corner_radius(bare), 6.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(b.font_size(bare), 14.0F, 1e-4F);  // 字号取 Material 档正文基准（字阶声明默认值）
     const EdgeInsets pad = b.padding(bare);
@@ -608,7 +608,7 @@ AURORA_TEST_CASE(button_metrics_follow_theme_tokens_when_unset) {
     t.spacing.small = 7.0F;
     t.type_scale.body_medium.size_pt = 17.5F;
     const auto [env, ctx] = themed_ctx(t);
-    PropsProbe b;
+    PropsProbe const b;
     AURORA_TEST_CHECK_NEAR(b.corner_radius(ctx), 11.5F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(b.font_size(ctx), 17.5F, 1e-4F);
     const EdgeInsets pad = b.padding(ctx);
@@ -633,7 +633,7 @@ AURORA_TEST_CASE(button_metrics_follow_style_arm) {
         {.style = ThemeStyle::Gnome, .expected = 9.0F, .body_pt = 11.0F},
         {.style = ThemeStyle::Kde, .expected = 5.0F, .body_pt = 10.0F},
     };
-    PropsProbe b;
+    PropsProbe const b;
     for (const Arm &arm : ARMS) {
         const auto [env, ctx] = themed_ctx(Theme::from_style(arm.style, ColorScheme::Light));
         AURORA_TEST_CHECK_NEAR(b.corner_radius(ctx), arm.expected, 1e-4F);
@@ -725,7 +725,7 @@ AURORA_TEST_CASE(button_stated_value_equal_to_token_does_not_follow_reskin) {
 
     PropsProbe stated;
     stated.set_corner_radius(baseline_small);  // 数值上与令牌相同，但表过态
-    PropsProbe unstated;  // 同一枚取值，来自回落
+    PropsProbe const unstated;  // 同一枚取值，来自回落
 
     Theme tuned = Theme::light();
     tuned.shapes.small = baseline_small + 5.0F;
@@ -821,7 +821,7 @@ AURORA_TEST_CASE(button_font_size_follows_type_scale_when_unset) {
 
 AURORA_TEST_CASE(button_serialize_emits_required_plus_stated_only) {
     // 未表态的非必填属性一律不写盘：序列化输出是意图集合，键数下降属预期。
-    Button b;
+    Button const b;
     Json j = Json::object();
     b.serialize_props(j);
     AURORA_TEST_CHECK_TRUE(j.contains("label"));  // 必填行恒写

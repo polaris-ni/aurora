@@ -800,7 +800,7 @@ AURORA_TEST_CASE(font_size_follows_type_scale_when_unset) {
     Json stated = Json::object();
     dd.serialize_props(stated);
     AURORA_TEST_CHECK_NEAR(require_field<float>(stated, "font_size"), 11.0F, 1e-4F);
-    Dropdown unstated{std::vector<std::string>{"Alpha"}};
+    Dropdown const unstated{std::vector<std::string>{"Alpha"}};
     Json bare = Json::object();
     unstated.serialize_props(bare);
     AURORA_TEST_CHECK_FALSE(bare.contains("font_size"));

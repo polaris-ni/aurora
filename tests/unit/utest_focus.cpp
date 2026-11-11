@@ -324,7 +324,7 @@ AURORA_TEST_CASE(layout_and_display_widgets_are_not_tab_stops_by_default) {
     auto inner = std::make_shared<Row>();
     auto rule = std::make_shared<Divider>();
     auto gapper = std::make_shared<Spacer>();
-    Column col{Node{label}, Node{inner}, Node{rule}, Node{gapper}};
+    Column const col{Node{label}, Node{inner}, Node{rule}, Node{gapper}};
 
     AURORA_TEST_CHECK_FALSE(col.wants_focus());
     AURORA_TEST_CHECK_FALSE(label->wants_focus());
@@ -333,8 +333,8 @@ AURORA_TEST_CASE(layout_and_display_widgets_are_not_tab_stops_by_default) {
     AURORA_TEST_CHECK_FALSE(gapper->wants_focus());
 
     // 基类默认仍是 true：自定义叶控件与交互控件不需任何声明即可 Tab 到。
-    FocusProbe probe;
-    Button btn{"Go"};
+    FocusProbe const probe;
+    Button const btn{"Go"};
     AURORA_TEST_CHECK_TRUE(probe.wants_focus());
     AURORA_TEST_CHECK_TRUE(btn.wants_focus());
 }

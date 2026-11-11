@@ -13,12 +13,13 @@ namespace ui = aurora::ui;
 
 AURORA_TEST_CASE(label_adds_text_and_overrides_content) {
     aurora::Column root;
-    aurora::Text *t = ui::label(root, "hello");
+    aurora::Text *const t = ui::label(root, "hello");
     AURORA_TEST_REQUIRE_NOT_NULL(t);
     AURORA_TEST_CHECK_EQ(root.child_nodes().size(), 1U);
     AURORA_TEST_CHECK_EQ(t->content().text, "hello");
     // props.content 被主文案覆盖。
-    aurora::Text *t2 = ui::label(root, "world", aurora::TextProps().set_content(aurora::LocalizedString{"ignored"}));
+    aurora::Text *const t2 =
+        ui::label(root, "world", aurora::TextProps().set_content(aurora::LocalizedString{"ignored"}));
     AURORA_TEST_CHECK_EQ(t2->content().text, "world");
     AURORA_TEST_CHECK_EQ(root.child_nodes().size(), 2U);
 }
@@ -26,44 +27,44 @@ AURORA_TEST_CASE(label_adds_text_and_overrides_content) {
 AURORA_TEST_CASE(button_adds_with_label_and_click) {
     aurora::Column root;
     int clicks = 0;
-    aurora::Button *b = ui::button(root, "OK", aurora::ButtonProps(), [&clicks]() -> void { ++clicks; });
+    aurora::Button *const b = ui::button(root, "OK", aurora::ButtonProps(), [&clicks]() -> void { ++clicks; });
     AURORA_TEST_REQUIRE_NOT_NULL(b);
     AURORA_TEST_CHECK_EQ(b->label().text, "OK");
     AURORA_TEST_REQUIRE_NOT_NULL(b->on_click);
     b->on_click();
     AURORA_TEST_CHECK_EQ(clicks, 1);
     // 无回调重载：on_click 为空不崩溃。
-    aurora::Button *plain = ui::button(root, "Noop");
+    aurora::Button *const plain = ui::button(root, "Noop");
     AURORA_TEST_CHECK_FALSE(static_cast<bool>(plain->on_click));
 }
 
 AURORA_TEST_CASE(input_adds_text_input_with_initial_value) {
     aurora::Column root;
-    aurora::TextInput *ti = ui::input(root, "abc");
+    aurora::TextInput *const ti = ui::input(root, "abc");
     AURORA_TEST_REQUIRE_NOT_NULL(ti);
     AURORA_TEST_CHECK_EQ(ti->value(), "abc");
     // 默认空值。
-    aurora::TextInput *empty = ui::input(root);
+    aurora::TextInput *const empty = ui::input(root);
     AURORA_TEST_CHECK_EQ(empty->value(), "");
 }
 
 AURORA_TEST_CASE(checkbox_state_and_literal_overloads) {
     aurora::Column root;
-    State<bool> state{false};
-    aurora::Checkbox *a = ui::checkbox(root, state);
+    State<bool> const state{false};
+    aurora::Checkbox *const a = ui::checkbox(root, state);
     AURORA_TEST_REQUIRE_NOT_NULL(a);
     // 裸值重载 → 建自有 State。
-    aurora::Checkbox *b = ui::checkbox(root, true);
+    aurora::Checkbox *const b = ui::checkbox(root, true);
     AURORA_TEST_REQUIRE_NOT_NULL(b);
     AURORA_TEST_CHECK_EQ(root.child_nodes().size(), 2U);
 }
 
 AURORA_TEST_CASE(slider_state_and_scalar_overloads) {
     aurora::Column root;
-    State<double> value{0.25};
-    aurora::Slider *a = ui::slider(root, value);
+    State<double> const value{0.25};
+    aurora::Slider *const a = ui::slider(root, value);
     AURORA_TEST_REQUIRE_NOT_NULL(a);
-    aurora::Slider *b = ui::slider(root, 0.75);
+    aurora::Slider *const b = ui::slider(root, 0.75);
     AURORA_TEST_REQUIRE_NOT_NULL(b);
     AURORA_TEST_CHECK_EQ(root.child_nodes().size(), 2U);
 }
@@ -71,7 +72,7 @@ AURORA_TEST_CASE(slider_state_and_scalar_overloads) {
 AURORA_TEST_CASE(vbox_hbox_return_typed_containers) {
     aurora::Column root;
     aurora::Column *v = ui::vbox(root);
-    aurora::Row *h = ui::hbox(root);
+    aurora::Row *const h = ui::hbox(root);
     AURORA_TEST_REQUIRE_NOT_NULL(v);
     AURORA_TEST_REQUIRE_NOT_NULL(h);
     AURORA_TEST_CHECK_EQ(std::string{v->type_name()}, "Column");
@@ -83,11 +84,11 @@ AURORA_TEST_CASE(vbox_hbox_return_typed_containers) {
 
 AURORA_TEST_CASE(stack_grid_scroll_forward_props) {
     aurora::Column root;
-    aurora::Stack *s = ui::stack(root, aurora::Alignment::Center);
+    aurora::Stack *const s = ui::stack(root, aurora::Alignment::Center);
     AURORA_TEST_REQUIRE_NOT_NULL(s);
-    aurora::Grid *g = ui::grid(root, aurora::GridProps().set_columns(2));
+    aurora::Grid *const g = ui::grid(root, aurora::GridProps().set_columns(2));
     AURORA_TEST_REQUIRE_NOT_NULL(g);
-    aurora::Scroll *sc =
+    aurora::Scroll *const sc =
         ui::scroll(root, aurora::Node(std::make_shared<aurora::Text>("page")), aurora::ScrollProps().set_step(32.0F));
     AURORA_TEST_REQUIRE_NOT_NULL(sc);
     AURORA_TEST_CHECK_EQ(root.child_nodes().size(), 3U);
@@ -118,7 +119,7 @@ AURORA_TEST_CASE(bottom_nav_bar_forward_props) {
     items.push_back(aurora::BottomNavItem{.icon = {}, .label = "Settings"});
     aurora::BottomNavBarProps props;
     props.set_selected_index(1);
-    aurora::BottomNavBar *bar = ui::bottom_nav_bar(root, std::move(items), std::move(props));
+    aurora::BottomNavBar *const bar = ui::bottom_nav_bar(root, std::move(items), std::move(props));
     AURORA_TEST_REQUIRE_NOT_NULL(bar);
     AURORA_TEST_CHECK_EQ(std::string{bar->type_name()}, "BottomNavBar");
     AURORA_TEST_CHECK_EQ(bar->items.size(), 2U);
@@ -128,7 +129,7 @@ AURORA_TEST_CASE(bottom_nav_bar_forward_props) {
 AURORA_TEST_CASE(factories_take_ownership_via_parent_tree) {
     // 返回的裸指针由父树 shared_ptr 持有：父销毁后指针失效（此处仅验证树内互指一致）。
     aurora::Column root;
-    aurora::Text *t = ui::label(root, "owned");
+    aurora::Text *const t = ui::label(root, "owned");
     AURORA_TEST_CHECK_EQ(&root.child_nodes()[0].widget(), t);
 }
 

@@ -233,7 +233,7 @@ AURORA_TEST_CASE(window_options_defaults) {
 
 AURORA_TEST_CASE(window_title_defaults_and_forwards_to_surface) {
     auto stub = std::make_unique<RecordingSurface>();
-    RecordingSurface &surf = *stub;
+    RecordingSurface const &surf = *stub;
     Window w{std::move(stub)};
     AURORA_TEST_CHECK_EQ(w.title(), std::string{"Aurora"});
     w.set_title("Hello");
@@ -245,7 +245,7 @@ AURORA_TEST_CASE(window_title_defaults_and_forwards_to_surface) {
 AURORA_TEST_CASE(window_size_and_content_inset_delegate_to_surface) {
     auto stub = std::make_unique<RecordingSurface>();
     RecordingSurface &surf = *stub;
-    Window w{std::move(stub)};
+    Window const w{std::move(stub)};
     const Size sz = w.size();
     AURORA_TEST_CHECK_NEAR(sz.width, 320.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(sz.height, 240.0F, 1e-4F);
@@ -263,8 +263,8 @@ AURORA_TEST_CASE(window_size_and_content_inset_delegate_to_surface) {
 
 AURORA_TEST_CASE(window_frame_lifecycle_delegates_to_surface) {
     auto stub = std::make_unique<RecordingSurface>();
-    RecordingSurface &surf = *stub;
-    Window w{std::move(stub)};
+    RecordingSurface const &surf = *stub;
+    Window const w{std::move(stub)};
     // begin_frame 以窗口逻辑尺寸（取整）启动后端帧。
     const auto bf = w.begin_frame();
     AURORA_TEST_CHECK_TRUE(bf.ok());
@@ -281,7 +281,7 @@ AURORA_TEST_CASE(window_frame_lifecycle_delegates_to_surface) {
 AURORA_TEST_CASE(window_control_actions_forward_to_surface) {
     auto stub = std::make_unique<RecordingSurface>();
     RecordingSurface &surf = *stub;
-    Window w{std::move(stub)};
+    Window const w{std::move(stub)};
     w.minimize();
     w.toggle_maximize();
     w.set_fullscreen(true);
@@ -306,7 +306,7 @@ AURORA_TEST_CASE(window_control_actions_forward_to_surface) {
 AURORA_TEST_CASE(window_title_bar_style_and_icon_forward_to_surface) {
     auto stub = std::make_unique<RecordingSurface>();
     RecordingSurface &surf = *stub;
-    Window w{std::move(stub)};
+    Window const w{std::move(stub)};
     TitleBarStyle style;
     style.height = 42.0F;
     style.button_layout = TitleBarButtonLayout::Windows;
@@ -359,7 +359,7 @@ AURORA_TEST_CASE(window_overlay_slot_roundtrip) {
 
 AURORA_TEST_CASE(window_idle_hud_refresh_presents_without_repainting_tree) {
     auto stub = std::make_unique<RecordingSurface>();
-    RecordingSurface &surf = *stub;
+    RecordingSurface const &surf = *stub;
     Window w{std::move(stub)};
     Node page = FilledSpacer{};
     // 叠加层用裸 Spacer：本用例只验证「空闲期是否为叠加层出帧」的调度与上屏，
@@ -413,7 +413,7 @@ AURORA_TEST_CASE(window_gpu_path_does_not_take_hud_only_shortcut) {
     // GPU 帧路径下软件缓冲只有底色（控件像素在 GPU 侧）：裸 present 会闪一屏空白，
     // 故 HUD 到期也必须走完整重渲染（帧 DL 录制 + replay），不得抄软件路径的近道。
     auto stub = std::make_unique<GpuStubSurface>();
-    GpuStubSurface &surf = *stub;
+    GpuStubSurface const &surf = *stub;
     Window w{std::move(stub)};
     Node page = FilledSpacer{};
     w.set_overlay(std::make_shared<Spacer>());
@@ -446,7 +446,7 @@ AURORA_TEST_CASE(system_redraw_with_gpu_sink_re_renders_instead_of_bare_present)
 
     // 首帧走 GPU 通道：录帧 DL → sink.begin_frame → replay → sink.end_frame → present。
     AURORA_TEST_CHECK_TRUE(static_cast<bool>(w.present_root(page)));
-    CountingSink &sink = surf.sink;
+    CountingSink const &sink = surf.sink;
     AURORA_TEST_CHECK_EQ(sink.begin_calls, 1);
     AURORA_TEST_CHECK_EQ(sink.end_calls, 1);
     AURORA_TEST_CHECK_GT(sink.rhi_submits(), 0);  // 命令确实进了 GPU 消费面

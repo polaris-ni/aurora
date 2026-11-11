@@ -21,7 +21,6 @@
 //   0 = view 为 None/Help/Version/Schema 且业务成功；2 = Err(Error)（用法错误）；1 = 业务失败。
 // ============================================================================
 
-#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>

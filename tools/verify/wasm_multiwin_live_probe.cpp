@@ -64,7 +64,6 @@
 #include <memory>
 #include <string>
 #include <string_view>
-#include <vector>
 
 #include "aurora/aurora.h"
 #include "aurora/window/wasm_surface.h"

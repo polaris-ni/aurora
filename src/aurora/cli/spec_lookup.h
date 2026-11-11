@@ -13,7 +13,6 @@
 
 #include <string_view>
 
-#include "aurora/cli/args.h"
 #include "aurora/cli/command.h"
 
 namespace aurora::cli::detail {

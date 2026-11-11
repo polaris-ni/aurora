@@ -125,7 +125,7 @@ AURORA_TEST_CASE(control_button_press_without_chrome_is_safe) {
     // headless 下 WindowChrome 缺失：控制钮命中分支执行但不调 chrome（is_handled 即可）。
     auto bar = std::make_shared<TitleBar>();
     bar->set_window_controls(true);
-    BuildContext ctx;
+    BuildContext const ctx;
     bar->mount(ctx);
     LayoutEngine::layout(*bar, host_constraints());
 
@@ -195,7 +195,8 @@ AURORA_TEST_CASE(paint_covers_icon_title_subtitle_glyphs_and_snap) {
     LayoutEngine::layout(*root, host_constraints());
 
     Painter painter;
-    Rect bounds{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = AURORA_HOST_W, .height = AURORA_HOST_H}};
+    Rect const bounds{.origin = Point{.x = 0.0F, .y = 0.0F},
+                      .size = Size{.width = AURORA_HOST_W, .height = AURORA_HOST_H}};
     bar->paint(painter, bounds, BuildContext{});  // 图标 + 标题 + 副标题 + 控制钮字形
 
     // 悬停最大化钮 ≥400ms → 真实路径展开 Snap 浮层。

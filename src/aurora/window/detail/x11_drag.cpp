@@ -15,8 +15,6 @@
 
 #include "aurora/window/detail/x11_drag.h"
 
-#include "aurora/core/platform.h"
-
 #if defined(AURORA_PLATFORM_LINUX) && !defined(AURORA_PLATFORM_ANDROID) && defined(AURORA_BACKEND_X11)
 
 // aurora 头必须先于 Xlib（理由见头文件注记：Xlib 的 `None` / `CursorShape` 宏污染）。

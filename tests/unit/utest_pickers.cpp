@@ -11,7 +11,6 @@
 #include "aurora/environment/build_context.h"
 #include "aurora/event/event.h"
 #include "aurora/render/painter.h"
-#include "aurora/state/state.h"
 #include "aurora/theming/theme.h"
 #include "aurora/widget/pickers.h"
 #include "framework/aurora_test.h"
@@ -25,7 +24,7 @@ namespace {
 
 /// 挂载并按给定上限布局，返回测得尺寸（无头环境：BuildContext + 约束）。
 auto laid_out(Widget &w, float max_w, float max_h) -> Size {
-    BuildContext ctx;
+    BuildContext const ctx;
     w.mount(ctx);
     const Constraints c{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = max_w, .height = max_h}};
     return w.layout(c, ctx);
@@ -105,7 +104,7 @@ AURORA_TEST_CASE(date_picker_constructor_and_select) {
     AURORA_TEST_CHECK_EQ(dp.view_month(), 7);
 
     // 非法初始值：回退默认 {2026-01-01}。
-    DatePicker bad{Date{.year = 2026, .month = 2, .day = 30}};
+    DatePicker const bad{Date{.year = 2026, .month = 2, .day = 30}};
     AURORA_TEST_CHECK_EQ(bad.selected_date(), Date{2026, 1, 1});
     AURORA_TEST_CHECK_EQ(bad.view_year(), 2026);
     AURORA_TEST_CHECK_EQ(bad.view_month(), 1);
@@ -159,7 +158,7 @@ AURORA_TEST_CASE(date_picker_month_navigation_wraps_year) {
 
 AURORA_TEST_CASE(date_picker_grid_day_mapping) {
     // 2026-07-01 是周三（first_wd=3，周日为第 0 列）。
-    DatePicker dp{Date{.year = 2026, .month = 7, .day = 25}};
+    DatePicker const dp{Date{.year = 2026, .month = 7, .day = 25}};
     AURORA_TEST_CHECK_EQ(dp.grid_day(0, 3), 1);  // 第一行周三 = 1 号
     AURORA_TEST_CHECK_EQ(dp.grid_day(0, 2), 0);  // 周二为空格
     AURORA_TEST_CHECK_EQ(dp.grid_day(0, 0), 0);
@@ -167,7 +166,7 @@ AURORA_TEST_CASE(date_picker_grid_day_mapping) {
     AURORA_TEST_CHECK_EQ(dp.grid_day(5, 6), 0);  // 超出 31 天的尾格为空
 
     // 闰年 2024-02：1 号是周四，共 29 天。
-    DatePicker feb{Date{.year = 2024, .month = 2, .day = 29}};
+    DatePicker const feb{Date{.year = 2024, .month = 2, .day = 29}};
     AURORA_TEST_CHECK_EQ(feb.grid_day(0, 4), 1);
     AURORA_TEST_CHECK_EQ(feb.grid_day(0, 3), 0);
     AURORA_TEST_CHECK_EQ(feb.grid_day(4, 4), 29);
@@ -226,7 +225,7 @@ AURORA_TEST_CASE(date_picker_pointer_navigation_and_pick) {
 }
 
 AURORA_TEST_CASE(date_picker_json_roundtrip_and_invalid_guard) {
-    DatePicker src{Date{.year = 2025, .month = 3, .day = 9}};
+    DatePicker const src{Date{.year = 2025, .month = 3, .day = 9}};
     Json props = Json::object();
     src.serialize_props(props);
     AURORA_TEST_CHECK_EQ(require_field<int>(props, "year"), 2025);
@@ -270,7 +269,7 @@ AURORA_TEST_CASE(time_picker_adjust_wraps) {
 }
 
 AURORA_TEST_CASE(time_picker_select_validates_and_notifies) {
-    TimePicker bad{TimeOfDay{.hour = 24, .minute = 0}};  // 非法初始 → 默认 {0,0}
+    TimePicker const bad{TimeOfDay{.hour = 24, .minute = 0}};  // 非法初始 → 默认 {0,0}
     AURORA_TEST_CHECK_EQ(bad.selected_time(), TimeOfDay{0, 0});
 
     TimePicker tp{TimeOfDay{.hour = 8, .minute = 15}};
@@ -328,7 +327,7 @@ AURORA_TEST_CASE(time_picker_describe_and_json_roundtrip) {
     AURORA_TEST_REQUIRE_EQ(d.events.size(), 1U);
     AURORA_TEST_CHECK_EQ(std::string{d.events[0]}, "on_change");
 
-    TimePicker src{TimeOfDay{.hour = 8, .minute = 15}};
+    TimePicker const src{TimeOfDay{.hour = 8, .minute = 15}};
     Json props = Json::object();
     src.serialize_props(props);
     AURORA_TEST_CHECK_EQ(require_field<int>(props, "hour"), 8);
@@ -361,7 +360,7 @@ AURORA_TEST_CASE(color_picker_palette_and_select) {
     AURORA_TEST_CHECK_EQ(calls, 1);
 
     // 显式构造初始色。
-    ColorPicker red{Color(255, 0, 0, 255)};
+    ColorPicker const red{Color(255, 0, 0, 255)};
     AURORA_TEST_CHECK(red.selected_color() == (Color(255, 0, 0, 255)));
 }
 
@@ -406,7 +405,7 @@ AURORA_TEST_CASE(color_picker_describe_and_json_roundtrip) {
     AURORA_TEST_REQUIRE_EQ(d.events.size(), 1U);
     AURORA_TEST_CHECK_EQ(std::string{d.events[0]}, "on_change");
 
-    ColorPicker src{Color(0, 122, 255, 255)};
+    ColorPicker const src{Color(0, 122, 255, 255)};
     Json props = Json::object();
     src.serialize_props(props);
     AURORA_TEST_CHECK_TRUE(require_child(props, "color")->is_array());  // color 以 [r,g,b,a] 数组落盘
@@ -424,7 +423,7 @@ AURORA_TEST_CASE(pickers_headless_paint_smoke) {
 
     Painter p;
     p.begin(400, 400);
-    BuildContext ctx;
+    BuildContext const ctx;
     dp.paint(p, Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 224.0F, .height = 200.0F}}, ctx);
     cp.paint(p, Rect{.origin = Point{.x = 0.0F, .y = 220.0F}, .size = Size{.width = 224.0F, .height = 56.0F}}, ctx);
     AURORA_TEST_CHECK_EQ(p.width(), 400);

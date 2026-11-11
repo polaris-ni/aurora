@@ -69,7 +69,6 @@ CMAKE_EXTS = (".cmake",)
 # cmake 侧另扫两处：cmake/ 全部模块 + 根 CMakeLists.txt
 CMAKE_DIRS = ("cmake",)
 CMAKE_ROOT_FILES = ("CMakeLists.txt",)
-CMAKE_EXTS = (".cmake",)
 CMAKE_FILES = ("CMakeLists.txt",)  # repo root + any scanned dir
 
 EXEMPT_TOKEN = "CJK-LITERAL"

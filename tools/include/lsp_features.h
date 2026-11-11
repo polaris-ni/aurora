@@ -154,7 +154,7 @@ struct CodeAction {
     const std::string prefix = line_prefix(text, pos);
 
     // The identifier currently being typed.
-    size_t wend = prefix.size();
+    size_t const wend = prefix.size();
     size_t wstart = wend;
     while (wstart > 0 && is_ident_char(prefix[wstart - 1])) {
         --wstart;
@@ -248,7 +248,7 @@ struct CodeAction {
         while (es > 0 && is_ident_char(prefix[es - 1])) {
             --es;
         }
-        std::string ename = prefix.substr(es, dcolon - es);
+        std::string const ename = prefix.substr(es, dcolon - es);
         const auto *en = schema.find_enum_qualified(ename);
         if (en != nullptr) {
             for (const auto &v : en->values) {
@@ -466,12 +466,12 @@ struct CodeAction {
             while (es > 0 && is_ident_char(text[es - 1])) {
                 --es;
             }
-            std::string ename = text.substr(es, i - es);
+            std::string const ename = text.substr(es, i - es);
             size_t vs = i + 2;
             while (vs < n && is_ident_char(text[vs])) {
                 ++vs;
             }
-            std::string vname = text.substr(i + 2, vs - (i + 2));
+            std::string const vname = text.substr(i + 2, vs - (i + 2));
             const auto *en = schema.find_enum_qualified(ename);
             if ((en != nullptr) && !vname.empty()) {
                 bool ok = false;

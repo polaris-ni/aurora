@@ -85,6 +85,8 @@ namespace {
 auto emit(const std::string &text) -> void { AURORA_LOG_RAW("verify", text, "\n"); }
 
 /// @brief 逐项判据：打印 PASS/FAIL 并累加失败数。
+/// @param ok 判据结果。
+/// @param label 判据名称（打印用）。
 /// @param failures 失败计数——由 `main` 持有、经 `run_automated` 逐层显式传入（探针单次运行，
 ///                 计数生命周期即 `main` 的作用域，不留命名空间级可变成量）。
 auto check(bool ok, const std::string &label, int &failures) -> void {
@@ -199,6 +201,9 @@ auto enable_and_report_ime(HIMC himc) -> void {
 }
 
 /// @brief 自动段：合成一整套 IMM32 组合序列并逐项断言控件侧读回的契约口径。
+/// @param hwnd 已查到的 Aurora 顶层窗口句柄（用于投递消息）。
+/// @param input 被聚焦的文本框（读回值的基准）。
+/// @param focused_type 焦点控件类型标签（nullptr = 无焦点）。
 /// @param failures 失败计数，由 `main` 持有并在此累加（判据流程与顺序保持原样）。
 auto run_automated(HWND hwnd, const aurora::TextInput &input, const char *focused_type, int &failures) -> void {
     // 焦点：VK_TAB + WM_CHAR 经真实消息路径落焦（组合事件只派发给焦点控件）。
@@ -325,7 +330,7 @@ auto main(int argc, char **argv) -> int {
     app.set_on_frame([&]() -> void {
         ++frame;
         if (frame == 3) {
-            aurora::Widget *focused = app.focus().focused();
+            aurora::Widget *const focused = app.focus().focused();
             run_automated(hwnd, *ui.input, focused != nullptr ? focused->type_name() : nullptr, failures);
             if (!interactive) {
                 app.quit();

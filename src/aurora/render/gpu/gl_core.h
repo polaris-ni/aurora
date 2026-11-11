@@ -7,8 +7,6 @@
 // 枚举常量值（值取自 GL 官方规范，与 <GL/gl.h> 无关、不包含任何系统头）。
 // ============================================================
 
-#include <cstdint>
-
 #include "aurora/render/rhi/gpu_gl_rhi.h"
 
 namespace aurora::rhi::gl {

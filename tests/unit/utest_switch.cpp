@@ -108,7 +108,7 @@ AURORA_TEST_CASE(switch_disabled_ignores_clicks) {
 }
 
 AURORA_TEST_CASE(switch_shared_source_writes_through_to_upstream) {
-    State<bool> up{true};
+    State<bool> const up{true};
     Switch s{up};  // 共享同一来源：控件与上游是同一个值
     AURORA_TEST_CHECK_TRUE(s.value());
 

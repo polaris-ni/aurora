@@ -50,7 +50,6 @@
 #include <vector>
 
 #include "aurora/app/file_association.h"
-#include "aurora/app/mime_types.h"
 #include "aurora/app/single_instance.h"
 #include "aurora/core/error_codes.h"
 #include "aurora/core/log.h"

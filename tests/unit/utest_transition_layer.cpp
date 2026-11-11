@@ -180,15 +180,15 @@ AURORA_TEST_CASE(layer_hit_test_prefers_new_then_old) {
     TransitionLayer layer(Node{old_probe}, Node{new_probe}, &progress, TransitionKind::Fade);
 
     constexpr BuildContext ctx;
-    Widget *hit = layer.hit_test(Point{.x = 50.0F, .y = 25.0F}, full_rect(), ctx);
+    Widget *const hit = layer.hit_test(Point{.x = 50.0F, .y = 25.0F}, full_rect(), ctx);
     AURORA_TEST_CHECK_EQ(hit, new_probe.get());  // 新页在视觉顶层，优先命中
 
     // 新页未命中（空 Column 无子节点）→ 回退旧页。
     TransitionLayer fallback(Node{old_probe}, Node{std::make_shared<Column>()}, &progress, TransitionKind::Fade);
-    Widget *hit_old = fallback.hit_test(Point{.x = 50.0F, .y = 25.0F}, full_rect(), ctx);
+    Widget *const hit_old = fallback.hit_test(Point{.x = 50.0F, .y = 25.0F}, full_rect(), ctx);
     AURORA_TEST_CHECK_EQ(hit_old, old_probe.get());
 
-    Widget *miss = fallback.hit_test(Point{.x = 150.0F, .y = 25.0F}, full_rect(), ctx);
+    Widget *const miss = fallback.hit_test(Point{.x = 150.0F, .y = 25.0F}, full_rect(), ctx);
     AURORA_TEST_CHECK_NULL(miss);
 }
 

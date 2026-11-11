@@ -20,8 +20,6 @@
 #include <cmath>
 #include <cstdint>
 
-#include "aurora/core/platform.h"
-
 namespace aurora::detail {
 
 /// @brief 把 OS 报出的双击间隔（秒，浮点）折算成派发器使用的连击时间窗（毫秒）。

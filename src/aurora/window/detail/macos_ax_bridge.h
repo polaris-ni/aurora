@@ -1,7 +1,7 @@
 #pragma once
 
 /// @brief macOS NSAccessibility 桥：语义树快照 ↔ `NSAccessibilityElement` 元素树。
-/// @file window/detail/macos_ax_bridge.h
+/// @file macos_ax_bridge.h
 ///
 /// 与 Win32 UIA / Linux AT-SPI 两座桥同列：内部头（src/，非公共 API），由 `MacOSSurface` 持有。
 /// 门控与 `macos_surface.h` 同款：平台宏 ∧ 后端宏。

@@ -119,7 +119,7 @@ AURORA_TEST_CASE(slider_disabled_ignores_pointer_events) {
 }
 
 AURORA_TEST_CASE(slider_shared_source_writes_through_to_upstream) {
-    State<double> up{0.0};
+    State<double> const up{0.0};
     Slider s{up};  // 共享同一来源：控件与上游是同一个值
     s.set_value(0.7);
     AURORA_TEST_CHECK_NEAR(up.get(), 0.7, 1e-4);  // 控件 → 上游

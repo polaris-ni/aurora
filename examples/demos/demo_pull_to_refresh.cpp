@@ -36,7 +36,7 @@ auto main() -> int {
     auto pull = std::make_shared<au::PullToRefresh>(au::Node{std::move(scroll)});
     pull->set_modifier(au::Modifier{}.border(1.0F, pal::AURORA_BORDER));
 
-    std::weak_ptr<au::PullToRefresh> weak_pull = pull;
+    std::weak_ptr<au::PullToRefresh> const weak_pull = pull;
     pull->on_refresh([status, weak_pull]() -> void {
         // CJK-LITERAL: on-screen-demo - painted window text, not console output
         status->set(au::LocalizedString{"刷新中…（异步取数）"});

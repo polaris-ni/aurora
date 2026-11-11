@@ -39,8 +39,6 @@
 #include <utility>
 #include <vector>
 
-#include "e2e/harness.h"
-
 #ifdef AURORA_PLATFORM_MACOS
 
 #include <ApplicationServices/ApplicationServices.h>

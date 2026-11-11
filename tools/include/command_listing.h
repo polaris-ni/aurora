@@ -120,6 +120,8 @@ enum class CommandStatus : std::uint8_t {
 }
 
 /// @brief 按 `id` 解析命令描述符并判定可调用性。
+/// @param items 命令列表 JSON 数组。
+/// @param id 目标命令 id。
 /// @param status 输出：判定结果（未命中时为 NotFound）
 /// @return 命中的描述符；未命中返回 nullptr
 [[nodiscard]] inline auto resolve_command(const Json &items, const std::string &id, CommandStatus &status)

@@ -104,7 +104,7 @@ using aurora::test::scripts::write_then_hold;
 [[nodiscard]] auto inner(CoroTask<Result<StreamOutcome>> &task) -> Result<StreamOutcome> {
     AURORA_TEST_REQUIRE_MSG(task.is_done(), "coro task not finished when result was read");
     const auto outer = task.result();
-    AURORA_TEST_REQUIRE_MSG(bool(outer), outer ? std::string{} : outer.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(outer), outer ? std::string{} : outer.error().message);
     return outer.value();
 }
 
@@ -135,7 +135,7 @@ using aurora::test::scripts::write_then_hold;
     // 未收尾时 `result()` 读的是空结果槽（帧外内存），先 REQUIRE 收尾再读（口径同 `pump_stream`）。
     AURORA_TEST_REQUIRE_MSG(task.is_done(), "coro task not finished when result was read");
     const auto outer = task.result();
-    AURORA_TEST_REQUIRE_MSG(bool(outer), outer ? std::string{} : outer.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(outer), outer ? std::string{} : outer.error().message);
     return outer.value();
 }
 
@@ -648,7 +648,7 @@ AURORA_TEST_CASE(stream_delivers_a_content_length_body_segment_by_segment) {
 
     RecordingSink sink;
     const auto outcome = open_and_drive(client, Request::get(loopback_url(peer.port())), sink);
-    AURORA_TEST_REQUIRE_MSG(bool(outcome), outcome ? std::string{} : outcome.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(outcome), outcome ? std::string{} : outcome.error().message);
 
     AURORA_TEST_CHECK_EQ(sink.heads, 1);  // 契约：`on_head` 恰一次，且在任一段体之前
     AURORA_TEST_CHECK_TRUE(sink.head_body_empty);
@@ -677,7 +677,7 @@ AURORA_TEST_CASE(stream_delivers_a_chunked_body) {
 
     RecordingSink sink;
     const auto outcome = open_and_drive(client, Request::get(loopback_url(peer.port())), sink);
-    AURORA_TEST_REQUIRE_MSG(bool(outcome), outcome ? std::string{} : outcome.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(outcome), outcome ? std::string{} : outcome.error().message);
     AURORA_TEST_CHECK_EQ(sink.text, "hello");
     AURORA_TEST_CHECK_EQ(sink.ends, 1);
     AURORA_TEST_CHECK_EQ(outcome.value().delivered_bytes, std::uint64_t{5});
@@ -696,7 +696,7 @@ AURORA_TEST_CASE(stream_a_head_response_delivers_no_body_and_skips_coding_checks
 
     RecordingSink sink;
     const auto outcome = open_and_drive(client, Request::head(loopback_url(peer.port())), sink);
-    AURORA_TEST_REQUIRE_MSG(bool(outcome), outcome ? std::string{} : outcome.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(outcome), outcome ? std::string{} : outcome.error().message);
     AURORA_TEST_CHECK_EQ(sink.segments, std::size_t{0});
     AURORA_TEST_CHECK_EQ(sink.ends, 1);
     AURORA_TEST_CHECK_EQ(outcome.value().wire_bytes, std::uint64_t{0});
@@ -717,7 +717,7 @@ AURORA_TEST_CASE(stream_stops_reading_when_the_sink_returns_stop) {
     RecordingSink sink;
     sink.stop_after = 2;
     const auto outcome = open_and_drive(client, Request::get(loopback_url(peer.port())), sink);
-    AURORA_TEST_REQUIRE_MSG(bool(outcome), outcome ? std::string{} : outcome.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(outcome), outcome ? std::string{} : outcome.error().message);
 
     AURORA_TEST_CHECK_EQ(sink.segments, std::size_t{2});  // 停住后再无交付：段数恰好停在收摊那一处
     AURORA_TEST_CHECK_TRUE(sink.text.size() < body.size());
@@ -742,7 +742,7 @@ AURORA_TEST_CASE(stream_stops_at_the_head_when_the_sink_returns_stop_there) {
     RecordingSink sink;
     sink.stop_at_head = true;
     const auto outcome = open_and_drive(client, Request::get(loopback_url(peer.port())), sink);
-    AURORA_TEST_REQUIRE_MSG(bool(outcome), outcome ? std::string{} : outcome.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(outcome), outcome ? std::string{} : outcome.error().message);
     AURORA_TEST_CHECK_EQ(sink.segments, std::size_t{0});
     AURORA_TEST_CHECK_EQ(sink.ends, 1);
     AURORA_TEST_CHECK_TRUE(outcome.value().stopped_by_sink);
@@ -766,7 +766,7 @@ AURORA_TEST_CASE(stream_abandons_the_body_of_a_redirect_hop) {
 
     RecordingSink sink;
     const auto outcome = open_and_drive(client, Request::get(loopback_url(origin.port())), sink);
-    AURORA_TEST_REQUIRE_MSG(bool(outcome), outcome ? std::string{} : outcome.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(outcome), outcome ? std::string{} : outcome.error().message);
 
     AURORA_TEST_CHECK_EQ(sink.text, "Z");
     AURORA_TEST_CHECK_EQ(sink.heads, 1);  // 中间跳的头部不进宿主：宿主只见最终一跳
@@ -792,7 +792,7 @@ AURORA_TEST_CASE(stream_stops_at_the_redirect_limit) {
     RecordingSink sink;
     const auto outcome =
         open_and_drive(client, Request::get(loopback_url(peer.port(), "/loop")).max_redirects(2), sink);
-    AURORA_TEST_REQUIRE_FALSE(bool(outcome));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(outcome));
     AURORA_TEST_CHECK_EQ(outcome.error().code_enum, aurora::ErrorCode::HttpRedirectLimit);
     AURORA_TEST_CHECK_EQ(peer.accepts(), 3);  // 初始一跳 + 两跳跟随，其后超限而止
     AURORA_TEST_CHECK_EQ(sink.ends, 0);  // 失败结局不宣告收摊
@@ -813,7 +813,7 @@ AURORA_TEST_CASE(stream_ignores_the_materialized_body_ceiling) {
 
     RecordingSink sink;
     const auto outcome = open_and_drive(client, Request::get(loopback_url(peer.port())), sink);
-    AURORA_TEST_REQUIRE_MSG(bool(outcome), outcome ? std::string{} : outcome.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(outcome), outcome ? std::string{} : outcome.error().message);
     AURORA_TEST_CHECK_EQ(outcome.value().delivered_bytes, body.size());
     AURORA_TEST_CHECK_EQ(sink.ends, 1);
 }
@@ -831,7 +831,7 @@ AURORA_TEST_CASE(stream_refuses_a_coding_outside_the_supported_set_before_any_by
 
     RecordingSink sink;
     const auto outcome = open_and_drive(client, Request::get(loopback_url(peer.port())), sink);
-    AURORA_TEST_REQUIRE_FALSE(bool(outcome));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(outcome));
     AURORA_TEST_CHECK_EQ(outcome.error().code_enum, aurora::ErrorCode::HttpContentEncodingUnsupported);
     AURORA_TEST_CHECK_EQ(sink.segments, std::size_t{0});
     AURORA_TEST_CHECK_EQ(sink.ends, 0);  // 失败不宣告收摊：字节流断在半途，收尾归调用方按 Result 分流
@@ -866,7 +866,7 @@ AURORA_TEST_CASE(stream_times_out_a_stalled_peer) {
                           .satisfied);
 
     const auto outcome = inner(task);
-    AURORA_TEST_REQUIRE_FALSE(bool(outcome));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(outcome));
     AURORA_TEST_CHECK_EQ(outcome.error().code_enum, aurora::ErrorCode::HttpTimeout);
     AURORA_TEST_CHECK_EQ(sink.ends, 0);
 }
@@ -887,7 +887,7 @@ AURORA_TEST_CASE(stream_reports_download_progress_on_wire_bytes_with_one_settled
     auto request = Request::get(loopback_url(peer.port()));
     request.on_progress([&seen](const Progress &progress) -> void { seen.push_back(progress); });
     const auto outcome = open_and_drive(client, std::move(request), sink);
-    AURORA_TEST_REQUIRE_MSG(bool(outcome), outcome ? std::string{} : outcome.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(outcome), outcome ? std::string{} : outcome.error().message);
 
     const auto down = downloads_of(seen);
     AURORA_TEST_REQUIRE(!down.empty());
@@ -919,7 +919,7 @@ AURORA_TEST_CASE(stream_refuses_to_run_on_a_leg_without_streaming_semantics) {
                           "open_stream done", [&task] { return task.is_done(); }, std::chrono::milliseconds{1000})
                           .satisfied);
     const auto outcome = inner(task);
-    AURORA_TEST_REQUIRE_FALSE(bool(outcome));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(outcome));
     AURORA_TEST_CHECK_EQ(outcome.error().code_enum, aurora::ErrorCode::NetPlatformUnavailable);
     AURORA_TEST_CHECK_EQ(sink.heads, 0);
     AURORA_TEST_CHECK_EQ(sink.ends, 0);
@@ -940,7 +940,7 @@ AURORA_TEST_CASE(stream_decompresses_a_gzip_body_with_two_byte_counters) {
 
     RecordingSink sink;
     const auto outcome = open_and_drive(client, Request::get(loopback_url(peer.port())), sink);
-    AURORA_TEST_REQUIRE_MSG(bool(outcome), outcome ? std::string{} : outcome.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(outcome), outcome ? std::string{} : outcome.error().message);
     AURORA_TEST_CHECK_EQ(sink.text, "hello aurora");  // 压缩字节一个都没进宿主
     const auto &done = outcome.value();
     AURORA_TEST_CHECK_EQ(done.wire_bytes, wire.size());
@@ -961,8 +961,9 @@ AURORA_TEST_CASE(stream_deflate_locks_the_format_from_the_wrapper_header) {
 
         RecordingSink sink;
         const auto outcome = open_and_drive(client, Request::get(loopback_url(peer.port())), sink);
-        AURORA_TEST_REQUIRE_MSG(bool(outcome), outcome ? std::string{"deflate probe failed: "} + std::string{label}
-                                                       : outcome.error().message);
+        AURORA_TEST_REQUIRE_MSG(
+            static_cast<bool>(outcome),
+            outcome ? std::string{"deflate probe failed: "} + std::string{label} : outcome.error().message);
         AURORA_TEST_CHECK_EQ(sink.text, "hello aurora");
     };
     probe("zlib wrapper", bytes(AURORA_ZLIB_HELLO));
@@ -984,7 +985,7 @@ AURORA_TEST_CASE(stream_decompression_ceiling_does_not_follow_materialized_body_
 
     RecordingSink sink;
     const auto passed = open_and_drive(client, Request::get(loopback_url(peer.port())), sink);
-    AURORA_TEST_REQUIRE_MSG(bool(passed), passed ? std::string{} : passed.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(passed), passed ? std::string{} : passed.error().message);
     AURORA_TEST_CHECK_EQ(passed.value().delivered_bytes, std::uint64_t{100});
     AURORA_TEST_CHECK_EQ(sink.text, std::string(100, 'a'));
     AURORA_TEST_CHECK_EQ(sink.ends, 1);
@@ -993,7 +994,7 @@ AURORA_TEST_CASE(stream_decompression_ceiling_does_not_follow_materialized_body_
     client.max_decompressed_bytes(std::optional<std::uint64_t>{std::uint64_t{50}});
     RecordingSink limited;
     const auto refused = open_and_drive(client, Request::get(loopback_url(peer.port())), limited);
-    AURORA_TEST_REQUIRE_FALSE(bool(refused));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(refused));
     AURORA_TEST_CHECK_EQ(refused.error().code_enum, aurora::ErrorCode::HttpBodyTooLarge);
     AURORA_TEST_CHECK_TRUE(names_in(refused.error().message, "max_decompressed_bytes"));
 }
@@ -1012,7 +1013,7 @@ AURORA_TEST_CASE(stream_enforces_the_decompressed_ceiling) {
 
     RecordingSink sink;
     const auto outcome = open_and_drive(client, Request::get(loopback_url(peer.port())), sink);
-    AURORA_TEST_REQUIRE_FALSE(bool(outcome));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(outcome));
     AURORA_TEST_CHECK_EQ(outcome.error().code_enum, aurora::ErrorCode::HttpBodyTooLarge);
     AURORA_TEST_CHECK(outcome.error().message.find("max_decompressed_bytes") != std::string::npos);
     AURORA_TEST_CHECK_TRUE(sink.text.size() <= 4);
@@ -1022,7 +1023,7 @@ AURORA_TEST_CASE(stream_enforces_the_decompressed_ceiling) {
     client.max_decompressed_bytes(std::optional<std::uint64_t>{std::uint64_t{12}});
     RecordingSink loose;
     const auto passed = open_and_drive(client, Request::get(loopback_url(peer.port())), loose);
-    AURORA_TEST_REQUIRE_MSG(bool(passed), passed ? std::string{} : passed.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(passed), passed ? std::string{} : passed.error().message);
     AURORA_TEST_CHECK_EQ(loose.text, "hello aurora");
 }
 
@@ -1084,7 +1085,7 @@ AURORA_TEST_CASE(stream_replays_a_timeout_raised_before_any_head_is_handed) {
     AURORA_TEST_REQUIRE(pump_stream(engine, task));
 
     const auto outcome = inner(task);
-    AURORA_TEST_REQUIRE_FALSE(bool(outcome));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(outcome));
     AURORA_TEST_CHECK_EQ(outcome.error().code_enum, aurora::ErrorCode::HttpTimeout);
     AURORA_TEST_CHECK(names_in(outcome.error().message, "total"));  // 逐尝试重新计时的正是这一档
     AURORA_TEST_CHECK_GE(engine.now().count(), 150);  // 三次尝试各用过一份 50 ms 窗口
@@ -1114,7 +1115,7 @@ AURORA_TEST_CASE(stream_does_not_replay_after_the_head_is_handed) {
     AURORA_TEST_REQUIRE(pump_stream(engine, task));
 
     const auto outcome = inner(task);
-    AURORA_TEST_REQUIRE_FALSE(bool(outcome));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(outcome));
     AURORA_TEST_CHECK_EQ(outcome.error().code_enum, aurora::ErrorCode::HttpTimeout);
     AURORA_TEST_CHECK_EQ(sink.heads, 1);  // 头确实交出去过：资格就此耗尽
     AURORA_TEST_CHECK_EQ(sink.ends, 0);  // 失败结局不调 `on_end`
@@ -1140,7 +1141,7 @@ AURORA_TEST_CASE(stream_refuses_an_out_of_range_policy_before_any_connection) {
                             .satisfied);
 
     const auto outcome = inner(task);
-    AURORA_TEST_REQUIRE_FALSE(bool(outcome));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(outcome));
     AURORA_TEST_CHECK_EQ(outcome.error().code_enum, aurora::ErrorCode::HttpRequestInvalid);
     AURORA_TEST_CHECK(names_in(outcome.error().message, "base"));
     AURORA_TEST_CHECK_EQ(peer.accepts(), 0);
@@ -1162,13 +1163,13 @@ AURORA_TEST_CASE(a_cache_hit_streams_the_stored_body_without_the_wire) {
     const auto url = loopback_url(peer.port());
 
     // 表先由物化路径灌一份（流式入口不写表，见下一例），这份 40 000 字节的载荷就是命中时要逐段交出去的那段。
-    AURORA_TEST_REQUIRE(bool(prime_with_send(client, Request::get(url))));
+    AURORA_TEST_REQUIRE(static_cast<bool>(prime_with_send(client, Request::get(url))));
     AURORA_TEST_CHECK_EQ(peer.accepts(), 1);
 
     // 命中缓存走的是同一个宿主、同一套次序：头部一次、体按段、收摊一次，只是线上一个字节也没来。
     RecordingSink sink;
     const auto hit = open_and_drive(client, Request::get(url), sink);
-    AURORA_TEST_REQUIRE(bool(hit));
+    AURORA_TEST_REQUIRE(static_cast<bool>(hit));
     AURORA_TEST_CHECK(hit.value().response.from_cache());
     AURORA_TEST_CHECK_EQ(hit.value().wire_bytes, std::uint64_t{0});
     AURORA_TEST_CHECK_EQ(hit.value().delivered_bytes, body.size());
@@ -1197,14 +1198,14 @@ AURORA_TEST_CASE(a_streamed_exchange_leaves_the_table_untouched) {
 
     RecordingSink first;
     const auto fetched = open_and_drive(client, Request::get(url), first);
-    AURORA_TEST_REQUIRE(bool(fetched));
+    AURORA_TEST_REQUIRE(static_cast<bool>(fetched));
     AURORA_TEST_CHECK_EQ(peer.accepts(), 1);
 
     // 流式入口只读不写：把载荷攒进表就意味着先把它攒进内存，那正是调用方选 `open_stream` 要避免的事。
     // 判据是「第二次仍然触网」——若这里写进了表，第二次就该是一次命中。
     RecordingSink second;
     const auto again = open_and_drive(client, Request::get(url), second);
-    AURORA_TEST_REQUIRE(bool(again));
+    AURORA_TEST_REQUIRE(static_cast<bool>(again));
     AURORA_TEST_CHECK_FALSE(again.value().response.from_cache());
     AURORA_TEST_CHECK_EQ(peer.accepts(), 2);
 }
@@ -1225,12 +1226,12 @@ AURORA_TEST_CASE(a_stale_entry_revalidates_and_streams_the_stored_body) {
     allow_test_cleartext(client);
     client.cache(CacheOptions{.enabled = true});
     const auto url = loopback_url(peer.port());
-    AURORA_TEST_REQUIRE(bool(prime_with_send(client, Request::get(url))));
+    AURORA_TEST_REQUIRE(static_cast<bool>(prime_with_send(client, Request::get(url))));
     AURORA_TEST_CHECK_EQ(peer.accepts(), 1);
 
     RecordingSink sink;
     const auto outcome = open_and_drive(client, Request::get(url), sink);
-    AURORA_TEST_REQUIRE(bool(outcome));
+    AURORA_TEST_REQUIRE(static_cast<bool>(outcome));
     // 宿主看不见那枚中间状态：头部是已存那份 200，体是已存那 6 字节，`on_head` 恰一次、`on_end` 恰一次。
     AURORA_TEST_CHECK_EQ(sink.status, std::uint16_t{200});
     AURORA_TEST_CHECK_EQ(sink.heads, 1);
@@ -1246,7 +1247,7 @@ AURORA_TEST_CASE(a_stale_entry_revalidates_and_streams_the_stored_body) {
     // 刚验证过的一份重新获得新鲜度：第三次不必再问对端，交出的仍是已存那份体。
     RecordingSink third;
     const auto again = open_and_drive(client, Request::get(url), third);
-    AURORA_TEST_REQUIRE(bool(again));
+    AURORA_TEST_REQUIRE(static_cast<bool>(again));
     AURORA_TEST_CHECK(again.value().response.from_cache());
     AURORA_TEST_CHECK_EQ(third.text, std::string{"stored"});
     AURORA_TEST_CHECK_EQ(peer.accepts(), 2);
@@ -1265,7 +1266,7 @@ AURORA_TEST_CASE(stream_stamps_a_request_id_on_every_exchange) {
 
     RecordingSink sink;
     const auto outcome = open_and_drive(client, Request::get(loopback_url(peer.port())), sink);
-    AURORA_TEST_REQUIRE_MSG(bool(outcome), outcome ? std::string{} : outcome.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(outcome), outcome ? std::string{} : outcome.error().message);
 
     // 标识的落位与 `send` 同处（协程体外、原始请求那一次）：本入口每跳与每次尝试都从它拷一份，挂上即全程同值。
     AURORA_TEST_CHECK_EQ(aurora::net::detail::is_request_id_shape(recorded_identifier(recorded, guard)), true);
@@ -1284,7 +1285,7 @@ AURORA_TEST_CASE(stream_carries_a_request_level_identifier_and_respects_the_swit
 
     RecordingSink sink;
     const auto declared = open_and_drive(client, Request::get(loopback_url(peer.port())).request_id("trace-42"), sink);
-    AURORA_TEST_REQUIRE(bool(declared));
+    AURORA_TEST_REQUIRE(static_cast<bool>(declared));
     AURORA_TEST_CHECK_EQ(recorded_identifier(recorded, guard), std::string{"trace-42"});
 
     // 请求级空声明与客户端总开关都关掉这一次：与物化路径同一套三级取定，两个入口不说两种话。
@@ -1293,7 +1294,7 @@ AURORA_TEST_CASE(stream_carries_a_request_level_identifier_and_respects_the_swit
     AURORA_TEST_REQUIRE(second.valid());
     RecordingSink next_sink;
     const auto omitted = open_and_drive(client, Request::get(loopback_url(second.port())).request_id(""), next_sink);
-    AURORA_TEST_REQUIRE(bool(omitted));
+    AURORA_TEST_REQUIRE(static_cast<bool>(omitted));
     AURORA_TEST_CHECK_EQ(recorded_identifier(quiet, guard), std::string{});
 
     client.request_id(false);
@@ -1301,7 +1302,7 @@ AURORA_TEST_CASE(stream_carries_a_request_level_identifier_and_respects_the_swit
     ScriptedPeer third(record_then_reply(off, guard, length_framed("", long_body(200))));
     AURORA_TEST_REQUIRE(third.valid());
     RecordingSink off_sink;
-    AURORA_TEST_REQUIRE(bool(open_and_drive(client, Request::get(loopback_url(third.port())), off_sink)));
+    AURORA_TEST_REQUIRE(static_cast<bool>(open_and_drive(client, Request::get(loopback_url(third.port())), off_sink)));
     AURORA_TEST_CHECK_EQ(recorded_identifier(off, guard), std::string{});
 }
 
@@ -1320,7 +1321,7 @@ AURORA_TEST_CASE(stream_sends_the_body_after_the_peer_opens_the_gate) {
     RecordingSink sink;
     const auto outcome =
         open_and_drive(client, Request::post(loopback_url(peer.port())).body(source).expect_continue(true), sink);
-    AURORA_TEST_REQUIRE_MSG(bool(outcome), outcome ? std::string{} : outcome.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(outcome), outcome ? std::string{} : outcome.error().message);
 
     // 信息应答既不进宿主的 `on_head`，也不改变交出的状态码：宿主看见的只有那份 200。
     AURORA_TEST_CHECK_EQ(sink.heads, 1);
@@ -1352,7 +1353,7 @@ AURORA_TEST_CASE(stream_delivers_an_answer_that_arrived_inside_the_expect_window
     RecordingSink sink;
     const auto outcome =
         open_and_drive(client, Request::post(loopback_url(peer.port())).body(source).expect_continue(true), sink);
-    AURORA_TEST_REQUIRE_MSG(bool(outcome), outcome ? std::string{} : outcome.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(outcome), outcome ? std::string{} : outcome.error().message);
 
     AURORA_TEST_CHECK_EQ(sink.heads, 1);
     AURORA_TEST_CHECK_EQ(sink.status, std::uint16_t{200});
@@ -1382,7 +1383,7 @@ AURORA_TEST_CASE(stream_holds_the_body_back_when_the_expectation_gets_a_final_an
     RecordingSink sink;
     const auto outcome =
         open_and_drive(client, Request::post(loopback_url(peer.port())).body(source).expect_continue(true), sink);
-    AURORA_TEST_REQUIRE_MSG(bool(outcome), outcome ? std::string{} : outcome.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(outcome), outcome ? std::string{} : outcome.error().message);
 
     AURORA_TEST_CHECK_EQ(sink.status, std::uint16_t{417});
     AURORA_TEST_CHECK_EQ(sink.text, std::string{});
@@ -1409,7 +1410,7 @@ AURORA_TEST_CASE(stream_uploads_a_body_source_that_knows_its_total) {
     ScriptedBody source{{"abcde", "fgh"}, std::optional<std::uint64_t>{std::uint64_t{8}}, true};
     RecordingSink sink;
     const auto outcome = open_and_drive(client, Request::post(loopback_url(peer.port())).body(source), sink);
-    AURORA_TEST_REQUIRE_MSG(bool(outcome), outcome ? std::string{} : outcome.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(outcome), outcome ? std::string{} : outcome.error().message);
     AURORA_TEST_CHECK_EQ(sink.text, std::string{"ok"});
 
     const auto sent = lowered(recorded_request(recorded, guard));
@@ -1445,7 +1446,7 @@ AURORA_TEST_CASE(stream_closes_the_retry_loop_on_a_body_that_cannot_rewind) {
     AURORA_TEST_REQUIRE(pump_stream(engine, task));
 
     const auto outcome = inner(task);
-    AURORA_TEST_REQUIRE_FALSE(bool(outcome));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(outcome));
     AURORA_TEST_CHECK_EQ(outcome.error().code_enum, aurora::ErrorCode::HttpTimeout);
     AURORA_TEST_CHECK_LT(engine.now().count(), std::int64_t{100});  // 只烧了一扇 50 ms 窗口
     AURORA_TEST_CHECK_EQ(sink.heads, 0);
@@ -1469,7 +1470,7 @@ AURORA_TEST_CASE(stream_answers_a_source_challenge_before_the_head_is_handed) {
     client.authenticator(std::make_shared<BasicAuthenticator>("lyn", "pw"));
     RecordingSink sink;
     const auto outcome = open_and_drive(client, Request::get(loopback_url(peer.port())), sink);
-    AURORA_TEST_REQUIRE_MSG(bool(outcome), outcome ? std::string{} : outcome.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(outcome), outcome ? std::string{} : outcome.error().message);
 
     // 流式路径的认证环必须生在**首段字节交给宿主之前**：那份 401 的头部块从没到达宿主，宿主看到的第一个头
     // 就是重跑之后那份 200。「头交出去就收不回来」这条重放闸规则（`stream_does_not_replay_after_the_head_is_handed`）
@@ -1501,7 +1502,7 @@ AURORA_TEST_CASE(a_declined_challenge_streams_the_peers_own_401) {
     client.authenticator(std::make_shared<BearerAuthenticator>("tok"));  // 对端只给 `Basic`：答空
     RecordingSink sink;
     const auto outcome = open_and_drive(client, Request::get(loopback_url(peer.port())), sink);
-    AURORA_TEST_REQUIRE_MSG(bool(outcome), outcome ? std::string{} : outcome.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(outcome), outcome ? std::string{} : outcome.error().message);
 
     // 放弃答复时交出的仍是**对端说的那一份** 401，且头部块只交一次、随后正常收摊——本环不把它折成错误。
     AURORA_TEST_CHECK_EQ(sink.heads, 1);

@@ -85,7 +85,6 @@
 #include <vector>
 
 #include "aurora/app/recent_documents.h"
-#include "aurora/core/error_codes.h"
 #include "aurora/core/utf8.h"
 #include "aurora/window/detail/win32_recent_documents.h"
 #include "aurora/window/platform.h"
@@ -192,7 +191,7 @@ class ComInit {
 /// @param target_utf8 待匹配的目标路径（UTF-8，原样探针路径）。
 /// @return 命中的快捷方式条数；COM 初始化失败或目录不可枚举时返回 -1（无从取证）。
 auto count_links_targeting(const std::wstring &folder, const std::string &target_utf8) -> int {
-    ComInit com;
+    ComInit const com;
     if (!com.ok()) {
         return -1;
     }
@@ -438,6 +437,7 @@ auto run_auto_stage(std::wstring &folder_out, std::string &probe_path_utf8) -> i
 
 /// @brief 人工段：由人目视核对系统入口的显示与消失（机器判据证的是目录，不是 UI）。
 /// @param folder Recent 目录。
+/// @param probe_path_utf8 探针文件全路径（UTF-8；自动段结束时已删除，仅供人工段显示）。
 /// @return 该段退出码：0 全部确认；7 存在未确认项。
 auto run_interactive_stage(const std::wstring &folder, const std::string &probe_path_utf8) -> int {
     emit("---- interactive segment ----");

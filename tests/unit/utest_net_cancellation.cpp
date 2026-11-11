@@ -20,7 +20,7 @@ namespace aurora::test_cases::utest_net_cancellation {
 
 // 新建令牌未取消；cancel 置位且可重复调用，状态位只转换一次。
 AURORA_TEST_CASE(cancel_is_idempotent) {
-    aurora::net::Cancellation token;
+    aurora::net::Cancellation const token;
     AURORA_TEST_CHECK_FALSE(token.is_cancelled());
 
     token.cancel();
@@ -32,7 +32,7 @@ AURORA_TEST_CASE(cancel_is_idempotent) {
 
 // 钩子至多一次：三次 cancel 只换来一次回调（引擎据此放行挂起点，重复放行即双份结果）。
 AURORA_TEST_CASE(hook_runs_at_most_once) {
-    aurora::net::Cancellation token;
+    aurora::net::Cancellation const token;
     int runs = 0;
     token.on_cancel([&runs]() -> void { ++runs; });
 
@@ -44,7 +44,7 @@ AURORA_TEST_CASE(hook_runs_at_most_once) {
 
 // 取消先发生、钩子后登记：必须立即在当前线程执行，否则挂起点永不放行。
 AURORA_TEST_CASE(hook_registered_after_cancel_fires_immediately) {
-    aurora::net::Cancellation token;
+    aurora::net::Cancellation const token;
     token.cancel();
 
     int runs = 0;
@@ -54,7 +54,7 @@ AURORA_TEST_CASE(hook_registered_after_cancel_fires_immediately) {
 
 // 空可调用体撤销登记：撤销后 cancel 不再回调（宿主析构时摘钩的入口）。
 AURORA_TEST_CASE(empty_hook_clears_registration) {
-    aurora::net::Cancellation token;
+    aurora::net::Cancellation const token;
     int runs = 0;
     token.on_cancel([&runs]() -> void { ++runs; });
     token.on_cancel({});
@@ -65,13 +65,13 @@ AURORA_TEST_CASE(empty_hook_clears_registration) {
 
 // 拷贝是「同一状态的另一个句柄」：一侧取消全侧可见，独立构造的两枚互不影响。
 AURORA_TEST_CASE(copies_share_one_state) {
-    aurora::net::Cancellation origin;
+    aurora::net::Cancellation const origin;
     // 拷贝必须是真实的值拷贝：本用例验证「拷贝 = 指向同一状态的另一枚独立句柄」这一契约，
     // 引用别名会退化成同一对象、失去对 copy-ctor 与共享状态的覆盖。该检查把 const 视角下的
     // 拷贝误判为「可避免」，此处实际不可替换，故豁免。
     // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     const aurora::net::Cancellation copy = origin;
-    aurora::net::Cancellation other;
+    aurora::net::Cancellation const other;
 
     AURORA_TEST_CHECK_TRUE(origin.shares_state_with(copy));
     AURORA_TEST_CHECK_FALSE(origin.shares_state_with(other));

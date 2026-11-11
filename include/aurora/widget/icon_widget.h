@@ -7,7 +7,6 @@
 
 #include "aurora/core/color.h"
 #include "aurora/icon/icon.h"
-#include "aurora/icon/icon_svg.h"
 #include "aurora/theming/theme.h"
 #include "aurora/widget/props_io.h"
 #include "aurora/widget/widget.h"

@@ -257,7 +257,7 @@ AURORA_TEST_CASE(deliver_projects_a_materialized_response) {
         });
 
     const auto outcome = await_job<std::string>("deliver settles", std::move(job));
-    AURORA_TEST_REQUIRE(bool(outcome));
+    AURORA_TEST_REQUIRE(static_cast<bool>(outcome));
     AURORA_TEST_CHECK_EQ(outcome.value(), std::string{"hello"});
 }
 
@@ -361,7 +361,7 @@ AURORA_TEST_CASE(the_exchange_survives_the_callers_client) {
         job.emplace(aurora::net::http::deliver(temporary, Request::get(loopback_url(peer.port()))));
     }
     const auto outcome = await_job<Response>("deliver settles", std::move(*job));
-    AURORA_TEST_REQUIRE(bool(outcome));
+    AURORA_TEST_REQUIRE(static_cast<bool>(outcome));
     AURORA_TEST_CHECK_EQ(std::string(outcome.value().body().begin(), outcome.value().body().end()),
                          std::string{"late"});
     AURORA_TEST_CHECK_EQ(peer.accepts(), 1);
@@ -770,7 +770,7 @@ AURORA_TEST_CASE(image_fetcher_returns_the_body_on_a_success_status) {
     auto fetch = aurora::net::http::image_fetcher(client);
     const auto outcome =
         await_job<std::vector<std::uint8_t>>("image lands", fetch(std::string_view{loopback_url(peer.port())}));
-    AURORA_TEST_REQUIRE(bool(outcome));
+    AURORA_TEST_REQUIRE(static_cast<bool>(outcome));
     const std::vector<std::uint8_t> expected(png.begin(), png.end());
     AURORA_TEST_CHECK(outcome.value() == expected);  // 逐字节等价：符号性转换不能改一个字节
 }
@@ -788,7 +788,7 @@ AURORA_TEST_CASE(image_fetcher_maps_a_not_found_to_an_image_load_error) {
     auto fetch = aurora::net::http::image_fetcher(client);
     const auto outcome =
         await_job<std::vector<std::uint8_t>>("image fails", fetch(std::string_view{loopback_url(peer.port())}));
-    AURORA_TEST_REQUIRE_FALSE(bool(outcome));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(outcome));
     AURORA_TEST_CHECK_EQ(outcome.error().code_enum, ErrorCode::RenderImageLoadFailed);
     // 原因必须点名状态码：404 的 HTML 喂给解码器只会换来「不是图片」，现场就此丢了。
     AURORA_TEST_CHECK_THAT(outcome.error().message, m::has_substr("404"));

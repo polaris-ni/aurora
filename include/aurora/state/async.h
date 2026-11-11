@@ -8,12 +8,12 @@
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <thread>
 #include <utility>
 #include <vector>
 
 #include "aurora/core/main_queue.h"
 #include "aurora/core/result.h"
+#include "aurora/core/strict_mode.h"
 #include "aurora/core/thread_pool.h"
 
 namespace aurora {
@@ -91,7 +91,7 @@ inline auto timeout_guards() -> std::vector<TimeoutGuard> & {
 /// @param expire 到点触发的动作；须自持共享状态，可安全重复触发。
 inline auto register_timeout_guard(std::chrono::steady_clock::time_point deadline, std::function<void()> expire)
     -> void {
-    std::scoped_lock lock(timeout_guards_mutex());  // 加锁写看守表
+    std::scoped_lock const lock(timeout_guards_mutex());  // 加锁写看守表
     timeout_guards().push_back(TimeoutGuard{.deadline = deadline, .expire = std::move(expire)});  // 追加登记项
 }
 
@@ -99,7 +99,7 @@ inline auto register_timeout_guard(std::chrono::steady_clock::time_point deadlin
 /// @param now 本帧参考时刻。
 /// @return 距最近到期的毫秒数（已到期钳 0）；表空为 -1。
 [[nodiscard]] inline auto next_timeout_deadline_ms(std::chrono::steady_clock::time_point now) -> double {
-    std::scoped_lock lock(timeout_guards_mutex());
+    std::scoped_lock const lock(timeout_guards_mutex());
     double nearest = -1.0;
     for (const auto &g : timeout_guards()) {
         const double ms = std::chrono::duration<double, std::milli>(g.deadline - now).count();
@@ -120,7 +120,7 @@ inline auto register_timeout_guard(std::chrono::steady_clock::time_point deadlin
 inline auto sweep_due_timeouts(std::chrono::steady_clock::time_point now) -> std::size_t {
     std::vector<TimeoutGuard> due;
     {
-        std::scoped_lock lock(timeout_guards_mutex());
+        std::scoped_lock const lock(timeout_guards_mutex());
         auto &guards = timeout_guards();
         for (auto it = guards.begin(); it != guards.end();) {  // NOLINT(*-loop-convert)：erase 返回后继
             if (it->deadline <= now) {
@@ -146,7 +146,7 @@ auto expire_timeout(const std::shared_ptr<AsyncState<T>> &state) -> void {
     std::optional<Result<T>> err;
     std::uint64_t epoch = 0;
     {
-        std::scoped_lock<std::mutex> lock(state->mutex);
+        std::scoped_lock<std::mutex> const lock(state->mutex);
         if (state->delivered || state->cancelled) {
             return;  // 已完成或已取消，超时无效
         }
@@ -183,7 +183,7 @@ auto set_result_once_locked(AsyncState<T> &st, Result<T> r) -> void {
 /// @return 待投递结果副本；不可投递（未就绪/已取消/未注册/已投递）时为 nullopt。
 template <typename T>
 auto take_for_delivery(AsyncState<T> &st, std::function<void(const Result<T> &)> &cb) -> std::optional<Result<T>> {
-    std::scoped_lock<std::mutex> lock(st.mutex);
+    std::scoped_lock<std::mutex> const lock(st.mutex);
     if (st.delivered) {
         return std::nullopt;
     }
@@ -298,7 +298,7 @@ class Task {
         if (epoch == 0) {
             // 打烊窗口注册：无处安放的回调——按「出生即取消」落定（结果即便已到也不补投：
             // 无在岗执行者，投递只会被打烊取消——与其静默，不如把取消记在状态上）。
-            std::scoped_lock<std::mutex> lock(state_->mutex);
+            std::scoped_lock<std::mutex> const lock(state_->mutex);
             state_->cancelled.store(true, std::memory_order_release);
             state_->delivered = true;
             detail::set_result_once_locked(
@@ -315,7 +315,7 @@ class Task {
         // 最短的载体。
         std::function<void()> replay;
         {
-            std::scoped_lock<std::mutex> lock(state_->mutex);
+            std::scoped_lock<std::mutex> const lock(state_->mutex);
             state_->on_done = std::move(cb);
             if (state_->initiation_epoch == 0) {
                 // 直接以状态构造的 Task（不经 async 工厂）在本世补盖戳：投递比对以它为准。
@@ -323,8 +323,8 @@ class Task {
             }
             // 若结果此前已 deliver（成功/超时/取消）但当时 on_done 为空，则补投到新回调。
             if (state_->delivered && !state_->cancelled && state_->result.has_value()) {
-                DoneFn to_call = state_->on_done;
-                Result<T> r = *state_->result;  // 锁内取副本：出锁后 state_ 可被其他线程继续改写
+                DoneFn const to_call = state_->on_done;
+                Result<T> const r = *state_->result;  // 锁内取副本：出锁后 state_ 可被其他线程继续改写
                 replay = [to_call, r]() mutable -> void { to_call(r); };
             }
         }
@@ -343,7 +343,7 @@ class Task {
     auto cancel() -> void {
         std::function<void()> hook;
         {
-            std::scoped_lock<std::mutex> lock(state_->mutex);
+            std::scoped_lock<std::mutex> const lock(state_->mutex);
             if (state_->cancelled.load(std::memory_order_relaxed)) {
                 return;  // 已取消过：置位与观察者都只属于第一次
             }
@@ -374,7 +374,7 @@ class Task {
         // 而更糟的是回读那一份在并发登记下未必是自己刚放上去的那枚。
         std::function<void()> fire_now;
         {
-            std::scoped_lock<std::mutex> lock(state_->mutex);
+            std::scoped_lock<std::mutex> const lock(state_->mutex);
             if (state_->cancelled.load(std::memory_order_acquire)) {
                 fire_now = std::move(hook);  // 竞态纪律：取消先于登记也要有观察者收到这一次事实
             } else {

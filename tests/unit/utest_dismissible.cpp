@@ -171,7 +171,7 @@ AURORA_TEST_CASE(descriptor_and_default_travel) {
 // ---- DragToDismiss：reduce_motion 短路 ----
 
 AURORA_TEST_CASE(dtd_reduce_motion_short_circuits_to_endpoint) {
-    ReduceMotionGuard guard;  // 进程级开启，析构还原
+    ReduceMotionGuard const guard;  // 进程级开启，析构还原
 
     // 飞出方向：拖 0.7 松手 → 单帧 tick 直接落 1 并触发 dismissed（不经过 spring 多帧）。
     DragToDismiss dtd(DragAxis::Horizontal, 100.0, SpringDescription{});

@@ -149,7 +149,7 @@ AURORA_TEST_CASE(builds_row_with_five_children_in_order) {
 
 AURORA_TEST_CASE(play_button_click_toggles_controller) {
     VideoPlayer player;
-    ControlsHook c(&player);
+    ControlsHook const c(&player);
     AURORA_TEST_CHECK_FALSE(player.is_playing());
     c.play_button()->on_click();
     AURORA_TEST_CHECK_TRUE(player.is_playing());
@@ -159,7 +159,7 @@ AURORA_TEST_CASE(play_button_click_toggles_controller) {
 
 AURORA_TEST_CASE(mute_button_click_toggles_muted) {
     VideoPlayer player;
-    ControlsHook c(&player);
+    ControlsHook const c(&player);
     AURORA_TEST_CHECK_FALSE(player.muted());
     c.mute_button()->on_click();
     AURORA_TEST_CHECK_TRUE(player.muted());

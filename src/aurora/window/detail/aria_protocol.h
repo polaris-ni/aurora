@@ -81,7 +81,9 @@ struct AriaElement {
 [[nodiscard]] auto aria_element_json(const AriaElement &el) -> std::string;
 
 /// @brief 全量载荷（首次应用 / 容器重建）：`{"els":[E…],"focus":N,"rtl":b}`。
+/// @param tree 镜像元素列表（输出为新数组 `els`）。
 /// @param focus 当前聚焦节点 id（0 = 无）
+/// @param rtl 是否从右到左排版（输出为 `rtl` 布尔值）
 [[nodiscard]] auto aria_full_json(const std::vector<AriaElement> &tree, std::uint64_t focus, bool rtl) -> std::string;
 
 /// @brief 增量载荷：`{"ops":[{"op":"remove","id":N}|{"op":"add","el":E}|

@@ -41,7 +41,7 @@ auto make_text(const au::Json &props) -> au::Json { return make_node("Text", pro
 }  // namespace
 
 AURORA_TEST_CASE(codegen_fluent_emits_column_and_button) {
-    au::Json node =
+    au::Json const node =
         make_node("Column", au::Json::object(), testing::json_arr({make_button("OK"), make_button("Cancel")}));
 
     const std::string code = to_code(node);
@@ -57,7 +57,7 @@ AURORA_TEST_CASE(codegen_fluent_emits_column_and_button) {
 
 AURORA_TEST_CASE(codegen_fluent_grid_puts_column_count_in_props) {
     // `au::Grid{a, b, 2}` 不是合法构造（无匹配 ctor）：子节点作构造首参，列数只能经 Props 链式写件发射。
-    au::Json node =
+    au::Json const node =
         make_node("Grid", testing::json_obj({{"columns", 2}}), testing::json_arr({make_button("A"), make_button("B")}));
 
     const std::string code = to_code(node);
@@ -74,8 +74,8 @@ AURORA_TEST_CASE(codegen_fluent_grid_puts_column_count_in_props) {
 AURORA_TEST_CASE(codegen_fluent_pull_to_refresh_child_leads_and_props_chain) {
     // 单子容器迁移后子节点出表、改作构造首参：`au::PullToRefreshProps{ .child = ... }` 已无该成员，
     // 属性只能经链式写件接在第二实参上。
-    au::Json node = make_node("PullToRefresh", testing::json_obj({{"threshold", 40.0}, {"max_pull", 90.0}}),
-                              testing::json_arr({make_button("A")}));
+    au::Json const node = make_node("PullToRefresh", testing::json_obj({{"threshold", 40.0}, {"max_pull", 90.0}}),
+                                    testing::json_arr({make_button("A")}));
 
     const std::string code = to_code(node);
     AURORA_TEST_CHECK_MSG(code.find("au::PullToRefresh(au::Button(") != std::string::npos,
@@ -98,7 +98,7 @@ AURORA_TEST_CASE(codegen_fluent_pull_to_refresh_child_leads_and_props_chain) {
 }
 
 AURORA_TEST_CASE(codegen_designated_init_and_step_by_step_styles) {
-    au::Json node = make_node("Column", au::Json::object(), testing::json_arr({make_button("OK")}));
+    au::Json const node = make_node("Column", au::Json::object(), testing::json_arr({make_button("OK")}));
 
     // DesignatedInit 是 Fluent 的别名：指定初始化器要求 `*Props` 的公有同名成员，而 18 型聚合字段全私有、
     // 其余 58 型不在发射名单内（属性按能力边界省略），故没有一条产物再发设计符。容器子项走构造首参，
@@ -468,7 +468,7 @@ AURORA_TEST_CASE(codegen_step_show_uses_setter_for_shadowed_and_plain_types) {
 AURORA_TEST_CASE(codegen_step_statements_are_complete_and_children_declared_first) {
     // 结构守卫（TC-WIDGET-006 的原始缺陷就是把变量声明写进了初始化列表）：
     // ① 每条非空行都以 `;`、`,`、`{` 或 `}` 收尾；② 子节点变量先声明后被 `std::move` 引用。
-    au::Json node = make_node(
+    au::Json const node = make_node(
         "Column", testing::json_obj({{"gap", 8.0F}}),
         testing::json_arr(
             {make_node("Row", au::Json::object(),

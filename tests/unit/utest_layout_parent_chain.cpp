@@ -253,7 +253,7 @@ class ProbeSingleChild final : public SingleChild {
 
 // 判据①上半：容器连同其子控件一起销毁（Column 路径）时，**不得**产生 detach 告警。
 AURORA_TEST_CASE(normal_container_teardown_emits_no_detach_warning) {
-    LogCapture capture;
+    LogCapture const capture;
     {
         auto col = std::make_shared<Column>();
         col->set_children({Node{DirtyProbe{}}});
@@ -266,7 +266,7 @@ AURORA_TEST_CASE(normal_container_teardown_emits_no_detach_warning) {
 // use_count 基线为 2/3 而非 1——本例钉住「自身持有份数」判别在 SingleChild 上同样静默，
 // 防止实现退化成硬编码 `use_count()==1`（那会让本例转红）。
 AURORA_TEST_CASE(normal_single_child_teardown_emits_no_detach_warning) {
-    LogCapture capture;
+    LogCapture const capture;
     {
         auto sc = std::make_shared<ProbeSingleChild>(Node{DirtyProbe{}});
         drive_layout(*sc);
@@ -276,7 +276,7 @@ AURORA_TEST_CASE(normal_single_child_teardown_emits_no_detach_warning) {
 
 // 判据①下半：子件确实活在容器之外被摘走（Column + 外部持有后 remove_child）时，**必须**告警。
 AURORA_TEST_CASE(detaching_an_externally_held_child_emits_detach_warning) {
-    LogCapture capture;
+    LogCapture const capture;
     auto probe = std::make_shared<DirtyProbe>();
     auto col = std::make_shared<Column>();
     col->set_children({Node{probe}});
@@ -288,7 +288,7 @@ AURORA_TEST_CASE(detaching_an_externally_held_child_emits_detach_warning) {
 
 // 判据①下半（SingleChild 换子路径）：adopt_children 换子时若旧子仍被外部持有，须告警。
 AURORA_TEST_CASE(replacing_an_externally_held_child_emits_detach_warning) {
-    LogCapture capture;
+    LogCapture const capture;
     auto probe = std::make_shared<DirtyProbe>();
     auto col = std::make_shared<Column>();
     col->set_children({Node{probe}});
@@ -299,7 +299,7 @@ AURORA_TEST_CASE(replacing_an_externally_held_child_emits_detach_warning) {
 
 // 判据③：告警正文含被摘控件的类型名，且不再残留 printf 占位符 `%s`。
 AURORA_TEST_CASE(detach_warning_message_embeds_the_child_type_name_without_placeholder) {
-    LogCapture capture;
+    LogCapture const capture;
     auto probe = std::make_shared<DirtyProbe>();
     auto col = std::make_shared<Column>();
     col->set_children({Node{probe}});

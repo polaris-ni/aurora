@@ -196,7 +196,7 @@ AURORA_TEST_CASE(headless_surface_state_seams_dispatch_handlers) {
     AURORA_TEST_CHECK_EQ(present_calls, 1);
 
     // 契约：未接线时 simulate_* 为 no-op（不崩溃）。
-    HeadlessSurface bare;
+    HeadlessSurface const bare;
     bare.simulate_window_state(WindowState::Occluded);
     bare.simulate_window_mode(WindowMode::Minimized);
     bare.simulate_present_request();

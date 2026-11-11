@@ -1,7 +1,6 @@
 #pragma once
 
 #include <functional>
-#include <memory>
 
 #include "aurora/environment/media_query.h"
 #include "aurora/state/read_only_state.h"

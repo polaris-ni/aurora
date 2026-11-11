@@ -5,7 +5,6 @@
 #include <string>
 #include <utility>
 
-#include "aurora/core/color.h"
 #include "aurora/core/font.h"
 #include "aurora/render/painter.h"
 #include "aurora/state/state.h"

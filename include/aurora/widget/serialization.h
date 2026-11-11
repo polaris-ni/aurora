@@ -7,7 +7,6 @@
 #include <vector>
 
 #include "aurora/core/result.h"
-#include "aurora/widget/button.h"
 #include "aurora/widget/props_io.h"
 #include "aurora/widget/widget.h"
 #include "aurora/widget/yaml.h"

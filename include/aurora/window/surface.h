@@ -525,7 +525,7 @@ class Surface {
     ///       不做成「按了没反应还无从知道」的静默 no-op。
     /// @note 本槽追加在虚函数段表尾：既有槽位序号不变（ABI 面仅新增槽，需全量重编）。
     /// @note 入参 `on`：true 显示窗口，false 隐藏窗口（同值重复调用应幂等，不重发 OS 调用）。
-    ///       默认实现刻意不命名该形参（空实现不用它），故以上一条 `@note` 而非 `@param` 申报。
+    ///       默认实现刻意不命名该形参（空实现不用它），故以上一条 note 条目而非 param 条目申报。
     virtual auto set_visible(bool /*on*/) -> void {}
 
     /// @brief 当前是否在用户视野内（`set_visible` 的读回）。
@@ -544,7 +544,7 @@ class Surface {
     /// Wayland 无核心协议对应，属「可查询的不支持」（`capabilities().runtime_always_on_top` 为 false）。
     /// @note 默认空实现 = 该后端未接线；本槽追加在虚函数段表尾（ABI 面仅新增槽）。
     /// @note 入参 `on`：true 置顶，false 取消置顶（同值重复调用应幂等）。默认实现不用该形参，
-    ///       故以 `@note` 申报而不写 `@param`。
+    ///       故以 note 条目申报而不写 param 条目。
     virtual auto set_always_on_top(bool /*on*/) -> void {}
 
     /// @brief 当前是否置顶（`set_always_on_top` 的读回，接线后端按 OS 扩展样式回读）。

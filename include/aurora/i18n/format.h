@@ -213,7 +213,7 @@ struct CivilDate {
                                       DateStyle style = DateStyle::Medium) -> std::string {
     const std::string &lang = loc.language;
     auto p2 = [](int v) -> std::string {
-        std::string s = std::to_string(v);
+        std::string const s = std::to_string(v);
         return s.size() == 1 ? "0" + s : s;
     };
     // 各语言 medium（现行口径）以外的档位；zh/ja 三档同 medium，直接落到末尾的现行分支。

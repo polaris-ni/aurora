@@ -84,7 +84,6 @@
 #include <vector>
 
 #include "aurora/state/state.h"
-#include "aurora/widget/a11y_tree.h"
 #include "aurora/widget/button.h"
 #include "aurora/widget/checkbox.h"
 #include "aurora/widget/containers.h"
@@ -433,7 +432,7 @@ auto emit(const std::string &text) -> void { AURORA_LOG_RAW("verify", text, "\n"
     long lb = 0;
     long ub = 0;
     if (SUCCEEDED(SafeArrayGetLBound(arr, 1, &lb)) && SUCCEEDED(SafeArrayGetUBound(arr, 1, &ub))) {
-        long n = ub - lb + 1;
+        long const n = ub - lb + 1;
         SafeArrayDestroy(arr);
         return n;
     }

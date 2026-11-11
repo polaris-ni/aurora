@@ -307,7 +307,7 @@ AURORA_TEST_CASE(os_scheme_change_via_surface_seam_flips_injection) {
     WindowOptions opts;
     opts.title = "theme_os_change";
     opts.size = Size{.width = 320.0F, .height = 240.0F};
-    Application app{make_scene("os-change"), make_window(headless_opts("theme_os_change")), opts};
+    Application const app{make_scene("os-change"), make_window(headless_opts("theme_os_change")), opts};
     WindowHost *const host = app.windows().front();
     HeadlessSurface *const surface = surface_of(host);
     AURORA_TEST_REQUIRE_NOT_NULL(surface);
@@ -348,7 +348,7 @@ AURORA_TEST_CASE(teardown_unbinds_os_color_scheme_handler) {
     WindowOptions opts;
     opts.title = "theme_os_unbind";
     opts.size = Size{.width = 320.0F, .height = 240.0F};
-    Application app{make_scene("os-unbind"), make_window(headless_opts("theme_os_unbind")), opts};
+    Application const app{make_scene("os-unbind"), make_window(headless_opts("theme_os_unbind")), opts};
     WindowHost *const host = app.windows().front();
     HeadlessSurface *const surface = surface_of(host);
     AURORA_TEST_REQUIRE_NOT_NULL(surface);

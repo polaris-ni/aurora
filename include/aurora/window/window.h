@@ -4,7 +4,6 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
-#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -790,7 +789,7 @@ class Window {
             return bf;
         }
 
-        BuildContext ctx = prepare_context(presented, app_root_changed);
+        BuildContext const ctx = prepare_context(presented, app_root_changed);
         const double layout_ms = run_layout(presented, plan, ctx);
         const double paint_ms = run_paint(p, presented, ctx, plan);
         // 无障碍根注入：布局与绘制都完成后语义树几何才有效，故放在 paint 之后。
@@ -1417,7 +1416,7 @@ class Window {
         const auto t_paint_start = std::chrono::steady_clock::now();
         {
             AURORA_PROFILE_SCOPE("Window::paint");
-            detail::PaintTimer scene_guard{&detail::paint_timing().scene};  // [性能排查] 整段 widget 绘制耗时
+            detail::PaintTimer const scene_guard{&detail::paint_timing().scene};  // [性能排查] 整段 widget 绘制耗时
 #ifdef AURORA_ENABLE_DEBUG
             // 调试帧计数器前移：使本帧 render_into 打的重绘标记与当前帧一致（repaint_highlight 时序）。
             if (debug::any_flag_enabled()) {

@@ -244,7 +244,7 @@ AURORA_TEST_CASE(highlight_does_not_bleed_into_neighbor_row) {
 
     FocusManager fm;
     fm.set_root(&col);
-    Sink dispatch = [&](MouseAction action, float x, float y) -> void {
+    Sink const dispatch = [&](MouseAction action, float x, float y) -> void {
         MouseEvent e;
         e.action = action;
         e.button = MouseButton::Left;
@@ -303,7 +303,7 @@ AURORA_TEST_CASE(neighbor_rows_unselected_and_uncolored_under_cleartype) {
 
     FocusManager fm;
     fm.set_root(&col);
-    Sink dispatch = [&](MouseAction action, float x, float y) -> void {
+    Sink const dispatch = [&](MouseAction action, float x, float y) -> void {
         MouseEvent e;
         e.action = action;
         e.button = MouseButton::Left;
@@ -615,7 +615,7 @@ AURORA_TEST_CASE(dispatcher_click_focus_enables_ctrl_c_copy) {
 
     FocusManager fm;
     fm.set_root(&col);
-    Sink dispatch = [&](MouseAction action, float x, float y) -> void {
+    Sink const dispatch = [&](MouseAction action, float x, float y) -> void {
         MouseEvent e;
         e.action = action;
         e.button = MouseButton::Left;

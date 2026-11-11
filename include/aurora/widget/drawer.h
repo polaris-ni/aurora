@@ -7,7 +7,6 @@
 #include <vector>
 
 #include "aurora/event/focus.h"
-#include "aurora/render/painter.h"
 #include "aurora/state/state.h"
 #include "aurora/widget/descriptor.h"
 #include "aurora/widget/progress.h"

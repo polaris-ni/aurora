@@ -503,7 +503,7 @@ class ListView : public Widget {
         items_.erase(items_.begin() + row);
         // 修正选中：删除项移除，之后的行号前移
         std::vector<int> fixed;
-        for (int s : selection_) {
+        for (int const s : selection_) {
             if (s == row) {
                 continue;
             }

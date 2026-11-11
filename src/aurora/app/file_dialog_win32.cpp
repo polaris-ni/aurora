@@ -205,13 +205,13 @@ auto open_file(const Options &opts) -> Result<std::vector<std::string>> {
     if (!interactive) {
         return std::vector<std::string>{};
     }
-    ComInit com;
+    ComInit const com;
     if (!com) {
         AURORA_LOG_WARN("file_dialog", "CoInitializeEx failed, cannot open file dialog");
         return make_error(ErrorCode::PlatformComInitFailed, "CoInitializeEx failed");
     }
     IFileOpenDialog *pfd = nullptr;
-    HRESULT hr =
+    HRESULT const hr =
         CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_IFileOpenDialog,
                          reinterpret_cast<void **>(&pfd));  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
     if (FAILED(hr) || (pfd == nullptr)) {
@@ -263,13 +263,13 @@ auto save_file(const Options &opts) -> Result<std::string> {
     if (!interactive) {
         return std::string{};
     }
-    ComInit com;
+    ComInit const com;
     if (!com) {
         AURORA_LOG_WARN("file_dialog", "CoInitializeEx failed, cannot save file dialog");
         return make_error(ErrorCode::PlatformComInitFailed, "CoInitializeEx failed");
     }
     IFileSaveDialog *pfs = nullptr;
-    HRESULT hr =
+    HRESULT const hr =
         CoCreateInstance(CLSID_FileSaveDialog, nullptr, CLSCTX_INPROC_SERVER, IID_IFileSaveDialog,
                          reinterpret_cast<void **>(&pfs));  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
     if (FAILED(hr) || (pfs == nullptr)) {
@@ -313,7 +313,7 @@ auto open_folder(const Options &opts) -> Result<std::string> {
     if (!interactive) {
         return std::string{};
     }
-    ComInit com;
+    ComInit const com;
     if (!com) {
         AURORA_LOG_WARN("file_dialog", "CoInitializeEx failed, cannot select folder");
         return make_error(ErrorCode::PlatformComInitFailed, "CoInitializeEx failed");

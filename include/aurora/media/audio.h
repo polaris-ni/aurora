@@ -328,13 +328,13 @@ class AudioParam {
     /// @brief COW 快照读取：拷贝指针即持有旧链生命期，锁外求值安全。
     /// @return 当前事件链的只读共享指针。
     [[nodiscard]] auto events_snapshot() const -> std::shared_ptr<const EventList> {
-        std::scoped_lock lock(events_mutex_);
+        std::scoped_lock const lock(events_mutex_);
         return events_;
     }
     /// @brief COW 快照写入（UI 线程排程末尾整体替换）。
     /// @param next 新事件链快照。
     auto set_events(std::shared_ptr<const EventList> next) -> void {
-        std::scoped_lock lock(events_mutex_);
+        std::scoped_lock const lock(events_mutex_);
         events_ = std::move(next);
     }
 

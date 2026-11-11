@@ -110,7 +110,7 @@ AURORA_TEST_CASE(widget_with_blur_modifier_paints) {
     t->set_content(LocalizedString{"blurred text"});
     t->set_modifier(Modifier{}.background(Color(255, 0, 0, 255)).blur(2.0F));
 
-    BuildContext ctx;
+    BuildContext const ctx;
     t->mount(ctx);
     Constraints c;
     c.min = Size{.width = 0.0F, .height = 0.0F};
@@ -128,7 +128,7 @@ AURORA_TEST_CASE(widget_with_backdrop_filter_paints) {
     t->set_content(LocalizedString{"frosted"});
     t->set_modifier(Modifier{}.backdrop_filter(4.0F).background(Color(255, 255, 255, 120)));
 
-    BuildContext ctx;
+    BuildContext const ctx;
     t->mount(ctx);
     Constraints c;
     c.min = Size{.width = 0.0F, .height = 0.0F};

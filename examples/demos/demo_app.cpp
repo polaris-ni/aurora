@@ -19,7 +19,7 @@ auto main() -> int {
         gap(12.0F),
         std::move(line2),
     });
-    aurora::Node tree{std::move(root)};  // 单一宿主：inspector 与 App 各持一份共享句柄
+    aurora::Node const tree{std::move(root)};  // 单一宿主：inspector 与 App 各持一份共享句柄
 
 #ifdef AURORA_BUILD_INSPECTOR_SERVER
     // 无人值守取证通道（opt-in：未设 AURORA_INSPECTOR_PORT 时完全静默，不影响本载体

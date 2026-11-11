@@ -309,10 +309,10 @@ AURORA_TEST_CASE(page_view_api_surface) {
     AURORA_TEST_CHECK_EQ(psigs.sources().size(), 1U);  // 仅 current_
     (void)pv.describe();
 
-    PageView under{std::vector<Node>{Node{a}, Node{b}, Node{c}}, -5};
+    PageView const under{std::vector<Node>{Node{a}, Node{b}, Node{c}}, -5};
     AURORA_TEST_CHECK_EQ(under.current_page(), 0);  // 负 → 夹到 0
 
-    PageView empty{std::vector<Node>{}, 9};
+    PageView const empty{std::vector<Node>{}, 9};
     AURORA_TEST_CHECK_EQ(empty.page_count(), 0U);
     AURORA_TEST_CHECK_EQ(empty.current_page(), 0);
 }
@@ -482,13 +482,13 @@ AURORA_TEST_CASE(drawer_hit_test_branches) {
     // 关闭且空：无命中。
     Drawer closed{Node{}, Node{}};
     LayoutEngine::layout(closed, bounded(800.0F, 600.0F));
-    Widget *none = closed.hit_test(Point{.x = 400.0F, .y = 300.0F},
-                                   Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = closed.size()}, ctx);
+    Widget *const none = closed.hit_test(Point{.x = 400.0F, .y = 300.0F},
+                                         Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = closed.size()}, ctx);
     AURORA_TEST_CHECK_EQ(none, nullptr);
 }
 
 AURORA_TEST_CASE(progress_dialog_layout_paint_hit_test) {
-    BuildContext ctx;
+    BuildContext const ctx;
     Painter p;
     constexpr Rect box{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 400.0F, .height = 300.0F}};
 

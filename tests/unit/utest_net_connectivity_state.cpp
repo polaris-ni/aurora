@@ -5,7 +5,6 @@
 ///           故三平台行为一致、wasm 腿同样可跑，无需 `AURORA_TEST_SKIP`；平台采集腿的真实读数
 ///           由 `connectivity_probe.cpp` 提供，本文件用 `optional<bool>` 直接驱动状态机。
 #include <chrono>
-#include <cstdint>
 #include <optional>
 
 #include "aurora/core/error_codes.h"

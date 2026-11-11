@@ -60,7 +60,7 @@ AURORA_TEST_CASE(api_surface_and_select) {
     int sel2 = -1;
     bar.set_on_select([&](int i) { sel2 = i; });
 
-    BuildContext ctx;
+    BuildContext const ctx;
     const Constraints c{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = 300.0F, .height = 200.0F}};
     const Size sz = bar.layout(c, ctx);
     AURORA_TEST_CHECK_EQ(sz.height, 50.0F);  // min(栏高, 可用高)
@@ -121,7 +121,7 @@ AURORA_TEST_CASE(serialize_deserialize_roundtrip) {
 AURORA_TEST_CASE(bottom_nav_bar_colors_follow_theme_when_unset) {
     // 两态语义：未显式设色时读件取主题角色；主题翻转 ⇒ 解析值翻转（换肤生效）。
     const BuildContext bare;  // 无注入：inherit_theme 回落 light
-    BottomNavBar bar;
+    BottomNavBar const bar;
     AURORA_TEST_CHECK(bar.background_color(bare) == Color(255, 255, 255));  // light surface
     AURORA_TEST_CHECK(bar.divider_color(bare) == Color(198, 198, 198));  // light outline_variant
     AURORA_TEST_CHECK(bar.selected_color(bare) == Color(0, 0, 255));  // light primary

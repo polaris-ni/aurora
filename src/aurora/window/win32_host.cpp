@@ -1300,7 +1300,7 @@ auto WINAPI Win32Host::Impl::wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             if (self->clipboard != nullptr && detail::win32_clipboard_render_format(hwnd, static_cast<unsigned>(wp))) {
                 return 0;
             }
-            break;
+            return DefWindowProcA(hwnd, msg, wp, lp);
         case WM_DESTROYCLIPBOARD:
             detail::win32_clipboard_destroy_clipboard();
             return 0;

@@ -93,7 +93,7 @@ AURORA_TEST_CASE(co_async_captures_fn_exception_as_error) {
     // 闭包为用例局部变量，协程在返回帧销毁前经 wait_until 确认完成，闭包存活期覆盖协程生命周期。
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-capturing-lambda-coroutines)
     auto coro = [&box]() -> CoroTask<int> {
-        Result<int> r = co_await co_async([]() -> int { throw std::runtime_error{"inner boom"}; });
+        Result<int> const r = co_await co_async([]() -> int { throw std::runtime_error{"inner boom"}; });
         if (!r.ok()) {
             box.set_value(r.error());
         }
@@ -119,7 +119,7 @@ AURORA_TEST_CASE(co_async_preserves_result_error_from_fn) {
     // 闭包为用例局部变量，协程在返回帧销毁前经 wait_until 确认完成，闭包存活期覆盖协程生命周期。
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-capturing-lambda-coroutines)
     auto coro = [&box]() -> CoroTask<int> {
-        Result<int> r = co_await co_async([]() -> Result<int> {
+        Result<int> const r = co_await co_async([]() -> Result<int> {
             return Result<int>{make_error(ErrorCode::GeneralInvalidArgument, std::string{"passthrough boom"})};
         });
         if (!r.ok()) {

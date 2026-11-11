@@ -469,7 +469,7 @@ AURORA_TEST_CASE(row_rtl_via_environment_mirrors_children) {
     Row ltr;
     ltr.add(box(40.0F, 20.0F));
     ltr.add(box(60.0F, 20.0F));
-    BuildContext plain;
+    BuildContext const plain;
     ltr.mount(plain);
     ltr.layout(bounded(300.0F, 100.0F), plain);
     AURORA_TEST_CHECK_NEAR(ltr.child_nodes()[0].bounds().origin.x, 0.0F, 1e-4F);

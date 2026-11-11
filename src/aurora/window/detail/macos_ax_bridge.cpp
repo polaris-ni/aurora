@@ -97,6 +97,7 @@ namespace {
 
 /// @brief 子角色：只在有专门语义时返回常量，其余 nil。
 /// @param role 语义角色。
+/// @param state 控件可访问性状态（密码框据此映射安全输入子角色）。
 /// @return AppKit 子角色常量或 nil。
 [[nodiscard]] auto ax_subrole(AccessibilityRole role, const AccessibilityState &state) -> NSString * {
     if (role == AccessibilityRole::Switch) {

@@ -318,7 +318,7 @@ AURORA_TEST_CASE(animator_remove_is_idempotent_and_stops_writes) {
     AURORA_TEST_CHECK_EQ(target.get(), frozen);  // 注销后 tick 不再写
 
     anim.remove(c);  // 重复注销幂等
-    AnimationController never{1.0};  // 从未登记
+    AnimationController const never{1.0};  // 从未登记
     anim.remove(never);
     AURORA_TEST_CHECK_FALSE(anim.has_active());
 }

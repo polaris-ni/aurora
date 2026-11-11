@@ -12,7 +12,6 @@
 #include "aurora/environment/build_context.h"
 #include "aurora/navigation/navigator_host.h"
 #include "aurora/render/painter.h"
-#include "aurora/state/state.h"
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_navigator_host {
@@ -90,7 +89,7 @@ AURORA_TEST_CASE(host_animated_push_transition_lifecycle) {
     NavigatorHost host(anim);
     host.push(Route{solid_page(Color{255, 0, 0}), "home"});
 
-    BuildContext ctx;
+    BuildContext const ctx;
     host.mount(ctx);
     host.push(Route{solid_page(Color{0, 0, 255}), "detail", animated_transition()});
 
@@ -140,7 +139,7 @@ AURORA_TEST_CASE(host_pop_transitions_and_completes) {
     host.push(Route{solid_page(Color{255, 0, 0}), "home"});
     host.push(Route{solid_page(Color{0, 0, 255}), "detail"});
 
-    BuildContext ctx;
+    BuildContext const ctx;
     host.mount(ctx);
     AURORA_TEST_CHECK_TRUE(host.pop());  // pop 默认 Fade 转场
 
@@ -165,7 +164,7 @@ AURORA_TEST_CASE(host_push_replacement_transitions_in_place) {
     Animator anim;
     NavigatorHost host(anim);
     host.push(Route{solid_page(Color{255, 0, 0}), "home"});
-    BuildContext ctx;
+    BuildContext const ctx;
     host.mount(ctx);
 
     host.push_replacement(Route{solid_page(Color{0, 160, 0}), "edited", animated_transition()});
@@ -193,7 +192,7 @@ AURORA_TEST_CASE(host_open_uri_replaces_stack_without_transition) {
     Animator anim;
     NavigatorHost host(anim);
     host.push(Route{solid_page(Color{255, 0, 0}), "home"});
-    BuildContext ctx;
+    BuildContext const ctx;
     host.mount(ctx);
     host.push(Route{solid_page(Color{0, 0, 255}), "detail"});
 
@@ -217,7 +216,7 @@ AURORA_TEST_CASE(host_unanimated_page_swap_marks_layout_dirty) {
     Animator anim;
     NavigatorHost host(anim);
     host.push(Route{solid_page(Color{255, 0, 0}), "home"});
-    BuildContext ctx;
+    BuildContext const ctx;
     host.mount(ctx);
 
     std::vector<bool> flags;
@@ -262,8 +261,8 @@ AURORA_TEST_CASE(host_hit_test_delegates_to_current_page) {
     auto page = std::make_shared<SolidBox>(Color{255, 0, 0});
     host.push(Route{Node{page}, "home"});
 
-    BuildContext ctx;
-    Widget *hit = host.hit_test(Point{.x = 50.0F, .y = 25.0F}, full_rect(100.0F, 50.0F), ctx);
+    BuildContext const ctx;
+    Widget *const hit = host.hit_test(Point{.x = 50.0F, .y = 25.0F}, full_rect(100.0F, 50.0F), ctx);
     AURORA_TEST_CHECK_EQ(hit, page.get());
 
     const Widget *miss = host.hit_test(Point{.x = 150.0F, .y = 25.0F}, full_rect(100.0F, 50.0F), ctx);
@@ -276,7 +275,7 @@ AURORA_TEST_CASE(host_hit_test_chain_delegates_to_current_page) {
     auto page = std::make_shared<SolidBox>(Color{255, 0, 0});
     host.push(Route{Node{page}, "home"});
 
-    BuildContext ctx;
+    BuildContext const ctx;
     const Rect box = full_rect(100.0F, 50.0F);
 
     // 事件派发走命中链（EventDispatcher::dispatch_mouse → Widget::hit_test_chain）：链须自宿主

@@ -24,7 +24,7 @@ auto main() -> int {
                  .font = au::Font{.size_pt = 14.0F},
                  .color = pal::AURORA_MUTED},
     };
-    au::State<std::vector<TextSpan>> state{std::move(spans)};
+    au::State<std::vector<TextSpan>> const state{std::move(spans)};
     au::RichText rt{state};
 
     au::Node root = au::Column{

@@ -1,7 +1,7 @@
 #pragma once
 
 /// @brief HTTP 头集合值类型。
-/// @file core/headers.h
+/// @file headers.h
 ///
 /// `Headers` 表达一组「字段名 → 值」，是 HTTP/SSE/WebSocket 握手与 Inspector 共用的基础件。
 /// 三条来自 RFC 9110 §5 的语义约束决定了它不能用 `std::map<string,string>` 顶替：

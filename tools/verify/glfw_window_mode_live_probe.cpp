@@ -48,7 +48,6 @@
 // macOS 下原生几何观测未实现，该平台仅验快照 + 零 WARN（几何覆盖降级为 NOTE）。
 
 #include <chrono>
-#include <cstdint>
 #include <optional>
 #include <string>
 #include <thread>

@@ -27,7 +27,6 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
-#include <ios>
 #include <iterator>
 #include <memory>
 #include <span>
@@ -508,7 +507,7 @@ AURORA_TEST_CASE(export_pdf_draws_each_page_in_ascending_order) {
 }
 
 AURORA_TEST_CASE(print_targets_reports_an_empty_system_as_success) {
-    PrintBackendGuard guard;
+    PrintBackendGuard const guard;
     FakePrintState state;
     state.targets.clear();
     install_fake_print_backend(state);
@@ -520,7 +519,7 @@ AURORA_TEST_CASE(print_targets_reports_an_empty_system_as_success) {
 }
 
 AURORA_TEST_CASE(print_targets_lists_every_target_from_the_backend) {
-    PrintBackendGuard guard;
+    PrintBackendGuard const guard;
     FakePrintState state;
     install_fake_print_backend(state);
 
@@ -535,7 +534,7 @@ AURORA_TEST_CASE(print_targets_lists_every_target_from_the_backend) {
 }
 
 AURORA_TEST_CASE(print_session_composites_pages_before_submission) {
-    PrintBackendGuard guard;
+    PrintBackendGuard const guard;
     FakePrintState state;
     install_fake_print_backend(state);
 
@@ -591,7 +590,7 @@ AURORA_TEST_CASE(print_session_composites_pages_before_submission) {
 }
 
 AURORA_TEST_CASE(print_session_rejects_mismatched_pages_and_bad_arguments) {
-    PrintBackendGuard guard;
+    PrintBackendGuard const guard;
     FakePrintState state;
     install_fake_print_backend(state);
 
@@ -665,7 +664,7 @@ AURORA_TEST_CASE(desktop_shell_capability_bits_follow_the_wired_bridges) {
 }
 
 AURORA_TEST_CASE(print_session_requires_a_wired_backend) {
-    PrintBackendGuard guard;
+    PrintBackendGuard const guard;
 #if defined(AURORA_PLATFORM_WINDOWS) || (defined(AURORA_PLATFORM_MACOS) && defined(AURORA_BACKEND_MACOS))
     // Win32 / macOS 有可按需自举的真桥：清掉伪造槽位后公共入口会去枚举真打印机，不适合无头断言。
     AURORA_TEST_SKIP("native print bridge boots on demand on this platform; unsupported degradation is not reachable");

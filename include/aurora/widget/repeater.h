@@ -103,7 +103,7 @@ class Repeater : public Container {
         float y = bounds.origin.y;
         for (Node &child : children_) {
             const Size s = child.widget().size();
-            Rect child_bounds{.origin = Point{.x = bounds.origin.x, .y = y}, .size = s};
+            Rect const child_bounds{.origin = Point{.x = bounds.origin.x, .y = y}, .size = s};
             child.widget().paint(p, child_bounds, ctx);
             y += s.height;
         }

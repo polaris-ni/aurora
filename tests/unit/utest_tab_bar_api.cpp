@@ -81,14 +81,14 @@ auto themed_ctx(const Theme &t) -> std::pair<std::shared_ptr<Environment>, Build
 
 AURORA_TEST_CASE(constructor_clamps_initial_selection) {
     // 默认构造：选中 0。
-    TabBar def;
+    TabBar const def;
     AURORA_TEST_CHECK_EQ(def.selected(), 0);
     AURORA_TEST_CHECK_EQ(def.tab_count(), 0U);
 
     // 初始越界：超出尾端钳到末项、负数钳到 0。
-    TabBar over{std::vector<Tab>{make_tab("A"), make_tab("B"), make_tab("C")}, 99};
+    TabBar const over{std::vector<Tab>{make_tab("A"), make_tab("B"), make_tab("C")}, 99};
     AURORA_TEST_CHECK_EQ(over.selected(), 2);
-    TabBar under{std::vector<Tab>{make_tab("A"), make_tab("B")}, -5};
+    TabBar const under{std::vector<Tab>{make_tab("A"), make_tab("B")}, -5};
     AURORA_TEST_CHECK_EQ(under.selected(), 0);
 
     AURORA_TEST_CHECK_EQ(std::string(def.type_name()), "TabBar");
@@ -232,7 +232,7 @@ AURORA_TEST_CASE(pointer_event_selects_and_closes_tab) {
     bar.add_tab(a);
     bar.add_tab(b);
     bar.set_active_color(Color{1, 2, 3, 255});  // 避免 on_paint 走 inherit_theme
-    BuildContext ctx;
+    BuildContext const ctx;
     bar.mount(ctx);
     LayoutEngine::layout(bar, bounded(320.0F, 240.0F));
 
@@ -259,7 +259,7 @@ AURORA_TEST_CASE(pointer_event_selects_and_closes_tab) {
 AURORA_TEST_CASE(pointer_event_content_area_falls_through) {
     TabBar bar;
     bar.add_tab(make_tab("A"));  // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks) 内容区 y >= 栏高
-    BuildContext ctx;
+    BuildContext const ctx;
     bar.mount(ctx);
     LayoutEngine::layout(bar, bounded(320.0F, 240.0F));
 
@@ -319,12 +319,12 @@ AURORA_TEST_CASE(paint_and_hit_test_exercise_render_paths) {
     bar.add_tab(make_tab("B"));  // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
     bar.set_active_color(Color{200, 100, 50, 255});
     bar.set_indicator_thickness(2.0F);
-    BuildContext ctx;
+    BuildContext const ctx;
     bar.mount(ctx);
     LayoutEngine::layout(bar, bounded(320.0F, 240.0F));
 
     Painter painter;
-    Rect bounds{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 320.0F, .height = 240.0F}};
+    Rect const bounds{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 320.0F, .height = 240.0F}};
     bar.paint(painter, bounds, ctx);  // 覆盖 on_paint / paint_tab（选中背景+指示器+文本）
 
     // 标签栏区域命中自身；内容区命中选中子树（LeafProbe）。
@@ -343,7 +343,7 @@ AURORA_TEST_CASE(children_traversal_and_mount_lifecycle) {
     auto b = std::make_shared<LeafProbe>();
     bar.add_tab(Tab{.label = "A", .content = Node{a}});
     bar.add_tab(Tab{.label = "B", .content = Node{b}});
-    BuildContext ctx;
+    BuildContext const ctx;
     bar.mount(ctx);
     AURORA_TEST_CHECK_EQ(a->mounts, 1);
     AURORA_TEST_CHECK_EQ(b->mounts, 1);
@@ -399,7 +399,7 @@ AURORA_TEST_CASE(font_size_follows_type_scale_when_unset) {
 
     const BuildContext bare_ctx;
     Painter painter;
-    Rect bounds{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 640.0F, .height = 240.0F}};
+    Rect const bounds{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 640.0F, .height = 240.0F}};
 
     TabBar scaled;
     fill_bar(scaled);

@@ -100,7 +100,7 @@ AURORA_TEST_CASE(enter_key_reaches_submit_callback_via_dispatcher) {
 
 AURORA_TEST_CASE(props_constructor_sets_initial_state) {
     const TextInputProps props = TextInputProps().set_value("init").set_placeholder("ph").set_font_size(16.0F);
-    TextInput ti{props};
+    TextInput const ti{props};
     AURORA_TEST_CHECK_EQ(ti.value(), std::string{"init"});
 
     Json out = Json::object();
@@ -139,7 +139,7 @@ AURORA_TEST_CASE(read_only_flag_state_and_serialization) {
 
     // 默认只读=false 时不落盘（键省略语义）。
     Json defaults = Json::object();
-    TextInput def;
+    TextInput const def;
     def.serialize_props(defaults);
     AURORA_TEST_CHECK_FALSE(defaults.contains("read_only"));
 }
@@ -390,7 +390,7 @@ AURORA_TEST_CASE(serialize_deserialize_roundtrip_and_defaults) {
 
     // 默认值省略语义：未设置的键不落盘。
     Json defaults = Json::object();
-    TextInput def;
+    TextInput const def;
     def.serialize_props(defaults);
     AURORA_TEST_CHECK_FALSE(defaults.contains("focused_border_color"));  // 保留「跟随主题」语义
     AURORA_TEST_CHECK_FALSE(defaults.contains("max_length"));
@@ -399,7 +399,7 @@ AURORA_TEST_CASE(serialize_deserialize_roundtrip_and_defaults) {
 
 AURORA_TEST_CASE(cursor_shape_hook_defaults_to_ibeam) {
     // TextInput 悬停默认 IBeam（控件级虚钩子）；修饰链显式声明在派发器解析时优先，此处只验钩子值。
-    TextInput ti;
+    TextInput const ti;
     AURORA_TEST_CHECK(ti.cursor_shape() == std::optional{CursorShape::IBeam});
 }
 
@@ -431,7 +431,7 @@ AURORA_TEST_CASE(rtl_arrow_keys_invert_logical_direction) {
     TextInput ltr;
     ltr.on_focus_change(true);
     ltr.on_text_input(seed);
-    BuildContext plain;
+    BuildContext const plain;
     ltr.mount(plain);
     ltr.layout(bounded(300.0F, 60.0F), plain);
     ltr.on_key_event(right);
@@ -656,7 +656,7 @@ AURORA_TEST_CASE(rtl_caret_paints_at_right_edge) {
     TextInput ltr;
     ltr.set_value("ab").set_cursor_color(magenta);
     ltr.on_focus_change(true);
-    BuildContext plain;
+    BuildContext const plain;
     ltr.mount(plain);
     ltr.layout(bounded(200.0F, 60.0F), plain);
     const float ltr_x = paint_caret_min_x(ltr, plain);
@@ -664,7 +664,7 @@ AURORA_TEST_CASE(rtl_caret_paints_at_right_edge) {
     TextInput rtl;
     rtl.set_value("ab").set_cursor_color(magenta).set_direction(TextDirection::RTL);
     rtl.on_focus_change(true);
-    BuildContext plain2;
+    BuildContext const plain2;
     rtl.mount(plain2);
     rtl.layout(bounded(200.0F, 60.0F), plain2);
     const float rtl_x = paint_caret_min_x(rtl, plain2);
@@ -754,7 +754,7 @@ AURORA_TEST_CASE(narrow_box_pointer_hit_maps_through_horizontal_viewport) {
     TextInput ti;
     ti.set_value(long_text).set_padding(EdgeInsets{.left = 4.0F, .top = 4.0F, .right = 4.0F, .bottom = 4.0F});
     ti.on_focus_change(true);
-    BuildContext ctx;
+    BuildContext const ctx;
     ti.mount(ctx);
     ti.layout(bounded(80.0F, 40.0F), ctx);
 
@@ -788,7 +788,7 @@ AURORA_TEST_CASE(direction_prop_serialization_roundtrip) {
     AURORA_TEST_CHECK_TRUE(dst.direction() == TextDirection::RTL);
 
     Json defaults = Json::object();
-    TextInput def;
+    TextInput const def;
     def.serialize_props(defaults);
     AURORA_TEST_CHECK_FALSE(defaults.contains("direction"));  // 未设置不落盘
 }
@@ -1104,7 +1104,7 @@ AURORA_TEST_CASE(paint_obscured_selection_preedit_and_border) {
 // ---- `value` 可写来源行：库内第一枚双向绑定 ----
 
 AURORA_TEST_CASE(typed_edits_write_through_the_bound_value_source) {
-    State<std::string> model{std::string{}};
+    State<std::string> const model{std::string{}};
     TextInput field{TextInputProps().set_value(model)};
     int rounds = 0;
     std::string seen;
@@ -1137,8 +1137,8 @@ AURORA_TEST_CASE(typed_edits_write_through_the_bound_value_source) {
 }
 
 AURORA_TEST_CASE(set_value_handle_is_the_only_way_to_swap_the_value_source) {
-    State<std::string> first{std::string{}};
-    State<std::string> second{std::string{}};
+    State<std::string> const first{std::string{}};
+    State<std::string> const second{std::string{}};
     TextInput field{TextInputProps().set_value(first)};
     field.on_focus_change(true);
 
@@ -1162,7 +1162,7 @@ AURORA_TEST_CASE(deserialize_writes_through_the_bound_value_source) {
     src.serialize_props(props);
     AURORA_TEST_CHECK_TRUE(props.contains("value"));  // 必填行恒落盘（与「等于回落就省略」的可空行不同）
 
-    State<std::string> model{std::string{"old"}};
+    State<std::string> const model{std::string{"old"}};
     int rounds = 0;
     const auto sub = model.subscribe([&rounds](const std::string &) -> void { ++rounds; });
     AURORA_TEST_CHECK_EQ(rounds, 1);
@@ -1178,7 +1178,7 @@ AURORA_TEST_CASE(deserialize_writes_through_the_bound_value_source) {
 
 AURORA_TEST_CASE(color_and_border_rows_fall_back_to_theme_tokens_when_unset) {
     const BuildContext bare;  // 无注入：inherit_theme 回落 light（与 OS 未表态同口径）
-    TextInput ti;
+    TextInput const ti;
     AURORA_TEST_CHECK_TRUE(ti.cursor_color(bare) == Theme::light().roles.on_surface);
     AURORA_TEST_CHECK_TRUE(ti.text_color(bare) == Theme::light().roles.on_surface);
     AURORA_TEST_CHECK_TRUE(ti.placeholder_color(bare) == Theme::light().roles.on_surface_variant);

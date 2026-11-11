@@ -60,7 +60,7 @@ AURORA_TEST_CASE(literal_ctor_tracks_own_value) {
 
 AURORA_TEST_CASE(external_source_tracks_upstream_without_writing_back) {
     // 纯展示件：外部只读来源随上游变化；set_value 换回自有来源，不代写上游。
-    State<double> upstream{0.25};
+    State<double> const upstream{0.25};
     ProgressIndicator p{upstream};
     AURORA_TEST_CHECK_NEAR(p.value(), 0.25, 1e-4);  // 初值来自上游
 
@@ -79,7 +79,7 @@ AURORA_TEST_CASE(collect_signals_reflects_active_source) {
     solo.collect_signals(solo_signals);
     AURORA_TEST_CHECK_EQ(solo_signals.sources().size(), std::size_t{1});  // 仅内部来源
 
-    State<double> upstream{0.0};
+    State<double> const upstream{0.0};
     ProgressIndicator bound{upstream};
     StateSink bound_signals;
     bound.collect_signals(bound_signals);
@@ -88,10 +88,10 @@ AURORA_TEST_CASE(collect_signals_reflects_active_source) {
 
 AURORA_TEST_CASE(mounted_swap_source_resubscribes_old_and_new) {
     // 挂载后换源必须「退旧 + 订新」：A、B 初值相等，换源不能靠值比较判得失。
-    State<double> a{0.5};
-    State<double> b{0.5};
+    State<double> const a{0.5};
+    State<double> const b{0.5};
     ProgressIndicator p{a};
-    BuildContext ctx;
+    BuildContext const ctx;
     p.mount(ctx);
 
     int dirty = 0;

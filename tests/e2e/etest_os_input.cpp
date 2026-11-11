@@ -28,7 +28,6 @@
 // X11Surface 取 native_display 需要完整类型；aurora.h 不含后端头，且本类仅在
 // `AURORA_PLATFORM_LINUX && AURORA_BACKEND_X11` 下声明（头内自门控，pimpl 不含 Xlib，
 // 无条件 include 安全）——后端关闭的配置下用例体走编译期 skip 桩，不触达该类型。
-#include "aurora/window/x11_surface.h"
 #include "e2e/harness.h"
 #include "e2e/os_input.h"
 #include "e2e_expect.h"

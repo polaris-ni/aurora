@@ -252,7 +252,7 @@ AURORA_TEST_CASE(logical_snapshots_match_golden_baseline) {
     for (const Scenario &sc : scenarios()) {
         AURORA_TEST_TRACE(std::string{"scenario "} + sc.name);
         Node root = sc.build();
-        Json snap = render_to_logical_snapshot(root, view_w, view_h);
+        Json const snap = render_to_logical_snapshot(root, view_w, view_h);
         out.set(sc.name, snap);
 
         if (regen) {

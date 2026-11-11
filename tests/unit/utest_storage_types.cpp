@@ -108,7 +108,7 @@ AURORA_TEST_CASE(storage_bytes_value_semantics) {
 
 AURORA_TEST_CASE(storage_change_callback_receives_event) {
     // StorageChangeCallback 签名：以 const 引用接收事件，字段完整传递。
-    aus::StorageChange sent{.op = aus::StorageChange::Operation::Remove, .id = "k1"};
+    aus::StorageChange const sent{.op = aus::StorageChange::Operation::Remove, .id = "k1"};
     aus::StorageChange received{.op = aus::StorageChange::Operation::Put, .id = ""};
 
     const aus::StorageChangeCallback cb = [&received](const aus::StorageChange &ch) -> void { received = ch; };

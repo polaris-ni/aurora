@@ -482,7 +482,7 @@ AURORA_TEST_CASE(initial_state_is_stopped) {
         "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
         "semantics)");
 #else
-    InspectorServer server(tree_getter);
+    InspectorServer const server(tree_getter);
     AURORA_TEST_CHECK_EQ(server.is_running(), false);
     AURORA_TEST_CHECK_EQ(server.port(), 0);
 #endif
@@ -494,7 +494,7 @@ AURORA_TEST_CASE(start_and_stop_lifecycle) {
         "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
         "semantics)");
 #else
-    InspectorServer server(tree_getter);
+    InspectorServer const server(tree_getter);
     // 端口传 0：由系统分配临时端口，规避并行用例间的端口冲突。
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
     AURORA_TEST_CHECK_EQ(server.is_running(), true);
@@ -512,7 +512,7 @@ AURORA_TEST_CASE(start_twice_while_running_fails) {
         "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
         "semantics)");
 #else
-    InspectorServer server(tree_getter);
+    InspectorServer const server(tree_getter);
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
     // 已运行时再次 start 必须拒绝（而不是悄悄重启或泄漏 socket）。
     AURORA_TEST_CHECK_EQ(server.start(0), false);
@@ -548,13 +548,13 @@ AURORA_TEST_CASE(destructor_joins_worker_and_releases_state) {
         "semantics)");
 #else
     {
-        InspectorServer scoped(tree_getter);
+        InspectorServer const scoped(tree_getter);
         AURORA_TEST_REQUIRE_TRUE(scoped.start(0));
         AURORA_TEST_CHECK_EQ(scoped.is_running(), true);
     }  // 析构须内部 stop：join worker、关 socket、还原 Winsock 引用
 
     // 析构后可立即再次起服（无悬挂线程/句柄阻塞）。
-    InspectorServer next(tree_getter);
+    InspectorServer const next(tree_getter);
     AURORA_TEST_REQUIRE_TRUE(next.start(0));
     AURORA_TEST_CHECK_EQ(next.is_running(), true);
     next.stop();
@@ -567,8 +567,8 @@ AURORA_TEST_CASE(tree_endpoint_serves_widget_tree_json) {
         "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
         "semantics)");
 #else
-    DutyPump duty;  // 空 wake 租约 + 后台排水：marshal 闭包有处落
-    InspectorServer server(tree_getter);
+    DutyPump const duty;  // 空 wake 租约 + 后台排水：marshal 闭包有处落
+    InspectorServer const server(tree_getter);
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
 
     const std::string resp = http_get(server.port(), "/api/tree");
@@ -587,8 +587,8 @@ AURORA_TEST_CASE(components_endpoint_returns_json_array) {
         "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
         "semantics)");
 #else
-    DutyPump duty;  // 空 wake 租约 + 后台排水：marshal 闭包有处落
-    InspectorServer server(tree_getter);
+    DutyPump const duty;  // 空 wake 租约 + 后台排水：marshal 闭包有处落
+    InspectorServer const server(tree_getter);
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
 
     const std::string resp = http_get(server.port(), "/api/components");
@@ -606,7 +606,7 @@ AURORA_TEST_CASE(unknown_endpoint_returns_404) {
         "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
         "semantics)");
 #else
-    InspectorServer server(tree_getter);
+    InspectorServer const server(tree_getter);
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
 
     const std::string resp = http_get(server.port(), "/api/no_such_endpoint");
@@ -622,7 +622,7 @@ AURORA_TEST_CASE(wrong_method_returns_405) {
         "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
         "semantics)");
 #else
-    InspectorServer server(tree_getter);
+    InspectorServer const server(tree_getter);
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
 
     const std::string resp =
@@ -638,8 +638,8 @@ AURORA_TEST_CASE(route_registry_matches_every_registered_endpoint) {
         "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
         "semantics)");
 #else
-    DutyPump duty;  // 空 wake 租约 + 后台排水：marshal 闭包有处落
-    InspectorServer server(tree_getter);
+    DutyPump const duty;  // 空 wake 租约 + 后台排水：marshal 闭包有处落
+    InspectorServer const server(tree_getter);
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
 
     // 逐枚精确端点用「它声明的动词」打一次：只要注册表漏登或动词位掩码写错，请求就会落 404/405，
@@ -690,8 +690,8 @@ AURORA_TEST_CASE(route_registry_gates_method_before_path_shape) {
         "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
         "semantics)");
 #else
-    DutyPump duty;  // 空 wake 租约 + 后台排水：marshal 闭包有处落
-    InspectorServer server(tree_getter);
+    DutyPump const duty;  // 空 wake 租约 + 后台排水：marshal 闭包有处落
+    InspectorServer const server(tree_getter);
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
 
     // 动词本就不被支持 + 路径恰好退化：405 而不是 400。405 说的是「这个端点不接受这个动词」，
@@ -723,8 +723,8 @@ AURORA_TEST_CASE(route_registry_strips_query_before_matching) {
         "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
         "semantics)");
 #else
-    DutyPump duty;  // 空 wake 租约 + 后台排水：marshal 闭包有处落
-    InspectorServer server(tree_getter);
+    DutyPump const duty;  // 空 wake 租约 + 后台排水：marshal 闭包有处落
+    InspectorServer const server(tree_getter);
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
 
     // 精确项与前缀族都在剥离查询串后的路径上匹配；查询串照旧交给 handler 解析。
@@ -745,8 +745,8 @@ AURORA_TEST_CASE(bad_pick_params_return_400) {
         "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
         "semantics)");
 #else
-    DutyPump duty;  // 空 wake 租约 + 后台排水：marshal 闭包有处落
-    InspectorServer server(tree_getter);
+    DutyPump const duty;  // 空 wake 租约 + 后台排水：marshal 闭包有处落
+    InspectorServer const server(tree_getter);
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
 
     // pick 需要数值 x/y：非数值参数必须回 400 而非 500/崩溃。
@@ -762,7 +762,7 @@ AURORA_TEST_CASE(missing_host_header_returns_403) {
         "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
         "semantics)");
 #else
-    InspectorServer server(tree_getter);
+    InspectorServer const server(tree_getter);
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
 
     // DNS rebinding 防护：缺失/非回环 Host 一律拒绝。
@@ -778,7 +778,7 @@ AURORA_TEST_CASE(debug_state_requires_surface_getter) {
         "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
         "semantics)");
 #else
-    InspectorServer server(tree_getter);
+    InspectorServer const server(tree_getter);
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
 
     // 未装配 getter：明确 400。
@@ -799,11 +799,11 @@ AURORA_TEST_CASE(input_click_dispatches_to_target_and_toggles_state) {
         "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
         "semantics)");
 #else
-    DutyPump duty;  // 空 wake 租约 + 后台排水：marshal 闭包有处落
-    InputTree tree = make_input_tree();
+    DutyPump const duty;  // 空 wake 租约 + 后台排水：marshal 闭包有处落
+    InputTree const tree = make_input_tree();
     AURORA_TEST_REQUIRE_FALSE(tree.checkbox->value());  // 起始未勾选，翻转可观测
 
-    InspectorServer server(tree.getter());
+    InspectorServer const server(tree.getter());
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
 
     const std::string resp = http_post(server.port(), "/api/input/click", R"({"path":"0"})");
@@ -826,9 +826,9 @@ AURORA_TEST_CASE(input_scroll_dispatches_to_target_and_reaches_on_scroll) {
         "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
         "semantics)");
 #else
-    DutyPump duty;  // 空 wake 租约 + 后台排水：marshal 闭包有处落
-    InputTree tree = make_input_tree();
-    InspectorServer server(tree.getter());
+    DutyPump const duty;  // 空 wake 租约 + 后台排水：marshal 闭包有处落
+    InputTree const tree = make_input_tree();
+    InspectorServer const server(tree.getter());
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
 
     const std::string resp = http_post(server.port(), "/api/input/scroll", R"({"path":"2","dx":0,"dy":-24})");
@@ -850,9 +850,9 @@ AURORA_TEST_CASE(input_text_dispatches_to_target_and_inserts_text) {
         "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
         "semantics)");
 #else
-    DutyPump duty;  // 空 wake 租约 + 后台排水：marshal 闭包有处落
-    InputTree tree = make_input_tree();
-    InspectorServer server(tree.getter());
+    DutyPump const duty;  // 空 wake 租约 + 后台排水：marshal 闭包有处落
+    InputTree const tree = make_input_tree();
+    InspectorServer const server(tree.getter());
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
 
     const std::string resp = http_post(server.port(), "/api/input/text", R"({"path":"1","text":"hi"})");
@@ -872,9 +872,9 @@ AURORA_TEST_CASE(input_endpoint_rejects_malformed_requests) {
         "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
         "semantics)");
 #else
-    DutyPump duty;  // 空 wake 租约 + 后台排水：marshal 闭包有处落
-    InputTree tree = make_input_tree();
-    InspectorServer server(tree.getter());
+    DutyPump const duty;  // 空 wake 租约 + 后台排水：marshal 闭包有处落
+    InputTree const tree = make_input_tree();
+    InspectorServer const server(tree.getter());
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
     const std::uint16_t port = server.port();
 
@@ -907,12 +907,12 @@ AURORA_TEST_CASE(input_endpoint_accepts_empty_path_as_tree_root) {
         "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
         "semantics)");
 #else
-    DutyPump duty;  // 空 wake 租约 + 后台排水：marshal 闭包有处落
+    DutyPump const duty;  // 空 wake 租约 + 后台排水：marshal 闭包有处落
     // 空串路径即树根本身（与 find_node_by_path 的空路径语义一致），使根控件无需再包一层容器
     // 就能被驱动；这里直接把 TextInput 作根来验证。
     auto input = std::make_shared<TextInput>();
     auto root = std::make_shared<Node>(Node{input});
-    InspectorServer server([root]() -> Node { return *root; });
+    InspectorServer const server([root]() -> Node { return *root; });
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
 
     const std::string resp = http_post(server.port(), "/api/input/text", R"({"path":"","text":"root"})");
@@ -930,9 +930,9 @@ AURORA_TEST_CASE(input_endpoint_maps_missing_target_and_simulate_failure) {
         "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
         "semantics)");
 #else
-    DutyPump duty;  // 空 wake 租约 + 后台排水：marshal 闭包有处落
-    InputTree tree = make_input_tree();
-    InspectorServer server(tree.getter());
+    DutyPump const duty;  // 空 wake 租约 + 后台排水：marshal 闭包有处落
+    InputTree const tree = make_input_tree();
+    InspectorServer const server(tree.getter());
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
     const std::uint16_t port = server.port();
 
@@ -956,9 +956,9 @@ AURORA_TEST_CASE(input_drag_dispatches_press_move_release_to_target) {
         "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
         "semantics)");
 #else
-    DutyPump duty;  // 空 wake 租约 + 后台排水：marshal 闭包有处落
-    InputTree tree = make_input_tree();
-    InspectorServer server(tree.getter());
+    DutyPump const duty;  // 空 wake 租约 + 后台排水：marshal 闭包有处落
+    InputTree const tree = make_input_tree();
+    InspectorServer const server(tree.getter());
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
 
     const std::string resp = http_post(server.port(), "/api/input/drag", R"({"path":"3","dx":30,"dy":-10})");
@@ -989,9 +989,9 @@ AURORA_TEST_CASE(find_endpoint_locates_by_type_key_text_and_combination) {
         "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
         "semantics)");
 #else
-    DutyPump duty;  // 空 wake 租约 + 后台排水：marshal 闭包有处落
-    FindTree tree = make_find_tree();
-    InspectorServer server(tree.getter());
+    DutyPump const duty;  // 空 wake 租约 + 后台排水：marshal 闭包有处落
+    FindTree const tree = make_find_tree();
+    InspectorServer const server(tree.getter());
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
     const std::uint16_t port = server.port();
 
@@ -1047,9 +1047,9 @@ AURORA_TEST_CASE(find_endpoint_percent_decodes_query_values) {
         "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
         "semantics)");
 #else
-    DutyPump duty;  // 空 wake 租约 + 后台排水：marshal 闭包有处落
-    FindTree tree = make_find_tree();
-    InspectorServer server(tree.getter());
+    DutyPump const duty;  // 空 wake 租约 + 后台排水：marshal 闭包有处落
+    FindTree const tree = make_find_tree();
+    InspectorServer const server(tree.getter());
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
     const std::uint16_t port = server.port();
 
@@ -1075,7 +1075,7 @@ AURORA_TEST_CASE(find_endpoint_percent_decodes_query_values) {
     auto row = std::make_shared<Column>();
     row->add(Node{save});
     auto space_root = std::make_shared<Node>(Node{row});
-    InspectorServer space_server([held = space_root]() -> Node { return *held; });
+    InspectorServer const space_server([held = space_root]() -> Node { return *held; });
     AURORA_TEST_REQUIRE_TRUE(space_server.start(0));
     const std::uint16_t space_port = space_server.port();
     AURORA_TEST_CHECK_TRUE(http_get(space_port, "/api/find?text=Save%20all%20files").find("\"count\":1") !=
@@ -1090,8 +1090,8 @@ AURORA_TEST_CASE(find_endpoint_rejects_malformed_requests) {
         "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
         "semantics)");
 #else
-    FindTree tree = make_find_tree();
-    InspectorServer server(tree.getter());
+    FindTree const tree = make_find_tree();
+    InspectorServer const server(tree.getter());
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
     const std::uint16_t port = server.port();
 
@@ -1111,10 +1111,10 @@ AURORA_TEST_CASE(tree_endpoint_by_window_returns_target_window_tree) {
         "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
         "semantics)");
 #else
-    DutyPump duty;  // 空 wake 租约 + 后台排水：marshal 闭包有处落
+    DutyPump const duty;  // 空 wake 租约 + 后台排水：marshal 闭包有处落
     // 主窗用共享树（Column[Text "hello"]）；window=1 → Column[Text "window-one"]，
     // window=2 → Checkbox 根；其它 id → 空 Node（路由层 404）。
-    InspectorServer server(tree_getter);
+    InspectorServer const server(tree_getter);
     server.set_window_tree_getter([](std::uint32_t id) -> Node {
         if (id == 1U) {
             auto col = std::make_shared<Column>();
@@ -1160,7 +1160,7 @@ AURORA_TEST_CASE(tree_endpoint_window_param_requires_getter) {
 #else
     // 未注册 window_tree_getter 时，带 window 参数的请求必须回 400（明确告知需配置），
     // 而非静默回退主窗或 404。
-    InspectorServer server(tree_getter);
+    InspectorServer const server(tree_getter);
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
     const std::string resp = http_get(server.port(), "/api/tree?window=1");
     AURORA_TEST_CHECK_TRUE(resp.find("400") != std::string::npos);
@@ -1174,8 +1174,8 @@ AURORA_TEST_CASE(patch_endpoint_applies_property_ops_to_live_widgets) {
         "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
         "semantics)");
 #else
-    DutyPump duty;  // 空 wake 租约 + 后台排水：marshal 闭包有处落
-    InspectorServer server(tree_getter);
+    DutyPump const duty;  // 空 wake 租约 + 后台排水：marshal 闭包有处落
+    InspectorServer const server(tree_getter);
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
 
     // 一条最小补丁：改掉第一个子控件的 content（路径 "/0/content"，最后一段是属性名）。
@@ -1213,7 +1213,7 @@ AURORA_TEST_CASE(tree_routes_marshal_tree_traversal_to_the_duty_thread) {
 #else
     DutyDrain drain;
     getter_threads().clear();
-    InspectorServer server(recording_tree_getter);
+    InspectorServer const server(recording_tree_getter);
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
     const std::uint16_t port = server.port();
 
@@ -1259,7 +1259,7 @@ AURORA_TEST_CASE(tree_routes_degrade_to_503_without_a_loop_on_duty) {
         "semantics)");
 #else
     getter_threads().clear();
-    InspectorServer server(recording_tree_getter);
+    InspectorServer const server(recording_tree_getter);
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
     const std::uint16_t port = server.port();
 
@@ -1281,11 +1281,11 @@ AURORA_TEST_CASE(tree_export_folds_property_strings_only_under_a_policy) {
         "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
         "semantics)");
 #else
-    DutyPump duty;  // 空 wake 租约 + 后台排水：marshal 闭包有处落
+    DutyPump const duty;  // 空 wake 租约 + 后台排水：marshal 闭包有处落
     auto tree = make_input_tree();
     tree.input->set_value("hunter2");
     tree.input->set_placeholder("type here");
-    InspectorServer server(tree.getter());
+    InspectorServer const server(tree.getter());
     server.set_window_tree_getter([root = tree.root](std::uint32_t id) -> Node { return id == 7U ? *root : Node{}; });
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
 
@@ -1299,7 +1299,7 @@ AURORA_TEST_CASE(tree_export_folds_property_strings_only_under_a_policy) {
     AURORA_TEST_CHECK_TRUE(baseline_yaml.find("hunter2") != std::string::npos);
 
     {
-        ScopedExportPolicy installed{std::make_shared<DenySensitivePolicy>()};
+        ScopedExportPolicy const installed{std::make_shared<DenySensitivePolicy>()};
 
         const std::string tree_resp = http_get(server.port(), "/api/tree");
         AURORA_TEST_CHECK_EQ(tree_resp.find("hunter2"), std::string::npos);
@@ -1347,16 +1347,17 @@ AURORA_TEST_CASE(tree_export_policy_gates_each_property_key) {
         "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
         "semantics)");
 #else
-    DutyPump duty;  // 空 wake 租约 + 后台排水：marshal 闭包有处落
+    DutyPump const duty;  // 空 wake 租约 + 后台排水：marshal 闭包有处落
     auto tree = make_input_tree();
     tree.input->set_value("hunter2");
     tree.input->set_placeholder("type here");
-    InspectorServer server(tree.getter());
+    InspectorServer const server(tree.getter());
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
 
     {
         // 只放行 `tree.value`：同一个控件里的 `placeholder` 仍折叠，证明键是逐条裁决而非整对象一刀切。
-        ScopedExportPolicy installed{std::make_shared<AllowSelectedKeysPolicy>(std::vector<std::string>{"tree.value"})};
+        ScopedExportPolicy const installed{
+            std::make_shared<AllowSelectedKeysPolicy>(std::vector<std::string>{"tree.value"})};
         const std::string tree_resp = http_get(server.port(), "/api/tree");
         AURORA_TEST_CHECK_TRUE(tree_resp.find("\"value\":\"hunter2\"") != std::string::npos);
         AURORA_TEST_CHECK_TRUE(tree_resp.find("\"placeholder\":\"***\"") != std::string::npos);
@@ -1368,7 +1369,7 @@ AURORA_TEST_CASE(tree_export_policy_gates_each_property_key) {
     {
         // `to_code` 把调用方自己送进来的树转成代码，是纯输入变换而非状态导出，不参与折叠。
         // 用步进风格（style=1）确保属性完整落码，否则 Fluent 会略去 setter-only 属性而使判据空转。
-        ScopedExportPolicy installed{std::make_shared<DenySensitivePolicy>()};
+        ScopedExportPolicy const installed{std::make_shared<DenySensitivePolicy>()};
         const std::string code_resp =
             http_post(server.port(), "/api/to_code", R"({"style":1,"type":"TextInput","props":{"value":"hunter2"}})");
         AURORA_TEST_CHECK_TRUE(code_resp.find("200 OK") != std::string::npos);
@@ -1385,12 +1386,12 @@ AURORA_TEST_CASE(network_snapshot_filters_before_limit) {
         "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
         "semantics)");
 #else
-    DutyPump duty;  // 空 wake 租约 + 后台排水：marshal 闭包有处落
-    ScopedActivityReset reset;
+    DutyPump const duty;  // 空 wake 租约 + 后台排水：marshal 闭包有处落
+    ScopedActivityReset const reset;
     seed_activity("GET", "rid-a", "http://api.example.test/one", 0, 0, 200);
     seed_activity("POST", "rid-b", "http://api.example.test/two", 0, 0, 503);
     seed_activity("GET", "rid-c", "http://cdn.example.test/three", 0, 0, 200);
-    InspectorServer server(tree_getter);
+    InspectorServer const server(tree_getter);
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
 
 #ifdef AURORA_ENABLE_DEBUG
@@ -1462,12 +1463,12 @@ AURORA_TEST_CASE(network_request_expands_hops_and_validates_id) {
         "The Inspector HTTP server cannot run here: not built, no thread capability, or wasm (no BSD socket "
         "semantics)");
 #else
-    DutyPump duty;  // 空 wake 租约 + 后台排水：marshal 闭包有处落
-    ScopedActivityReset reset;
+    DutyPump const duty;  // 空 wake 租约 + 后台排水：marshal 闭包有处落
+    ScopedActivityReset const reset;
     seed_activity("GET", "rid-hop", "http://api.example.test/start", 0, 0, 302);
     seed_activity("GET", "rid-other", "http://cdn.example.test/other", 0, 0, 200);
     seed_activity("GET", "rid-hop", "http://api.example.test/final", 1, 0, 200);
-    InspectorServer server(tree_getter);
+    InspectorServer const server(tree_getter);
     AURORA_TEST_REQUIRE_TRUE(server.start(0));
 
 #ifdef AURORA_ENABLE_DEBUG

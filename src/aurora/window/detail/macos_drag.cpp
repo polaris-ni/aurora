@@ -19,8 +19,6 @@
 
 #include "aurora/window/detail/macos_drag.h"
 
-#include "aurora/core/platform.h"
-
 #if defined(AURORA_PLATFORM_MACOS) && defined(AURORA_BACKEND_MACOS)
 
 // aurora 头先于 AppKit 头（同款纪律：平台头关在单个 TU 内，包含顺序即语义）。

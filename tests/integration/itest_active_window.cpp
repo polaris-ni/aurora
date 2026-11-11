@@ -12,7 +12,6 @@
 
 #include "aurora/app/application.h"
 #include "aurora/widget/text.h"
-#include "aurora/window/surface.h"
 #include "aurora/window/window.h"
 #include "framework/aurora_test.h"
 

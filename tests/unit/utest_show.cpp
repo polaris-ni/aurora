@@ -52,7 +52,7 @@ AURORA_TEST_CASE(show_hidden_collapses_to_zero) {
 }
 
 AURORA_TEST_CASE(show_state_driven_visibility) {
-    State<bool> state{false};
+    State<bool> const state{false};
     Show s(state, box(80.0F, 30.0F));
     AURORA_TEST_CHECK_FALSE(s.is_visible());
     LayoutEngine::layout(s, bounded(200.0F, 100.0F));
@@ -66,7 +66,7 @@ AURORA_TEST_CASE(show_state_driven_visibility) {
 }
 
 AURORA_TEST_CASE(show_collects_state_signal) {
-    State<bool> state{true};
+    State<bool> const state{true};
     Show s(state, box(1.0F, 1.0F));
     StateSink out;
     s.collect_signals(out);
@@ -87,12 +87,12 @@ AURORA_TEST_CASE(show_collects_state_signal) {
 }
 
 AURORA_TEST_CASE(show_serializes_visibility) {
-    Show on(true, box(1.0F, 1.0F));
+    Show const on(true, box(1.0F, 1.0F));
     Json props = Json::object();
     on.serialize_props(props);
     AURORA_TEST_CHECK_EQ(require_field<bool>(props, "visible"), true);
 
-    Show off(false, box(1.0F, 1.0F));
+    Show const off(false, box(1.0F, 1.0F));
     off.serialize_props(props);
     AURORA_TEST_CHECK_EQ(require_field<bool>(props, "visible"), false);
 }

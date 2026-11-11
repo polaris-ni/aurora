@@ -66,7 +66,7 @@ AURORA_TEST_CASE(of_ctx_penetrates_to_ancestor_for_uncovered_type) {
 
 AURORA_TEST_CASE(of_ctx_falls_back_to_default_without_provider) {
     // 无 Provider 注入：media_query_of 返回 nullptr；of(ctx) 返回进程级默认实例（保守降级）。
-    aurora::BuildContext ctx;  // env == nullptr
+    aurora::BuildContext const ctx;  // env == nullptr
     AURORA_TEST_CHECK(aurora::media_query_of(ctx) == nullptr);
     const aurora::MediaQuery &fallback = aurora::MediaQuery::of(ctx);
     AURORA_TEST_CHECK_NEAR(fallback.scale_factor, 1.0F, 1e-6F);
@@ -143,7 +143,7 @@ AURORA_TEST_CASE(breakpoint_builder_falls_back_to_constraint_width) {
         return Node{std::make_shared<Text>("bp")};
     });
 
-    BuildContext ctx;  // env == nullptr
+    BuildContext const ctx;  // env == nullptr
     LayoutEngine::layout(bb, Constraints{}, ctx);  // max 无限 → 0 → Compact
     AURORA_TEST_CHECK(bb.current_breakpoint() == Breakpoint::Compact);
     AURORA_TEST_CHECK_EQ(builds, 1);

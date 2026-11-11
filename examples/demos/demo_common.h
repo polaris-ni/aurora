@@ -15,12 +15,10 @@
 
 #include <aurora/aurora.h>
 
-#include <chrono>
 #include <filesystem>
 #include <string>
 #include <vector>
 
-#include "aurora/event/dispatcher.h"
 #include "aurora/render/font_engine.h"
 #include "aurora/window/window.h"
 

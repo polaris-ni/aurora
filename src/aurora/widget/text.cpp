@@ -1,7 +1,6 @@
 #include "aurora/widget/text.h"
 
 #include "aurora/app/clipboard.h"
-#include "aurora/core/accessibility.h"
 #include "aurora/core/diagnostics.h"
 #include "aurora/core/directionality.h"
 #include "aurora/core/utf8.h"

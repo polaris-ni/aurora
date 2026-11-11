@@ -4,7 +4,6 @@
 #include <functional>
 #include <memory>
 #include <unordered_set>
-#include <vector>
 
 #include "aurora/animation/timeline.h"
 #include "aurora/core/types.h"

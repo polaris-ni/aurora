@@ -364,7 +364,7 @@ class Animator {
 /// @param raw_seconds 裸帧步长（秒），通常来自单调钟相邻两帧之差。
 /// @return 缩放后的动画时间轴步长；冻结时为 0；无运行中 Animator 时为 `raw_seconds`。
 inline auto scaled_frame_dt(double raw_seconds) -> double {
-    Animator *a = Animator::current();
+    Animator *const a = Animator::current();
     return a != nullptr ? a->scale_frame_dt(raw_seconds) : raw_seconds;
 }
 

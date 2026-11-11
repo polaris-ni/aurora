@@ -24,7 +24,6 @@
 #include "aurora/event/keycode.h"
 #include "aurora/i18n/message_catalog.h"
 #include "aurora/layout/layout_engine.h"
-#include "aurora/render/painter.h"
 #include "aurora/widget/reorderable_list.h"
 #include "framework/aurora_test.h"
 #include "framework/json_access.h"
@@ -136,6 +135,7 @@ class ClickBox final : public Widget {
 };
 
 /// 行高表驱动的条目构造器：第 i 项高度 = heights[i]（越界用最后一项）。
+/// @param heights 逐项高度表（越界取最后一项）。
 /// @param clickable 条目是否自带点击（消费指针事件）——真实列表的常见形态。
 auto make_builder(const std::vector<float> &heights, bool clickable = false) -> ReorderableList<int>::ItemBuilder {
     // 返回的条目构造器转入 std::function（ItemBuilder），本检查对可调用对象一律判「不应抛出」；
@@ -425,7 +425,7 @@ AURORA_TEST_CASE(default_construct_and_empty_data_are_safe) {
     AURORA_TEST_CHECK_NEAR(no_items.max_scroll_offset(), 0.0F, 1e-4F);
 
     // 负 gap 降级为 0（Diagnostics::degraded，不抛）。
-    ReorderableList<int> neg_gap{make_items({0}), make_builder({20.0F}), -8.0F};
+    ReorderableList<int> const neg_gap{make_items({0}), make_builder({20.0F}), -8.0F};
     AURORA_TEST_CHECK_NEAR(neg_gap.gap(), 0.0F, 1e-4F);
 }
 
@@ -776,7 +776,7 @@ AURORA_TEST_CASE(keyboard_cursor_moves_and_rolls_items_into_view) {
     auto items = make_items({0, 1, 2, 3, 4});
     ReorderableList<int> list{items, make_builder({40.0F})};
     LayoutEngine::layout(list, bounded(100.0F, 100.0F));  // 视口 100 / 内容 200：需滚动才看得见后段
-    ScopedAnnouncements ann;
+    ScopedAnnouncements const ann;
     FocusManager fm;
     focus_list(list, fm);
 
@@ -812,7 +812,7 @@ AURORA_TEST_CASE(keyboard_grab_move_drop_commits_the_reorder) {
     std::vector<std::pair<int, int>> calls;
     list.set_on_reorder([&calls](int from, int to) -> void { calls.emplace_back(from, to); });
     LayoutEngine::layout(list, bounded(300.0F, 300.0F));  // 全项可见：排除滚动干扰
-    ScopedAnnouncements ann;
+    ScopedAnnouncements const ann;
     FocusManager fm;
     focus_list(list, fm);
 
@@ -851,7 +851,7 @@ AURORA_TEST_CASE(keyboard_escape_and_focus_loss_cancel_the_grab) {
     auto items = make_items({0, 1, 2});
     ReorderableList<int> list{items, make_builder({40.0F})};
     LayoutEngine::layout(list, bounded(300.0F, 300.0F));
-    ScopedAnnouncements ann;
+    ScopedAnnouncements const ann;
     FocusManager fm;
     focus_list(list, fm);
 
@@ -921,7 +921,7 @@ AURORA_TEST_CASE(keyboard_path_yields_when_disabled_and_for_unclaimed_keys) {
 }
 
 AURORA_TEST_CASE(keyboard_announcements_are_localizable_and_switch_off_mid_grab_cancels) {
-    ScopedCatalogGuard table_guard;
+    ScopedCatalogGuard const table_guard;
     auto &table = default_catalog();
     // 控件在按键路径无 BuildContext，按「默认区域」解析；Locale{} 即该区域未设置时的槽位。
     // CJK-LITERAL: cjk-fixture - Han locale templates registered by this case to prove announcements are localizable
@@ -937,7 +937,7 @@ AURORA_TEST_CASE(keyboard_announcements_are_localizable_and_switch_off_mid_grab_
     auto items = make_items({0, 1, 2});
     ReorderableList<int> list{items, make_builder({40.0F})};
     LayoutEngine::layout(list, bounded(300.0F, 300.0F));
-    ScopedAnnouncements ann;
+    ScopedAnnouncements const ann;
     FocusManager fm;
     focus_list(list, fm);
 

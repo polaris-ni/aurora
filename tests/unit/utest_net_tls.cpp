@@ -500,7 +500,7 @@ AURORA_TEST_CASE(designated_unknown_backend_fails_exactly_once_without_falling_b
 
 AURORA_TEST_CASE(channel_names_the_backend_that_served_it) {
     const aurora::test::tls::Assets assets;
-    aurora::test::tls::TlsPeer peer{assets};
+    aurora::test::tls::TlsPeer const peer{assets};
     require_peer(peer);
     require_backend("needs a real handshake to have a backend in effect");
     HostDriven host;
@@ -525,7 +525,7 @@ AURORA_TEST_CASE(channel_names_the_backend_that_served_it) {
 // 不通」永远不会在这里暴露，而 provider 腿的存在理由恰恰是它走得通。
 AURORA_TEST_CASE(every_registered_backend_completes_a_real_handshake) {
     const aurora::test::tls::Assets assets;
-    aurora::test::tls::TlsPeer peer{assets};
+    aurora::test::tls::TlsPeer const peer{assets};
     require_peer(peer);
     require_backend("needs one real handshake per registered backend");
     HostDriven host;
@@ -548,7 +548,7 @@ AURORA_TEST_CASE(every_registered_backend_completes_a_real_handshake) {
 
 AURORA_TEST_CASE(handshake_establishes_channel_and_summarizes_peer) {
     const aurora::test::tls::Assets assets;
-    aurora::test::tls::TlsPeer peer{assets};
+    aurora::test::tls::TlsPeer const peer{assets};
     require_peer(peer);
     require_backend("needs a real handshake");
     HostDriven host;
@@ -582,7 +582,7 @@ AURORA_TEST_CASE(handshake_establishes_channel_and_summarizes_peer) {
 
 AURORA_TEST_CASE(read_and_write_are_isomorphic_with_l1_stream) {
     const aurora::test::tls::Assets assets;
-    aurora::test::tls::TlsPeer peer{assets};
+    aurora::test::tls::TlsPeer const peer{assets};
     require_peer(peer);
     require_backend("needs a real handshake");
     HostDriven host;
@@ -625,7 +625,7 @@ AURORA_TEST_CASE(read_and_write_are_isomorphic_with_l1_stream) {
 
 AURORA_TEST_CASE(payload_spanning_records_round_trips) {
     const aurora::test::tls::Assets assets;
-    aurora::test::tls::TlsPeer peer{assets};
+    aurora::test::tls::TlsPeer const peer{assets};
     require_peer(peer);
     require_backend("needs a real handshake");
     HostDriven host;
@@ -651,7 +651,7 @@ AURORA_TEST_CASE(payload_spanning_records_round_trips) {
 
 AURORA_TEST_CASE(untrusted_self_signed_peer_is_rejected_by_default) {
     const aurora::test::tls::Assets assets;
-    aurora::test::tls::TlsPeer peer{assets};
+    aurora::test::tls::TlsPeer const peer{assets};
     require_peer(peer);
     require_backend("needs a real handshake");
     HostDriven host;
@@ -666,7 +666,7 @@ AURORA_TEST_CASE(untrusted_self_signed_peer_is_rejected_by_default) {
 
 AURORA_TEST_CASE(appended_trust_root_makes_self_signed_peer_acceptable) {
     const aurora::test::tls::Assets assets;
-    aurora::test::tls::TlsPeer peer{assets};
+    aurora::test::tls::TlsPeer const peer{assets};
     require_peer(peer);
     require_backend("needs a real handshake");
     HostDriven host;
@@ -686,7 +686,7 @@ AURORA_TEST_CASE(expired_self_signed_peer_is_rejected_even_when_chain_is_trusted
     // 剩下的唯一不满足项是 Validity。判据要的是这两维各自独立——追加根只赦签发者，不赦有效期，
     // 否则一条「把自己那张过期根加进去」的写法就等于关掉校验（而危险开关是另一枚显式命名的字段）。
     const aurora::test::tls::Assets assets{"localhost", false, aurora::test::tls::Lifetime::Expired};
-    aurora::test::tls::TlsPeer peer{assets};
+    aurora::test::tls::TlsPeer const peer{assets};
     require_peer(peer);
     require_backend("needs a real handshake");
     HostDriven host;
@@ -700,7 +700,7 @@ AURORA_TEST_CASE(expired_self_signed_peer_is_rejected_even_when_chain_is_trusted
 
 AURORA_TEST_CASE(hostname_mismatch_is_rejected_even_when_chain_is_trusted) {
     const aurora::test::tls::Assets assets;
-    aurora::test::tls::TlsPeer peer{assets};
+    aurora::test::tls::TlsPeer const peer{assets};
     require_peer(peer);
     require_backend("needs a real handshake");
     HostDriven host;
@@ -722,7 +722,7 @@ AURORA_TEST_CASE(hostname_mismatch_is_rejected_even_when_chain_is_trusted) {
 AURORA_TEST_CASE(san_extension_without_dns_name_is_rejected_despite_matching_cn) {
     const aurora::test::tls::Assets assets{"localhost", false, aurora::test::tls::Lifetime::Valid,
                                            aurora::test::tls::NameShape::SanWithoutDns};
-    aurora::test::tls::TlsPeer peer{assets};
+    aurora::test::tls::TlsPeer const peer{assets};
     require_peer(peer);
     require_backend("needs a real handshake for the SAN-priority verdict");
     HostDriven host;
@@ -741,7 +741,7 @@ AURORA_TEST_CASE(san_extension_without_dns_name_is_rejected_despite_matching_cn)
     // 「恒拒」有可能只是追加根没生效，判据就成了恒真断言。
     const aurora::test::tls::Assets control{"localhost", false, aurora::test::tls::Lifetime::Valid,
                                             aurora::test::tls::NameShape::SanAndCn};
-    aurora::test::tls::TlsPeer control_peer{control};
+    aurora::test::tls::TlsPeer const control_peer{control};
     require_peer(control_peer);
     for (const auto &id : surface) {
         const auto accepted = name_verdict(control, control_peer, id, "localhost");
@@ -775,7 +775,7 @@ AURORA_TEST_CASE(certificate_name_shapes_are_reconciled_across_backends) {
 
     for (const auto &shape : shapes) {
         const aurora::test::tls::Assets assets{"localhost", false, aurora::test::tls::Lifetime::Valid, shape.shape};
-        aurora::test::tls::TlsPeer peer{assets};
+        aurora::test::tls::TlsPeer const peer{assets};
         require_peer(peer);
         const auto rows = name_verdicts(shape.label, assets, peer, shape.target);
         AURORA_TEST_REQUIRE_EQ(rows.size(), surface.size());
@@ -799,11 +799,11 @@ AURORA_TEST_CASE(certificate_name_shapes_are_reconciled_across_backends) {
 
 AURORA_TEST_CASE(dangerous_switch_skips_verification_but_leaves_a_trace) {
     const aurora::test::tls::Assets assets;
-    aurora::test::tls::TlsPeer peer{assets};
+    aurora::test::tls::TlsPeer const peer{assets};
     require_peer(peer);
     require_backend("needs a real handshake");
     HostDriven host;
-    CapturedLogger capture;
+    CapturedLogger const capture;
     aurora::Logger::instance().set_level(aurora::LogLevel::Warn);
     // 危险开关连主机名一起跳过（上一条用例的名字在此刻不构成拒绝理由），但必须留下诊断：
     // 事后无法从连接本身还原「当初为什么没校验」，诊断是这一档唯一的现场证据。
@@ -820,7 +820,7 @@ AURORA_TEST_CASE(dangerous_switch_skips_verification_but_leaves_a_trace) {
 
 AURORA_TEST_CASE(pin_mismatch_rejects_a_trusted_peer_and_insecure_switch_does_not_mask_it) {
     const aurora::test::tls::Assets assets;
-    aurora::test::tls::TlsPeer peer{assets};
+    aurora::test::tls::TlsPeer const peer{assets};
     require_peer(peer);
     require_backend("needs a real handshake");
     HostDriven host;
@@ -862,7 +862,7 @@ AURORA_TEST_CASE(pin_mismatch_rejects_a_trusted_peer_and_insecure_switch_does_no
 
 AURORA_TEST_CASE(alpn_reports_the_negotiated_identifier) {
     const aurora::test::tls::Assets assets;
-    aurora::test::tls::TlsPeer peer{assets, {"-alpn", "http/1.1"}};
+    aurora::test::tls::TlsPeer const peer{assets, {"-alpn", "http/1.1"}};
     require_peer(peer);
     require_backend("needs a real handshake");
     HostDriven host;
@@ -880,7 +880,7 @@ AURORA_TEST_CASE(alpn_reports_the_negotiated_identifier) {
 
 AURORA_TEST_CASE(alpn_without_overlap_is_reported_as_shape_mismatch) {
     const aurora::test::tls::Assets assets;
-    aurora::test::tls::TlsPeer peer{assets, {"-alpn", "http/1.1"}};
+    aurora::test::tls::TlsPeer const peer{assets, {"-alpn", "http/1.1"}};
     require_peer(peer);
     require_backend("needs a real handshake");
     HostDriven host;
@@ -903,7 +903,7 @@ AURORA_TEST_CASE(cancel_finishes_an_ongoing_handshake_exactly_once) {
     AURORA_TEST_SKIP("wasm has no fd wait semantics for a stalled handshake");
 #endif
     require_backend("needs an ongoing handshake to cancel");
-    aurora::test::ScriptedPeer stalled{aurora::test::scripts::silent()};
+    aurora::test::ScriptedPeer const stalled{aurora::test::scripts::silent()};
     AURORA_TEST_REQUIRE(stalled.valid());
     HostDriven host;
     Cancellation cancellation;
@@ -922,7 +922,7 @@ AURORA_TEST_CASE(cancel_finishes_an_ongoing_handshake_exactly_once) {
 
 AURORA_TEST_CASE(close_is_idempotent_and_leaves_nothing_to_wait_for) {
     const aurora::test::tls::Assets assets;
-    aurora::test::tls::TlsPeer peer{assets};
+    aurora::test::tls::TlsPeer const peer{assets};
     require_peer(peer);
     require_backend("needs a real handshake");
     HostDriven host;
@@ -1025,7 +1025,7 @@ AURORA_TEST_CASE(tls12_reports_a_missing_client_certificate_inside_the_handshake
 
 AURORA_TEST_CASE(client_identity_satisfies_a_verified_peer_request) {
     const aurora::test::tls::Assets assets{"localhost", true};
-    aurora::test::tls::TlsPeer peer{assets, {"-Verify", "1", "-CAfile", assets.certificate().string()}};
+    aurora::test::tls::TlsPeer const peer{assets, {"-Verify", "1", "-CAfile", assets.certificate().string()}};
     require_peer(peer);
     require_backend("needs a real handshake");
     if (!assets.identity_valid()) {
@@ -1076,7 +1076,7 @@ AURORA_TEST_CASE(client_identity_satisfies_a_verified_peer_request) {
 
 AURORA_TEST_CASE(pem_client_identity_satisfies_a_verified_peer_request) {
     const aurora::test::tls::Assets assets{"localhost", true};
-    aurora::test::tls::TlsPeer peer{assets, {"-Verify", "1", "-CAfile", assets.certificate().string()}};
+    aurora::test::tls::TlsPeer const peer{assets, {"-Verify", "1", "-CAfile", assets.certificate().string()}};
     require_peer(peer);
     require_backend("needs a real handshake");
     const auto chain = assets.client_certificate_pem();

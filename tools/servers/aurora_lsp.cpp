@@ -274,8 +274,8 @@ static auto on_code_action(const au::Json &params) -> au::Json {
         return au::Json::array();
     }
 
-    au::tools::Document doc = au::tools::analyze(text);
-    std::vector<au::tools::CodeAction> actions = code_actions(doc, schema());
+    au::tools::Document const doc = au::tools::analyze(text);
+    std::vector<au::tools::CodeAction> const actions = code_actions(doc, schema());
 
     au::Json arr = au::Json::array();
     for (const auto &a : actions) {

@@ -845,7 +845,7 @@ inline auto LineChart::on_paint(Painter &p, const Rect &bounds, const BuildConte
 
     // ---- 类目轴 ----
     if (x_axis.visible) {
-        BandScale band{g.point_count};
+        BandScale const band{g.point_count};
         draw_category_axis(p, origin, plot, band, g.cats, x_axis, font, axis);
     }
 

@@ -7,7 +7,6 @@
 ///           采样登记的用例按 §8.8.41 契约降级为 skip；无源契约由专测逐类断言（有旁证通路者
 ///           允许登记但 `refresh()` 恒拒，wasm 两者皆无、订阅也拒），快照两处都恒可读。
 #include <chrono>
-#include <cstdint>
 #include <functional>
 #include <optional>
 #include <vector>

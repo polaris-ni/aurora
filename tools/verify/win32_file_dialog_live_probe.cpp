@@ -316,7 +316,7 @@ class CapturedLog {
 /// @brief 自动段：逐格投进真实对话框，再用 OS 自己的读回面判一致性。
 /// @return 退出码（0 通过 / 1 断言失败 / 2 环境不可用）。
 auto run_auto_stage() -> int {
-    ComInit com;
+    ComInit const com;
     if (!com.ok()) {
         env_fail("CoInitializeEx failed; no COM dialog available", "run the probe on an interactive desktop session");
         return env_unavailable() ? 2 : 1;
@@ -329,7 +329,7 @@ auto run_auto_stage() -> int {
             env_fail("CoCreateInstance(IFileSaveDialog) failed", "check shell32 / ole32 availability on this machine");
             return 2;
         }
-        CapturedLog log;
+        CapturedLog const log;
         const aurora::file_dialog::Options opts{.suggested_name = "dir/sub/report.txt", .default_extension = ".txt"};
         aurora::file_dialog::detail::apply_save_name(dlg, opts);
         check(read_file_name(dlg) == "report.txt", "SetFileName received the last path segment");
@@ -358,7 +358,7 @@ auto run_auto_stage() -> int {
             env_fail("CoCreateInstance(IFileSaveDialog) failed (empty-options leg)", "shell dialog unavailable");
             return 2;
         }
-        CapturedLog log;
+        CapturedLog const log;
         const aurora::file_dialog::Options plain;
         aurora::file_dialog::detail::apply_save_name(dlg, plain);
         aurora::file_dialog::detail::apply_initial_dir(dlg, plain);
@@ -395,7 +395,7 @@ auto run_auto_stage() -> int {
             env_fail("CoCreateInstance(IFileSaveDialog) failed (fallback leg)", "shell dialog unavailable");
             return 2;
         }
-        CapturedLog log;
+        CapturedLog const log;
         const std::string bogus = "C:/aurora-verify/does-not-exist";
         const aurora::file_dialog::Options opts{.initial_dir = bogus};
         aurora::file_dialog::detail::apply_initial_dir(dlg, opts);
@@ -432,7 +432,7 @@ auto run_auto_stage() -> int {
 /// 只用来接住位置、收尾按空目录摘掉；返回路径落在别处时一律不动。
 /// @return 退出码（0 机判通过且三项全确认 / 1 机判失败 / 2 暂存目录不可用 / 7 存在未确认项）。
 auto run_interactive_stage() -> int {
-    ComInit com;
+    ComInit const com;
     if (!com.ok()) {
         emit("[ENV ] interactive stage needs a COM apartment; skipping");
         return 7;

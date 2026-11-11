@@ -104,6 +104,10 @@ inline auto flip_rows_y(std::vector<std::uint8_t> &px, int w, int h) -> void {
 ///        replay → `end_frame` → `read_pixels`。与宿主 GPU 帧路径同构。
 /// @tparam Sink 具备 `begin_frame(int,int,float)` / `end_frame()` / `backend()` /
 ///              `read_pixels(std::vector<std::uint8_t>&)` 的 GPU 后端（`WgpuRhi`、`GpuGlRhi`）
+/// @param sink GPU 后端实例（满足 `@tparam Sink` 的接口约定）。
+/// @param w 帧宽（设备像素）。
+/// @param h 帧高（设备像素）。
+/// @param draw 录制回调（在 `Painter` 上构建显示列表）。
 /// @param bottom_up 读回行序自底向上（GL 帧缓冲原序）时为 true，归一到基线的自顶向下序
 [[nodiscard]] inline auto render_display_list(auto &sink, int w, int h, const std::function<void(au::Painter &)> &draw,
                                               bool bottom_up) -> au::Image {

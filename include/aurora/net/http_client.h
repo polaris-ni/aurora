@@ -1,7 +1,7 @@
 #pragma once
 
 /// @brief HTTP/1.1 发起侧客户端。
-/// @file net/http_client.h
+/// @file http_client.h
 ///
 /// 本头回答一个问题：**「把一份 `Request` 送出去、把应答拿回来」**——连接（`http://` 直连、
 /// `https://` 先握手再套流）、写出请求头部与消息体、逐段喂接收侧装配器 `wire::ResponseAssembler` 装配应答、

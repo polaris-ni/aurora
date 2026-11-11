@@ -141,9 +141,9 @@ AURORA_TEST_CASE(runtime_added_overlay_is_mounted_on_next_layout) {
     // ctx.env 必须非空（真实窗口里指向 `root_env_`）：`Provider::rebuild_env` 在有父环境时走
     // `Environment::with()` 每次重建一份新环境，换肤才生效；`env == nullptr` 的退化路径走
     // `set_local`，其 `map_.emplace` 对已存在的键不覆盖——那是独立于本任务的既有缺陷，不在此顺带修。
-    Environment root_env;
+    Environment const root_env;
     auto host = std::make_shared<OverlayHost>(base_content());
-    State<Theme> theme_state{theme_a};
+    State<Theme> const theme_state{theme_a};
     Provider<Theme> provider{theme_state, Node{host}};
     BuildContext ctx;
     ctx.env = &root_env;
@@ -449,7 +449,7 @@ AURORA_TEST_CASE(popup_content_window_bounds_matches_probe_measured_reachable_bo
     // 形态①：`Popup` 内容控件的窗口盒须与命中链实测可达框相符。
     // 树把 `OverlayHost` 摆在 y = LEAD_IN 的非零位置，故「叠加锚点」与「替换基准」两种读法
     // 在此必然分叉（前者 y 会多出一个 LEAD_IN），判据对修复机制本身敏感。
-    PopupTree f = make_popup_tree(AURORA_ANCHOR);
+    PopupTree const f = make_popup_tree(AURORA_ANCHOR);
     AURORA_TEST_REQUIRE(f.popup->is_open());
     // 缺口前提：`Popup` 在常规流中占零尺寸（否则内容子盒 origin 不会是 {0,0}）。
     AURORA_TEST_CHECK(f.popup->size().width <= 0.0F);
@@ -480,7 +480,7 @@ AURORA_TEST_CASE(popup_content_window_bounds_matches_probe_measured_reachable_bo
 AURORA_TEST_CASE(plain_subtree_window_bounds_matches_probe_measured_reachable_box) {
     // 形态②：未挂 `Popup` 的普通子树，两者同样相符——守住缺省路径零变化。
     // 任何多减 / 少减一份平移（滚动修正、Modifier 内容平移、锚点）都会在这里现形。
-    PlainTree f = make_plain_tree();
+    PlainTree const f = make_plain_tree();
     const Rect wb = require_value(f.target->window_bounds());
     const Rect reachable = require_value(probe_reachable_box(*f.root, f.target.get(), wb));
 
@@ -503,7 +503,7 @@ AURORA_TEST_CASE(popup_paint_and_hit_semantics_unchanged) {
     // `anchor_` 的施加方式不止一种（绘制下传盒 / 命中链 contains 判定），两者都是既有语义，
     // 本次只补事后查询路径，不得改动。
     const Point anchor = AURORA_ANCHOR;
-    PopupTree f = make_popup_tree(anchor);
+    PopupTree const f = make_popup_tree(anchor);
     AURORA_TEST_REQUIRE(f.popup->is_open());
 
     // 绘制路径：内容盒原点仍为 `anchor_`（全局），不含 `OverlayHost` 在树上的位置。
@@ -537,7 +537,7 @@ AURORA_TEST_CASE(dispatch_by_window_bounds_lands_on_popup_content) {
     // 判据④：端到端正面形态——按 `window_bounds()` 的读数取点派发，内容控件须收到事件，
     // 且 `local_position` 等于该点在盒内的偏移。这是缺口原始症状（取点落不到控件 → 字符被基类
     // `Widget::on_text_input` 缺省 `is_handled = true` 静默吞掉）的正面闭合。
-    PopupTree f = make_popup_tree(AURORA_ANCHOR);
+    PopupTree const f = make_popup_tree(AURORA_ANCHOR);
     const Rect wb = require_value(f.target->window_bounds());
     const Point probe_point{.x = wb.origin.x + 60.0F, .y = wb.origin.y + 10.0F};
 

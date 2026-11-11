@@ -208,7 +208,7 @@ struct PropTarget {
 /// @param key 基类属性键名。
 /// @param type 序列化 type 名（遮蔽消歧用）。
 /// @return 该键在该类型上的发射落点（链式 setter 名或公开成员路径）。
-[[nodiscard]] inline auto base_target(const std::string &key, const std::string &type) -> PropTarget {
+[[nodiscard]] inline auto base_target(const std::string &key, [[maybe_unused]] const std::string &type) -> PropTarget {
     if (key == "show") {
         // 展示属性只读：统一经换源入口写入，弹层同名 show() 不再造成赋值歧义。
         return {.lhs = "set_show", .via_setter = true};

@@ -1,7 +1,7 @@
 #pragma once
 
 /// @brief 链路态判据层与进程级运行时：状态机裁决 + 订阅表 + 定时登记。
-/// @file net/detail/connectivity_state.h
+/// @file connectivity_state.h
 ///
 /// 与 `src/aurora/net/detail/connectivity_probe.h`（采集接缝）相邻而分工不同：接缝回答「本
 /// 机构建有没有这条腿、这一拍读到什么」，本件回答「这些读数该落成什么态、要不要通知谁」。

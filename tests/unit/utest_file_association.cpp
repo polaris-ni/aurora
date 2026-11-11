@@ -103,7 +103,7 @@ void install_fake_backend(FakeAssociation &state) {
 }  // namespace
 
 AURORA_TEST_CASE(normalization_precedes_the_backend) {
-    FileAssociationBackendGuard guard;
+    FileAssociationBackendGuard const guard;
     FakeAssociation state;
     install_fake_backend(state);
 
@@ -139,7 +139,7 @@ AURORA_TEST_CASE(normalization_precedes_the_backend) {
 }
 
 AURORA_TEST_CASE(query_passes_the_backend_answer_through) {
-    FileAssociationBackendGuard guard;
+    FileAssociationBackendGuard const guard;
     FakeAssociation state;
     install_fake_backend(state);
 
@@ -162,7 +162,7 @@ AURORA_TEST_CASE(query_passes_the_backend_answer_through) {
 }
 
 AURORA_TEST_CASE(declaration_prefers_the_explicit_mime) {
-    FileAssociationBackendGuard guard;
+    FileAssociationBackendGuard const guard;
     FakeAssociation state;
     install_fake_backend(state);
 
@@ -190,7 +190,7 @@ AURORA_TEST_CASE(declaration_prefers_the_explicit_mime) {
 }
 
 AURORA_TEST_CASE(declaration_requires_a_resolvable_mime) {
-    FileAssociationBackendGuard guard;
+    FileAssociationBackendGuard const guard;
     FakeAssociation state;
     install_fake_backend(state);
 
@@ -203,13 +203,13 @@ AURORA_TEST_CASE(declaration_requires_a_resolvable_mime) {
 }
 
 AURORA_TEST_CASE(declaration_requires_an_executable_path) {
-    FileAssociationBackendGuard guard;
+    FileAssociationBackendGuard const guard;
     FakeAssociation state;
     install_fake_backend(state);
 
     AssociationDeclaration declaration;
     declaration.extension = "png";
-    AppIdentity no_path;
+    AppIdentity const no_path;
     auto result = register_file_association(declaration, no_path);
     AURORA_TEST_REQUIRE(!result.ok());
     AURORA_TEST_CHECK_EQ(result.error().code_enum, ErrorCode::GeneralInvalidArgument);
@@ -222,7 +222,7 @@ AURORA_TEST_CASE(declaration_requires_an_executable_path) {
 }
 
 AURORA_TEST_CASE(undeclare_propagates_ownership_conflicts) {
-    FileAssociationBackendGuard guard;
+    FileAssociationBackendGuard const guard;
     FakeAssociation state;
     install_fake_backend(state);
 
@@ -248,7 +248,7 @@ AURORA_TEST_CASE(undeclare_propagates_ownership_conflicts) {
 }
 
 AURORA_TEST_CASE(degradation_reports_unsupported_without_a_wired_bridge) {
-    FileAssociationBackendGuard guard;
+    FileAssociationBackendGuard const guard;
 #if defined(AURORA_PLATFORM_WINDOWS) || defined(AURORA_PLATFORM_LINUX) || \
     (defined(AURORA_PLATFORM_MACOS) && defined(AURORA_BACKEND_MACOS))
     // 这三条腿有可按需自举的真桥：清空槽位后公共入口会去碰真实注册表 / 桌面条目，不适合无头断言。

@@ -179,7 +179,7 @@ AURORA_TEST_CASE(defaults_match_declared_property_defaults) {
     AURORA_TEST_CHECK_NEAR(static_cast<double>(d.padding().left), 8.0, 1e-6);
     AURORA_TEST_CHECK_NEAR(static_cast<double>(d.padding().bottom), 8.0, 1e-6);
 
-    ScatterChart c{};
+    ScatterChart const c{};
     AURORA_TEST_CHECK_TRUE(c.type_name() == std::string{"ScatterChart"});
     AURORA_TEST_CHECK_TRUE(c.wants_click());
     AURORA_TEST_CHECK_FALSE(c.hovered_point().has_value());
@@ -241,7 +241,7 @@ AURORA_TEST_CASE(props_roundtrip_and_factory) {
     s.name = "P";
     s.points = {ChartPoint{.x = 1.0, .y = 2.0}, ChartPoint{.x = 3.0, .y = 4.0}};
     s.dot_radius = 5.0F;
-    ScatterChart src{ScatterChartProps().set_series({s})};
+    ScatterChart const src{ScatterChartProps().set_series({s})};
     Json props = Json::object();
     src.serialize_props(props);
     const auto &series = *require_child(props, "series");
@@ -437,7 +437,7 @@ AURORA_TEST_CASE(scatterchart_empty_array_stated_differs_from_unstated) {
     AURORA_TEST_REQUIRE_TRUE(require_child(stated_json, "series")->is_array());
     AURORA_TEST_CHECK_EQ(require_child(stated_json, "series")->size(), 0U);
 
-    ScatterChartProbe unstated;
+    ScatterChartProbe const unstated;
     AURORA_TEST_CHECK_FALSE(unstated.present(ScatterChartProps::series_row()));
     AURORA_TEST_CHECK_TRUE(unstated.series().empty());
     Json unstated_json = Json::object();

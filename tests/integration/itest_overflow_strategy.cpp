@@ -20,7 +20,6 @@
 #include "aurora/widget/text.h"
 #include "framework/aurora_test.h"
 #include "framework/json_access.h"
-#include "framework/json_literals.h"
 
 namespace aurora::test_cases::itest_overflow_strategy {
 using aurora::testing::require_field;

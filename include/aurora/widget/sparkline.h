@@ -10,7 +10,6 @@
 
 #include "aurora/core/accessibility.h"
 #include "aurora/core/color.h"
-#include "aurora/core/json.h"
 #include "aurora/core/types.h"
 #include "aurora/render/painter.h"
 #include "aurora/theming/theme_scope.h"

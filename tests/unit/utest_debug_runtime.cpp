@@ -59,7 +59,7 @@ AURORA_TEST_CASE(widget_tree_delegates_to_inspector_full_json) {
         AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG is not enabled: widget_tree is compiled out and returns unavailable");
     }
     // 门面收编原则：widget_tree 是 Inspector::tree_json_full 的薄封装，输出必须等价。
-    Node root = make_tree();
+    Node const root = make_tree();
     const Json via_facade = widget_tree(root);
     const Json via_inspector = Inspector::tree_json_full(root);
     AURORA_TEST_CHECK_EQ(via_facade, via_inspector);

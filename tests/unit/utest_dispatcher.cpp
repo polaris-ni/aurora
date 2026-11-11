@@ -15,7 +15,6 @@
 /// 意图沿 layout_parent() 上溯交给最近可滚动祖先而链上无可滚动者返回 false
 
 #include <algorithm>
-#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -473,7 +472,7 @@ class ChainInjectingRoot final : public LeafWidget {
 [[nodiscard]] auto make_stale_node(Widget *live, const Point &origin = Point{}) -> HitNode {
     auto block = std::make_shared<int>(42);
     std::shared_ptr<Widget> alias(block, live);
-    std::weak_ptr<Widget> stale_guard = alias;
+    std::weak_ptr<Widget> const stale_guard = alias;
     HitNode node(live, stale_guard, origin);
     alias.reset();
     block.reset();
@@ -1757,7 +1756,7 @@ AURORA_TEST_CASE(scroll_skips_recycled_hit_chain_nodes) {
     auto live = std::make_shared<RecordingScroller>();
 
     // 对照组：守卫有效时，最深节点先消费，更浅的可滚动祖先收不到。
-    std::weak_ptr<Widget> live_guard = live;
+    std::weak_ptr<Widget> const live_guard = live;
     root->injected = {HitNode(live.get(), live_guard, Point{})};
     ScrollEvent alive_event;
     alive_event.position = Point{.x = 20.0F, .y = 20.0F};
@@ -1783,7 +1782,7 @@ AURORA_TEST_CASE(hover_keeps_widget_alive_across_leave_callback) {
     std::shared_ptr<Widget> holder = std::make_shared<SelfReleasingBox>(&probe);
     probe.release = [&holder] { holder.reset(); };
 
-    std::weak_ptr<Widget> guard = holder;
+    std::weak_ptr<Widget> const guard = holder;
     root->injected = {HitNode(holder.get(), guard, Point{})};
 
     EventDispatcher dispatcher;
@@ -1812,7 +1811,7 @@ AURORA_TEST_CASE(cursor_resolution_keeps_widget_alive_across_hook) {
     probe.release = [&holder] { holder.reset(); };
     probe.release_on_cursor = true;
 
-    std::weak_ptr<Widget> guard = holder;
+    std::weak_ptr<Widget> const guard = holder;
     root->injected = {HitNode(holder.get(), guard, Point{})};
 
     EventDispatcher dispatcher;

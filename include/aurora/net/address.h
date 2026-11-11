@@ -1,7 +1,7 @@
 #pragma once
 
 /// @brief 网络端点值类型。
-/// @file net/address.h
+/// @file address.h
 ///
 /// 一个 `Endpoint` 表达「一条字节流要去往或来自何处」，是纯值类型：不含句柄、不含平台头，
 /// 可在任意线程拷贝与比较。三条设计约束值得在写代码前知道：

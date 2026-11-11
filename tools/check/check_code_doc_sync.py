@@ -291,19 +291,19 @@ def parse_test_header(repo, rel):
             continue
         m = TYPE_RE.match(line)
         if m and type_v is None:
-            type_v = m.group(1).strip();
+            type_v = m.group(1).strip()
             continue
         m = NOTE_RE.match(line)
         if m and note_v is None:
-            note_v = m.group(1).strip();
+            note_v = m.group(1).strip()
             continue
         m = STD_TARGET_RE.match(line)
         if m and std_v is None:
-            std_v = m.group(1).strip();
+            std_v = m.group(1).strip()
             continue
         m = ALT_TARGET_RE.match(line)
         if m and alt_v is None:
-            alt_v = m.group(1).strip();
+            alt_v = m.group(1).strip()
             continue
     has_std_block = (type_v is not None and std_v is not None and note_v is not None)
     fmt = "standard" if has_std_block else ("alt" if alt_v is not None else "none")

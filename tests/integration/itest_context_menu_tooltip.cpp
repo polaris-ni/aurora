@@ -18,7 +18,7 @@
 namespace aurora::test_cases::itest_context_menu_tooltip {
 
 AURORA_TEST_CASE(menu_item_construction_and_submenu) {
-    MenuItem item{"Open", []() -> void {}};
+    MenuItem const item{"Open", []() -> void {}};
     AURORA_TEST_CHECK_STREQ(item.label, "Open");
     AURORA_TEST_CHECK_FALSE(item.separator);
     AURORA_TEST_CHECK_FALSE(item.is_submenu());

@@ -48,8 +48,6 @@
 #include <string>
 #include <string_view>
 
-#include "e2e/harness.h"
-
 #ifdef AURORA_PLATFORM_WINDOWS
 // clang-format off
 #ifndef WIN32_LEAN_AND_MEAN  // NOLINT(readability-identifier-naming)
@@ -243,7 +241,7 @@ struct LandingCheck {
     if (!landing.clear) {
         return Result<void>{make_error(ErrorCode::GeneralNotSupported, "sendinput_click: " + landing.reason)};
     }
-    POINT pt{.x = static_cast<LONG>(landing.screen_px.x), .y = static_cast<LONG>(landing.screen_px.y)};
+    POINT const pt{.x = static_cast<LONG>(landing.screen_px.x), .y = static_cast<LONG>(landing.screen_px.y)};
     if (SetCursorPos(pt.x, pt.y) == 0) {
         return Result<void>{make_error(ErrorCode::GeneralNotSupported, "sendinput_click: SetCursorPos failed")};
     }

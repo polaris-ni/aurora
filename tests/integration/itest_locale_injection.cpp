@@ -134,8 +134,8 @@ AURORA_TEST_CASE(provider_state_switch_reresolves_message_text) {
     const MessageId id = catalog.find_by_name("itest.items");
     AURORA_TEST_REQUIRE_MSG(id != AURORA_INVALID_MESSAGE_ID, "registered name resolves to a vocabulary Id");
 
-    State<Locale> locale_state{Locale{.language = "en"}};
-    Node text_node{Text{TextProps().set_content(LocalizedString::tr(id, {MessageArg{"n", std::int64_t{3}}}))}};
+    State<Locale> const locale_state{Locale{.language = "en"}};
+    Node const text_node{Text{TextProps().set_content(LocalizedString::tr(id, {MessageArg{"n", std::int64_t{3}}}))}};
     Node node{LocaleProvider{locale_state, text_node}};
     (void)win->present_root(node);
 

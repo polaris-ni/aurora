@@ -96,7 +96,7 @@ class ImageViewProbe final : public ImageView {
 }  // namespace
 
 AURORA_TEST_CASE(default_image_view_invariants) {
-    ImageViewProbe iv;
+    ImageViewProbe const iv;
     AURORA_TEST_CHECK_EQ(std::string{iv.type_name()}, "Image");
     AURORA_TEST_CHECK_EQ(iv.bitmap.width, 0);
     AURORA_TEST_CHECK_TRUE(iv.bitmap.pixels.empty());
@@ -363,7 +363,7 @@ class PosterGuard {
             if (batch.empty()) {
                 return;
             }
-            for (std::function<void()> &fn : batch) {
+            for (std::function<void()> const &fn : batch) {
                 if (fn) {
                     fn();
                 }

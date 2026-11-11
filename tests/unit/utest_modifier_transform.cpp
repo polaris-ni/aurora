@@ -76,7 +76,7 @@ AURORA_TEST_CASE(align_skips_the_loose_axis_of_a_flex_container) {
 AURORA_TEST_CASE(align_respects_min_constraint_clamp) {
     // max 无限时 self 取子尺寸，结果经 c.constrain 被 min 抬升。
     const AlignNode a(Alignment::TopLeft);
-    Constraints c{.min = Size{.width = 60.0F, .height = 60.0F}, .max = Size::infinity()};
+    Constraints const c{.min = Size{.width = 60.0F, .height = 60.0F}, .max = Size::infinity()};
     const Size s = a.layout(c, make_measure(10.0F, 10.0F));
     AURORA_TEST_CHECK_NEAR(s.width, 60.0F, 0.0F);
     AURORA_TEST_CHECK_NEAR(s.height, 60.0F, 0.0F);

@@ -1,7 +1,7 @@
 #pragma once
 
 /// @brief 异步作业的三态响应式绑定：`Resource<T>`（一次性落定）与 `StreamResource<T>`（持续流）。
-/// @file state/resource.h
+/// @file resource.h
 ///
 /// 本头把「一个会异步落定的结果」变成 widget 可以直接读的信号：三态 `Loading / Ready(T) /
 /// Failed(Error)`，读取即登记依赖、落定即定点刷新，对位业界的 `FutureBuilder`。
@@ -242,7 +242,7 @@ class ResourceCore : public std::enable_shared_from_this<ResourceCore<T>> {
         std::uint64_t gen = 0;
         ResourceSnapshot<T> next;
         {
-            std::scoped_lock<std::mutex> lock(mutex_);
+            std::scoped_lock<std::mutex> const lock(mutex_);
             if (producer_) {
                 if (job_) {
                     job_->cancel();  // 重发：自动取消上一次未完成的作业
@@ -273,7 +273,7 @@ class ResourceCore : public std::enable_shared_from_this<ResourceCore<T>> {
     auto commit(std::uint64_t gen, const Result<T> &r) -> void {
         ResourceSnapshot<T> next;
         {
-            std::scoped_lock<std::mutex> lock(mutex_);
+            std::scoped_lock<std::mutex> const lock(mutex_);
             if (gen != generation_) {
                 return;  // 已被新请求取代：旧结果不覆盖新状态
             }
@@ -292,7 +292,7 @@ class ResourceCore : public std::enable_shared_from_this<ResourceCore<T>> {
     /// @param gen 本次发送的代次。
     /// @return 可直接交给 `Task<T>::then` 的回调。
     [[nodiscard]] auto completion(std::uint64_t gen) -> std::function<void(const Result<T> &)> {
-        std::weak_ptr<ResourceCore<T>> weak = this->weak_from_this();
+        std::weak_ptr<ResourceCore<T>> const weak = this->weak_from_this();
         return [weak, gen](const Result<T> &r) -> void {
             const auto core = weak.lock();
             if (!core) {

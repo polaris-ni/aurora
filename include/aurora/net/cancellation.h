@@ -1,7 +1,7 @@
 #pragma once
 
 /// @brief 异步网络操作的取消令牌。
-/// @file net/cancellation.h
+/// @file cancellation.h
 ///
 /// 一次网络操作的「能不能中途放弃」由 `Cancellation` 表达：它是**共享状态**的句柄，拷贝只
 /// 增加引用，不复制状态——因此发起方、挂起的协程与引擎内部看到的都是同一个取消位。三条契约：

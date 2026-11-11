@@ -148,7 +148,6 @@ def main() -> int:
     root = find_root()
     include = re.compile(args.include) if args.include else None
 
-    cf = None
     from shutil import which as _which
 
     if args.clang_format:

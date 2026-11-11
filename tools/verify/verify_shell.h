@@ -9,7 +9,6 @@
 // 四枚探针分别在独立进程里跑，故这里的进程级静态量（失败计数 / 环境不可用标记）互不串扰。
 
 #include <chrono>
-#include <cstdint>
 #include <filesystem>
 #include <string>
 #include <string_view>

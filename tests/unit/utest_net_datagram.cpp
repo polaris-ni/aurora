@@ -20,7 +20,6 @@
 ///    AURORA_TEST_SKIP。
 
 #include <atomic>
-#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <functional>

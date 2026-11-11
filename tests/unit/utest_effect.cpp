@@ -37,7 +37,7 @@ AURORA_TEST_CASE(effect_runs_immediately_and_tracks_dependencies) {
 AURORA_TEST_CASE(effect_ignores_sources_read_outside_callback) {
     // 回调体不读取的来源不登记：写入不触发重跑。
     State<int> watched{0};
-    State<int> bystander{0};
+    State<int> const bystander{0};
     int runs = 0;
     auto sub = effect([&]() -> void {
         ++runs;

@@ -192,7 +192,7 @@ try {
 
     // —— 期望 8/9（判据 ⑥⑦）：焦点窗口改名即时生效；非焦点改名只缓存、易主时重播
     await cmd('titleB:待切B');
-    s = await waitState(/tb=待切B/);
+    await waitState(/tb=待切B/);
     ok('⑥ 焦点窗口改名即时写页面标题', (await title()) === '待切B', await title());
     await cmd('titleA:改名A');
     await waitState(/ta=改名A/);

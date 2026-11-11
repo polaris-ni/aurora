@@ -303,7 +303,7 @@ AURORA_TEST_CASE(bar_empty_click_closes) {
 AURORA_TEST_CASE(add_menu_appends_and_relayouts) {
     int hits = 0;
     int last = -1;
-    std::shared_ptr<MenuBar> bar = make_menu_bar(hits, last);
+    std::shared_ptr<MenuBar> const bar = make_menu_bar(hits, last);
     AURORA_TEST_CHECK_EQ(bar->menu_count(), 2U);
 
     Menu extra;

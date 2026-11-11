@@ -57,6 +57,7 @@ struct CpRange {
 ///
 /// 目标段 = 连续的 `TargetConverted` / `TargetNotConverted` 单元。IMM32 实际只给单段目标；
 /// 出现多段（异常输入）时取**起始最靠前的一段**，保证可稳定复现。
+/// @param text 组合串原文（UTF-16）。
 /// @param attrs 逐单元属性；长度与 `text` 单元数不一致时按较短者生效（多余忽略、不足视同缺失）。
 /// @return 无属性数组 / 数组全零长 / 无目标段时，`end` 为哨兵（无选区）。
 [[nodiscard]] auto target_selection(std::u16string_view text, const std::vector<std::uint8_t> &attrs) -> CpRange;

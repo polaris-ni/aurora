@@ -32,7 +32,6 @@
 //   流留在内存里再试一次」这笔开销。
 #pragma once
 
-#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <optional>

@@ -23,7 +23,7 @@ AURORA_TEST_CASE(default_subscription_is_inactive_and_reset_is_safe) {
     AURORA_TEST_CHECK_FALSE(sub.active());
 
     // 空取消回调构造的句柄同样是非活跃态。
-    Subscription from_empty{std::function<void()>{}};
+    Subscription const from_empty{std::function<void()>{}};
     AURORA_TEST_CHECK_FALSE(from_empty.active());
 }
 
@@ -70,7 +70,7 @@ AURORA_TEST_CASE(move_semantics_transfer_ownership_and_flush_pending_cancel) {
 
 AURORA_TEST_CASE(subscription_from_state_subscribe_stops_after_reset) {
     // State::subscribe 返回的凭证：reset 之后写入不再回调。
-    State<int> s{0};
+    State<int> const s{0};
     std::vector<int> seen;
     auto sub = s.subscribe([&](const int &v) { seen.push_back(v); });
     AURORA_TEST_REQUIRE_EQ(seen.size(), 1U);  // 立即交付首值
@@ -98,7 +98,7 @@ AURORA_TEST_CASE(subscription_scopes_to_destruction) {
 
 AURORA_TEST_CASE(subscription_move_keeps_underlying_observation_alive) {
     // 移动交接到新凭证后，订阅本体不变、继续生效；旧凭证析构不取消。
-    State<int> s{0};
+    State<int> const s{0};
     int calls = 0;
     Subscription outer;
     {
@@ -115,8 +115,8 @@ AURORA_TEST_CASE(subscription_move_keeps_underlying_observation_alive) {
 
 AURORA_TEST_CASE(read_only_state_subscription_tracks_shared_source) {
     // 只读句柄的订阅跟随其来源：可写句柄写入照常回调。
-    State<int> s{0};
-    ReadOnlyState<int> ro = s;
+    State<int> const s{0};
+    ReadOnlyState<int> const ro = s;
     int calls = 0;
     auto sub = ro.subscribe([&](const int &) { ++calls; });
     AURORA_TEST_CHECK_EQ(calls, 1);

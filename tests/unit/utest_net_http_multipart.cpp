@@ -100,7 +100,7 @@ struct Drained {
 /// @return 失败码（校验通过即致命失败）。
 [[nodiscard]] auto validation_code(const MultipartWriter &writer) -> aurora::ErrorCode {
     const auto check = writer.validate();
-    AURORA_TEST_REQUIRE_MSG(!bool(check), check ? std::string{"expected a refusal"} : std::string{});
+    AURORA_TEST_REQUIRE_MSG(!static_cast<bool>(check), check ? std::string{"expected a refusal"} : std::string{});
     return check.error().code_enum;
 }
 
@@ -123,7 +123,7 @@ AURORA_TEST_CASE(a_fixed_boundary_renders_the_form_byte_for_byte) {
         "ab\r\n"
         "--AuroraBoundary--\r\n"};
     const auto flowed = drain(writer);
-    AURORA_TEST_CHECK_TRUE(!bool(flowed.failure));
+    AURORA_TEST_CHECK_TRUE(!static_cast<bool>(flowed.failure));
     AURORA_TEST_CHECK_EQ(flowed.bytes, expected);
     // 声明与流出必须逐字节相等：这是 `Content-Length` 不说谎的唯一保证。
     const auto total = writer.total_size();
@@ -148,7 +148,7 @@ AURORA_TEST_CASE(the_generated_boundary_is_legal_and_unique_per_writer) {
     AURORA_TEST_CHECK_EQ(first.boundary().size(), std::size_t{23});
     AURORA_TEST_CHECK_TRUE(first.boundary().rfind("aurora-", 0) == 0);
     AURORA_TEST_CHECK_TRUE(first.boundary() != second.boundary());
-    AURORA_TEST_CHECK_TRUE(bool(first.validate()));
+    AURORA_TEST_CHECK_TRUE(static_cast<bool>(first.validate()));
     AURORA_TEST_CHECK_EQ(first.content_type(), "multipart/form-data; boundary=" + first.boundary());
 
     // 体流里的边界与 `Content-Type` 里的必须是同一枚（两处读的是同一个字段，没有第二份真值源）。
@@ -223,7 +223,7 @@ AURORA_TEST_CASE(a_file_part_streams_in_segments_and_replays_identically) {
     writer.boundary("BigBoundary").field("note", "ok").file("blob", path.string());
 
     const auto first = drain(writer);
-    AURORA_TEST_CHECK_TRUE(!bool(first.failure));
+    AURORA_TEST_CHECK_TRUE(!static_cast<bool>(first.failure));
     AURORA_TEST_CHECK_TRUE(first.largest <= AURORA_WRITE_CHUNK);
     // 文本部件三段 + 文件部件（头 + 三正文段 + 收尾）五段 + 结束边界 = 九段。
     AURORA_TEST_CHECK_EQ(first.segments, std::size_t{9});
@@ -250,7 +250,7 @@ AURORA_TEST_CASE(zero_length_parts_do_not_emit_empty_segments) {
     writer.boundary("Z").field("empty", "").bytes("blank", std::vector<char>{});
 
     const auto flowed = drain(writer);
-    AURORA_TEST_CHECK_TRUE(!bool(flowed.failure));
+    AURORA_TEST_CHECK_TRUE(!static_cast<bool>(flowed.failure));
     // 每枚部件只交出头与收尾两段（正文为空便不产出段），加结束边界共五段。
     AURORA_TEST_CHECK_EQ(flowed.segments, std::size_t{5});
     AURORA_TEST_CHECK_EQ(flowed.bytes, std::string{"--Z\r\nContent-Disposition: form-data; name=\"empty\"\r\n\r\n\r\n"
@@ -264,7 +264,7 @@ AURORA_TEST_CASE(quotes_and_backslashes_in_part_names_are_escaped) {
     MultipartWriter writer;
     writer.boundary("Q").field("we\"ird\\name", "v");
     const auto flowed = drain(writer);
-    AURORA_TEST_CHECK_TRUE(!bool(flowed.failure));
+    AURORA_TEST_CHECK_TRUE(!static_cast<bool>(flowed.failure));
     AURORA_TEST_CHECK_TRUE(flowed.bytes.find("name=\"we\\\"ird\\\\name\"") != std::string::npos);
     // 转义只加反斜杠，长度算的是转义后的实际字节，故声明与流出仍相等。
     AURORA_TEST_CHECK_EQ(writer.total_size().value_or(std::uint64_t{0}),
@@ -277,7 +277,7 @@ AURORA_TEST_CASE(bad_forms_are_refused_before_a_single_byte_leaves) {
     AURORA_TEST_CHECK_EQ(validation_code(bare), aurora::ErrorCode::HttpRequestInvalid);
     AURORA_TEST_CHECK_TRUE(!bare.total_size().has_value());
     const auto refused = bare.next_chunk();
-    AURORA_TEST_REQUIRE_TRUE(!bool(refused));
+    AURORA_TEST_REQUIRE_TRUE(!static_cast<bool>(refused));
     AURORA_TEST_CHECK_EQ(refused.error().code_enum, aurora::ErrorCode::HttpRequestInvalid);
 
     // 字段名不可为空，也不含 CR / LF——那两字符会把部件头顶开一行（MIME 版的请求走私）。
@@ -288,7 +288,7 @@ AURORA_TEST_CASE(bad_forms_are_refused_before_a_single_byte_leaves) {
     injected.field("bad\r\nname", "v");
     AURORA_TEST_CHECK_EQ(validation_code(injected), aurora::ErrorCode::HttpRequestInvalid);
     const auto mid_stream = injected.next_chunk();
-    AURORA_TEST_REQUIRE_TRUE(!bool(mid_stream));
+    AURORA_TEST_REQUIRE_TRUE(!static_cast<bool>(mid_stream));
     AURORA_TEST_CHECK_EQ(mid_stream.error().code_enum, aurora::ErrorCode::HttpRequestInvalid);
 
     // 边界：空、含空格、含必须引用的字符、超长、字符集外，四种都不上线。
@@ -310,7 +310,7 @@ AURORA_TEST_CASE(bad_forms_are_refused_before_a_single_byte_leaves) {
     // 合法字符集里的 Marks（`'()+_,-./:=?`）不该被误拒。
     MultipartWriter marks;
     marks.boundary("a'b()+,-./:=?z").field("a", "1");
-    AURORA_TEST_CHECK_TRUE(bool(marks.validate()));
+    AURORA_TEST_CHECK_TRUE(static_cast<bool>(marks.validate()));
 }
 
 AURORA_TEST_CASE(unavailable_files_leave_the_length_unknown_and_fail_at_the_open) {
@@ -320,12 +320,12 @@ AURORA_TEST_CASE(unavailable_files_leave_the_length_unknown_and_fail_at_the_open
     writer.boundary("F").field("note", "ok").file("blob", missing.string());
 
     // 校验不看文件可读性（那是取字节时才知道的事实），故形态退回「长度未知」而非报错。
-    AURORA_TEST_CHECK_TRUE(bool(writer.validate()));
+    AURORA_TEST_CHECK_TRUE(static_cast<bool>(writer.validate()));
     AURORA_TEST_CHECK_TRUE(!writer.total_size().has_value());
 
     // 前面的部件照常交出，错误落在打开文件的那一刻。
     const auto flowed = drain(writer);
-    AURORA_TEST_REQUIRE_TRUE(bool(flowed.failure));
+    AURORA_TEST_REQUIRE_TRUE(static_cast<bool>(flowed.failure));
     AURORA_TEST_CHECK_EQ(require_value(flowed.failure).code_enum, aurora::ErrorCode::IOFileNotFound);
     AURORA_TEST_CHECK_TRUE(flowed.bytes.find("Content-Disposition") != std::string::npos);
     AURORA_TEST_CHECK_TRUE(flowed.bytes.find("ok\r\n") != std::string::npos);
@@ -337,7 +337,7 @@ AURORA_TEST_CASE(unavailable_files_leave_the_length_unknown_and_fail_at_the_open
     as_dir.boundary("F").file("blob", as_dir_path.string());
     AURORA_TEST_CHECK_TRUE(!as_dir.total_size().has_value());
     const auto second = drain(as_dir);
-    AURORA_TEST_REQUIRE_TRUE(bool(second.failure));
+    AURORA_TEST_REQUIRE_TRUE(static_cast<bool>(second.failure));
     AURORA_TEST_CHECK_EQ(require_value(second.failure).code_enum, aurora::ErrorCode::IOFileNotFound);
 }
 
@@ -354,7 +354,7 @@ AURORA_TEST_CASE(apply_to_sets_only_the_content_type_and_the_source) {
 
     // 头部里的 `Content-Length` 就是 `total_size()`：两处读同一份计划，不可能各说一套。
     const auto head = request.render_head();
-    AURORA_TEST_REQUIRE_TRUE(bool(head));
+    AURORA_TEST_REQUIRE_TRUE(static_cast<bool>(head));
     const auto length = writer.total_size().value_or(std::uint64_t{0});
     AURORA_TEST_CHECK_TRUE(head.value().find("Content-Length: " + std::to_string(length) + "\r\n") !=
                            std::string::npos);
@@ -367,7 +367,7 @@ AURORA_TEST_CASE(apply_to_sets_only_the_content_type_and_the_source) {
     auto other = Request::post("https://example.com/upload");
     streaming.apply_to(other);
     const auto other_head = other.render_head();
-    AURORA_TEST_REQUIRE_TRUE(bool(other_head));
+    AURORA_TEST_REQUIRE_TRUE(static_cast<bool>(other_head));
     AURORA_TEST_CHECK_TRUE(other_head.value().find("Transfer-Encoding: chunked") != std::string::npos);
     AURORA_TEST_CHECK_TRUE(other_head.value().find("Content-Length") == std::string::npos);
 }
@@ -377,19 +377,19 @@ AURORA_TEST_CASE(a_rewritten_boundary_revalidates_the_form) {
     MultipartWriter writer;
     writer.boundary("").field("name", "v");
     const auto refused = writer.next_chunk();
-    AURORA_TEST_REQUIRE_TRUE(!bool(refused));
+    AURORA_TEST_REQUIRE_TRUE(!static_cast<bool>(refused));
     AURORA_TEST_CHECK_EQ(refused.error().code_enum, aurora::ErrorCode::HttpRequestInvalid);
 
     writer.boundary("Fixed");
-    AURORA_TEST_CHECK_TRUE(bool(writer.validate()));
+    AURORA_TEST_CHECK_TRUE(static_cast<bool>(writer.validate()));
     const auto flowed = drain(writer);
-    AURORA_TEST_CHECK_TRUE(!bool(flowed.failure));
+    AURORA_TEST_CHECK_TRUE(!static_cast<bool>(flowed.failure));
 
     // 新边界撞进已有正文：旧的「合格」结论不再算数，重算之后当场拒。
     writer.boundary("v");
     AURORA_TEST_CHECK_EQ(validation_code(writer), aurora::ErrorCode::HttpRequestInvalid);
     const auto stuck = drain(writer);
-    AURORA_TEST_REQUIRE_TRUE(bool(stuck.failure));
+    AURORA_TEST_REQUIRE_TRUE(static_cast<bool>(stuck.failure));
 }
 
 }  // namespace aurora::test_cases::utest_net_http_multipart

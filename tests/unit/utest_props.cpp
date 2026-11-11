@@ -384,12 +384,12 @@ AURORA_TEST_CASE(serialize_writes_required_always_and_stated_only) {
 
 AURORA_TEST_CASE(deserialize_writes_bound_source_without_rebinding) {
     ProbeProps props;
-    State<float> opacity{0.2F};
+    State<float> const opacity{0.2F};
     props.bind_opacity(opacity);
     AURORA_TEST_CHECK_NEAR(props.opacity(), 0.2F, 1e-4F);
 
     // 回写落进**当前源**：外部 State 的现值被改，且绑定没断（后续 set 仍驱动该属性）。
-    Json empty = Json::object();
+    Json const empty = Json::object();
     props.deserialize(empty);
     AURORA_TEST_CHECK_NEAR(props.opacity(), 0.2F, 1e-4F);  // 键缺失保留现值
 
@@ -402,7 +402,7 @@ AURORA_TEST_CASE(deserialize_writes_bound_source_without_rebinding) {
     AURORA_TEST_CHECK_NEAR(props.opacity(), 0.9F, 1e-4F);
 
     // 必填来源件同理：绑定后回写改的是那个源。
-    State<std::string> label{"origin"};
+    State<std::string> const label{"origin"};
     props.bind_label(label);
     Json text = Json::object();
     text.set("label", Json{"hot-reload"});
@@ -536,7 +536,7 @@ AURORA_TEST_CASE(shows_token_row_emits_quoted_registry_names) {
 
 AURORA_TEST_CASE(signal_collection_registers_stated_sources_only) {
     ProbeProps props;
-    State<std::string> label{"a"};
+    State<std::string> const label{"a"};
     props.bind_label(label);
     StateSink sink;
     props.collect(sink);
@@ -686,7 +686,7 @@ AURORA_TEST_CASE(props_copy_and_detached_dto_mark_nothing) {
 AURORA_TEST_CASE(resubscribe_channel_follows_the_moved_host) {
     // 换源后的重订阅经同一枚链接位调宿主的受保护件（不用 std::function 转调 ⇒ 零堆分配）。
     // 这里先移动、后挂载，再换源：来源变更的标脏必须落在移动目标上。
-    State<float> opacity{0.5F};
+    State<float> const opacity{0.5F};
     auto first = ProbeWidget();
     auto moved = ProbeWidget(std::move(first));
     DirtyCounter dirty;

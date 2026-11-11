@@ -42,7 +42,7 @@ auto main() -> int {
     au::enable_dpi_awareness();
     au::init_console();
 
-    au::Node root = build_root();
+    au::Node const root = build_root();
 
 #ifdef AURORA_BACKEND_GLFW
     au::GlfwOptions opts;

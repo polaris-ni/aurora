@@ -407,7 +407,7 @@ def check_tier_table(matrix, violations):
     return tiers
 
 
-def check_ratios(matrix, tiers, violations):
+def check_ratios(matrix, violations):
     """C5 + C6: judge the shipped columns, and police the exemption table in both directions."""
     floors = {(row.get("style"), row.get("scheme"), row.get("pair")): row
               for row in (matrix.get("preset_floors") or [])}
@@ -640,8 +640,8 @@ def main(argv=None):
     if styles:
         check_columns(matrix, styles, violations)
     if check_coverage(matrix, role_names, violations) is not None:
-        tiers = check_tier_table(matrix, violations)
-        check_ratios(matrix, tiers, violations)
+        check_tier_table(matrix, violations)
+        check_ratios(matrix, violations)
         check_derived(matrix, violations)
     check_reasons(matrix, violations)
     check_spec(matrix, spec_text, violations)

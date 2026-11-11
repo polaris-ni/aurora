@@ -30,7 +30,7 @@ AURORA_TEST_CASE(win32_media_query_maps_headless_surface) {
 #if defined(AURORA_BACKEND_WIN32) && defined(AURORA_BACKEND_HEADLESS)
     // win32_media_query 是纯映射函数：只读 Surface 的 scale_factor()/size()，
     // 叠加系统 DPI/屏幕度量与减弱动效设置——不创建窗口，可用 HeadlessSurface 注入。
-    HeadlessSurface surface("", Size{.width = 800.0F, .height = 600.0F});
+    HeadlessSurface const surface("", Size{.width = 800.0F, .height = 600.0F});
     const MediaQuery mq = win32_media_query(surface);
 
     // Headless 未覆写 scale_factor（基类默认 1.0），mq.size 即注入的逻辑尺寸。

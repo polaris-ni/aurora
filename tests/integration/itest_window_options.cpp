@@ -120,7 +120,7 @@ AURORA_TEST_CASE(set_title_forwards_to_custom_surface) {
     };
 
     auto rec = std::make_unique<RecordingSurface>();
-    RecordingSurface *raw = rec.get();
+    RecordingSurface *const raw = rec.get();
     au::Window w{std::move(rec)};
     w.set_title("hello-title");
     AURORA_TEST_CHECK(raw->called);

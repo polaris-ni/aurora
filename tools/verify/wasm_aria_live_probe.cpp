@@ -40,7 +40,6 @@
 
 #include "aurora/aurora.h"
 #include "aurora/core/accessibility.h"
-#include "aurora/window/wasm_surface.h"
 
 namespace au = aurora;
 

@@ -71,7 +71,7 @@ AURORA_TEST_CASE(hero_tag_accessors) {
 }
 
 AURORA_TEST_CASE(hero_serialize_props_roundtrip) {
-    Hero hero{"logo", Node{SolidBox{Color{255, 0, 0}}}};
+    Hero const hero{"logo", Node{SolidBox{Color{255, 0, 0}}}};
     Json props = Json::object();
     hero.serialize_props(props);
     AURORA_TEST_CHECK_EQ(require_field<std::string>(props, "tag"), std::string{"logo"});

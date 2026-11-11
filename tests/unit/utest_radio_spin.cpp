@@ -75,9 +75,9 @@ AURORA_TEST_CASE(radiogroup_select_and_callback_boundaries) {
 }
 
 AURORA_TEST_CASE(radiogroup_initial_index_clamped) {
-    RadioGroup high({"A", "B"}, 5);
+    RadioGroup const high({"A", "B"}, 5);
     AURORA_TEST_CHECK_EQ(high.selected_index(), 1);  // 钳到最后一项
-    RadioGroup low({"A", "B"}, -3);
+    RadioGroup const low({"A", "B"}, -3);
     AURORA_TEST_CHECK_EQ(low.selected_index(), 0);  // 钳到首项
 
     RadioGroup empty(std::vector<std::string>{});
@@ -140,7 +140,7 @@ AURORA_TEST_CASE(radiogroup_describe_and_roundtrip) {
     AURORA_TEST_REQUIRE_EQ(d.events.size(), 1U);
     AURORA_TEST_CHECK_EQ(std::string{d.events[0]}, "on_change");
 
-    RadioGroup src({"A", "B"}, 1);
+    RadioGroup const src({"A", "B"}, 1);
     Json props = Json::object();
     src.serialize_props(props);
     AURORA_TEST_CHECK_EQ(require_field<int>(props, "selected_index"), 1);

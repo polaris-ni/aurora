@@ -1,5 +1,5 @@
 /// @brief 声明式交付面的实现：协程出口 → 作业状态 → 响应式资源的桥（§12）。
-/// @file src/aurora/net/http_binding.cpp
+/// @file http_binding.cpp
 ///
 /// 本文件只做一件事：**把 `Client` 的协程出口接到 `Task` / `StreamResource` 上**，并把取消接回套接字。
 /// 三条实现约束决定了下面的形态：

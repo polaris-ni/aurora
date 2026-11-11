@@ -167,7 +167,7 @@ AURORA_TEST_CASE(defaults_and_identity) {
     AURORA_TEST_CHECK_TRUE(d.legend().position == LegendPosition::Top);
     AURORA_TEST_CHECK_NEAR(static_cast<double>(d.padding().left), 8.0, 1e-6);
 
-    LineChart c{};
+    LineChart const c{};
     AURORA_TEST_CHECK_TRUE(c.type_name() == std::string{"LineChart"});
     AURORA_TEST_CHECK_TRUE(c.wants_click());
     AURORA_TEST_CHECK_FALSE(c.hovered_point().has_value());
@@ -213,12 +213,13 @@ AURORA_TEST_CASE(describe_static_is_complete) {
 }
 
 AURORA_TEST_CASE(props_roundtrip_and_factory) {
-    LineChart src{LineChartProps()
-                      .set_series({ChartSeries{.name = "A", .values = {1.0, 2.0, 3.0}, .color = Color{9, 8, 7, 255}}})
-                      .set_categories({"a", "b", "c"})
-                      .set_show_dots(false)
-                      .set_line_width(3.5F)
-                      .set_show_crosshair(false)};
+    LineChart const src{
+        LineChartProps()
+            .set_series({ChartSeries{.name = "A", .values = {1.0, 2.0, 3.0}, .color = Color{9, 8, 7, 255}}})
+            .set_categories({"a", "b", "c"})
+            .set_show_dots(false)
+            .set_line_width(3.5F)
+            .set_show_crosshair(false)};
     Json props = Json::object();
     src.serialize_props(props);
     const Json *arr = require_child(props, "series");
@@ -414,7 +415,7 @@ AURORA_TEST_CASE(linechart_empty_array_stated_differs_from_unstated) {
     AURORA_TEST_CHECK_EQ(cats->size(), 0U);
     AURORA_TEST_CHECK_TRUE(stated.series().empty());
 
-    LineChartProbe bare;
+    LineChartProbe const bare;
     AURORA_TEST_CHECK_FALSE(bare.present(LineChartProps::series_row()));
     Json without_key = Json::object();
     bare.serialize_props(without_key);

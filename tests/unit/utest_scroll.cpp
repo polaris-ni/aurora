@@ -261,7 +261,7 @@ auto make_regression_tree() -> Node {
 /// 否则登记册被删空后断言会静默变成空转。
 auto gate_threshold(const char *id) -> double {
     const std::string path = aurora::testing::paths::under_repo("tools/check/perf_gates.json");
-    std::ifstream in(path, std::ios::binary);
+    std::ifstream const in(path, std::ios::binary);
     AURORA_TEST_REQUIRE_MSG(in.good(), "perf_gates.json must be readable: " + path);
     std::ostringstream ss;
     ss << in.rdbuf();
@@ -395,7 +395,7 @@ AURORA_TEST_CASE(serialized_offset_round_trips_and_beats_restore_key) {
 }
 
 AURORA_TEST_CASE(default_scroll_invariants) {
-    Scroll s;
+    Scroll const s;
     AURORA_TEST_CHECK_EQ(std::string{s.type_name()}, "Scroll");
     AURORA_TEST_CHECK_NEAR(s.step(), 16.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(s.overscan(), 1.0F, 1e-4F);
@@ -481,7 +481,7 @@ AURORA_TEST_CASE(step_serialization_roundtrip) {
     Json props = Json::object();
     Scroll{}.serialize_props(props);
     AURORA_TEST_CHECK_FALSE(props.contains("step"));
-    Scroll defaults;
+    Scroll const defaults;
     AURORA_TEST_CHECK_NEAR(defaults.step(), 16.0F, 1e-4F);
 
     Scroll src;
@@ -580,7 +580,7 @@ AURORA_TEST_CASE(snap_paging_snaps_back_when_less_than_half_page) {
 }
 
 AURORA_TEST_CASE(reduce_motion_snaps_directly_without_intermediate_frames) {
-    ReduceMotionGuard guard;
+    ReduceMotionGuard const guard;
     Scroll s{box(300.0F, 800.0F), ScrollProps().set_step(1.0F).set_snap_extent(200.0F)};
     LayoutEngine::layout(s, bounded(300.0F, 200.0F));
 
@@ -648,8 +648,8 @@ AURORA_TEST_CASE(snap_properties_describe_and_round_trip) {
     AURORA_TEST_CHECK_EQ(align->enum_values.front(), std::string{"Start"});
     AURORA_TEST_CHECK_EQ(align->enum_values.back(), std::string{"End"});
 
-    Scroll src{box(300.0F, 800.0F),
-               ScrollProps().set_step(1.0F).set_snap_extent(120.0F).set_snap_alignment(ScrollSnapAlignment::Center)};
+    Scroll const src{box(300.0F, 800.0F), ScrollProps().set_step(1.0F).set_snap_extent(120.0F).set_snap_alignment(
+                                              ScrollSnapAlignment::Center)};
     Json props = Json::object();
     src.serialize_props(props);
     AURORA_TEST_CHECK_NEAR(require_field<float>(props, "snap_extent"), 120.0F, 1e-4F);
@@ -891,7 +891,7 @@ auto click_at(Widget &root, float x, float y) -> void {
 AURORA_TEST_CASE(content_bounds_written_in_content_coordinates) {
     // 回归点：布局必须把内容盒写入 children_[0]；且是**内容坐标**（原点 0,0、不含滚动偏移）。
     // 吸顶判据（natural_y >= offset_y_）依赖此前提，写成视口坐标会破坏它。
-    ScrollFixture f = make_scrollable(200.0F);
+    ScrollFixture const f = make_scrollable(200.0F);
     const std::vector<Node> &kids = f.scroll->child_nodes();
     AURORA_TEST_REQUIRE(!kids.empty());
     const Rect cb = kids.front().bounds();
@@ -957,7 +957,7 @@ AURORA_TEST_CASE(scrolled_content_still_hits_visual_row) {
 
 AURORA_TEST_CASE(content_outside_viewport_is_not_hittable) {
     // 被 offset 推出可视区的内容不应命中（可视区裁剪）。
-    ScrollFixture f = make_scrollable(400.0F);
+    ScrollFixture const f = make_scrollable(400.0F);
     AURORA_TEST_CHECK_NEAR(f.scroll->offset_y(), 400.0F, 1e-3F);
 
     // 视口顶（y=0.5）对应内容 y=400.5 ⇒ 行号 10；行 9（y=360..400）已在视口之上，不得命中。
@@ -997,7 +997,7 @@ AURORA_TEST_CASE(content_outside_viewport_is_not_hittable) {
 
 AURORA_TEST_CASE(container_stays_on_chain_behind_content) {
     // 容器自身须仍在链上（滚轮/拖拽需要它），但排在内容之后（派发自链尾向链头）。
-    ScrollFixture f = make_scrollable(0.0F);
+    ScrollFixture const f = make_scrollable(0.0F);
     const auto chain = f.scroll->hit_test_chain(Point{.x = 150.0F, .y = 60.0F}, g27_viewport(), BuildContext{});
     AURORA_TEST_REQUIRE(chain.size() >= 2U);
     AURORA_TEST_CHECK_EQ(chain.front().ptr, static_cast<Widget *>(f.scroll.get()));
@@ -1178,7 +1178,7 @@ AURORA_TEST_CASE(window_bounds_is_empty_for_hidden_and_unlaid_out_widget) {
     // 负守卫（口径定死，不得留未定义）：show==false 与从未布局两种情形均返回 nullopt，
     // 而**不是**零盒 —— 零盒无法与「盒恰在窗口原点」区分，会被「非空即采用」的几何判据
     // （如语义树的绘制盒回退）当成有效几何。
-    FixedBox fresh(40.0F, 20.0F);
+    FixedBox const fresh(40.0F, 20.0F);
     AURORA_TEST_CHECK_FALSE(fresh.window_bounds().has_value());
 
     ScrollFixture f = make_scrollable(200.0F);
@@ -1273,7 +1273,7 @@ AURORA_TEST_CASE(drag_auto_scroll_advances_scroll_on_frame_ticks_and_releases) {
     // （复用既有 offset_y_，不新增滚动实现）；方向跟落点所在带（上带负 / 底带正）；
     // 落点移出带外即就地收车、nullopt（Leave / Drop）即收车、已到可滚边缘亦收车。
     // 帧钟为假想钟（pump 每帧 16ms）；内核首帧 dt 兜底 1/60。
-    ScrollFixture f = make_scrollable(400.0F);
+    ScrollFixture const f = make_scrollable(400.0F);
     Scroll &s = *f.scroll;
     const float max_offset = AURORA_CONTENT_H - AURORA_VIEW_H;  // 800 − 200 = 600
     AURORA_TEST_CHECK_NEAR(s.offset_y(), 400.0F, 1e-4F);
@@ -1312,7 +1312,7 @@ AURORA_TEST_CASE(drag_auto_scroll_advances_scroll_on_frame_ticks_and_releases) {
     AURORA_TEST_CHECK_NEAR(s.offset_y(), frozen, 1e-3F);
 
     // 已到可滚边缘：推进被夹住即收车（单次拖放不会再有反方向意图），不再反复顶墙。
-    ScrollFixture tail = make_scrollable(590.0F);
+    ScrollFixture const tail = make_scrollable(590.0F);
     AURORA_TEST_CHECK_TRUE(tail.scroll->on_system_drag_auto_scroll(Point{.x = 150.0F, .y = 200.0F}));
     pump(*tail.scroll, 1);
     AURORA_TEST_CHECK_NEAR(tail.scroll->offset_y(), max_offset, 1e-3F);  // 夹到末端
@@ -1385,7 +1385,7 @@ AURORA_TEST_CASE(scroll_glide_freeze_holds_progress_and_emits_no_redraw) {
 
     anim.set_time_scale(0.0);
     AURORA_TEST_CHECK_EQ(anim.time_scale(), 0.0);
-    ScopedDirtyCounter dirty{s};
+    ScopedDirtyCounter const dirty{s};
     for (int i = 0; i < 8; ++i) {
         pump_scaled_frame(s);
     }
@@ -1410,7 +1410,7 @@ AURORA_TEST_CASE(scroll_drag_auto_scroll_delta_ignores_time_scale) {
 
     auto deltas_at = [&anim](double scale) -> std::pair<float, float> {
         anim.set_time_scale(scale);
-        ScrollFixture f = make_scrollable(400.0F);
+        ScrollFixture const f = make_scrollable(400.0F);
         AURORA_TEST_CHECK_TRUE(f.scroll->on_system_drag_auto_scroll(Point{.x = 150.0F, .y = 0.0F}));
         const float before = f.scroll->offset_y();
         pump_scaled_frame(*f.scroll);

@@ -580,7 +580,7 @@ struct DragOutSession {
     if (copy == nullptr) {
         return nullptr;
     }
-    void *source_locked = GlobalLock(source);
+    void *const source_locked = GlobalLock(source);
     void *copy_locked = GlobalLock(copy);
     if (source_locked != nullptr && copy_locked != nullptr) {
         std::memcpy(copy_locked, source_locked, size);

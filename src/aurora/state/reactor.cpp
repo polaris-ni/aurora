@@ -132,7 +132,7 @@ auto RunRecord::execute() -> void {
     }
     running_ = true;
     next_.clear();
-    CollectorScope scope(*this);
+    CollectorScope const scope(*this);
     try {
         if (fn_) {
             fn_();

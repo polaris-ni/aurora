@@ -1,7 +1,7 @@
 #pragma once
 
 /// @brief 通用事件源注册口。
-/// @file app/event_source_registry.h
+/// @file event_source_registry.h
 ///
 /// 这是网络栈 L0 宿主集成层对外与对内共用的就绪通知底座：第三方非阻塞会话（libssh2、DBus
 /// 一类）与库自带的 poll 线程引擎都以它为实现基座。**缺省驱动方是 `net::Engine` 的常驻线程**

@@ -178,7 +178,7 @@ AURORA_TEST_P(A11yBackends, semantic_snapshot_matches_widgets) {
         AURORA_TEST_SKIP("backend not compiled into this build");
     }
     au::Node root = build_a11y_column();
-    e2e::Session session = assemble_a11y_session(backend, root);
+    e2e::Session const session = assemble_a11y_session(backend, root);
     verify_pixel_channel(session, backend);
     verify_semantic_snapshot(session);
 }

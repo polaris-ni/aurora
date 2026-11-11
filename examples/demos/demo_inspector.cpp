@@ -28,7 +28,7 @@ auto main() -> int {
     au::InspectorPanel inspector{target_tree, 0.4F};
 
     // 用 Splitter 分栏：左侧 Inspector，右侧被检查的 UI
-    au::Node target = target_tree();
+    au::Node const target = target_tree();
     au::Splitter splitter = au::HSplitter(au::Node{std::move(inspector)},
                                           au::Node{au::Column(
                                               {

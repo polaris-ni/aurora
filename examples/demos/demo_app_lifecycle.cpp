@@ -57,9 +57,9 @@ using namespace std::chrono_literals;
 // try/catch 包装
 // NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
-    au::State<bool> paused{false};
-    au::State<int> ticks{0};
-    au::State<au::LocalizedString> ticks_label{au::LocalizedString{"ticks = 0"}};
+    au::State<bool> const paused{false};
+    au::State<int> const ticks{0};
+    au::State<au::LocalizedString> const ticks_label{au::LocalizedString{"ticks = 0"}};
 
     // 动画子树：每 200ms 递增计数（仅在可见时）。被遮挡/最小化时由 window_state 回调暂停。
     au::Node anim = au::Timer(

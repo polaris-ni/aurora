@@ -201,7 +201,7 @@ class ReduceMotionGuard final {
 }  // namespace
 
 AURORA_TEST_CASE(default_lazy_list_invariants) {
-    LazyList list;
+    LazyList const list;
     AURORA_TEST_CHECK_EQ(std::string{list.type_name()}, "LazyList");
     AURORA_TEST_CHECK_EQ(list.count(), 0);
     AURORA_TEST_CHECK_NEAR(list.scroll_offset(), 0.0F, 1e-4F);
@@ -213,15 +213,15 @@ AURORA_TEST_CASE(default_lazy_list_invariants) {
 }
 
 AURORA_TEST_CASE(ctor_clamps_count_and_degrades_extent) {
-    LazyList negative{-5, {}, 48.0F};
+    LazyList const negative{-5, {}, 48.0F};
     AURORA_TEST_CHECK_EQ(negative.count(), 0);
     AURORA_TEST_CHECK_NEAR(negative.content_height(), 0.0F, 1e-4F);
 
     // 非正行高降级为默认 48（经 Diagnostics::degraded 上报）。
-    LazyList degraded{5, {}, -1.0F};
+    LazyList const degraded{5, {}, -1.0F};
     AURORA_TEST_CHECK_NEAR(degraded.content_height(), 240.0F, 1e-4F);
 
-    LazyList normal{100, {}, 48.0F};
+    LazyList const normal{100, {}, 48.0F};
     AURORA_TEST_CHECK_NEAR(normal.content_height(), 4800.0F, 1e-4F);
 }
 
@@ -520,7 +520,7 @@ AURORA_TEST_CASE(snap_paging_pages_by_viewport_height_and_bounces_back) {
 }
 
 AURORA_TEST_CASE(reduce_motion_snaps_without_intermediate_frames) {
-    ReduceMotionGuard guard;
+    ReduceMotionGuard const guard;
     LazyList list{100, {}, 48.0F};
     list.set_snap(ScrollSnap{.extent = 240.0F});
     LayoutEngine::layout(list, bounded(300.0F, 400.0F));
@@ -763,7 +763,7 @@ AURORA_TEST_CASE(lazy_list_glide_freeze_holds_progress_and_emits_no_redraw) {
 
     anim.set_time_scale(0.0);
     AURORA_TEST_CHECK_EQ(anim.time_scale(), 0.0);
-    ScopedDirtyCounter dirty{list};
+    ScopedDirtyCounter const dirty{list};
     for (int i = 0; i < 8; ++i) {
         pump_scaled_frame(list);
     }

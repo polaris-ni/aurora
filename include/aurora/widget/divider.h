@@ -13,7 +13,6 @@
 #include "aurora/render/painter.h"
 #include "aurora/theming/color_roles.h"  // 活令牌回落点：roles.outline_variant
 #include "aurora/theming/control_metrics.h"  // 活令牌回落点：controls.separator_thickness
-#include "aurora/theming/theme_scope.h"  // inherit_theme
 #include "aurora/widget/props.h"
 #include "aurora/widget/widget.h"
 

@@ -297,7 +297,7 @@ AURORA_TEST_CASE(scroll_glide_tick_is_immune_to_current_animator_time_scale) {
         const testing::ScopedCurrentAnimator scope{fast};
         ScrollGlide g;
         g.start(0.0F, 100.0F);
-        for (double dt : steps) {
+        for (double const dt : steps) {
             under_scale.push_back(g.tick(dt));
         }
     }
@@ -307,7 +307,7 @@ AURORA_TEST_CASE(scroll_glide_tick_is_immune_to_current_animator_time_scale) {
         Animator::set_current(nullptr);
         ScrollGlide g;
         g.start(0.0F, 100.0F);
-        for (double dt : steps) {
+        for (double const dt : steps) {
             neutral.push_back(g.tick(dt));
         }
     }

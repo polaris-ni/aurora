@@ -115,8 +115,8 @@ constexpr double AURORA_FRAME_SECONDS = 1.0 / 64.0;  // 二进制精确的帧步
 
 // @brief 判据 20：逐帧逼近目标，is_settled 后定格于 target 并停帧；on_settled 恰触发一次，定格后无幽灵帧。
 AURORA_TEST_CASE(spring_animation_converges_then_settles_exactly_once) {
-    aurora::State<double> s{0.0};
-    aurora::SpringAnimation spring{s};
+    aurora::State<double> const s{0.0};
+    aurora::SpringAnimation const spring{s};
     int settled = 0;
     spring.on_settled([&settled]() -> void { ++settled; });
 
@@ -152,8 +152,8 @@ AURORA_TEST_CASE(spring_animation_converges_then_settles_exactly_once) {
 // @brief 判据 22 的可观测形式：停帧由 is_settled（容差双条件）真实驱动——放宽容差即更早定格。
 AURORA_TEST_CASE(spring_animation_settle_time_follows_tolerance) {
     auto run_until_settled = [](double tolerance) -> int {
-        aurora::State<double> s{0.0};
-        aurora::SpringAnimation spring{s};
+        aurora::State<double> const s{0.0};
+        aurora::SpringAnimation const spring{s};
         spring.animate_to(100.0, AURORA_DEFAULT_SPRING, 0.0, tolerance);
         int frames = 0;
         while (spring.is_running() && frames < 5000) {
@@ -173,8 +173,8 @@ AURORA_TEST_CASE(spring_animation_settle_time_follows_tolerance) {
 // @brief 未设夹取窗口时按原值写出（欠阻尼回弹可越界）；set_range 后写出值落在窗口内。
 AURORA_TEST_CASE(spring_animation_writes_overshoot_unless_range_declared) {
     {
-        aurora::State<double> s{0.0};
-        aurora::SpringAnimation spring{s};
+        aurora::State<double> const s{0.0};
+        aurora::SpringAnimation const spring{s};
         spring.animate_to(100.0, AURORA_UNDERDAMPED_SPRING);
         bool crossed = false;
         for (int i = 0; i < 400 && spring.is_running(); ++i) {
@@ -184,8 +184,8 @@ AURORA_TEST_CASE(spring_animation_writes_overshoot_unless_range_declared) {
         AURORA_TEST_CHECK_TRUE(crossed);  // 欠阻尼必然过冲，默认不夹（调用方要的就是这段回弹）
     }
     {
-        aurora::State<double> s{0.0};
-        aurora::SpringAnimation spring{s};
+        aurora::State<double> const s{0.0};
+        aurora::SpringAnimation const spring{s};
         spring.set_range(0.0, 100.0);
         spring.animate_to(100.0, AURORA_UNDERDAMPED_SPRING);
         bool clamped_hit = false;
@@ -203,8 +203,8 @@ AURORA_TEST_CASE(spring_animation_writes_overshoot_unless_range_declared) {
 AURORA_TEST_CASE(spring_animation_attach_keeps_active_and_is_removable) {
     aurora::Animator animator;
 
-    aurora::State<double> s{0.0};
-    aurora::SpringAnimation spring{s};
+    aurora::State<double> const s{0.0};
+    aurora::SpringAnimation const spring{s};
     spring.animate_to(1.0, AURORA_DEFAULT_SPRING);
     spring.attach(animator);
     AURORA_TEST_CHECK_TRUE(animator.has_active());  // 否则 wait_once 会深睡、把半途弹簧冻在原地
@@ -219,7 +219,7 @@ AURORA_TEST_CASE(spring_animation_attach_keeps_active_and_is_removable) {
     }
     AURORA_TEST_CHECK_FALSE(animator.has_active());  // 定格即停帧，无幽灵帧
 
-    aurora::State<double> s2{0.0};
+    aurora::State<double> const s2{0.0};
     aurora::SpringAnimation detached{s2};
     detached.attach(animator);
     detached.animate_to(50.0, AURORA_DEFAULT_SPRING);
@@ -236,10 +236,10 @@ AURORA_TEST_CASE(spring_animation_attach_keeps_active_and_is_removable) {
 
 // @brief 判据 10/11 的弹簧行：同一动画时间轴总长下取值与倍率无关（无双层缩放）；冻结帧不推进不写值。
 AURORA_TEST_CASE(spring_animation_scales_with_the_animator_and_freezes_on_zero) {
-    aurora::State<double> a{0.0};
-    aurora::State<double> b{0.0};
-    aurora::SpringAnimation at_1x{a};
-    aurora::SpringAnimation at_2x{b};
+    aurora::State<double> const a{0.0};
+    aurora::State<double> const b{0.0};
+    aurora::SpringAnimation const at_1x{a};
+    aurora::SpringAnimation const at_2x{b};
     at_1x.animate_to(100.0, AURORA_DEFAULT_SPRING);
     at_2x.animate_to(100.0, AURORA_DEFAULT_SPRING);
 
@@ -277,8 +277,8 @@ AURORA_TEST_CASE(spring_animation_scales_with_the_animator_and_freezes_on_zero) 
 // @brief 判据 24：reduce_motion 单帧落 target 并结束，与换封装前的手写弹簧一致。
 AURORA_TEST_CASE(spring_animation_reduce_motion_settles_in_one_frame) {
     const aurora::testing::ScopedReduceMotion reduce{true};
-    aurora::State<double> s{0.0};
-    aurora::SpringAnimation spring{s};
+    aurora::State<double> const s{0.0};
+    aurora::SpringAnimation const spring{s};
     int settled = 0;
     spring.on_settled([&settled]() -> void { ++settled; });
     spring.animate_to(42.0, AURORA_UNDERDAMPED_SPRING, 500.0);
@@ -294,10 +294,10 @@ AURORA_TEST_CASE(spring_animation_reduce_motion_settles_in_one_frame) {
 
 // @brief 判据 27：只做标量——组合两个实例即可驱动二维位移，互不干扰且各自收敛。
 AURORA_TEST_CASE(two_scalar_springs_compose_into_a_vector_offset) {
-    aurora::State<double> x{0.0};
-    aurora::State<double> y{0.0};
-    aurora::SpringAnimation sx{x};
-    aurora::SpringAnimation sy{y};
+    aurora::State<double> const x{0.0};
+    aurora::State<double> const y{0.0};
+    aurora::SpringAnimation const sx{x};
+    aurora::SpringAnimation const sy{y};
     int settled_x = 0;
     int settled_y = 0;
     sx.on_settled([&settled_x]() -> void { ++settled_x; });
@@ -317,11 +317,11 @@ AURORA_TEST_CASE(two_scalar_springs_compose_into_a_vector_offset) {
 
 // @brief 未起播 / 句柄拷贝共享载荷：拷贝后任一句柄起播都写同一来源，收敛判定只跑一次。
 AURORA_TEST_CASE(spring_animation_handle_copies_share_the_payload) {
-    aurora::State<double> s{0.0};
-    aurora::SpringAnimation spring{s};
+    aurora::State<double> const s{0.0};
+    aurora::SpringAnimation const spring{s};
     // 句柄拷贝（载荷是 shared_ptr）正是本例的被测对象，不是可省略的中转变量：按建议直接复用
     // `spring` 会让这条用例失去要验证的语义，故只能就地抑制该检查项。
-    aurora::SpringAnimation alias = spring;  // NOLINT(performance-unnecessary-copy-initialization)
+    aurora::SpringAnimation const alias = spring;  // NOLINT(performance-unnecessary-copy-initialization)
 
     AURORA_TEST_CHECK_FALSE(spring.is_running());  // 未起播时 tick 为 no-op
     spring.tick(AURORA_FRAME_SECONDS);

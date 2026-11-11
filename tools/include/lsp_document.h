@@ -352,7 +352,7 @@ struct Document {
     };
 
     for (size_t i = 0; i < n;) {
-        size_t s = skip_trivia(text, i);
+        size_t const s = skip_trivia(text, i);
         if (s != i) {
             // The skipped content may span lines; the line number is updated approximately
             // (line counting inside comments/strings has negligible impact).
@@ -544,7 +544,7 @@ struct Document {
                     ++k;
                 }
                 if (k < n && text[k] == '=' && (k + 1 >= n || text[k + 1] != '=')) {
-                    std::string p_name = text.substr(i + 1, j - (i + 1));
+                    std::string const p_name = text.substr(i + 1, j - (i + 1));
                     auto [pl, pc] = line_col_of(i + 1);
                     const size_t ve = designated_value_end(text, k + 1);
                     open.back().props.push_back({.name = p_name,

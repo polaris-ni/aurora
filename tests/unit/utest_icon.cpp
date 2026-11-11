@@ -208,7 +208,7 @@ AURORA_TEST_CASE(icon_serialize_roundtrip) {
 }
 
 AURORA_TEST_CASE(icon_accessibility_label_semantics) {
-    Icon decorative;
+    Icon const decorative;
     AURORA_TEST_CHECK_TRUE(decorative.accessibility_label().empty());
     AURORA_TEST_CHECK_FALSE(decorative.accessibility_is_semantic());  // 纯装饰不进语义树
 
@@ -255,7 +255,7 @@ AURORA_TEST_CASE(icon_button_click_target_semantics) {
     AURORA_TEST_CHECK_EQ(fired, 1);
 
     // 启用但无回调：不作为点击目标。
-    IconButton silent;
+    IconButton const silent;
     AURORA_TEST_CHECK_FALSE(silent.wants_click());
 }
 

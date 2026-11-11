@@ -109,7 +109,7 @@ auto IconRegistry::clear() -> void { registry_table().clear(); }
 auto paint_icon_data(Painter &p, const Rect &box, const IconData &data, const Color &color, float optical_bias)
     -> void {
     if (const auto *glyph = data.as_glyph()) {
-        Font f{.family = glyph->font_family, .size_pt = box.size.height, .weight = 400};
+        Font const f{.family = glyph->font_family, .size_pt = box.size.height, .weight = 400};
         const std::string text = utf8_encode(static_cast<std::uint32_t>(glyph->codepoint));
         const float h = render::FontEngine::measure_height(f);
         // 字号框垂直居中；跨大跨度再叠光学中心补偿（基线视觉中心偏差）。

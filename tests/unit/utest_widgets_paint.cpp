@@ -37,7 +37,7 @@ auto select_line0(Text &t, float width) -> void {
 }  // namespace
 
 AURORA_TEST_CASE(text_paint_alignment_and_selection) {
-    BuildContext ctx;
+    BuildContext const ctx;
     Painter p;
     const Rect box{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 160.0F, .height = 120.0F}};
     const float width = 160.0F;
@@ -70,7 +70,7 @@ AURORA_TEST_CASE(text_paint_alignment_and_selection) {
 }
 
 AURORA_TEST_CASE(text_paint_background_color) {
-    BuildContext ctx;
+    BuildContext const ctx;
     Painter p;
     const Rect box{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 200.0F, .height = 60.0F}};
     Text t{"highlighted"};
@@ -80,7 +80,7 @@ AURORA_TEST_CASE(text_paint_background_color) {
 }
 
 AURORA_TEST_CASE(text_paint_justify_multiline) {
-    BuildContext ctx;
+    BuildContext const ctx;
     Painter p;
     const Rect box{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 200.0F, .height = 120.0F}};
     Text t{"one two three four five six seven eight nine ten"};
@@ -90,7 +90,7 @@ AURORA_TEST_CASE(text_paint_justify_multiline) {
 }
 
 AURORA_TEST_CASE(text_paint_justify_single_word_fallback) {
-    BuildContext ctx;
+    BuildContext const ctx;
     Painter p;
     const Rect box{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 60.0F, .height = 120.0F}};
     // 无空格长串在窄盒内折成多行，每行仅 1 个「词」→ 走 justify 单行兜底分支。
@@ -101,7 +101,7 @@ AURORA_TEST_CASE(text_paint_justify_single_word_fallback) {
 }
 
 AURORA_TEST_CASE(text_paint_decoration_lines) {
-    BuildContext ctx;
+    BuildContext const ctx;
     Painter p;
     const Rect box{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 200.0F, .height = 60.0F}};
     Text t{"decorated"};
@@ -111,7 +111,7 @@ AURORA_TEST_CASE(text_paint_decoration_lines) {
 }
 
 AURORA_TEST_CASE(button_paint_border_branches) {
-    BuildContext ctx;
+    BuildContext const ctx;
     Painter p;
     const Rect box{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 120.0F, .height = 40.0F}};
 

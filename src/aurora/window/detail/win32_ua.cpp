@@ -251,7 +251,7 @@ template <typename R>
 
 /// @brief 当前线程是否已初始化 COM 公寓：未初始化时 UIA 回调线程不确定。
 [[nodiscard]] auto ensure_sta_apartment() -> bool {
-    HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    HRESULT const hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     if (hr == S_OK || hr == S_FALSE) {
         // S_FALSE：本线程此前已 CoInitialize（Aurora 主线程常见）——无需配对 CoUninitialize。
         return true;
@@ -594,8 +594,7 @@ class UiaTextRangeProvider : public ITextRangeProvider {
     HRESULT STDMETHODCALLTYPE ScrollIntoView(UiaBool align_to_top) override;
     HRESULT STDMETHODCALLTYPE GetChildren(SAFEARRAY **ret) override;
 
-    [[nodiscard]] auto start() const -> std::size_t { return start_; }
-    [[nodiscard]] auto end() const -> std::size_t { return end_; }
+    [[maybe_unused, nodiscard]] auto end() const -> std::size_t { return end_; }
 
   protected:
     virtual ~UiaTextRangeProvider() = default;
@@ -1612,7 +1611,12 @@ auto UiaTextProvider::GetSelection(SAFEARRAY **ret) -> HRESULT {
     }
     auto *range = static_cast<ITextRangeProvider *>(new UiaTextRangeProvider(bridge_, id_, span->first, span->second));
     LONG index = 0;
-    SafeArrayPutElement(arr, &index, static_cast<void *>(range));
+    const HRESULT hr = SafeArrayPutElement(arr, &index, static_cast<void *>(range));
+    if (FAILED(hr)) {
+        range->Release();  // 数组没接管，这次 new 出来的引用得自己收
+        SafeArrayDestroy(arr);
+        return hr;
+    }
     *ret = arr;
     return S_OK;
 }
@@ -1637,7 +1641,12 @@ auto UiaTextProvider::GetVisibleRanges(SAFEARRAY **ret) -> HRESULT {
         return E_OUTOFMEMORY;
     }
     LONG index = 0;
-    SafeArrayPutElement(arr, &index, static_cast<void *>(range));  // 数组接管该引用
+    const HRESULT put_hr = SafeArrayPutElement(arr, &index, static_cast<void *>(range));  // 成功后数组接管该引用
+    if (FAILED(put_hr)) {
+        range->Release();
+        SafeArrayDestroy(arr);
+        return put_hr;
+    }
     *ret = arr;
     return S_OK;
 }
@@ -1884,7 +1893,7 @@ auto Win32UiaBridge::hit_test_id(Point local_dip) -> std::uint64_t {
             if (root_ == nullptr) {
                 return 0;
             }
-            Widget *hit = EventDispatcher::hit_test(*root_, local_dip);
+            Widget *const hit = EventDispatcher::hit_test(*root_, local_dip);
             return (hit != nullptr) ? hit->runtime_id() : 0;
         },
         AURORA_UI_READ_TIMEOUT_MS);

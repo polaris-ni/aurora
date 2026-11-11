@@ -306,7 +306,7 @@ AURORA_TEST_CASE(filter_and_options_struct_defaults) {
 }
 
 AURORA_TEST_CASE(headless_last_options_records_every_entry) {
-    HookGuard guard;
+    HookGuard const guard;
     aurora::file_dialog::interactive = false;
     aurora::file_dialog::headless_last_options = std::nullopt;
 
@@ -344,7 +344,7 @@ AURORA_TEST_CASE(headless_last_options_records_every_entry) {
 }
 
 AURORA_TEST_CASE(headless_last_options_records_before_hook_check) {
-    HookGuard guard;
+    HookGuard const guard;
     // 钩子置值：入口走钩子分支，但记录排在判据之前，故仍读得到本次传入的原文。
     aurora::file_dialog::headless_open_result = {"preset.png"};
     aurora::file_dialog::headless_save_result = "preset.txt";
@@ -371,7 +371,7 @@ AURORA_TEST_CASE(headless_last_options_records_before_hook_check) {
 }
 
 AURORA_TEST_CASE(headless_last_options_keeps_non_ascii_bytes) {
-    HookGuard guard;
+    HookGuard const guard;
     aurora::file_dialog::interactive = false;
     aurora::file_dialog::headless_last_options = std::nullopt;
 
@@ -391,7 +391,7 @@ AURORA_TEST_CASE(headless_last_options_keeps_non_ascii_bytes) {
 }
 
 AURORA_TEST_CASE(open_file_returns_headless_preset) {
-    HookGuard guard;
+    HookGuard const guard;
     aurora::file_dialog::headless_open_result = {"a.png", "b.jpg"};
 
     // 钩子非空 → 直接返回预设（opts 仅作配置载体，不触发真实对话框）。
@@ -404,7 +404,7 @@ AURORA_TEST_CASE(open_file_returns_headless_preset) {
 }
 
 AURORA_TEST_CASE(save_and_folder_headless_presets) {
-    HookGuard guard;
+    HookGuard const guard;
 
     aurora::file_dialog::headless_save_result = "out.txt";
     const auto saved = aurora::file_dialog::save_file();
@@ -418,7 +418,7 @@ AURORA_TEST_CASE(save_and_folder_headless_presets) {
 }
 
 AURORA_TEST_CASE(non_interactive_behaves_as_cancel) {
-    HookGuard guard;
+    HookGuard const guard;
     aurora::file_dialog::interactive = false;
 
     // 钩子为空 + 非交互 → 等价取消（空结果，不抛错、不弹窗）。
@@ -436,7 +436,7 @@ AURORA_TEST_CASE(non_interactive_behaves_as_cancel) {
 }
 
 AURORA_TEST_CASE(headless_hook_takes_priority_over_interactive) {
-    HookGuard guard;
+    HookGuard const guard;
     aurora::file_dialog::interactive = false;
 
     // 钩子优先于 interactive 开关：预设值照常返回。
@@ -453,8 +453,8 @@ AURORA_TEST_CASE(headless_hook_takes_priority_over_interactive) {
 }
 
 AURORA_TEST_CASE(hook_priority_skips_picker_construction) {
-    HookGuard hooks;
-    PickerSeamGuard seams;
+    HookGuard const hooks;
+    PickerSeamGuard const seams;
     aurora::file_dialog::interactive = true;  // 交互开 + 钩子置值：仍应走钩子
 
     aurora::file_dialog::headless_open_result = {"preset.png"};
@@ -961,7 +961,7 @@ AURORA_TEST_CASE(no_context_warns_and_returns_empty) {
 
 AURORA_TEST_CASE(run_modal_installs_and_restores_singletons) {
     // 入口预装「外层」单例（模拟外层 Application / TestController 的上下文）。
-    SingletonSnapshot snapshot;
+    SingletonSnapshot const snapshot;
     Application outer{Scene{Node{std::make_shared<Text>("outer")}}, 100, 100};
     Application app{Scene{Node{std::make_shared<Text>("main")}}, 320, 240};
     Scheduler outer_sched;
@@ -1002,7 +1002,7 @@ AURORA_TEST_CASE(run_modal_installs_and_restores_singletons) {
 }
 
 AURORA_TEST_CASE(run_modal_drives_frames_until_done) {
-    PickerSeamGuard seams;
+    PickerSeamGuard const seams;
     AURORA_TEST_REQUIRE_TRUE(file_dialog::detail::current_application_slot() == nullptr);
     Application app{Scene{Node{std::make_shared<Text>("root")}}, 320, 240};
 
@@ -1024,7 +1024,7 @@ AURORA_TEST_CASE(run_modal_drives_frames_until_done) {
 
 AURORA_TEST_CASE(run_modal_stops_on_frame_budget) {
 #ifdef AURORA_BACKEND_HEADLESS
-    PickerSeamGuard seams;
+    PickerSeamGuard const seams;
     AURORA_TEST_REQUIRE_TRUE(file_dialog::detail::current_application_slot() == nullptr);
     WindowOptions o;
     o.size = Size{.width = 200.0F, .height = 150.0F};
@@ -1048,7 +1048,7 @@ AURORA_TEST_CASE(run_modal_stops_on_frame_budget) {
 }
 
 AURORA_TEST_CASE(run_modal_allows_one_stacked_modal) {
-    PickerSeamGuard seams;
+    PickerSeamGuard const seams;
     AURORA_TEST_REQUIRE_TRUE(file_dialog::detail::current_application_slot() == nullptr);
     Application app{Scene{Node{std::make_shared<Text>("root")}}, 320, 240};
 
@@ -1074,14 +1074,14 @@ AURORA_TEST_CASE(run_modal_allows_one_stacked_modal) {
 }
 
 AURORA_TEST_CASE(run_modal_refuses_third_level) {
-    PickerSeamGuard seams;
+    PickerSeamGuard const seams;
     AURORA_TEST_REQUIRE_TRUE(file_dialog::detail::current_application_slot() == nullptr);
     Application app{Scene{Node{std::make_shared<Text>("root")}}, 320, 240};
 
     bool innermost_ran = false;
     app.run_modal([&]() -> bool {  // 第 1 层
         app.run_modal([&]() -> bool {  // 第 2 层（一枚叠一枚，允许）
-            CapturedLog log;
+            CapturedLog const log;
             app.run_modal([&]() -> bool {  // 第 3 层：拒绝并 WARN
                 innermost_ran = true;
                 return true;

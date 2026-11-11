@@ -102,9 +102,9 @@ AURORA_TEST_CASE(font_size_degrade_and_validate_props) {
     }
 
     // 配置块构造可绕过降级路径，让 validate_props 真正拦截非法值。
-    Text bad{TextProps().set_font_size(0.0F)};
+    Text const bad{TextProps().set_font_size(0.0F)};
     AURORA_TEST_CHECK_FALSE(bad.validate_props().ok());
-    Text ok{TextProps().set_font_size(14.0F)};
+    Text const ok{TextProps().set_font_size(14.0F)};
     AURORA_TEST_CHECK_TRUE(ok.validate_props().ok());
 }
 
@@ -238,7 +238,7 @@ AURORA_TEST_CASE(text_direction_serialize_and_unset_omitted) {
     AURORA_TEST_CHECK_TRUE(back.present(TextProps::direction_row()));
     AURORA_TEST_CHECK_TRUE(back.direction() == TextDirection::RTL);
 
-    Text inherit("inherit");
+    Text const inherit("inherit");
     Json plain = Json::object();
     inherit.serialize_props(plain);
     AURORA_TEST_CHECK_TRUE(!plain.contains("direction"));  // 继承语义不落盘
@@ -299,7 +299,7 @@ auto themed_ctx(const Theme &t) -> std::pair<std::shared_ptr<Environment>, Build
 AURORA_TEST_CASE(text_color_follows_theme_when_unset) {
     // 两态语义：未显式设色时 resolve 取主题 on_surface；主题翻转 ⇒ 解析值翻转（换肤生效）。
     const BuildContext bare;  // 无注入：inherit_theme 回落 light（与 OS 未表态同口径）
-    Text t("hello");
+    Text const t("hello");
     AURORA_TEST_CHECK(t.resolve_text_color(bare) == Color{0, 0, 0});  // light on_surface = 黑
 
     const auto [env, dark] = themed_ctx(Theme::dark());

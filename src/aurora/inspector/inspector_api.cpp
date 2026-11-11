@@ -76,7 +76,7 @@ auto Inspector::apply_patch(Node &root, const Json &patch) -> Result<void> {
             set_widget_prop(root.widget(), path_str, value);
         } else {
             std::string widget_path = path_str.substr(0, last_slash);
-            std::string prop_name = path_str.substr(last_slash + 1);
+            std::string const prop_name = path_str.substr(last_slash + 1);
             // 跳过前导 '/'
             if (!widget_path.empty() && widget_path.at(0) == '/') {
                 widget_path = widget_path.substr(1);
@@ -304,19 +304,19 @@ auto next_sub_id() -> std::size_t & {
 }  // namespace
 
 auto Inspector::subscribe_changes(ChangeCallback cb) -> std::size_t {
-    std::scoped_lock lock(subscribers_mutex());
+    std::scoped_lock const lock(subscribers_mutex());
     const std::size_t id = ++next_sub_id();
     subscribers()[id] = std::move(cb);
     return id;
 }
 
 auto Inspector::unsubscribe(std::size_t id) -> void {
-    std::scoped_lock lock(subscribers_mutex());
+    std::scoped_lock const lock(subscribers_mutex());
     subscribers().erase(id);
 }
 
 void Inspector::notify_changes(const Json &patch) {
-    std::scoped_lock lock(subscribers_mutex());
+    std::scoped_lock const lock(subscribers_mutex());
     for (auto &cb : subscribers() | std::views::values) {
         if (cb) {
             cb(patch);

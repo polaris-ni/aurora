@@ -9,7 +9,6 @@
 #include <string>
 
 #include "aurora/perf/scroll_bench.h"
-#include "aurora/render/painter.h"
 #include "aurora/widget/scroll.h"
 #include "aurora/widget/widget.h"
 #include "framework/aurora_test.h"

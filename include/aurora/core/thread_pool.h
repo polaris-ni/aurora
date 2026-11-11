@@ -79,7 +79,7 @@ class ThreadPool {
     /// NOLINTNEXTLINE(bugprone-exception-escape)
     ~ThreadPool() {
         {
-            std::scoped_lock lock(mutex_);
+            std::scoped_lock const lock(mutex_);
             stop_ = true;
         }
         if (deferred_) {
@@ -144,7 +144,7 @@ class ThreadPool {
         }
         std::size_t budget = 0;
         {
-            std::scoped_lock lock(mutex_);
+            std::scoped_lock const lock(mutex_);
             budget = queue_.size();
         }
         std::size_t ran = 0;
@@ -160,7 +160,7 @@ class ThreadPool {
     /// @brief 当前排队未执行的任务数（近似值，仅供诊断）。
     /// @return 加锁瞬间 queue_ 的长度；出锁后可能立即变化，勿用于同步判断。
     [[nodiscard]] auto pending_count() const -> std::size_t {
-        std::scoped_lock lock(mutex_);
+        std::scoped_lock const lock(mutex_);
         return queue_.size();
     }
 
@@ -170,7 +170,7 @@ class ThreadPool {
     /// 不向外传播；若需传播请用 `submit`（返回 `std::future`）。
     auto execute(std::function<void()> job) -> void {
         {
-            std::scoped_lock lock(mutex_);
+            std::scoped_lock const lock(mutex_);
             // 契约（见上方注释）：fire-and-forget 任务的异常在此吞掉，绝不跨出 worker 线程。
             queue_.emplace([job = std::move(job)]() mutable -> void {
                 try {
@@ -223,7 +223,7 @@ class ThreadPool {
     auto drain_one() -> bool {
         std::function<void()> job;
         {
-            std::scoped_lock lock(mutex_);
+            std::scoped_lock const lock(mutex_);
             if (queue_.empty()) {
                 return false;
             }

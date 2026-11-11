@@ -134,6 +134,7 @@ using aurora_verify::note;
 
 /// @brief 核对 xref 表：每个在用项的偏移都指向对应的 `N 0 obj`。
 /// @param pdf PDF 文本。
+/// @param ok 输出：结构是否合法（早退时为 false）。
 /// @return 结构正确且逐项命中的条数；结构不合法返回 0 并置 `ok` 为 false。
 [[nodiscard]] auto verify_xref(const std::string &pdf, bool &ok) -> std::size_t {
     ok = false;

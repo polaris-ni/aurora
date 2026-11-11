@@ -141,7 +141,7 @@ AURORA_TEST_CASE(gradient_modifier_widget_offscreen_snapshot) {
     txt->set_modifier(Modifier{}.gradient_linear(Color(255, 0, 0, 255), Color(0, 0, 255, 255)));
 
     Node root(std::move(txt));
-    Json snap = render_to_logical_snapshot(root, 200, 50);
+    Json const snap = render_to_logical_snapshot(root, 200, 50);
     AURORA_TEST_CHECK_TRUE(snap.contains("type"));
     AURORA_TEST_CHECK_EQ(require_field<std::string>(snap, "type"), std::string{"Text"});
     AURORA_TEST_CHECK_GT(require_field<float>(*require_child(snap, "box"), "w"), 0.0F);

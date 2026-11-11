@@ -117,7 +117,7 @@ struct BuildRecorder {
 }  // namespace
 
 AURORA_TEST_CASE(default_lazy_row_invariants) {
-    LazyRow row;
+    LazyRow const row;
     AURORA_TEST_CHECK_EQ(std::string{row.type_name()}, "LazyRow");
     // 五行皆未表态 ⇒ 生效值即各行回落基线（与迁移前的字段声明处默认值逐值相同）。
     AURORA_TEST_CHECK_EQ(row.item_count(), 0);
@@ -171,7 +171,7 @@ AURORA_TEST_CASE(ctors_write_the_same_rows_the_readers_read) {
     AURORA_TEST_CHECK_NEAR(from_props.size().height, 64.0F, 1e-4F);
 
     // 位置构造的第三枚实参省略 ⇒ 该行未表态，生效值即回落基线（迁移前的 96 默认实参同值）。
-    LazyRow defaulted{3, {}};
+    LazyRow const defaulted{3, {}};
     AURORA_TEST_CHECK_NEAR(defaulted.item_extent(), 96.0F, 1e-4F);
 }
 
@@ -384,7 +384,7 @@ AURORA_TEST_CASE(press_beyond_items_is_ignored) {
 
 AURORA_TEST_CASE(serialize_deserialize_roundtrip) {
     // 属性块构造与位置构造走同一批行：`item_extent` 只有一枚存储，故往返不必再绕「私有副本 vs 聚合字段」。
-    LazyRow src{LazyRowProps().set_item_count(7).set_item_extent(48.0F).set_cache_extent(32.0F)};
+    LazyRow const src{LazyRowProps().set_item_count(7).set_item_extent(48.0F).set_cache_extent(32.0F)};
     Json props = Json::object();
     src.serialize_props(props);
     AURORA_TEST_CHECK_EQ(require_field<int>(props, "item_count"), 7);
@@ -404,7 +404,7 @@ AURORA_TEST_CASE(serialize_deserialize_roundtrip) {
 
 AURORA_TEST_CASE(unstated_rows_are_not_serialized) {
     // 「落盘的是意图不是现值」：未表态的行没有键；表外运行键 `offset` 与行无关，恒在场。
-    LazyRow bare;
+    LazyRow const bare;
     Json bare_props = Json::object();
     bare.serialize_props(bare_props);
     for (const std::string_view key : AURORA_TABLE_KEYS) {
@@ -579,7 +579,7 @@ AURORA_TEST_CASE(constant_rows_readers_equal_library_resolve) {
     AURORA_TEST_CHECK_NEAR(d.padding().bottom, d.resolve(LazyRowProps::padding_row(), ctx).bottom, 1e-6F);
 
     // 未表态的行同样解析到该行回落基线（读件与解析同源，不是读件另算一遍）。
-    LazyRowProbe bare;
+    LazyRowProbe const bare;
     AURORA_TEST_CHECK_NEAR(bare.item_extent(), bare.resolve(LazyRowProps::item_extent_row(), ctx), 1e-6F);
     AURORA_TEST_CHECK_NEAR(bare.item_extent(), 96.0F, 1e-6F);
 }

@@ -66,7 +66,7 @@ auto mouse(MouseAction action, float x) -> MouseEvent {
 
 AURORA_TEST_CASE(hit_chain_at_divider_includes_splitter) {
     // 回归点：分隔条处的命中链不得为空——空链等于把 Splitter 排除在派发之外。
-    Fixture f = make_fixture();
+    Fixture const f = make_fixture();
     const Rect root_rect{.origin = Point{}, .size = Size{.width = AURORA_WIDTH, .height = AURORA_HEIGHT}};
     const std::vector<HitNode> chain =
         f.root->hit_test_chain(Point{.x = divider_x(*f.sp), .y = 100.0F}, root_rect, BuildContext{});
@@ -76,7 +76,7 @@ AURORA_TEST_CASE(hit_chain_at_divider_includes_splitter) {
 }
 
 AURORA_TEST_CASE(divider_drag_via_dispatcher_updates_ratio_and_clamps) {
-    Fixture f = make_fixture();
+    Fixture const f = make_fixture();
     int cb_hits = 0;
     f.sp->set_on_ratio_change([&cb_hits](float) -> void { ++cb_hits; });
 
@@ -116,7 +116,7 @@ AURORA_TEST_CASE(divider_drag_via_dispatcher_updates_ratio_and_clamps) {
 
 AURORA_TEST_CASE(press_outside_divider_does_not_start_drag) {
     // 落在某一栏空白处（非分隔条）的按下不应进入拖拽态——否则整块面板都变成把手。
-    Fixture f = make_fixture();
+    Fixture const f = make_fixture();
     MouseEvent press = mouse(MouseAction::Press, first_extent(*f.sp) + AURORA_HANDLE + 40.0F);
     AURORA_TEST_CHECK_TRUE(EventDispatcher::dispatch(*f.root, press, nullptr));  // 命中链非空（Splitter 兜底认领）
     AURORA_TEST_CHECK_FALSE(f.sp->is_dragging());
@@ -130,7 +130,7 @@ AURORA_TEST_CASE(press_outside_divider_does_not_start_drag) {
 
 AURORA_TEST_CASE(simulate_pointer_presses_at_given_coordinate) {
     // 按坐标的单步派发：目标式 simulate_click/drag 只能取控件中心，够不到分隔条这类子区域。
-    Fixture f = make_fixture();
+    Fixture const f = make_fixture();
     AURORA_TEST_REQUIRE_TRUE(
         Inspector::simulate_pointer(*f.sp, Point{.x = divider_x(*f.sp), .y = 100.0F}, MouseAction::Press).ok());
     AURORA_TEST_CHECK_TRUE(f.sp->is_dragging());
@@ -176,9 +176,9 @@ AURORA_TEST_CASE(vertical_splitter_drag_uses_other_axis) {
 
 AURORA_TEST_CASE(splitter_paint_draws_children_and_handle) {
     // 覆盖 on_paint：两区域内容绘制 + 分隔条矩形绘制（非拖拽半透明黑 / 拖拽蓝高亮）。
-    Fixture f = make_fixture();
+    Fixture const f = make_fixture();
     Painter painter;
-    Rect bounds{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = f.sp->size()};
+    Rect const bounds{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = f.sp->size()};
 
     // 非拖拽态：分隔条 fill_rect(Color{0,0,0,24})。
     f.sp->paint(painter, bounds, BuildContext{});
@@ -234,14 +234,14 @@ AURORA_TEST_CASE(splitter_clamp_equalizes_when_minima_exceed_space) {
 
 AURORA_TEST_CASE(splitter_hit_test_recurses_and_self_at_handle) {
     // 覆盖 on_hit_test：内容区递归命中子控件、分隔条处返回自身。
-    Fixture f = make_fixture();
+    Fixture const f = make_fixture();
     const Rect root_rect{.origin = Point{}, .size = Size{.width = AURORA_WIDTH, .height = AURORA_HEIGHT}};
 
     const float fx = first_extent(*f.sp) * 0.5F;  // 第一栏内容盒内
-    Widget *hit = f.root->hit_test(Point{.x = fx, .y = 50.0F}, root_rect, BuildContext{});
+    Widget *const hit = f.root->hit_test(Point{.x = fx, .y = 50.0F}, root_rect, BuildContext{});
     AURORA_TEST_CHECK(hit != nullptr);
 
-    Widget *handle = f.root->hit_test(Point{.x = divider_x(*f.sp), .y = 50.0F}, root_rect, BuildContext{});
+    Widget *const handle = f.root->hit_test(Point{.x = divider_x(*f.sp), .y = 50.0F}, root_rect, BuildContext{});
     AURORA_TEST_CHECK_EQ(handle, static_cast<Widget *>(f.sp.get()));
 }
 

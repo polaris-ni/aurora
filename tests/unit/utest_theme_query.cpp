@@ -21,7 +21,7 @@ namespace aurora::test_cases::utest_theme_query {
 AURORA_TEST_CASE(resolve_theme_without_injection_returns_defaults) {
     // 树中无 ThemeProvider → 兜底明色基线 Theme::light()，与 inherit_theme 的无注入兜底合一
     // （旧偏差：本函数曾兜 Theme::with_defaults()，两枚兜底差在 scheme 位）。
-    Node root{Placeholder{}};
+    Node const root{Placeholder{}};
     const Theme resolved = resolve_theme(root);
     AURORA_TEST_CHECK_EQ(resolved.roles.surface, Theme::light().roles.surface);
     AURORA_TEST_CHECK_EQ(resolved.roles.primary, Theme::light().roles.primary);
@@ -32,7 +32,7 @@ AURORA_TEST_CASE(resolve_theme_without_injection_returns_defaults) {
 AURORA_TEST_CASE(resolve_theme_fallback_is_material_baseline_not_platform_style) {
     // 三处兜底同源的查询侧：无 Provider 时逐组令牌全等于裸主题（Material 基线），身份位也不是探测档。
     // 若兜底被改成 `Theme::default_style()`，在非 Material 风格档的构建上本用例即红。
-    Node root{Placeholder{}};
+    Node const root{Placeholder{}};
     const Theme resolved = resolve_theme(root);
     AURORA_TEST_CHECK(resolved.style == ThemeStyle::Material);
     AURORA_TEST_CHECK(resolved.shapes == ShapeScale{});
@@ -42,7 +42,7 @@ AURORA_TEST_CASE(resolve_theme_fallback_is_material_baseline_not_platform_style)
 }
 
 AURORA_TEST_CASE(resolve_theme_at_root_scope) {
-    Node root{ThemeScope{Theme::dark(), Placeholder{}}};
+    Node const root{ThemeScope{Theme::dark(), Placeholder{}}};
     const Theme resolved = resolve_theme(root);
     AURORA_TEST_CHECK_EQ(resolved.roles.surface, Theme::dark().roles.surface);
     AURORA_TEST_CHECK_EQ(resolved.roles.on_surface, Theme::dark().roles.on_surface);
@@ -51,7 +51,7 @@ AURORA_TEST_CASE(resolve_theme_at_root_scope) {
 AURORA_TEST_CASE(resolve_theme_prefers_nearest_ancestor_scope) {
     // 嵌套覆盖：内层 ThemeScope（dark）对子树生效，外层（light）被遮蔽。
     auto inner = std::make_shared<ThemeScope>(Theme::dark(), Placeholder{});
-    Node root{ThemeScope{Theme::light(), Node{inner}}};
+    Node const root{ThemeScope{Theme::light(), Node{inner}}};
 
     const Theme root_theme = resolve_theme(root);
     AURORA_TEST_CHECK_EQ(root_theme.roles.surface, Theme::light().roles.surface);
@@ -63,7 +63,7 @@ AURORA_TEST_CASE(resolve_theme_prefers_nearest_ancestor_scope) {
 AURORA_TEST_CASE(resolve_theme_descendant_inherits_ancestor) {
     // 目标本身不是 Provider：沿 DFS 继承最近祖先注入的主题。
     auto leaf = std::make_shared<Placeholder>();
-    Node root{ThemeScope{Theme::dark(), Node{leaf}}};
+    Node const root{ThemeScope{Theme::dark(), Node{leaf}}};
 
     const Theme resolved = resolve_theme(root, *leaf);
     AURORA_TEST_CHECK_EQ(resolved.roles.surface, Theme::dark().roles.surface);
@@ -72,7 +72,7 @@ AURORA_TEST_CASE(resolve_theme_descendant_inherits_ancestor) {
 
 AURORA_TEST_CASE(resolve_theme_target_outside_tree_falls_back) {
     // 目标不在树中：DFS 走完全树仍未命中，结果保持兜底明色基线（不崩溃、不返回脏值）。
-    Node root{ThemeScope{Theme::dark(), Placeholder{}}};
+    Node const root{ThemeScope{Theme::dark(), Placeholder{}}};
     const Placeholder outsider;
     const Theme resolved = resolve_theme(root, outsider);
     AURORA_TEST_CHECK_EQ(resolved.roles.surface, Theme::light().roles.surface);

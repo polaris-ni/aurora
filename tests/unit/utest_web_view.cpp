@@ -188,9 +188,6 @@ auto has_code(const std::vector<Diagnostic> &items, const std::string &slug) -> 
     return std::ranges::any_of(items, [&slug](const Diagnostic &d) -> bool { return d.code == slug; });
 }
 
-/// @brief 把控件放进容器并布局一次（触发挂载），返回根容器以延长生命周期。
-/// @param wv 被测控件。
-/// @return 已完成布局的根容器（持有 `wv` 的一份共享所有权）。
 /// @brief 视图桩日志里以给定前缀开头的条目数。
 /// @param sink 待检查的视图桩。
 /// @param prefix 方法名前缀（如 "capture"）。
@@ -691,10 +688,10 @@ AURORA_TEST_CASE(props_round_trip_through_json) {
 
 AURORA_TEST_CASE(unstated_rows_are_absent_and_clear_drops_the_key) {
     // 「未表态不写键」与「撤表态该键退盘」是同一条口径的两半：序列化面不再把回落基线伪装成用户意图。
-    webview::WebView fresh;
+    webview::WebView const fresh;
     Json empty = Json::object();
     fresh.serialize_props(empty);
-    for (std::string_view key :
+    for (std::string_view const key :
          {"url", "html", "base_uri", "mode", "zoom_factor", "javascript_enabled", "background"}) {
         AURORA_TEST_CHECK_FALSE(empty.contains(key));
     }
@@ -780,7 +777,7 @@ AURORA_TEST_CASE(deserialize_withdraws_statements_on_bad_values) {
 }
 
 AURORA_TEST_CASE(defaults_are_interactive_and_script_enabled) {
-    webview::WebView w;
+    webview::WebView const w;
     AURORA_TEST_CHECK_EQ(static_cast<int>(w.mode()), static_cast<int>(webview::WebViewMode::Interactive));
     AURORA_TEST_CHECK(w.javascript_enabled());
     AURORA_TEST_CHECK(w.url().empty());

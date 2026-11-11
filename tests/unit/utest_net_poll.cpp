@@ -204,7 +204,7 @@ AURORA_TEST_CASE(event_source_registry_drives_real_fd_ready) {
 
     int hits = 0;
     aurora::app::SourceReady last_ready{};
-    SeamGuard guard(poller_over_wait_ready());
+    SeamGuard const guard(poller_over_wait_ready());
 
     {
         auto reg = registry.register_source(pair.server.native_handle(), aurora::app::WaitInterest{.read = true},

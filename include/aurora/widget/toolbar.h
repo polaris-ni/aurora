@@ -6,7 +6,6 @@
 #include <utility>
 #include <vector>
 
-#include "aurora/core/color.h"
 #include "aurora/render/painter.h"
 #include "aurora/theming/theme_scope.h"  // inherit_theme：栏底色与分隔线取主题角色
 #include "aurora/widget/descriptor.h"

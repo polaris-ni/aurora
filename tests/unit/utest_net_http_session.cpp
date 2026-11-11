@@ -157,14 +157,15 @@ auto read_request(aurora::net::blocking::StreamSocket &socket, PeerStop &stop, s
     // 未收尾时 `result()` 读的是空结果槽（帧外内存），先 REQUIRE 收尾再读，段错误不代替失败判据。
     AURORA_TEST_REQUIRE_MSG(task.is_done(), "coro task not finished when result was read");
     const auto outer = task.result();
-    AURORA_TEST_REQUIRE_MSG(bool(outer), outer ? std::string{} : outer.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(outer), outer ? std::string{} : outer.error().message);
     // 本套件每一条 send 都应当成功：内层失败在这里就地暴露（拿错误码当判据输出），不让 `.value()`
     // 在 CHECK 里抛出把现场盖掉。
     const auto &answered = outer.value();
-    AURORA_TEST_REQUIRE_MSG(
-        bool(answered), answered ? std::string{}
-                                 : "send failed: code=" + std::to_string(static_cast<int>(answered.error().code_enum)) +
-                                       " " + answered.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(answered),
+                            answered
+                                ? std::string{}
+                                : "send failed: code=" + std::to_string(static_cast<int>(answered.error().code_enum)) +
+                                      " " + answered.error().message);
     return answered;
 }
 
@@ -180,7 +181,7 @@ auto read_request(aurora::net::blocking::StreamSocket &socket, PeerStop &stop, s
     AURORA_TEST_CHECK(aurora::test::net::drive_until("stream done", [&task] { return task.is_done(); }).satisfied);
     AURORA_TEST_REQUIRE_MSG(task.is_done(), "coro task not finished when result was read");
     const auto outer = task.result();
-    AURORA_TEST_REQUIRE_MSG(bool(outer), outer ? std::string{} : outer.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(outer), outer ? std::string{} : outer.error().message);
     return outer.value();
 }
 
@@ -484,10 +485,11 @@ AURORA_TEST_CASE(per_host_limit_queues_and_times_out_naming_the_queue) {
                           return queued_task.is_done();
                       }).satisfied);
     const auto queued_outer = queued_task.result();
-    AURORA_TEST_REQUIRE_MSG(bool(queued_outer), queued_outer ? std::string{} : queued_outer.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(queued_outer),
+                            queued_outer ? std::string{} : queued_outer.error().message);
     // 双层解包：外层是「协程跑完没有」（必成），内层才是「排队超时」那枚失败——超时住在内层。
     const auto &queued_answer = queued_outer.value();
-    AURORA_TEST_CHECK(!bool(queued_answer));  // 排队等不到：以内层失败收场
+    AURORA_TEST_CHECK(!static_cast<bool>(queued_answer));  // 排队等不到：以内层失败收场
     const auto &queued_error = queued_answer.error();
     AURORA_TEST_CHECK(queued_error.code_enum == ErrorCode::HttpTimeout);
     AURORA_TEST_CHECK(queued_error.message.find("queued") != std::string::npos);  // detail 点名「排队等不到」
@@ -498,9 +500,9 @@ AURORA_TEST_CASE(per_host_limit_queues_and_times_out_naming_the_queue) {
                           return held_task.is_done();
                       }).satisfied);
     const auto held_outer = held_task.result();
-    AURORA_TEST_REQUIRE_MSG(bool(held_outer), held_outer ? std::string{} : held_outer.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(held_outer), held_outer ? std::string{} : held_outer.error().message);
     const auto &held_answer = held_outer.value();
-    AURORA_TEST_CHECK(!bool(held_answer));
+    AURORA_TEST_CHECK(!static_cast<bool>(held_answer));
     // 占位那条由本例主动收摊，故落 `net-cancelled`；它原先那句「按 total 档收摊」在本文件不再承担——
     // total 档的口径由 `utest_net_http_client` 的 `send_times_out_whole_request` 那条专例管。
     AURORA_TEST_CHECK(held_answer.error().code_enum == ErrorCode::NetCancelled);

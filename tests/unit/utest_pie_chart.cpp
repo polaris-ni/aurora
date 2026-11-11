@@ -160,7 +160,7 @@ AURORA_TEST_CASE(defaults_match_declared_property_defaults) {
     AURORA_TEST_CHECK_TRUE(d.legend().position == LegendPosition::Top);
     AURORA_TEST_CHECK_NEAR(static_cast<double>(d.padding().left), 8.0, 1e-6);
 
-    PieChart c{};
+    PieChart const c{};
     AURORA_TEST_CHECK_TRUE(c.type_name() == std::string{"PieChart"});
     AURORA_TEST_CHECK_TRUE(c.wants_click());
     AURORA_TEST_CHECK_FALSE(c.hovered_section().has_value());
@@ -210,15 +210,15 @@ AURORA_TEST_CASE(describe_static_lists_all_props_and_events) {
 }
 
 AURORA_TEST_CASE(props_roundtrip_including_section_array) {
-    PieChart src{PieChartProps()
-                     .set_sections({PieSection{.name = "A", .value = 3.0, .color = Color{1, 2, 3, 255}},
-                                    PieSection{.name = "B", .value = 1.0}})
-                     .set_center_space_ratio(0.5F)
-                     .set_start_angle(0.0F)
-                     .set_show_percentage_labels(true)
-                     .set_section_gap(3.0F)
-                     .set_legend(ChartLegendSpec{.visible = true, .position = LegendPosition::Right})
-                     .set_padding(EdgeInsets{.left = 2.0F, .top = 3.0F, .right = 4.0F, .bottom = 5.0F})};
+    PieChart const src{PieChartProps()
+                           .set_sections({PieSection{.name = "A", .value = 3.0, .color = Color{1, 2, 3, 255}},
+                                          PieSection{.name = "B", .value = 1.0}})
+                           .set_center_space_ratio(0.5F)
+                           .set_start_angle(0.0F)
+                           .set_show_percentage_labels(true)
+                           .set_section_gap(3.0F)
+                           .set_legend(ChartLegendSpec{.visible = true, .position = LegendPosition::Right})
+                           .set_padding(EdgeInsets{.left = 2.0F, .top = 3.0F, .right = 4.0F, .bottom = 5.0F})};
     Json props = Json::object();
     src.serialize_props(props);
     AURORA_TEST_REQUIRE_TRUE(props.contains("sections"));
@@ -378,7 +378,7 @@ AURORA_TEST_CASE(piechart_empty_array_stated_differs_from_unstated) {
     AURORA_TEST_CHECK_EQ(arr->size(), 0U);
     AURORA_TEST_CHECK_TRUE(stated.sections().empty());
 
-    PieChartProbe bare;
+    PieChartProbe const bare;
     AURORA_TEST_CHECK_FALSE(bare.present(PieChartProps::sections_row()));
     Json without_key = Json::object();
     bare.serialize_props(without_key);

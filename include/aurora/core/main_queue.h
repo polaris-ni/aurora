@@ -25,7 +25,6 @@
 
 #include "aurora/core/diagnostics.h"
 #include "aurora/core/log.h"
-#include "aurora/core/strict_mode.h"
 
 namespace aurora {
 
@@ -81,7 +80,7 @@ class MainQueue {
                 return;  // 从未持有或已卸任：零锁开销
             }
             try {
-                std::scoped_lock lk(state().mtx);
+                std::scoped_lock const lk(state().mtx);
                 if (state().epoch == epoch_) {
                     state().epoch = 0;
                     state().wake = nullptr;  // 唤醒通道随登记一并摘除
@@ -136,7 +135,7 @@ class MainQueue {
         friend class MainQueue;
         /// @brief 开窗（仅经 `closing_scope()`）：锁内置位打烊标志。
         Closing() : active_(true) {
-            std::scoped_lock lk(state().mtx);
+            std::scoped_lock const lk(state().mtx);
             state().closing = true;
         }
         /// @brief 关窗：仅在自己名开窗时清位（幂等）。
@@ -148,7 +147,7 @@ class MainQueue {
                 return;
             }
             try {
-                std::scoped_lock lk(state().mtx);
+                std::scoped_lock const lk(state().mtx);
                 state().closing = false;
             } catch (...) {  // NOLINT(bugprone-empty-catch)
                 // 收起窗口的系统级失败不可恢复：析构路径不外抛，守卫本身照常销毁。
@@ -166,7 +165,7 @@ class MainQueue {
     ///             唤醒只回答「叫谁起床」，不决定任务归属。
     /// @return 成功领回租约；**此刻**已有值班者时为空 `nullopt`（调用方据此拒绝并发 run）。
     [[nodiscard]] static auto on_duty(std::function<void()> wake) -> std::optional<Lease> {
-        std::scoped_lock lk(state().mtx);
+        std::scoped_lock const lk(state().mtx);
         if (state().epoch != 0) {
             return std::nullopt;  // CAS 只拒「此刻有人」；归还后的重入循环可再次领取
         }
@@ -194,7 +193,7 @@ class MainQueue {
     static auto post(std::function<void()> task, std::uint64_t expected_epoch) -> void {
         std::function<void()> wake;
         {
-            std::scoped_lock lk(state().mtx);
+            std::scoped_lock const lk(state().mtx);
             if (!accept_locked(expected_epoch)) {
                 reject_locked();  // 打烊取消：不投递、不 terminate，计数 + ERROR 日志
                 return;
@@ -220,7 +219,7 @@ class MainQueue {
     [[nodiscard]] static auto try_post(std::function<void()> task, std::uint64_t expected_epoch) -> bool {
         std::function<void()> wake;
         {
-            std::scoped_lock lk(state().mtx);
+            std::scoped_lock const lk(state().mtx);
             if (!accept_locked(expected_epoch)) {
                 return false;
             }
@@ -242,7 +241,7 @@ class MainQueue {
     /// @return 本批任务（可能为空；空批 = 无事发生的帧照常返回空）。
     [[nodiscard]] static auto take_batch() -> std::vector<std::function<void()>> {
         std::vector<std::function<void()>> out;
-        std::scoped_lock lk(state().mtx);
+        std::scoped_lock const lk(state().mtx);
         out.reserve(state().queue.size());
         for (auto &task : state().queue) {
             out.push_back(std::move(task));
@@ -254,7 +253,7 @@ class MainQueue {
     /// @brief 值班世代的全函数：在岗返回当前世代号（≥1），不在岗（未上岗/已 release）恒返回 0。
     /// @return 当前在岗世代号或 0。
     [[nodiscard]] static auto current_epoch() -> std::uint64_t {
-        std::scoped_lock lk(state().mtx);
+        std::scoped_lock const lk(state().mtx);
         return state().epoch;
     }
 
@@ -265,21 +264,21 @@ class MainQueue {
     /// @brief 队列是否有待排水的任务（供帧末等待决策：有待办即不深睡，立即进入下一帧排空）。
     /// @return 有滞留任务为 true。
     [[nodiscard]] static auto has_pending() -> bool {
-        std::scoped_lock lk(state().mtx);
+        std::scoped_lock const lk(state().mtx);
         return !state().queue.empty();
     }
 
     /// @brief 当前滞留待排水的任务数（观测口：测试据此造「已排进主线程但尚未执行」的时序）。
     /// @return 队列中尚未被 `take_batch` 取走的任务数。
     [[nodiscard]] static auto pending_count() -> std::size_t {
-        std::scoped_lock lk(state().mtx);
+        std::scoped_lock const lk(state().mtx);
         return state().queue.size();
     }
 
     /// @brief 是否处于打烊窗口（`loop_end` 收尾排空中；`is_closing() ⇒ current_epoch()==0`）。
     /// @return 打烊窗口内为 true。
     [[nodiscard]] static auto is_closing() -> bool {
-        std::scoped_lock lk(state().mtx);
+        std::scoped_lock const lk(state().mtx);
         return state().closing;
     }
 

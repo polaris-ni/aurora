@@ -1,7 +1,7 @@
 #pragma once
 
 /// @brief 链路态采集接缝：把三平台原语压成同一枚无平台类型的读数。
-/// @file net/detail/connectivity_probe.h
+/// @file connectivity_probe.h
 ///
 /// 本件只含三样：`ProbeReading`（内部读数形态）、`compiled_source()`（编译期腿令牌）、
 /// Windows 查询 `probe_default_route_win32()` 的**声明**与 `probe_default_route()`（分派）。
@@ -17,7 +17,6 @@
 /// @note Side-effects: 读 OS 路由与接口状态。
 #include <optional>
 
-#include "aurora/core/platform.h"  // 编译期平台宏（`AURORA_PLATFORM_*`）：`compiled_source()` 的分派依赖它
 #include "aurora/net/connectivity.h"
 
 namespace aurora::net::detail {

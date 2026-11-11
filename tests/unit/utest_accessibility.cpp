@@ -467,24 +467,24 @@ AURORA_TEST_CASE(build_tree_honours_explicit_root_box) {
 
 AURORA_TEST_CASE(build_tree_self_fills_name_and_value_from_widgets) {
     // 控件自带语义：Button 取 label、Text 取文本、Progress 取数值（无需布局/绘制即可自填）。
-    aurora::Button button{
+    aurora::Button const button{
         std::string{"确定"}};  // CJK-LITERAL: cjk-fixture - Han button label under a11y name assertion
     AURORA_TEST_CHECK_EQ(aurora::build_accessibility_tree(button).name, std::string{"确定"});
 
-    aurora::Text text{
+    aurora::Text const text{
         std::string{"订单总额"}};  // CJK-LITERAL: cjk-fixture - Han text widget label under a11y assertion
     AURORA_TEST_CHECK_EQ(aurora::build_accessibility_tree(text).name, std::string{"订单总额"});
 
-    aurora::Checkbox checked{true};
+    aurora::Checkbox const checked{true};
     AURORA_TEST_CHECK_EQ(aurora::build_accessibility_tree(checked).value, std::string{"true"});
 
-    aurora::Switch off{false};
+    aurora::Switch const off{false};
     AURORA_TEST_CHECK_EQ(aurora::build_accessibility_tree(off).value, std::string{"false"});
 
-    aurora::Slider slider{0.5};
+    aurora::Slider const slider{0.5};
     AURORA_TEST_CHECK_EQ(aurora::build_accessibility_tree(slider).value, std::to_string(0.5));
 
-    aurora::ProgressIndicator progress{0.25};
+    aurora::ProgressIndicator const progress{0.25};
     AURORA_TEST_CHECK_EQ(aurora::build_accessibility_tree(progress).value, std::to_string(0.25));
 
     // 编辑框：name 取占位提示、value 取当前内容，两者互不相干。
@@ -497,7 +497,7 @@ AURORA_TEST_CASE(build_tree_self_fills_name_and_value_from_widgets) {
 }
 
 AURORA_TEST_CASE(build_tree_prefers_widget_hooks_and_exposes_hint) {
-    ProbeAnnotatedLeaf annotated;
+    ProbeAnnotatedLeaf const annotated;
     const auto tree = aurora::build_accessibility_tree(annotated);
     AURORA_TEST_CHECK_EQ(tree.role, aurora::AccessibilityRole::Button);
     AURORA_TEST_CHECK_EQ(tree.name, std::string{"提交订单"});  // CJK-LITERAL: cjk-fixture - Han probe hook fields below
@@ -505,7 +505,7 @@ AURORA_TEST_CASE(build_tree_prefers_widget_hooks_and_exposes_hint) {
     AURORA_TEST_CHECK_EQ(tree.hint, std::string{"回车提交"});
 
     // 未覆写的控件：三个钩子均为空串（保留给宿主自行覆写）。
-    ProbeLeaf plain{"Slider"};
+    ProbeLeaf const plain{"Slider"};
     const auto plain_tree = aurora::build_accessibility_tree(plain);
     AURORA_TEST_CHECK(plain_tree.name.empty());
     AURORA_TEST_CHECK(plain_tree.value.empty());
@@ -816,7 +816,7 @@ AURORA_TEST_CASE(explicit_label_round_trips_through_props) {
     AURORA_TEST_CHECK_EQ(aurora::build_accessibility_tree(dst).name, std::string{"静音"});
 
     // 未声明不写键：空值落盘会被误读成「显式清空名字」。
-    aurora::Checkbox plain;
+    aurora::Checkbox const plain;
     aurora::Json plain_props = aurora::Json::object();
     plain.serialize_props(plain_props);
     AURORA_TEST_CHECK_FALSE(plain_props.contains("accessibility_label"));
@@ -1074,7 +1074,7 @@ AURORA_TEST_CASE(stable_key_and_labelled_by_round_trip_through_props) {
     AURORA_TEST_CHECK_EQ(dst.labelled_by_key(), std::string{"notify-label"});
 
     // 未声明不写键（同 `accessibility_label` 纪律）：空值落盘会被误读成「显式清空」。
-    aurora::Checkbox plain;
+    aurora::Checkbox const plain;
     aurora::Json plain_props = aurora::Json::object();
     plain.serialize_props(plain_props);
     AURORA_TEST_CHECK_FALSE(plain_props.contains("stable_key"));
@@ -1126,12 +1126,12 @@ AURORA_TEST_CASE(vertical_view_size_and_scroll_percent_are_consistent) {
     const double span = content - viewport;  // 可滚跨度 700
     const double view = aurora::compute_vertical_view_size({.viewport = viewport, .content = content});
     AURORA_TEST_CHECK_NEAR(view, 12.5, 1e-6);
-    aurora::AccessibilityScrollRange top{
+    aurora::AccessibilityScrollRange const top{
         .min = 0.0, .max = span, .position = 0.0, .viewport = viewport, .content = content};
     const double top_pct = (top.position - top.min) / (top.max - top.min) * 100.0;
     AURORA_TEST_CHECK_NEAR(top_pct, 0.0, 1e-9);
     AURORA_TEST_CHECK_NEAR(aurora::compute_vertical_view_size(top), view, 1e-9);
-    aurora::AccessibilityScrollRange mid{
+    aurora::AccessibilityScrollRange const mid{
         .min = 0.0, .max = span, .position = 350.0, .viewport = viewport, .content = content};
     const double mid_pct = (mid.position - mid.min) / (mid.max - mid.min) * 100.0;
     AURORA_TEST_CHECK(mid_pct > 1.0);  // 已离开顶部

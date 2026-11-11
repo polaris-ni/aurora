@@ -2,7 +2,6 @@
 
 #include <chrono>
 #include <functional>
-#include <memory>
 
 #include "aurora/state/read_only_state.h"
 #include "aurora/state/subscription.h"

@@ -25,7 +25,6 @@
 #include "aurora/app/file_association.h"
 #include "aurora/app/run_at_login.h"
 #include "aurora/app/single_instance.h"
-#include "aurora/app/url_scheme.h"
 #include "aurora/core/image.h"
 #include "aurora/core/result.h"
 
