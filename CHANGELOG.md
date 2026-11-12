@@ -7,7 +7,7 @@
 > 各版本下分 `Breaking` / `Added` / `Changed` / `Fixed` / `Migration` / `Notes` 子节。
 <!-- aurora-changelog-meta
 schema: aurora-changelog/1.0
-currentVersion: 1.0.0-alpha.10
+currentVersion: 1.0.0-alpha.11
 policy: semver
 freeze: minor-versions-are-additive
 -->
@@ -21,6 +21,12 @@ freeze: minor-versions-are-additive
 
 
 ## [Unreleased]
+
+## [1.0.0-alpha.11] - 2026-11-12
+
+> 类型：pre-release
+
+响应式状态模型收口为「可写状态 + 只读状态」两词，错误分类拆成「域 + 性质」两轴，widget 属性面统一迁到「私有字段 + 权威表 + 链式写件」，主题引入「风格 × 明暗」两条正交轴与四套系统风格预设；同批落地四容器共用滚动条几何与焦点环令牌消费，并补齐 Win32 / X11 程序化窗控、macOS 平台能力、依赖供应链台账与模糊测试、线程竞态两条持续集成红线。
 
 ### Breaking
 
