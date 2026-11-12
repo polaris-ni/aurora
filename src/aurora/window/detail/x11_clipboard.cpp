@@ -48,6 +48,7 @@
 #include <cstdint>
 #include <cstring>
 #include <optional>
+#include <span>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -59,7 +60,7 @@ namespace {
 ///
 /// 取 X 协议属性上限的经验安全值（远小于理论 2^24-1，规避对端小缓冲），与拖放 / 剪贴板互操作的
 /// 主流实现一致。
-constexpr std::size_t AURORA_X11_MAX_DIRECT = 256U * 1024U;
+constexpr std::size_t AURORA_X11_MAX_DIRECT = std::size_t{256} * 1024U;
 
 /// @brief 读入同步等待上界：对端挂死时不把 UI 线程永久钉住（与 Wayland 桥 5s 同口径）。
 constexpr std::chrono::milliseconds AURORA_X11_READ_TIMEOUT{5000};
@@ -79,10 +80,15 @@ struct ReadKey {
     Atom property = 0;
 };
 
+/// @brief 从 Xlib 回调参数还原只读键（`XPointer` 是 `char *`，经 `void *` 静态还原避免类型双关）。
+/// @param arg Xlib 传入的只读上下文指针。
+/// @return 指向等待谓词键的只读指针。
+[[nodiscard]] auto read_key(const void *arg) -> const ReadKey * { return static_cast<const ReadKey *>(arg); }
+
 /// @brief 读入等待谓词：只匹配「本窗口的 CLIPBOARD SelectionNotify」或「本私有属性的
 /// PropertyNotify」，不吞掉其它事件（`XCheckIfEvent` 语义，见 `wait_for_read`）。
 int read_pred(Display * /*dpy*/, XEvent *ev, XPointer arg) {
-    const auto *key = reinterpret_cast<const ReadKey *>(arg);  // NOLINT(*-pro-type-reinterpret-cast)
+    const auto *key = read_key(arg);
     if (ev->type == SelectionNotify && ev->xselection.selection == key->selection &&
         ev->xselection.requestor == key->win) {
         return True;
@@ -121,8 +127,8 @@ struct X11ClipboardBridge::Impl {
     int xfixes_error_base = 0;
 
     // 内容态
-    std::unordered_map<std::string, std::vector<std::uint8_t>> data_;  ///< 立即写（mime → 字节）
-    std::optional<ClipboardOffer> offer_;  ///< 惰性要约（formats + provide）
+    std::unordered_map<std::string, std::vector<std::uint8_t>> data;  ///< 立即写（mime → 字节）
+    std::optional<ClipboardOffer> offer;  ///< 惰性要约（formats + provide）
 
     // 在途 INCR 写出发送（请求方窗口 → 分片态）；同一时刻通常仅一个，但键化以容多请求
     struct IncrSend {
@@ -139,9 +145,9 @@ struct X11ClipboardBridge::Impl {
     auto uninstall() -> void;
 
     // ---- atom 工具 ----
-    [[nodiscard]] auto intern(const char *name) -> Atom;
+    [[nodiscard]] auto intern(const char *name) const -> Atom;
     [[nodiscard]] auto atom_for_mime(const std::string &mime) -> Atom;
-    [[nodiscard]] auto mime_for_target(Atom target) -> std::optional<std::string>;
+    [[nodiscard]] auto mime_for_target(Atom target) const -> std::optional<std::string>;
 
     // ---- 所有权 ----
     auto claim() -> void;
@@ -150,7 +156,7 @@ struct X11ClipboardBridge::Impl {
     // ---- 写出（请求方索取时）----
     auto on_selection_request(Window requestor, Atom selection, Atom target, Atom property, Time time) -> void;
     auto serve_target(Window requestor, Atom target, Atom property, Time time) -> void;
-    auto send_notify(Window requestor, Atom target, Atom property, Time time) -> void;
+    auto send_notify(Window requestor, Atom target, Atom property, Time time) const -> void;
     auto send_bytes(Window requestor, Atom property, Atom target, const std::vector<std::uint8_t> &bytes,
                     Atom prop_type = None) -> void;
     auto begin_incr(Window requestor, Atom property, Atom target, Atom prop_type, std::vector<std::uint8_t> bytes)
@@ -172,7 +178,7 @@ struct X11ClipboardBridge::Impl {
     auto on_selection_clear(Atom selection, Time time) -> void;
     auto on_selection_notify(Atom selection, Atom target, Atom property) -> void;
     auto on_property_notify(Window window, Atom atom, int state) -> void;
-    auto on_fixes_selection_notify(int subtype, Atom selection, Window owner) -> void;
+    auto on_fixes_selection_notify(int subtype, Atom selection, Window owner) const -> void;
     [[nodiscard]] auto on_x_event(const XEvent &event) -> bool;
 
     // ---- 后端九入口 ----
@@ -182,7 +188,7 @@ struct X11ClipboardBridge::Impl {
     auto backend_get_files() -> Result<std::vector<std::string>>;
     auto backend_set_html(const std::string &html) -> Result<bool>;
     auto backend_get_html() -> Result<std::string>;
-    auto backend_set_offer(const ClipboardOffer &offer) -> Result<void>;
+    auto backend_set_offer(const ClipboardOffer &new_offer) -> Result<void>;
     auto backend_available_formats() -> Result<std::vector<std::string>>;
     auto backend_set_change_listener(std::function<void()> callback) -> Result<void>;
 };
@@ -230,7 +236,7 @@ auto X11ClipboardBridge::Impl::uninstall() -> void {
 
 // ---- atom 工具 ----
 
-auto X11ClipboardBridge::Impl::intern(const char *name) -> Atom { return XInternAtom(dpy, name, False); }
+auto X11ClipboardBridge::Impl::intern(const char *name) const -> Atom { return XInternAtom(dpy, name, False); }
 
 auto X11ClipboardBridge::Impl::atom_for_mime(const std::string &mime) -> Atom {
     if (mime == AURORA_MIME_TEXT_PLAIN) {
@@ -239,7 +245,7 @@ auto X11ClipboardBridge::Impl::atom_for_mime(const std::string &mime) -> Atom {
     return intern(mime.c_str());
 }
 
-auto X11ClipboardBridge::Impl::mime_for_target(Atom target) -> std::optional<std::string> {
+auto X11ClipboardBridge::Impl::mime_for_target(Atom target) const -> std::optional<std::string> {
     if (target == a_utf8 || target == a_string || target == a_text || target == a_compound) {
         return std::string{AURORA_MIME_TEXT_PLAIN};
     }
@@ -272,8 +278,8 @@ auto X11ClipboardBridge::Impl::release() -> void {
         XSetSelectionOwner(dpy, a_clipboard, None, CurrentTime);
         owns = false;
     }
-    data_.clear();
-    offer_.reset();
+    data.clear();
+    offer.reset();
     incr_sends.clear();
 }
 
@@ -298,9 +304,9 @@ auto X11ClipboardBridge::Impl::serve_target(Window requestor, Atom target, Atom 
         targets.push_back(a_timestamp);
         // 只广告真正可取到的目标：UTF8_STRING（text/plain）须立即写或惰性要约真的声明了它，
         // 否则严格读取方会拿到「广告了却拒绝」的不一致视图。
-        bool has_text = data_.find(std::string{AURORA_MIME_TEXT_PLAIN}) != data_.end();
-        if (!has_text && offer_.has_value()) {
-            for (const auto &mime : offer_->formats) {
+        bool has_text = data.contains(std::string{AURORA_MIME_TEXT_PLAIN});
+        if (!has_text && offer.has_value()) {
+            for (const auto &mime : offer->formats) {
                 if (mime == AURORA_MIME_TEXT_PLAIN) {
                     has_text = true;
                     break;
@@ -310,14 +316,14 @@ auto X11ClipboardBridge::Impl::serve_target(Window requestor, Atom target, Atom 
         if (has_text) {
             targets.push_back(a_utf8);
         }
-        for (const auto &kv : data_) {
+        for (const auto &kv : data) {
             const Atom a = atom_for_mime(kv.first);
             if (a != 0 && std::find(targets.begin(), targets.end(), a) == targets.end()) {
                 targets.push_back(a);
             }
         }
-        if (offer_.has_value()) {
-            for (const auto &mime : offer_->formats) {
+        if (offer.has_value()) {
+            for (const auto &mime : offer->formats) {
                 const Atom a = atom_for_mime(mime);
                 if (a != 0 && std::find(targets.begin(), targets.end(), a) == targets.end()) {
                     targets.push_back(a);
@@ -351,8 +357,9 @@ auto X11ClipboardBridge::Impl::serve_target(Window requestor, Atom target, Atom 
                                &nitems, &bytes_after, &prop) == Success &&
             prop != nullptr && (nitems % 2) == 0) {
             const auto *pairs = reinterpret_cast<const Atom *>(prop);  // NOLINT
+            const std::span<const Atom> pair_view{pairs, nitems};
             for (unsigned long i = 0; i + 1 < nitems; i += 2) {
-                serve_target(requestor, pairs[i], pairs[i + 1], time);
+                serve_target(requestor, pair_view[i], pair_view[i + 1], time);
             }
             XFree(prop);
         }
@@ -367,18 +374,18 @@ auto X11ClipboardBridge::Impl::serve_target(Window requestor, Atom target, Atom 
         return;
     }
     std::optional<std::vector<std::uint8_t>> bytes;
-    if (const auto it = data_.find(*mime); it != data_.end()) {
+    if (const auto it = data.find(*mime); it != data.end()) {
         bytes = it->second;
-    } else if (offer_.has_value() && offer_->provide != nullptr) {
+    } else if (offer.has_value() && offer->provide != nullptr) {
         bool declared = false;
-        for (const auto &m : offer_->formats) {
+        for (const auto &m : offer->formats) {
             if (m == *mime) {
                 declared = true;
                 break;
             }
         }
         if (declared) {
-            const auto produced = offer_->provide(*mime);
+            const auto produced = offer->provide(*mime);
             if (!produced) {
                 // 惰性提供失败：拒绝此次请求（不谎报成功）
                 refuse(requestor, target, property, time);
@@ -394,7 +401,7 @@ auto X11ClipboardBridge::Impl::serve_target(Window requestor, Atom target, Atom 
     send_bytes(requestor, property, target, *bytes);
 }
 
-auto X11ClipboardBridge::Impl::send_notify(Window requestor, Atom target, Atom property, Time time) -> void {
+auto X11ClipboardBridge::Impl::send_notify(Window requestor, Atom target, Atom property, Time time) const -> void {
     XSelectionEvent sev{};
     sev.type = SelectionNotify;
     sev.display = dpy;
@@ -429,7 +436,7 @@ auto X11ClipboardBridge::Impl::send_bytes(Window requestor, Atom property, Atom 
 auto X11ClipboardBridge::Impl::begin_incr(Window requestor, Atom property, Atom target, Atom prop_type,
                                           std::vector<std::uint8_t> bytes) -> void {
     // 首片：INCR 类型 + 32 位总长提示（按规范，长度可填 0 表示未知）。
-    const std::uint32_t total = static_cast<std::uint32_t>(bytes.size());
+    const auto total = static_cast<std::uint32_t>(bytes.size());
     XChangeProperty(dpy, requestor, property, a_incre, 32, PropModeReplace,
                     reinterpret_cast<const unsigned char *>(&total), 1);  // NOLINT
     IncrSend send;
@@ -452,8 +459,8 @@ auto X11ClipboardBridge::Impl::pump_incr(Window requestor, Atom property) -> voi
         return;
     }
     auto &send = it->second;
-    const auto *base = send.bytes.data() + send.offset;
-    const auto left = send.bytes.size() - send.offset;
+    const std::span<const std::uint8_t> bytes{send.bytes};
+    const auto left = bytes.size() - send.offset;
     const auto chunk = left > AURORA_X11_MAX_DIRECT ? AURORA_X11_MAX_DIRECT : left;
     if (chunk == 0) {
         // 末片零长：收尾并清态
@@ -462,7 +469,8 @@ auto X11ClipboardBridge::Impl::pump_incr(Window requestor, Atom property) -> voi
         XFlush(dpy);
         return;
     }
-    XChangeProperty(dpy, requestor, property, send.type, 8, PropModeReplace, base, static_cast<int>(chunk));
+    XChangeProperty(dpy, requestor, property, send.type, 8, PropModeReplace, bytes.subspan(send.offset, chunk).data(),
+                     static_cast<int>(chunk));
     send.offset += chunk;
     XFlush(dpy);
 }
@@ -471,7 +479,7 @@ auto X11ClipboardBridge::Impl::pump_incr(Window requestor, Atom property) -> voi
 
 auto X11ClipboardBridge::Impl::wait_for_read(Atom selection, Atom property, XEvent &out,
                                              std::chrono::steady_clock::time_point deadline) -> bool {
-    ReadKey key{win, selection, property};
+    ReadKey key{.win = win, .selection = selection, .property = property};
     for (;;) {
         // XCheckIfEvent 只取匹配项：未命中的事件留在队列里交回主泵。XIfEvent 会顺带丢弃它们，
         // 对「在控件回调里同步读剪贴板」而言等于吞掉当事窗口的输入事件。
@@ -484,7 +492,7 @@ auto X11ClipboardBridge::Impl::wait_for_read(Atom selection, Atom property, XEve
             return false;  // 超时：不悬挂，调用方按「无可读数据」如实收尾
         }
         // XPending 顺带从连接读入已到达的事件；队列非空但无匹配项时短等让出，避免空转。
-        pollfd pfd{ConnectionNumber(dpy), POLLIN, 0};
+        pollfd pfd{.fd = ConnectionNumber(dpy), .events = POLLIN, .revents = 0};
         const int wait_ms = XPending(dpy) > 0 ? 10 : static_cast<int>(remain);
         if (::poll(&pfd, 1, wait_ms) < 0 && errno != EINTR) {
             return false;
@@ -528,19 +536,19 @@ auto X11ClipboardBridge::Impl::read_payload(const std::string &mime) -> Result<s
         return read_property(ev.xselection.property, deadline);
     }
     // 读自己刚写的：直接取本地态（避免绕一圈 X 往返）
-    if (const auto it = data_.find(mime); it != data_.end()) {
+    if (const auto it = data.find(mime); it != data.end()) {
         return it->second;
     }
-    if (offer_.has_value() && offer_->provide != nullptr) {
+    if (offer.has_value() && offer->provide != nullptr) {
         bool declared = false;
-        for (const auto &m : offer_->formats) {
+        for (const auto &m : offer->formats) {
             if (m == mime) {
                 declared = true;
                 break;
             }
         }
         if (declared) {
-            const auto produced = offer_->provide(mime);
+            const auto produced = offer->provide(mime);
             if (!produced) {
                 return make_error(ErrorCode::ClipboardProviderFailed, ErrorParams{{"mime", mime}});
             }
@@ -619,7 +627,8 @@ auto X11ClipboardBridge::Impl::read_property(Atom property, std::chrono::steady_
                     break;
                 }
                 const auto len = cn * static_cast<unsigned long>(cf > 0 ? cf / 8 : 0);
-                out.insert(out.end(), cp, cp + len);
+                const std::span<const unsigned char> piece{cp, len};
+                out.insert(out.end(), piece.begin(), piece.end());
                 XFree(cp);
                 offset_items += static_cast<long>(cn);
                 if (ca == 0) {
@@ -648,7 +657,8 @@ auto X11ClipboardBridge::Impl::read_property(Atom property, std::chrono::steady_
             break;
         }
         const auto len = nitems * static_cast<unsigned long>(actual_format > 0 ? actual_format / 8 : 0);
-        out.insert(out.end(), prop, prop + len);
+        const std::span<const unsigned char> piece{prop, len};
+        out.insert(out.end(), piece.begin(), piece.end());
         XFree(prop);
         prop = nullptr;
         if (bytes_after == 0) {
@@ -706,8 +716,8 @@ auto X11ClipboardBridge::Impl::on_selection_clear(Atom selection, Time /*time*/)
         return;
     }
     owns = false;
-    data_.clear();
-    offer_.reset();
+    data.clear();
+    offer.reset();
     incr_sends.clear();
     clipboard::detail::fire_ownership_lost();
 }
@@ -732,7 +742,7 @@ auto X11ClipboardBridge::Impl::on_property_notify(Window window, Atom atom, int 
     }
 }
 
-auto X11ClipboardBridge::Impl::on_fixes_selection_notify(int subtype, Atom selection, Window /*owner*/) -> void {
+auto X11ClipboardBridge::Impl::on_fixes_selection_notify(int subtype, Atom selection, Window /*owner*/) const -> void {
     if (!xfixes || selection != a_clipboard) {
         return;
     }
@@ -765,7 +775,7 @@ auto X11ClipboardBridge::Impl::backend_set_payload(const std::string &mime, cons
     if (bytes.empty()) {
         return Result<bool>{true};  // 契约：空字节 no-op，保留既有内容
     }
-    data_[mime] = bytes;  // 立即写覆盖同 mime 的惰性声明（后写者接管）
+    data[mime] = bytes;  // 立即写覆盖同 mime 的惰性声明（后写者接管）
     claim();
     return Result<bool>{true};
 }
@@ -805,12 +815,12 @@ auto X11ClipboardBridge::Impl::backend_get_html() -> Result<std::string> {
     return std::string{raw.value().begin(), raw.value().end()};
 }
 
-auto X11ClipboardBridge::Impl::backend_set_offer(const ClipboardOffer &offer) -> Result<void> {
-    if (offer.formats.empty() || offer.provide == nullptr) {
+auto X11ClipboardBridge::Impl::backend_set_offer(const ClipboardOffer &new_offer) -> Result<void> {
+    if (new_offer.formats.empty() || new_offer.provide == nullptr) {
         return make_error(ErrorCode::GeneralInvalidArgument,
                           ErrorParams{{"detail", "set_offer: formats empty or provide null"}});
     }
-    offer_ = offer;  // 惰性要约与立即写并存（后写者接管同 mime）
+    this->offer = new_offer;  // 惰性要约与立即写并存（后写者接管同 mime）
     claim();
     return Result<void>{};
 }
@@ -823,11 +833,12 @@ auto X11ClipboardBridge::Impl::backend_available_formats() -> Result<std::vector
     }
     if (owns) {
         std::vector<std::string> formats;
-        for (const auto &kv : data_) {
+        formats.reserve(data.size() + (offer.has_value() ? offer->formats.size() : 0U));
+        for (const auto &kv : data) {
             formats.push_back(kv.first);
         }
-        if (offer_.has_value()) {
-            for (const auto &mime : offer_->formats) {
+        if (offer.has_value()) {
+            for (const auto &mime : offer->formats) {
                 if (std::find(formats.begin(), formats.end(), mime) == formats.end()) {
                     formats.push_back(mime);
                 }

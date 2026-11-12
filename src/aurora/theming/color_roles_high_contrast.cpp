@@ -31,6 +31,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <tuple>
 #include <vector>
 
@@ -169,8 +170,10 @@ struct Candidate {
     for (int i = 0; i < AURORA_HIGH_CONTRAST_BISECTIONS; ++i) {
         const double mid = (lo + hi) / 2.0;
         std::array<double, 3> mixed{};
+        const std::span<double> out{mixed};
+        const std::span<const double> in{linear};
         for (std::size_t c = 0; c < mixed.size(); ++c) {
-            mixed.at(c) = linear.at(c) + ((1.0 - linear.at(c)) * mid);
+            out[c] = in[c] + ((1.0 - in[c]) * mid);
         }
         if (linear_luminance(mixed) > target) {
             hi = mid;

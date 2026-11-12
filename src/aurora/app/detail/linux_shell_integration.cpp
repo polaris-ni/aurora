@@ -19,7 +19,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/un.h>
-#include <time.h>
+#include <ctime>
 #include <unistd.h>
 
 #include <cerrno>
@@ -31,6 +31,7 @@
 #include <fstream>
 #include <functional>
 #include <optional>
+#include <span>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -511,17 +512,18 @@ struct InstanceState {
 }
 
 [[nodiscard]] auto write_all(int fd, const void *data, std::size_t size) -> bool {
-    const auto *bytes = static_cast<const char *>(data);
-    while (size > 0) {
-        const ssize_t written = ::send(fd, bytes, size, MSG_NOSIGNAL);
+    const std::span<const char> buffer{static_cast<const char *>(data), size};
+    std::size_t sent = 0;
+    while (sent < buffer.size()) {
+        const auto chunk = buffer.subspan(sent);
+        const ssize_t written = ::send(fd, chunk.data(), chunk.size(), MSG_NOSIGNAL);
         if (written < 0) {
             if (errno == EINTR) {
                 continue;
             }
             return false;
         }
-        bytes += written;
-        size -= static_cast<std::size_t>(written);
+        sent += static_cast<std::size_t>(written);
     }
     return true;
 }
@@ -540,15 +542,16 @@ struct InstanceState {
 
 /// @brief 帧长度解码（小端）。
 [[nodiscard]] auto decode_frame_length(const char *bytes) -> std::uint32_t {
-    const auto byte = [bytes](std::size_t index) -> std::uint32_t {
-        return static_cast<std::uint32_t>(static_cast<unsigned char>(bytes[index]));
+    const std::span<const char> frame{bytes, 4};
+    const auto byte = [&frame](std::size_t index) -> std::uint32_t {
+        return static_cast<std::uint32_t>(static_cast<unsigned char>(frame[index]));
     };
     return byte(0) | (byte(1) << 8U) | (byte(2) << 16U) | (byte(3) << 24U);
 }
 
 /// @brief 对端是否与本进程同一用户（纵深防御：目录 0700 已挡住别的用户）。
 [[nodiscard]] auto peer_is_same_user(int fd) -> bool {
-#if defined(SO_PEERCRED)
+#ifdef SO_PEERCRED
     struct ucred credentials{};
     socklen_t length = sizeof(credentials);
     if (::getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &credentials, &length) != 0) {
@@ -575,23 +578,24 @@ struct InstanceState {
         return false;  // 套接字路径超出平台上限：无法转交
     }
     std::memcpy(address.sun_path, socket_path.c_str(), socket_path.size());
+    void *address_ptr = &address;
     for (int attempt = 0; attempt < AURORA_INSTANCE_CONNECT_RETRIES; ++attempt) {
         fd = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
         if (fd < 0) {
             return false;
         }
-        if (::connect(fd, reinterpret_cast<struct sockaddr *>(&address), sizeof(address)) == 0) {
+        if (::connect(fd, static_cast<struct sockaddr *>(address_ptr), sizeof(address)) == 0) {
             break;
         }
         ::close(fd);
         fd = -1;
-        const struct timespec pause{0, AURORA_INSTANCE_RETRY_SLEEP_NS};
+        const struct timespec pause{.tv_sec = 0, .tv_nsec = AURORA_INSTANCE_RETRY_SLEEP_NS};
         (void)::nanosleep(&pause, nullptr);
     }
     if (fd < 0) {
         return false;  // 首实例的套接字还没就绪 / 已退出：按新实例正常启动
     }
-    const struct timeval timeout{AURORA_INSTANCE_ACK_TIMEOUT_SECONDS, 0};
+    const struct timeval timeout{.tv_sec = AURORA_INSTANCE_ACK_TIMEOUT_SECONDS, .tv_usec = 0};
     (void)::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
     (void)::setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
     bool forwarded = true;
@@ -644,7 +648,8 @@ auto backend_acquire_instance(const AppIdentity &identity, const std::vector<std
         }
         std::memcpy(address.sun_path, socket_path.c_str(), socket_path.size());
         const int listen_fd = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
-        if (listen_fd < 0 || ::bind(listen_fd, reinterpret_cast<struct sockaddr *>(&address), sizeof(address)) != 0 ||
+        void *address_ptr = &address;
+        if (listen_fd < 0 || ::bind(listen_fd, static_cast<struct sockaddr *>(address_ptr), sizeof(address)) != 0 ||
             ::listen(listen_fd, 8) != 0 || !set_nonblocking(listen_fd)) {
             if (listen_fd >= 0) {
                 ::close(listen_fd);
@@ -700,9 +705,7 @@ auto backend_poll_instance() -> void {
                 connection.buffer.append(bytes, static_cast<std::size_t>(got));
                 continue;
             }
-            if (got == 0) {
-                closed = true;
-            } else if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
+            if (got == 0 || (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR)) {
                 closed = true;
             }
             break;

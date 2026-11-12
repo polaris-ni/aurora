@@ -28,6 +28,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <optional>
 #include <string>
 #include <system_error>
 #include <utility>
@@ -364,8 +365,11 @@ class BenchResult {
 /// so a tool only needs identify() once and finalize_process() at the very end.
 /// @return the single result object owned by this process.
 [[nodiscard]] inline auto process_result() -> BenchResult & {
-    static BenchResult instance{make_meta("unknown-tool", "default")};
-    return instance;
+    static std::optional<BenchResult> instance;  // NOLINT(bugprone-dynamic-static-initializers)
+    if (!instance.has_value()) {
+        instance.emplace(make_meta("unknown-tool", "default"));
+    }
+    return *instance;
 }
 
 /// @brief Persist the process-wide result.

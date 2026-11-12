@@ -81,7 +81,7 @@ constexpr const char *AURORA_PROBE_EXTENSION = "log";
 /// @return 文本；打不开返回空串。
 [[nodiscard]] auto read_text(const std::string &path) -> std::string {
     std::ifstream file(path, std::ios::binary);
-    return std::string(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+    return {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
 }
 
 /// @brief 取文件里某个 INI 节的内容（`[section]` 到下一个 `[` 之间，原样保留行）。
@@ -224,10 +224,10 @@ constexpr const char *AURORA_PROBE_EXTENSION = "log";
 /// @brief 用户配置目录（XDG_CONFIG_HOME 优先，回落后 HOME/.config）。
 /// @return 目录路径；两者都缺返回空串。
 [[nodiscard]] auto config_home() -> std::string {
-    if (const char *xdg = std::getenv("XDG_CONFIG_HOME"); xdg != nullptr && xdg[0] != '\0') {
+    if (const char *xdg = std::getenv("XDG_CONFIG_HOME"); xdg != nullptr && *xdg != '\0') {
         return xdg;
     }
-    if (const char *home = std::getenv("HOME"); home != nullptr && home[0] != '\0') {
+    if (const char *home = std::getenv("HOME"); home != nullptr && *home != '\0') {
         return std::string(home) + "/.config";
     }
     return {};
@@ -236,10 +236,10 @@ constexpr const char *AURORA_PROBE_EXTENSION = "log";
 /// @brief 用户数据目录（XDG_DATA_HOME 优先，回落后 HOME/.local/share）。
 /// @return 目录路径；两者都缺返回空串。
 [[nodiscard]] auto data_home() -> std::string {
-    if (const char *xdg = std::getenv("XDG_DATA_HOME"); xdg != nullptr && xdg[0] != '\0') {
+    if (const char *xdg = std::getenv("XDG_DATA_HOME"); xdg != nullptr && *xdg != '\0') {
         return xdg;
     }
-    if (const char *home = std::getenv("HOME"); home != nullptr && home[0] != '\0') {
+    if (const char *home = std::getenv("HOME"); home != nullptr && *home != '\0') {
         return std::string(home) + "/.local/share";
     }
     return {};

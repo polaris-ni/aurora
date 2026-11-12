@@ -307,7 +307,7 @@ class CapturedLog {
         return false;
     }
     out = std::wstring(base) + L"\\aurora_verify";
-    if (CreateDirectoryW(out.c_str(), nullptr)) {
+    if (CreateDirectoryW(out.c_str(), nullptr) != FALSE) {
         return true;
     }
     return GetLastError() == ERROR_ALREADY_EXISTS;
@@ -480,15 +480,15 @@ auto run_interactive_stage() -> int {
         const bool in_scratch =
             ascii_lower(aurora::internal::wstr_to_utf8(parent.c_str())) == ascii_lower(scratch_utf8);
         const std::string saved_name = aurora::internal::wstr_to_utf8(name.c_str());
-        const bool ours = in_scratch && (saved_name.rfind("aurora-verify-name", 0) == 0);
+        const bool ours = in_scratch && saved_name.starts_with("aurora-verify-name");
         if (!ours) {
             emit("[SKIP ] saved outside the scratch dir or under an unexpected name; leaving it alone");
         } else {
             // `IFileDialog` **不写文件**：确认后只返回选定的路径，落盘由应用自己完成（实测本段返回
             // 路径后目录里始终没有该文件，`GetFileAttributesW` 报 error=2）。故这里没有文件要回收，
             // 只摘掉探针自建的那枚空暂存目录；目录非空（人往里放了东西）就留着不动。
-            emit(RemoveDirectoryW(scratch.c_str()) ? "cleanup: scratch dir removed"
-                                                   : "cleanup: scratch dir kept (not empty; nothing was deleted)");
+            emit(RemoveDirectoryW(scratch.c_str()) != FALSE ? "cleanup: scratch dir removed"
+                                                              : "cleanup: scratch dir kept (not empty; nothing was deleted)");
         }
     }
 
@@ -516,33 +516,38 @@ auto run_interactive_stage() -> int {
 }  // namespace
 
 auto main(int argc, char **argv) -> int {
-    const auto cli = aurora_verify::parse_interactive("Win32 file-dialog delivery live probe", argc, argv);
-    if (!cli.arguments) {
-        return cli.exit_code;
-    }
-    const bool interactive = cli.arguments->flag("interactive");
+    try {
+        const auto cli = aurora_verify::parse_interactive("Win32 file-dialog delivery live probe", argc, argv);
+        if (!cli.arguments) {
+            return cli.exit_code;
+        }
+        const bool interactive = cli.arguments->flag("interactive");
 
-    aurora::init_console();  // Windows 控制台切 UTF-8，避免路径行错行
+        aurora::init_console();  // Windows 控制台切 UTF-8，避免路径行错行
 
-    emit("== Aurora Win32 file-dialog delivery live probe ==");
-    emit("auto segment: name / folder read back via the OS getters, extension via the confirmed path");
+        emit("== Aurora Win32 file-dialog delivery live probe ==");
+        emit("auto segment: name / folder read back via the OS getters, extension via the confirmed path");
 
-    const int auto_code = run_auto_stage();
-    if (auto_code != 0) {
-        return auto_code;
+        const int auto_code = run_auto_stage();
+        if (auto_code != 0) {
+            return auto_code;
+        }
+        if (!interactive) {
+            emit("Skipping the interactive stage.");
+            emit("The default-extension append is only readable from a confirmed path, and whether the");
+            emit("prefilled name shows on screen is a human judgement. Re-run with --interactive for both.");
+            emit("PASS: Win32 file-dialog delivery acceptance passed (auto stage)");
+            return 0;
+        }
+        const int human_code = run_interactive_stage();
+        if (human_code == 0) {
+            emit("PASS: Win32 file-dialog delivery acceptance passed (auto + interactive)");
+        }
+        return human_code;
+    } catch (...) {
+        // 入口把异常折算为非零退出码；此处不调用任何可能再次抛出的输出接口，避免异常逃逸。
+        return 1;
     }
-    if (!interactive) {
-        emit("Skipping the interactive stage.");
-        emit("The default-extension append is only readable from a confirmed path, and whether the");
-        emit("prefilled name shows on screen is a human judgement. Re-run with --interactive for both.");
-        emit("PASS: Win32 file-dialog delivery acceptance passed (auto stage)");
-        return 0;
-    }
-    const int human_code = run_interactive_stage();
-    if (human_code == 0) {
-        emit("PASS: Win32 file-dialog delivery acceptance passed (auto + interactive)");
-    }
-    return human_code;
 }
 
 // ---------------------------------------------------------------------------

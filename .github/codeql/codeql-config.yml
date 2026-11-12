@@ -1,0 +1,8 @@
+# CodeQL analysis configuration for the advanced setup workflow.
+# Vendored dependencies are tracked upstream; analysing them here produces
+# alerts this repository cannot fix and that pollute pull request checks.
+# The filter applies because both languages in codeql.yml use build-mode: none,
+# so no separate build step supplies a source set of its own.
+name: "Aurora CodeQL configuration"
+paths-ignore:
+  - "third_party/**"

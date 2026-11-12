@@ -284,8 +284,8 @@ Win32RecentDocumentsBridge::~Win32RecentDocumentsBridge() { detach(); }
 
 auto win32_recent_documents_ensure_registered() -> bool {
     // 进程级长存守卫：登记一次即不再释放（投影记录与通路都与窗口无关）。
-    static Win32RecentDocumentsBridge const bootstrap;
-    return bootstrap.installed();
+    static Win32RecentDocumentsBridge const BOOTSTRAP;
+    return BOOTSTRAP.installed();
 }
 
 }  // namespace aurora::detail

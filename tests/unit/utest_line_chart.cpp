@@ -497,7 +497,7 @@ AURORA_TEST_CASE(linechart_constant_rows_ignore_theme_scope) {
     // 显式域随整值表态：两档主题下读回来都是那条域，不被作用域改写。
     AURORA_TEST_CHECK_TRUE(d.axis_y().min.has_value());
     AURORA_TEST_CHECK_TRUE(d.axis_y().max.has_value());
-    AURORA_TEST_CHECK_NEAR(*d.axis_y().max, 5.0, 1e-6);
+    AURORA_TEST_CHECK_NEAR(require_value(d.axis_y().max), 5.0, 1e-6);
 }
 
 AURORA_TEST_CASE(linechart_full_key_json_restores_every_effective_value) {

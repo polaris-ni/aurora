@@ -95,9 +95,10 @@ constexpr std::string_view AURORA_TIER_PREFIX = "theme.";  // THEME-LITERAL: 组
 /// @param member ColorRoles member pointer.
 /// @return short name (e.g. `on_primary`); empty when the role is not in the token table.
 [[nodiscard]] constexpr auto role_short_name(Color ColorRoles::*member) noexcept -> std::string_view {
-    const std::string_view token = ColorRoles::token_name(member);
+    std::string_view token = ColorRoles::token_name(member);
     if (token.size() > AURORA_TIER_PREFIX.size() && token.starts_with(AURORA_TIER_PREFIX)) {
-        return token.substr(AURORA_TIER_PREFIX.size());
+        token.remove_prefix(AURORA_TIER_PREFIX.size());
+        return token;
     }
     return {};
 }

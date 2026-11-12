@@ -212,7 +212,7 @@ AURORA_TEST_CASE(connectivity_state_failure_timeout_only_triggers_sample_and_las
     AURORA_TEST_CHECK_EQ(static_cast<int>(after.state), static_cast<int>(NetworkState::Online));
     AURORA_TEST_CHECK_EQ(after.generation, before.generation);  // 不推进代际
     AURORA_TEST_CHECK(after.last_failure.has_value());
-    AURORA_TEST_CHECK_EQ(*after.last_failure, std::string{"http-timeout"});
+    AURORA_TEST_CHECK_EQ(aurora::testing::require_value(after.last_failure), std::string{"http-timeout"});
 }
 
 AURORA_TEST_CASE(connectivity_state_failure_cancelled_is_noop) {

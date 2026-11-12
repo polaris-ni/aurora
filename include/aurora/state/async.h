@@ -325,7 +325,19 @@ class Task {
             if (state_->delivered && !state_->cancelled && state_->result.has_value()) {
                 DoneFn const to_call = state_->on_done;
                 Result<T> const r = *state_->result;  // 锁内取副本：出锁后 state_ 可被其他线程继续改写
-                replay = [to_call, r]() mutable -> void { to_call(r); };
+                // 补投闭包转入 std::function（经 MainQueue::post 排水），本检查对任何可调用对象一律判为
+                // 「不应抛出」（std::function::operator() 无 noexcept 规格，无法证明其不抛）；闭包内 try/catch
+                // 已把完成回调的异常收敛为 no-op（逸出即 terminate），此处不再额外吞异常，仅消该误报。
+                // NOLINTNEXTLINE(bugprone-exception-escape)
+                replay = [to_call, r]() mutable -> void {
+                    try {
+                        to_call(r);
+                    } catch (...) {
+                        // 完成回调经主队列排水执行，异常不得逸出投递边界（逸出即 terminate）；
+                        // 收敛为 no-op，与线程池 fire-and-forget 任务的兜底同口径。
+                        return;
+                    }
+                };
             }
         }
         if (replay) {

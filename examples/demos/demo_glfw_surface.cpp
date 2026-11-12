@@ -67,7 +67,7 @@ auto main() -> int {
     if (win) {
         // 帧循环统一由 `Application` 驱动（接管事件派发、焦点、脏区呈现与等待决策）。
         AURORA_LOG_INFO("demo", "[demo_glfw_surface] GLFW window shown (close window to exit)");
-        au::Application app{au::Scene{root}, std::move(win), static_cast<au::WindowOptions>(opts)};
+        au::Application app{au::Scene{root}, std::move(win), opts};
         app.run();
         return 0;
     }

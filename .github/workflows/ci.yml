@@ -53,29 +53,33 @@
 #                    覆盖该宏的 `-pthread` 链接标志与 ThreadPool 行为分支。
 #  7. install     — cmake --install + 工作流内联最小消费端端到端验证
 #                    （find_package(Aurora) + 静态链接 + feature 宏导出一致性）。
-#  8. lint        — clang-tidy 门禁，矩阵 = pass(DEBUG OFF / ON + 优化开关全关的反极性遍，三份
-#                    编译数据库) × shard(TU 清单分片，现 4 片) 共 12 个作业，去重后 0 finding 才
-#                    通过。纯静态分析，主 Linux 遍在 ubuntu-26.04 单跑，且 configure 打开**除
-#                    Windows/macOS 特有宏之外的全部后端与能力开关**（含 WebView 控件；开关串集中
-#                    在顶层 env 的 LINT_CAPABILITY_FLAGS*，native 与 wasm 两份口径），使覆盖面
-#                    尽可能贴近全仓。
-#                    依赖 AuroraLint.cmake 提供的 `lint` 目标与 AURORA_LINT_SHARD 分片开关。
-#                    为什么摊成矩阵：runner 只有 4 vCPU，单遍 500+ TU 实测 86 分钟，三遍串跑
-#                    4 小时量级、必超时；分片只改排布不减覆盖面，总核时不变而墙钟近线性下降。
-#                    ⚠️ 判据是「12 个作业全绿」：任一片红即整门红，缺片等于缺覆盖面。
-#                    ⚠️ 本矩阵的口径是 **native**：EMSCRIPTEN 门后的 TU 不在这三份编译库里，
-#                    其静态检查由 8w 在同一份 wasm 编译库上跑浏览器口径 lint 补齐；Windows /
-#                    macOS 特有宏下的代码各由 8win / 8mac 子作业定向补齐（只扫平台相关 TU）。
-#                    全量 / 增量分流（作业 8 / 8w）：全量矩阵只在 PR、master(+main) 推送、
-#                    每周定时与手动触发时跑；分支推送由作业 8i「单 job 增量」覆盖——只 lint
-#                    「本次改动牵动的 TU」（由 tools/check/select_lint_tus.py 按编译库 include
-#                    闭包挑出，详见 BUILD_OPTIONS.md §4.5），把分支 push 的 lint 开销从 12 个
-#                    job 压到 1 个。增量省的是 job 数与墙钟：诊断只可能来自 TU 自身与它读到的
-#                    头，没被挑中的 TU 本轮不可能产生新告警；全量出口由 PR / master 与每周定时兜底。
-#  8w. lint-wasm  — 浏览器口径 clang-tidy（`lint` 目标在 Emscripten 配置下自动加 --emscripten，
-#                    见 job 8 与 BUILD_OPTIONS.md §4.5）：4 个分片作业，只 configure 不构建。
-#                    这是 EMSCRIPTEN 门后那批 TU 唯一的静态检查面，与 job 8 同为**必过**门禁，
-#                    清单仍逐片作 artifact 落盘。
+#  8. lint        — clang-tidy **主遍**：一份编译数据库、4 个 TU 分片作业，去重后 0 finding 才通过。
+#                    口径是「开尽可能多的宏、扫尽可能多的代码」：DEBUG=ON、SIMD / TEST_HOOKS 显式 ON、
+#                    顶层 env 的 LINT_CAPABILITY_FLAGS 全量（除 Windows/macOS 特有宏外的全部后端与
+#                    能力开关，含 WebView 控件），并追加 OpenSSL provider 使两枚 TLS 引擎 TU 同时入面。
+#                    依赖 AuroraLint.cmake 的 `lint` 目标与 AURORA_LINT_SHARD 分片开关。
+#                    为什么主遍仍摊 4 片：runner 只有 4 vCPU，单遍 500+ TU 实测 86 分钟，分片只改
+#                    排布、不减主遍覆盖面，墙钟降到 ~25 分钟。
+#  8p. lint-polarity — **辅助极性遍**（2 个单 job）：分别按 DEBUG=OFF 与 SIMD/TEST_HOOKS=OFF
+#                    配置编译库，只扫「这些宏开关能改变代码形态」的 TU——按宏 token 用 git grep
+#                    定向选集，再经 select_lint_tus.py --changed-only 保留本身是 TU 的文件，与
+#                    8win/8mac 的平台定向选集同构；不分片、不扫全仓。主遍已全量扫过同一批 TU 的
+#                    另一极性，辅助遍只需补上极性差集那一面。
+#  8w. lint-wasm  — **辅助浏览器口径遍**（1 个单 job）：`lint` 目标在 Emscripten 配置下自动加
+#                    --emscripten（见 job 8 与 BUILD_OPTIONS.md §4.5），只 configure 不构建，同样
+#                    按 EMSCRIPTEN / AURORA_PLATFORM_WASM / AURORA_BACKEND_WASM token 定向选集，
+#                    只补 native 编译库里根本不存在的那批 TU。
+#                    ⚠️ 辅助遍的覆盖率口径与旧「三份编译库各自全量」不同：token 选集可能漏掉
+#                    「宏经公共头间接生效」的 TU，故 **8p / 8w 在每周定时事件下改跑全量**（与
+#                    8win 的每周全量同款兜底），把系统性漏选补回来。判据是「7 个作业全绿」：
+#                    主遍 4 片 + 8p 两遍 + 8w 一遍，任一红即整门红。
+#                    ⚠️ 主遍口径是 **native**：Windows / macOS 特有宏下的代码各由 8win / 8mac
+#                    子作业定向补齐（只扫平台相关 TU）。
+#                    全量 / 增量分流：主遍与辅助遍只在 PR、master(+main) 推送、每周定时与手动
+#                    触发时跑；分支推送由作业 8i「单 job 增量」覆盖——只 lint「本次改动牵动的
+#                    TU」（由 tools/check/select_lint_tus.py 按编译库 include 闭包挑出，详见
+#                    BUILD_OPTIONS.md §4.5）。增量省的是 job 数与墙钟；诊断只可能来自 TU 自身
+#                    与它读到的头，没被挑中的 TU 本轮不可能产生新告警。
 #  8win. lint-windows / lint-macos — 平台专属 lint 子作业：主 Linux 遍开不了 Windows / macOS 特有的
 #                    编译选项（那两组宏只在各自平台存在），这两处的 `#ifdef _WIN32` / `__APPLE__`
 #                    代码因此不在主遍覆盖面内。子作业用各自的编译库**只扫平台相关 TU**（由
@@ -146,8 +150,8 @@ concurrency:
 
 env:
   # lint 家族共用的「全能力开关集」，两份口径各自一串（折叠标量 >- 按空格并成单行 shell 参数）：
-  #   LINT_CAPABILITY_FLAGS       — job 8（native 双 pass）与 8i 的 build-lint-off / build-lint-on；
-  #   LINT_CAPABILITY_FLAGS_WASM  — job 8w 与 8i 的 build-wasm-lint（浏览器口径，无 PROFILING/VERIFY）。
+  #   LINT_CAPABILITY_FLAGS       — job 8 主遍、8p 辅助极性遍与 8i 的 native 编译库；
+  #   LINT_CAPABILITY_FLAGS_WASM  — job 8w 辅助浏览器遍与 8i 的 build-wasm-lint（无 PROFILING/VERIFY）。
   # 集中一处维护，改这里即全部 lint 腿同步，消除四处粘贴漂移。
   # WEBVIEW 宏是 PRIVATE：开启即让 webview 收口代码进入分析面；Linux 上显式关掉 WEBKITGTK
   # （其引擎编译需 GTK3/WebKitGTK dev 头，lint 静态面不付这份依赖）。
@@ -155,8 +159,8 @@ env:
   # ${{ env.* }} 展开进 shell，把该行剩余部分连同行尾续行 `\` 一起注释掉——轻则丢失参数，
   # 重则把下一行变成独立命令（`-D...: command not found`，exit 127）。注释一律写在键外。
   # TLS 覆盖面说明：mbedTLS 由仓库内置源码构建（`AURORA_ENABLE_NET_TLS_MBEDTLS=ON`，源码随 checkout
-  # 就位，无需 /opt provider 根）；simd-testhooks-off pass 追加一条 OpenSSL provider（`shared:/usr`），
-  # 两枚引擎 TU 各拿到一次 lint 分析面。
+  # 就位，无需 /opt provider 根）；job 8 主遍在 Configure 步骤另追加一条 OpenSSL provider
+  # （`shared:/usr`），使 tls_mbedtls.cpp / tls_openssl.cpp 两枚引擎 TU 同时进入主遍分析面。
   LINT_CAPABILITY_FLAGS: >-
     -DAURORA_BACKEND_X11=ON -DAURORA_BACKEND_WAYLAND=ON -DAURORA_BACKEND_GLFW=ON
     -DAURORA_ENABLE_GLFW_GPU_GL=ON -DAURORA_BACKEND_GPU_WGPU=ON
@@ -1247,14 +1251,18 @@ jobs:
   # 以覆盖 #if（debug-ON）与 #else（debug-OFF）两分支——
   # AURORA_ENABLE_DEBUG=AUTO 是 generator expression，单配置只分析一分支，门禁天然盲一半。
   #
-  # 为什么要摊成矩阵：这两遍原本在**同一个 job 里串跑**，而 runner 只有 4 vCPU —— 单遍实测 498 TU / 5172s = 86 分钟，
-  # 两遍串跑就是 3 小时量级，`timeout-minutes: 240` 根本不够，红灯是必然、不是偶发。
-  # runner 侧的并行度早已开满核数，所以**唯一还能动的量是把 TU 分到多个作业**：
-  # pass(2) × shard(4) = 8 个作业，每片约 125 TU ≈ 22 分钟，整门墙钟 86 → ~25 分钟。
-  # ⚠️ 分片只改排布、不减覆盖面：总核时与原来一模一样（该跑的 TU 一个不少）。
-  # ⚠️ 判据随矩阵改写为「8 个作业全绿」：任一片红即整门红；`fail-fast: false` 让其余片继续跑完，
-  # 好让一次 push 就看到整张告警面，而不是修一片再看一片。缺片（作业被跳过或没配出来）等于
-  # 缺覆盖面，故每片的 lint-findings.json 自带 `shard` / `tu_total` 字段供聚合核对。
+  # 本作业是 lint 家族的**主遍**：一份编译数据库覆盖尽可能多的宏与 TU，DEBUG / SIMD /
+  # TEST_HOOKS 全部显式 ON，另在 Configure 步骤追加 OpenSSL provider。旧形态是「三份编译库
+  # （DEBUG OFF / ON / SIMD+TEST_HOOKS OFF）各自全量 × 4 分片 = 12 个作业」，其中两份把与主遍
+  # 重合的 498 TU 又各扫了一遍；现在极性差集交给 8p 的两个定向单 job（只扫宏 token 命中的
+  # TU），主遍仍全量但只有一份，全量矩阵由 16 个作业降到 7 个。
+  # 为什么主遍仍摊成矩阵：runner 只有 4 vCPU —— 单遍实测 498 TU / 5172s = 86 分钟，单 job
+  # 串跑必超时；分片把 TU 摊到 4 个作业，每片约 125 TU ≈ 22 分钟，整门墙钟 86 → ~25 分钟。
+  # ⚠️ 主遍分片只改排布、不减主遍覆盖面（该跑的 TU 一个不少）；总覆盖面 = 主遍全量 +
+  #    8p / 8w 的极性差集 + 8win / 8mac 的平台差集，另由每周定时全量兜底 token 选集的漏选。
+  # ⚠️ 判据是「主遍 4 片 + 辅助 3 个作业全绿」：任一片红即整门红；`fail-fast: false` 让其余片
+  #    继续跑完，好让一次 push 就看到整张告警面。缺片（作业被跳过或没配出来）等于缺覆盖面，
+  #    故每片的 lint-findings.json 自带 `shard` / `tu_total` 字段供聚合核对。
   # 改片数须同时动两处：下面的 `shard: [0, 1, 2, 3]` 与 `total: [4]`（矩阵表达式取不到某维度
   # 的取值列表，job name 里又用不了 `env`，只能把总数单列成一个取值维度当引用点）。
   # 两处不一致的后果不对称，都响：列表比 total 长 → 越界片在 configure 期 FATAL_ERROR；
@@ -1262,32 +1270,18 @@ jobs:
   # `tu_total` 自述字段核对，加聚合作业不值当（多一个作业、多一处会红的无关依赖）。
   # ---------------------------------------------------------------------------
   lint:
-    name: clang-tidy (${{ matrix.pass.label }}, shard ${{ matrix.shard }}/${{ matrix.total }})
+    name: clang-tidy (main, shard ${{ matrix.shard }}/${{ matrix.total }})
     runs-on: ubuntu-26.04
     # 240 → 40：每片 ~140 TU ≈ 24 分钟 tidy，加 apt 安装 / configure / lint-prereq ≈ 4 分钟；40 分钟是
     # 一倍半余量。余量必须留：本轮 TU 编译失败即整片红，慢起来没有上限。
-    # 全量矩阵只跑 PR / master(+main) / 每周定时 / 手动触发；分支推送改由下方 lint-incremental
-    # 单 job 增量覆盖（见作业 8i），避免每个功能分支 push 都发 12 个 native lint job。
+    # 主遍只跑 PR / master(+main) / 每周定时 / 手动触发；分支推送改由下方 lint-incremental
+    # 单 job 增量覆盖（见作业 8i）。
     needs: gate
     if: ${{ !cancelled() && needs.gate.outputs.dup != 'true' && (github.event_name != 'push' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main') }}
     timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
-        pass:
-          - label: debug-off
-            debug: "OFF"
-            flags: ""
-          - label: debug-on
-            debug: "ON"
-            flags: ""
-          # 反极性遍：SIMD 与测试注入点关闭——这些 `#ifdef` 收口的分支在默认开启时根本不参与分析。
-          # 与上方两遍共用同一份扩面后端/能力开关（见 Configure 步骤）。
-          # 本 pass 另在 env 串的内置 mbedTLS 之外追加一条 OpenSSL provider（shared:/usr）：两枚引擎 TU
-          # （tls_mbedtls.cpp / tls_openssl.cpp）各自进一个 pass 的分析面，不新增 job。
-          - label: simd-testhooks-off
-            debug: "OFF"
-            flags: -DAURORA_ENABLE_SIMD=OFF -DAURORA_ENABLE_TEST_HOOKS=OFF -DAURORA_NET_TLS_PROVIDERS=shared:/usr
         shard: [0, 1, 2, 3]
         # 单值维度：只为给 `--shard=i/n` 的 n 一个 yaml 内的引用点（见上方注释）。
         total: [4]
@@ -1307,7 +1301,7 @@ jobs:
           # libclang1-22：wgpu-native 的 bindgen 由 configure 期探测 libclang 共享库，clang-tidy-22
           # 只拉 libclang-cpp22（C++ 接口）不含 C 接口的 libclang-22.so.1，故显式补装。
           # mbedTLS 现由仓库内置源码构建（AURORA_ENABLE_NET_TLS_MBEDTLS，源码随 checkout 就位），无需
-          # libmbedtls-dev、也不再搭 /opt provider 根；libssl-dev 供 simd-testhooks-off pass 的 OpenSSL 腿。
+          # libmbedtls-dev、也不再搭 /opt provider 根；libssl-dev 供主遍追加的 OpenSSL provider 腿。
           sudo apt-get install -y clang-tidy-22 clang-format-22 libclang1-22 \
             libx11-dev libxfixes-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxext-dev \
             libgl1-mesa-dev libwayland-dev wayland-protocols libxkbcommon-dev \
@@ -1370,19 +1364,20 @@ jobs:
       # 扩面：主 Linux 遍打开除 Windows/macOS 特有宏之外的全部后端与能力开关，让
       # `#ifdef AURORA_BACKEND_X11/WAYLAND/GLFW`、GPU（GL / wgpu-native）、音频、SQLite、图像编解码、
       # WebView 控件、Inspector Server、性能观测（PROFILING/TRACING）与 verify 探针都进入分析面。
-      # 开关串维护在顶层 env 的 LINT_CAPABILITY_FLAGS（四处 lint 腿共用，防粘贴漂移）。
-      # `matrix.pass.flags` 追加反极性遍的优化开关收口。
+      # 开关串维护在顶层 env 的 LINT_CAPABILITY_FLAGS（lint 腿共用，防粘贴漂移）。
+      # 主遍在串之外显式把 DEBUG / SIMD / TEST_HOOKS 三枚都钉 ON，并追加一条 OpenSSL
+      # provider（shared:/usr），让两枚 TLS 引擎 TU 同时入面；反极性遍改由 8p 定向补差。
       # ⚠️ AURORA_BACKEND_GPU_WGPU=ON 只做 configure 期工具链探测（cargo/rustc/libclang），lint 目标
       #    不构建 wgpu_native_build，故无需真正跑 cargo 编译。
-      - name: Configure (${{ matrix.pass.label }}, export compile_commands.json)
+      - name: Configure (main, export compile_commands.json)
         run: |
           cmake -S . -B build-lint -G Ninja \
             -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DAURORA_ENABLE_CLANG_TIDY=ON \
-            -DAURORA_ENABLE_DEBUG=${{ matrix.pass.debug }} \
+            -DAURORA_ENABLE_DEBUG=ON -DAURORA_ENABLE_SIMD=ON -DAURORA_ENABLE_TEST_HOOKS=ON \
+            -DAURORA_NET_TLS_PROVIDERS=shared:/usr \
             -DAURORA_LINT_SHARD=${{ matrix.shard }}/${{ matrix.total }} \
-            ${{ env.LINT_CAPABILITY_FLAGS }} \
-            ${{ matrix.pass.flags }}
+            ${{ env.LINT_CAPABILITY_FLAGS }}
 
       # 生成物就位：lint 只 configure 不构建，而被分析的 TU 会 include 构建期产物——wayland-scanner
       # 产出的协议头（<build>/wayland-gen/*-client-protocol.h）、词表生成头（<build>/<target>_i18n/
@@ -1410,9 +1405,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: .tidy-cache
-          key: aurora-tidy-${{ matrix.pass.label }}-${{ runner.os }}-${{ github.run_id }}
+          key: aurora-tidy-main-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
-            aurora-tidy-${{ matrix.pass.label }}-${{ runner.os }}-
+            aurora-tidy-main-${{ runner.os }}-
 
       - name: Lint (shard ${{ matrix.shard }}/${{ matrix.total }})
         run: |
@@ -1461,45 +1456,33 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: tidy-findings-${{ matrix.pass.label }}-shard${{ matrix.shard }}
+          name: tidy-findings-main-shard${{ matrix.shard }}
           path: build-lint/lint-findings.json
           if-no-files-found: warn
 
   # ---------------------------------------------------------------------------
-  # 8w. 浏览器口径 clang-tidy：Emscripten 编译库上的同一道门禁，同样按 TU 分片。
-  # 为什么非要有这一遍：native 门禁（作业 8）的两份编译库里根本没有 `EMSCRIPTEN` 门后的
-  # TU —— wasm_* 实现、Web Audio 后端、wasm 探针，以及各文件里 `#ifdef AURORA_BACKEND_WASM`
-  # 包住的分支都不参与分析。作业 8 全绿不构成这些代码被检查过的证据。
-  # AuroraLint 在 Emscripten 配置下自动给 `lint` 附加 --emscripten：runner 先把 em++ 写的
-  # 编译库重写成 native clang-tidy 能消费的形态（换 wasm 三元组、指 sysroot、弃 PCH、补驱动宏），
-  # 再走同一套并行 / 去重 / 汇总流程——两种口径的产物因此可比。
-  # ⚠️ 本作业**只 configure 不构建**：`lint` 目标只要 compile_commands.json + sysroot，
-  #    不链库。这与作业 8 一直以来的跑法一致，且成立的前提是仓库内所有生成物
-  #    （error_codes.gen.h / aurora_api.json）都落在源码树并已提交——若日后新增
-  #    「构建目录里生成、又被 TU include」的头，分片作业会因找不到文件而报 broken_tus，
-  #    届时要么把生成物提交进源码树，要么在本作业补一步 configure 期生成目标。
+  # 8w. 辅助浏览器口径 clang-tidy：只扫 EMSCRIPTEN 门后那批 TU（native 编译库里不存在）。
+  #     为什么不再全量分片：主遍已把通用 TU 在 native 口径下全量扫过，wasm 编译库里的通用
+  #     TU 再扫一遍只是重复核时；这里只补「浏览器口径才有」的差集。
+  #     AuroraLint 在 Emscripten 配置下自动给 `lint` 附加 --emscripten：runner 先把 em++ 写的
+  #     编译库重写成 native clang-tidy 能消费的形态（换 wasm 三元组、指 sysroot、弃 PCH、补驱动宏），
+  #     再走同一套并行 / 去重 / 汇总流程——两种口径的产物因此可比。
+  #     ⚠️ 本作业**只 configure 不构建**：`lint` 目标只要 compile_commands.json + sysroot，
+  #        不链库。成立前提是仓库内所有生成物（error_codes.gen.h / aurora_api.json）都落在
+  #        源码树并已提交；若日后新增「构建目录里生成、又被 TU include」的头，本作业会报
+  #        broken_tus，届时要么把生成物提交进源码树，要么补一步 configure 期生成目标。
+  #     ⚠️ token 选集可能漏掉「宏经公共头间接生效」的 TU：每周定时事件下改跑全量兜底。
   # ---------------------------------------------------------------------------
   lint-wasm:
-    name: clang-tidy (wasm, shard ${{ matrix.shard }}/${{ matrix.total }})
+    name: clang-tidy (wasm, targeted TUs)
     runs-on: ubuntu-26.04
-    # 40：单片 ~17 分钟 tidy + emsdk/apt/configure ~4 分钟，留一倍余量。
-    # 与作业 8 同一套门禁分流：全量矩阵只在 PR / master(+main) / 定时 / 手动触发；分支推送
-    # 由 lint-incremental 单 job 覆盖浏览器口径的增量子集。
+    # 120：定向选集约数分钟；每周定时走全量（~471 TU ≈ 86 分钟）才需要这个上限。
+    timeout-minutes: 120
     needs: gate
     if: ${{ !cancelled() && needs.gate.outputs.dup != 'true' && (github.event_name != 'push' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main') }}
-    timeout-minutes: 40
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [0, 1, 2, 3]
-        # 单值维度：给 `--shard=i/n` 的 n 一个引用点（同作业 8，改片数须与 shard 列表同步）。
-        total: [4]
     steps:
       - uses: actions/checkout@v7
 
-      # 让 aurora_find_clang_format 在本作业探测成功：发行版与旧 patch 构建读不懂本仓
-      # .clang-format 的枚举取值，探测全落空即静默降级（format 目标不生成、生成链换二进制），
-      # 口径与实测见 codespec/BUILD_OPTIONS.md §4.7。
       - name: Setup clang-format (repo-parseable)
         uses: ./.github/actions/setup-clang-format
 
@@ -1515,9 +1498,8 @@ jobs:
           version: 6.0.9
 
       # ⚠️ 安装必须在 Configure **之前**：AuroraLint.cmake 在 configure 阶段 find_program(clang-tidy)，
-      #    找不到就直接 return——`lint` 目标根本不会被定义，届时构建只会报
-      #    "no rule to make target 'lint'"。与作业 8 同款钉版本 22：不同 clang 大版本的检查集会
-      #    漂移，两种口径的清单必须可比。（安装块与作业 8 重复——workflow 不支持 YAML 锚点复用。）
+      #    找不到就直接 return——`lint` 目标根本不会被定义。钉版本 22：不同 clang 大版本的检查集会
+      #    漂移，两种口径的清单必须可比。
       - name: Install clang-tidy-22
         run: |
           sudo wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc >/dev/null
@@ -1525,66 +1507,27 @@ jobs:
           echo "deb [signed-by=/etc/apt/trusted.gpg.d/apt.llvm.org.asc] http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-22 main" | sudo tee /etc/apt/sources.list.d/llvm22.list
           sudo apt-get update -y
           # clang-format-22 一并装上：aurora_find_clang_format 在 configure 期要找一个读得懂
-          # 本仓 .clang-format 的版本，缺它则 format 目标与生成链静默降级（见 BUILD_OPTIONS.md §4.7）。
+          # 本仓 .clang-format 的版本，缺它则 format 目标与生成链静默降级。
           sudo apt-get install -y clang-tidy-22 clang-format-22
           sudo ln -sf /usr/bin/clang-tidy-22 /usr/local/bin/clang-tidy
           sudo ln -sf /usr/bin/clang-format-22 /usr/local/bin/clang-format
 
-      # configure 的**能力开关**与作业 8 对齐（音频 / SQLite / 图像编解码 / WebView / Inspector
-      # Server），只去掉 native 后端（X11/Wayland/GLFW 在 wasm 下无意义）——开关串维护在顶层
-      # env 的 LINT_CAPABILITY_FLAGS_WASM；换开关等于换覆盖面，扩面后本作业的 TU 清单较历史
-      # 基线（首轮 420 TU / 470 条）有增量，属预期。
-      # 与作业 8 同一套全量 / 增量分界（workflow 不支持 YAML 锚点复用，故同款块写两份）。
-      # 浏览器口径的编译库是另一张 TU 清单，选集必须在本作业的编译库上重算一遍，
-      # 不能复用 native 那份：`EMSCRIPTEN` 门后的 TU 与 `AURORA_BACKEND_WASM` 分支只在
-      # 这里存在，拿 native 的清单来跑会正好把它们漏掉。
-      - name: Decide lint scope
-        id: scope
-        run: |
-          set -euo pipefail
-          full=false
-          case "${{ github.event_name }}" in
-            schedule|workflow_dispatch) full=true ;;
-            pull_request) full=true ;;
-            *) case "${{ github.ref }}" in refs/heads/master|refs/heads/main) full=true ;; esac ;;
-          esac
-          if [ "$full" != "true" ]; then
-            if [ "${{ github.event_name }}" = "pull_request" ]; then
-              git -c core.quotepath=off fetch --depth=1 origin \
-                "+refs/heads/${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}"
-              git -c core.quotepath=off diff --name-only "origin/${{ github.base_ref }}..." > changed.txt
-            else
-              before="${{ github.event.before }}"
-              git -c core.quotepath=off fetch --depth=1 origin "$before" 2>/dev/null || true
-              if [ -z "$before" ] || [ "$before" = "0000000000000000000000000000000000000000" ] \
-                 || ! git cat-file -e "${before}^{commit}" 2>/dev/null; then
-                full=true
-                echo "::warning::previous commit unavailable; falling back to a full lint pass"
-              else
-                git -c core.quotepath=off diff --name-only "$before" "${{ github.sha }}" > changed.txt
-              fi
-            fi
-          fi
-          echo "full=$full" >> "$GITHUB_OUTPUT"
-          if [ "$full" != "true" ]; then
-            echo "incremental scope: $(wc -l < changed.txt) changed files"
-          else
-            echo "full scope: every TU in this compile database"
-          fi
-
+      # 能力开关与作业 8 对齐（音频 / SQLite / 图像编解码 / WebView / Inspector Server），
+      # 只去掉 native 后端（X11/Wayland/GLFW 在 wasm 下无意义）——开关串维护在顶层 env。
+      # 不分片：本作业只跑定向选集（或每周全量），故不传 AURORA_LINT_SHARD。
       - name: Configure (emcmake, export compile_commands.json)
-        run: emcmake cmake -S . -B build-wasm-lint -G Ninja -DCMAKE_BUILD_TYPE=Release -DAURORA_BACKEND_WASM=ON -DAURORA_BUILD_TESTS=ON -DAURORA_BUILD_DEMOS=OFF -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DAURORA_ENABLE_CLANG_TIDY=ON -DAURORA_LINT_SHARD=${{ matrix.shard }}/${{ matrix.total }} ${{ env.LINT_CAPABILITY_FLAGS_WASM }}
+        run: emcmake cmake -S . -B build-wasm-lint -G Ninja -DCMAKE_BUILD_TYPE=Release -DAURORA_BACKEND_WASM=ON -DAURORA_BUILD_TESTS=ON -DAURORA_BUILD_DEMOS=OFF -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DAURORA_ENABLE_CLANG_TIDY=ON ${{ env.LINT_CAPABILITY_FLAGS_WASM }}
 
-      # 选集必须在 configure 之后：它读的就是这份编译库。全量时跳过（那份清单只有增量用得上）。
-      # ⚠️ 与作业 8 同理，本分支在生产中不可达（`if:` 已排除非 master 分支 push），唯一的分支推送
-      #    增量入口是作业 8i；保留 `--changed-only` 只为万一被改回可达时不误跑闭包全量。
-      - name: Select affected translation units
-        if: steps.scope.outputs.full != 'true'
+      # 定向选集：按浏览器口径 token 从第一方源码里挑出 wasm 相关文件，再交由选集脚本保留
+      # 其中「本身就是 TU」的那些（--changed-only）。不扫全仓，也不做分片。
+      - name: Select wasm-specific TUs
+        shell: bash
         run: |
           set -euo pipefail
-          python3 tools/check/select_lint_tus.py --build-dir build-wasm-lint --changed changed.txt --changed-only \
-            --out-dir build-wasm-lint/lint-selection --shards ${{ matrix.total }} --min-tu-per-shard 40 --jobs 4
-          cat build-wasm-lint/lint-selection/selection.json
+          git -c core.quotepath=off grep -lE 'EMSCRIPTEN|AURORA_PLATFORM_WASM|AURORA_BACKEND_WASM|__EMSCRIPTEN__|emscripten\.h|wasm_' -- src tools tests examples include | sort > wasm-tus.txt || true
+          echo "wasm token files: $(wc -l < wasm-tus.txt)"
+          python3 tools/check/select_lint_tus.py --build-dir build-wasm-lint --changed wasm-tus.txt --changed-only --out-dir build-wasm-lint/sel --shards 1
+          cat build-wasm-lint/sel/selection.json
 
       - name: Restore tidy result cache
         uses: actions/cache@v6
@@ -1594,65 +1537,147 @@ jobs:
           restore-keys: |
             aurora-tidy-wasm-${{ runner.os }}-
 
-      - name: Lint (shard ${{ matrix.shard }}/${{ matrix.total }})
+      - name: Lint wasm-specific TUs
+        shell: bash
         run: |
           set -euo pipefail
-          if [ "${{ steps.scope.outputs.full }}" = "true" ]; then
+          if [ "${{ github.event_name }}" = "schedule" ]; then
             cmake --build build-wasm-lint --target lint
             exit 0
           fi
-          list="build-wasm-lint/lint-selection/tus_${{ matrix.shard }}.txt"
+          list=build-wasm-lint/sel/tus_0.txt
           if [ ! -s "$list" ]; then
-            printf '{"idle":true,"mode":"incremental","shard":[%s,%s],"tu_count":0,"tu_total":0,"unique_findings":0,"broken_tus":[],"by_check":[],"by_file":[],"findings":[]}\n' \
-              "${{ matrix.shard }}" "${{ matrix.total }}" > build-wasm-lint/lint-findings.json
-            echo "incremental: no TU assigned to shard ${{ matrix.shard }} (subset smaller than the shard count)"
-            exit 0
+            echo "::error::wasm lint selection is empty - the token list matched no translation unit"
+            exit 1
           fi
           python3 tools/check/run_clang_tidy.py --build-dir build-wasm-lint --emscripten \
-            --tu-list "$list" \
-            --deps build-wasm-lint/lint-selection/deps.json \
-            --cache-dir .tidy-cache \
-            --json-out build-wasm-lint/lint-findings.json --jobs 4
-
-      - name: Annotate findings with shard scope
-        if: steps.scope.outputs.full != 'true'
-        env:
-          SHARD: ${{ matrix.shard }}
-          TOTAL: ${{ matrix.total }}
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import json, os
-          sel_p = "build-wasm-lint/lint-selection/selection.json"
-          out_p = "build-wasm-lint/lint-findings.json"
-          sel = json.load(open(sel_p, encoding="utf-8"))
-          data = json.load(open(out_p, encoding="utf-8"))
-          data["shard"] = [int(os.environ["SHARD"]), int(os.environ["TOTAL"])]
-          data["tu_total"] = sel["selected_count"]
-          data["selection_mode"] = sel["mode"]
-          json.dump(data, open(out_p, "w", encoding="utf-8"), indent=1)
-          PY
+            --tu-list "$list" --deps build-wasm-lint/sel/deps.json --cache-dir .tidy-cache \
+            --json-out build-wasm-lint/findings.json --jobs 4
 
       - name: Upload tidy findings
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: tidy-findings-wasm-shard${{ matrix.shard }}
-          path: build-wasm-lint/lint-findings.json
+          name: tidy-findings-wasm
+          path: build-wasm-lint/findings.json
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
+  # 8p. 辅助极性遍：主遍把 DEBUG / SIMD / TEST_HOOKS 全钉 ON，这两份编译库把极性反过来，
+  #     且**只扫这些宏开关真正能改变代码形态的 TU**（宏 token 定向选集，与 8win/8mac 同构），
+  #     不分片、不扫全仓。主遍已全量扫过同一批 TU 的 ON 极性，这里补的是 OFF 那一面。
+  #     ⚠️ token 选集可能漏掉「宏经公共头间接生效、源文件里没有 token」的 TU：每周定时事件
+  #        下改跑全量 `lint` 目标兜底（与 8win 的每周全量同款）。
+  # ---------------------------------------------------------------------------
+  lint-polarity:
+    name: clang-tidy (${{ matrix.pass.label }}, targeted TUs)
+    runs-on: ubuntu-26.04
+    # 120：定向选集约数分钟；每周定时走全量（~498 TU ≈ 86 分钟）才需要这个上限。
+    timeout-minutes: 120
+    needs: gate
+    if: ${{ !cancelled() && needs.gate.outputs.dup != 'true' && (github.event_name != 'push' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main') }}
+    strategy:
+      fail-fast: false
+      matrix:
+        pass:
+          - label: debug-off
+            configure: -DAURORA_ENABLE_DEBUG=OFF
+            tokens: 'AURORA_ENABLE_DEBUG|AURORA_ENABLE_TEST_HOOKS|AURORA_DEBUG_'
+          - label: simd-testhooks-off
+            configure: -DAURORA_ENABLE_DEBUG=OFF -DAURORA_ENABLE_SIMD=OFF -DAURORA_ENABLE_TEST_HOOKS=OFF
+            tokens: 'AURORA_ENABLE_DEBUG|AURORA_ENABLE_SIMD|AURORA_ENABLE_TEST_HOOKS|AURORA_SIMD|AURORA_NET_TLS_PROVIDERS'
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install clang-tidy-22 + desktop backend dev dependencies
+        run: |
+          sudo wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc >/dev/null
+          # http 为 apt.llvm.org 官方源格式：包完整性由上方 GPG 签名验证，非 TLS
+          echo "deb [signed-by=/etc/apt/trusted.gpg.d/apt.llvm.org.asc] http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-22 main" | sudo tee /etc/apt/sources.list.d/llvm22.list
+          sudo apt-get update -y
+          # clang-format-22 供 aurora_find_clang_format 在 configure 期探测；libclang1-22 供
+          # AURORA_BACKEND_GPU_WGPU=ON 的 configure 期 libclang 探测；libssl-dev 为可选 OpenSSL 腿。
+          sudo apt-get install -y clang-tidy-22 clang-format-22 libclang1-22 \
+            libx11-dev libxfixes-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxext-dev \
+            libgl1-mesa-dev libwayland-dev wayland-protocols libxkbcommon-dev \
+            libssl-dev
+          sudo ln -sf /usr/bin/clang-tidy-22 /usr/local/bin/clang-tidy
+          sudo ln -sf /usr/bin/clang-format-22 /usr/local/bin/clang-format
+
+      - name: Ensure Rust toolchain (wgpu backend configure probe)
+        run: |
+          if ! command -v cargo >/dev/null 2>&1 || ! command -v rustc >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          fi
+          cargo --version || true
+          rustc -vV || true
+
+      - name: Configure (${{ matrix.pass.label }}, export compile_commands.json)
+        run: |
+          cmake -S . -B build-lint -G Ninja \
+            -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DAURORA_ENABLE_CLANG_TIDY=ON \
+            ${{ matrix.pass.configure }} \
+            ${{ env.LINT_CAPABILITY_FLAGS }}
+
+      - name: Build lint prerequisites
+        run: cmake --build build-lint --target lint-prereq
+
+      - name: Select polarity-affected TUs
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -c core.quotepath=off grep -lE '${{ matrix.pass.tokens }}' -- src tools tests examples include | sort > polarity-tus.txt || true
+          echo "polarity token files: $(wc -l < polarity-tus.txt)"
+          python3 tools/check/select_lint_tus.py --build-dir build-lint --changed polarity-tus.txt --changed-only --out-dir build-lint/sel --shards 1
+          cat build-lint/sel/selection.json
+
+      - name: Restore tidy result cache
+        uses: actions/cache@v6
+        with:
+          path: .tidy-cache
+          key: aurora-tidy-${{ matrix.pass.label }}-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            aurora-tidy-${{ matrix.pass.label }}-${{ runner.os }}-
+
+      - name: Lint polarity-affected TUs
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            cmake --build build-lint --target lint
+            exit 0
+          fi
+          list=build-lint/sel/tus_0.txt
+          if [ ! -s "$list" ]; then
+            echo "::error::${{ matrix.pass.label }} lint selection is empty - the token list matched no translation unit"
+            exit 1
+          fi
+          python3 tools/check/run_clang_tidy.py --build-dir build-lint \
+            --tu-list "$list" --deps build-lint/sel/deps.json --cache-dir .tidy-cache \
+            --json-out build-lint/findings.json --jobs 4
+
+      - name: Upload tidy findings
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: tidy-findings-${{ matrix.pass.label }}
+          path: build-lint/findings.json
           if-no-files-found: warn
 
   # ---------------------------------------------------------------------------
   # 8i. 增量 lint（分支推送专用）：单 job 内顺序覆盖 native(DEBUG OFF/ON) 与 wasm 三套
   # 编译库上「本次改动牵动的 TU」。只在 push 到非 master/main 分支时跑；PR 与 master 推送
-  # 走上方全量矩阵（作业 8 / 8w）。
+  # 走上方主遍全量分片（作业 8）与辅助定向遍（8p / 8w）。
   # 为什么是单 job 而非矩阵：分支推送改动通常很小，单 job 内对受牵动子集跑三遍足矣，不必为
-  # 每个分片各发一个 runner；分片矩阵是给全量（每遍 556 TU）降墙钟用的。三套编译库的子集
+  # 每个分片各发一个 runner；分片矩阵是给主遍全量（~498 TU）降墙钟用的。三套编译库的子集
   # 各自独立计算，不能互用（EMSCRIPTEN 门后 TU 只在 wasm 库存在）。
   # 改动面来源：正常 push 取 `before..sha` 两点差异；首推 / 强推导致 `before` 不可用
   # 时回落到「相对 origin/master 的差异」，仍是有界子集（分支相对 master 的净改动）而非全量。
-  # 选集口径与作业 8/8w **不同**：本 job 走 `select_lint_tus.py --changed-only`，只跑改动集里
-  # 本身就是 TU 的文件（不展开 include 闭包），求快；闭包级完整覆盖留给 PR / master 的作业
-  # 8 / 8w。故改一个公共头不会在本 job 顺带重跑它的包含者——那部分告警由全量 lint 兜底。
+  # 输入清单与作业 8p / 8w **不同**：本 job 把 `git diff` 的改动清单喂给
+  # `select_lint_tus.py --changed-only`，只跑改动集里本身就是 TU 的文件（不展开 include
+  # 闭包），求快；8p / 8w 喂的是宏 token 命中清单，主遍则是整份编译库全量。故改一个公共头
+  # 不会在本 job 顺带重跑它的包含者——那部分告警由主遍全量与每周定时全量兜底。
   # ---------------------------------------------------------------------------
   lint-incremental:
     name: clang-tidy (incremental, push)
@@ -1910,6 +1935,25 @@ jobs:
           fi
           echo "$bin" >> "$GITHUB_PATH"
           "$bin/clang-tidy" --version
+          # AURORA_BACKEND_GPU_WGPU=ON 在 configure 期硬探测 libclang 共享库（wgpu-native 的
+          # bindgen 需要，见 cmake/AuroraBackends.cmake）。LLVM macOS tarball 的 bin/ 旁没有
+          # libclang*.dylib，类 Unix 默认位又只查 /usr/lib/llvm-*，探测因此落空并让整个
+          # configure 失败。优先取同一份 LLVM 的 lib/，回落到 Xcode toolchain 自带的真实
+          # libclang；两处都没有就当场报错，不用关掉 WGPU 或跳过探测来糊过去（关掉会让
+          # wgpu 宿主那批 TU 退出 Apple 侧分析面）。
+          lib_dir=""
+          llvm_lib="$(dirname "$bin")/lib"
+          xcode_lib="$(xcode-select -p)/Toolchains/XcodeDefault.xctoolchain/usr/lib"
+          if ls "$llvm_lib"/libclang*.dylib >/dev/null 2>&1; then
+            lib_dir="$llvm_lib"
+          elif ls "$xcode_lib"/libclang*.dylib >/dev/null 2>&1; then
+            lib_dir="$xcode_lib"
+          fi
+          if [ -z "$lib_dir" ]; then
+            echo "::error::no libclang shared library found for the wgpu configure probe"
+            exit 1
+          fi
+          echo "LIBCLANG_PATH=$lib_dir" >> "$GITHUB_ENV"
 
       # 与作业 8 / 8i 同口径：wgpu 后端的 configure 期硬探测 cargo / rustc；镜像预装则跳过。
       # 本作业只 configure 不 build，故 Rust 侧只付探测与 CMake 配置，不编 wgpu-native。

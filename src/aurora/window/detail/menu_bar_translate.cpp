@@ -61,6 +61,9 @@ auto register_menu_bar_backend(MenuBarBackend backend) -> void { slot().emplace(
 
 auto unregister_menu_bar_backend() -> void { slot().reset(); }
 
-auto menu_bar_backend() -> const MenuBarBackend * { return slot().has_value() ? &*slot() : nullptr; }
+auto menu_bar_backend() -> const MenuBarBackend * {
+    const auto &backend = slot();
+    return backend.has_value() ? &*backend : nullptr;
+}
 
 }  // namespace aurora::menu_bar_translate

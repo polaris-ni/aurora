@@ -131,7 +131,7 @@ class Watcher {
 
   private:
     mutable std::mutex mutex_;
-    std::condition_variable cv_{};
+    std::condition_variable cv_;
     std::vector<aurora::net::ConnectivityChange> changes_;
 };
 
@@ -255,8 +255,9 @@ auto run_auto(std::chrono::milliseconds timeout) -> int {
 
     // 6. 句柄移动契约：源句柄转空态，目标接管订阅。
     aurora::net::ConnectivityRegistration moved = std::move(handle);
-    // 故意读 moved-from 源句柄：契约要求它可读且为空态，不属于使用已移动对象。
-    // NOLINTNEXTLINE(bugprone-use-after-move)
+    // 故意读 moved-from 源句柄：契约要求它可读且为空态，不属于使用已移动对象；
+    // 静态分析器与 bugprone 对同一处有意读取各报一次，合并到同一枚豁免。
+    // NOLINTNEXTLINE(bugprone-use-after-move, clang-analyzer-cplusplus.Move)
     check(handle.token() == 0 && !handle.is_registered(), "a moved-from registration becomes an empty handle");
     check(moved.token() == token && moved.is_registered(), "the moved-to handle keeps the subscription");
     return failures == 0 ? 0 : 1;

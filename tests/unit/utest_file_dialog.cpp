@@ -41,7 +41,7 @@
 // file_dialog_macos.cpp 里的原生面板）。L0–L2（数据源 / 状态机 / 视图）在所有桌面平台仍编译，
 // 故 L1/L2 用例继续按「Linux || macOS」守护；只有入口路由与会话端到端用例跟着入口实现走。
 #if defined(AURORA_PLATFORM_LINUX) || (defined(AURORA_PLATFORM_MACOS) && !defined(AURORA_BACKEND_MACOS))
-#define AURORA_UTEST_FILE_DIALOG_SELFDRAWN 1
+#define AURORA_UTEST_FILE_DIALOG_SELFDRAWN
 #endif
 
 namespace aurora::test_cases::utest_file_dialog {

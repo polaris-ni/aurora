@@ -86,8 +86,8 @@ struct WaylandClipboardBridge::Impl {
     wl_data_offer *foreign = nullptr;  ///< 读侧当前 offer（不 owns 时非空）
     std::vector<std::string> foreign_names;  ///< 当前 offer 的线上 MIME 名清单
 
-    std::unordered_map<std::string, std::vector<std::uint8_t>> data_;  ///< 立即写（mime → 字节）
-    std::optional<ClipboardOffer> offer_;  ///< 惰性要约
+    std::unordered_map<std::string, std::vector<std::uint8_t>> data;  ///< 立即写（mime → 字节）
+    std::optional<ClipboardOffer> offer;  ///< 惰性要约
 
     /// @brief 在途写出作业（至多一个：同一时刻只有一个 `send` 事件）。
     struct Send {
@@ -101,7 +101,7 @@ struct WaylandClipboardBridge::Impl {
     auto uninstall() -> void;
 
     // ---- selection 转发（来自拖放桥）----
-    auto on_selection(wl_data_offer *offer, const std::vector<std::string> &names) -> void;
+    auto on_selection(wl_data_offer *incoming_offer, const std::vector<std::string> &names) -> void;
 
     // ---- 所有权 ----
     [[nodiscard]] auto claim() -> bool;
@@ -113,7 +113,7 @@ struct WaylandClipboardBridge::Impl {
     auto pump_send() -> void;
 
     // ---- 读入（同步）----
-    [[nodiscard]] auto read_sync(wl_data_offer *offer, const std::string &mime) -> Result<std::vector<std::uint8_t>>;
+    [[nodiscard]] auto read_sync(wl_data_offer *incoming_offer, const std::string &mime) const -> Result<std::vector<std::uint8_t>>;
 
     // ---- 后端九入口 ----
     auto backend_set_payload(const std::string &mime, const std::vector<std::uint8_t> &bytes) -> Result<bool>;
@@ -122,7 +122,7 @@ struct WaylandClipboardBridge::Impl {
     auto backend_get_files() -> Result<std::vector<std::string>>;
     auto backend_set_html(const std::string &html) -> Result<bool>;
     auto backend_get_html() -> Result<std::string>;
-    auto backend_set_offer(const ClipboardOffer &offer) -> Result<void>;
+    auto backend_set_offer(const ClipboardOffer &new_offer) -> Result<void>;
     auto backend_available_formats() -> Result<std::vector<std::string>>;
     auto backend_set_change_listener(std::function<void()> callback) -> Result<void>;
 };
@@ -130,8 +130,8 @@ struct WaylandClipboardBridge::Impl {
 namespace {
 
 // ---- wl_data_source 监听器（写侧的取数 / 所有权丢失）----
-void source_send(void *data, wl_data_source *source, const char *mime_type, std::int32_t fd) {
-    auto *self = static_cast<WaylandClipboardBridge::Impl *>(data);
+void source_send(void *user_data, wl_data_source *source, const char *mime_type, std::int32_t fd) {
+    auto *self = static_cast<WaylandClipboardBridge::Impl *>(user_data);
     if (self->source != source) {
         if (fd >= 0) {
             ::close(fd);  // 旧 source 的迟到 send：本端已换源，拒绝服务（fd 须由本端关闭）
@@ -141,8 +141,8 @@ void source_send(void *data, wl_data_source *source, const char *mime_type, std:
     self->on_source_send(mime_type, fd);
 }
 
-void source_cancelled(void *data, wl_data_source *source) {
-    auto *self = static_cast<WaylandClipboardBridge::Impl *>(data);
+void source_cancelled(void *user_data, wl_data_source *source) {
+    auto *self = static_cast<WaylandClipboardBridge::Impl *>(user_data);
     if (self->source != source) {
         return;  // 被本端替换/销毁的旧 source 的迟到 cancelled：不得拆掉当前 source
     }
@@ -184,8 +184,8 @@ auto WaylandClipboardBridge::Impl::uninstall() -> void {
         foreign = nullptr;
     }
     foreign_names.clear();
-    data_.clear();
-    offer_.reset();
+    data.clear();
+    offer.reset();
     hooks.on_change = nullptr;
     // 最后撤后端表 / 转发器：二者都捕获本桥自指针，先撤再让桥进入析构。
     unregister_backend(this);
@@ -193,19 +193,19 @@ auto WaylandClipboardBridge::Impl::uninstall() -> void {
 
 // ---- selection 转发 ----
 
-auto WaylandClipboardBridge::Impl::on_selection(wl_data_offer *offer, const std::vector<std::string> &names) -> void {
+auto WaylandClipboardBridge::Impl::on_selection(wl_data_offer *incoming_offer, const std::vector<std::string> &names) -> void {
     if (owns) {
         // 本端已声明选择权：此刻到达的 selection 只能是本端 source 的回环（协议事件按序送达，
         // 外来选择必先经 `cancelled` 夺权）。回环 offer 只需记账待销毁，不改所有权、不重复通知。
-        if (offer != nullptr && offer != self_offer) {
+        if (incoming_offer != nullptr && incoming_offer != self_offer) {
             if (self_offer != nullptr) {
                 wl_data_offer_destroy(self_offer);
             }
-            self_offer = offer;
+            self_offer = incoming_offer;
         }
         return;
     }
-    if (offer == nullptr) {
+    if (incoming_offer == nullptr) {
         // 选择区被清空（无人持有）：如实清态并通知。
         if (foreign != nullptr) {
             wl_data_offer_destroy(foreign);
@@ -217,7 +217,7 @@ auto WaylandClipboardBridge::Impl::on_selection(wl_data_offer *offer, const std:
         }
         return;
     }
-    if (offer == foreign) {
+    if (incoming_offer == foreign) {
         // 同一 offer 的迟到名称（转发器的增量补发）：只追加清单，不重复通知。
         foreign_names.insert(foreign_names.end(), names.begin(), names.end());
         return;
@@ -226,7 +226,7 @@ auto WaylandClipboardBridge::Impl::on_selection(wl_data_offer *offer, const std:
     if (foreign != nullptr) {
         wl_data_offer_destroy(foreign);
     }
-    foreign = offer;
+    foreign = incoming_offer;
     foreign_names = names;
     if (hooks.on_change != nullptr) {
         hooks.on_change();
@@ -252,11 +252,11 @@ auto WaylandClipboardBridge::Impl::claim() -> bool {
     }
     wl_data_source_add_listener(source, &AURORA_CB_SOURCE_LISTENER, this);
     // 广告全部可提供的线上名（立即写 + 惰性要约）；线名即 MIME 原串（剪贴板不映射到 Wayland 专有名）。
-    for (const auto &kv : data_) {
+    for (const auto &kv : data) {
         wl_data_source_offer(source, kv.first.c_str());
     }
-    if (offer_.has_value()) {
-        for (const auto &mime : offer_->formats) {
+    if (offer.has_value()) {
+        for (const auto &mime : offer->formats) {
             wl_data_source_offer(source, mime.c_str());
         }
     }
@@ -298,18 +298,18 @@ auto WaylandClipboardBridge::Impl::on_source_send(const char *mime_type, int fd)
     }
     const std::string mime{mime_type};
     std::optional<std::vector<std::uint8_t>> bytes;
-    if (const auto it = data_.find(mime); it != data_.end()) {
+    if (const auto it = data.find(mime); it != data.end()) {
         bytes = it->second;
-    } else if (offer_.has_value() && offer_->provide != nullptr) {
+    } else if (offer.has_value() && offer->provide != nullptr) {
         bool declared = false;
-        for (const auto &m : offer_->formats) {
+        for (const auto &m : offer->formats) {
             if (m == mime) {
                 declared = true;
                 break;
             }
         }
         if (declared) {
-            const auto produced = offer_->provide(mime);
+            const auto produced = offer->provide(mime);
             if (!produced) {
                 ::close(fd);
                 return;  // 惰性提供失败：不谎报成功
@@ -367,16 +367,16 @@ auto WaylandClipboardBridge::Impl::pump_send() -> void {
 
 // ---- 读入 ----
 
-auto WaylandClipboardBridge::Impl::read_sync(wl_data_offer *offer, const std::string &mime)
+auto WaylandClipboardBridge::Impl::read_sync(wl_data_offer *incoming_offer, const std::string &mime) const
     -> Result<std::vector<std::uint8_t>> {
-    if (offer == nullptr) {
+    if (incoming_offer == nullptr) {
         return std::vector<std::uint8_t>{};  // 无 offer = 空内容
     }
     int fds[2] = {-1, -1};
     if (::pipe(fds) != 0) {
         return make_error(ErrorCode::ClipboardAccessFailed, ErrorParams{{"detail", "pipe() failed for receive"}});
     }
-    wl_data_offer_receive(offer, mime.c_str(), fds[1]);
+    wl_data_offer_receive(incoming_offer, mime.c_str(), fds[1]);
     ::close(fds[1]);
     set_nonblocking(fds[0]);
     wl_display_flush(dpy);
@@ -402,7 +402,7 @@ auto WaylandClipboardBridge::Impl::read_sync(wl_data_offer *offer, const std::st
             if (remain <= 0) {
                 break;  // 超时：返回已收到的部分
             }
-            pollfd pfd{fds[0], POLLIN, 0};
+            pollfd pfd{.fd = fds[0], .events = POLLIN, .revents = 0};
             ::poll(&pfd, 1, static_cast<int>(remain));
             continue;
         }
@@ -423,16 +423,16 @@ auto WaylandClipboardBridge::Impl::backend_set_payload(const std::string &mime, 
         return Result<bool>{true};  // 契约：空字节 no-op，保留既有内容
     }
     std::optional<std::vector<std::uint8_t>> previous;
-    if (const auto it = data_.find(mime); it != data_.end()) {
+    if (const auto it = data.find(mime); it != data.end()) {
         previous = it->second;
     }
-    data_[mime] = bytes;  // 立即写覆盖同 mime 的惰性声明
+    data[mime] = bytes;  // 立即写覆盖同 mime 的惰性声明
     if (!claim()) {
         // 声明失败即本次写未生效：回滚本地态，避免下次成功声明把这次失败的内容一并广告出去。
         if (previous.has_value()) {
-            data_[mime] = std::move(*previous);
+            data[mime] = std::move(*previous);
         } else {
-            data_.erase(mime);
+            data.erase(mime);
         }
         return make_error(ErrorCode::ClipboardWriteFailed,
                           ErrorParams{{"detail", "Wayland: no input serial for wl_data_device.set_selection"}});
@@ -445,19 +445,19 @@ auto WaylandClipboardBridge::Impl::backend_get_payload(const std::string &mime) 
         return make_error(ErrorCode::GeneralInvalidArgument, ErrorParams{{"detail", "get_payload: mime empty"}});
     }
     if (owns) {
-        if (const auto it = data_.find(mime); it != data_.end()) {
+        if (const auto it = data.find(mime); it != data.end()) {
             return it->second;
         }
-        if (offer_.has_value() && offer_->provide != nullptr) {
+        if (offer.has_value() && offer->provide != nullptr) {
             bool declared = false;
-            for (const auto &m : offer_->formats) {
+            for (const auto &m : offer->formats) {
                 if (m == mime) {
                     declared = true;
                     break;
                 }
             }
             if (declared) {
-                const auto produced = offer_->provide(mime);
+                const auto produced = offer->provide(mime);
                 if (!produced) {
                     return make_error(ErrorCode::ClipboardProviderFailed, ErrorParams{{"mime", mime}});
                 }
@@ -508,15 +508,15 @@ auto WaylandClipboardBridge::Impl::backend_get_html() -> Result<std::string> {
     return std::string{raw.value().begin(), raw.value().end()};
 }
 
-auto WaylandClipboardBridge::Impl::backend_set_offer(const ClipboardOffer &offer) -> Result<void> {
-    if (offer.formats.empty() || offer.provide == nullptr) {
+auto WaylandClipboardBridge::Impl::backend_set_offer(const ClipboardOffer &new_offer) -> Result<void> {
+    if (new_offer.formats.empty() || new_offer.provide == nullptr) {
         return make_error(ErrorCode::GeneralInvalidArgument,
                           ErrorParams{{"detail", "set_offer: formats empty or provide null"}});
     }
-    const std::optional<ClipboardOffer> previous = offer_;
-    offer_ = offer;  // 惰性要约与立即写并存（后写者接管同 mime）
+    const std::optional<ClipboardOffer> previous = this->offer;
+    this->offer = new_offer;  // 惰性要约与立即写并存（后写者接管同 mime）
     if (!claim()) {
-        offer_ = previous;  // 声明失败即本次写未生效：回滚，见 set_payload 同款理由
+        this->offer = previous;  // 声明失败即本次写未生效：回滚，见 set_payload 同款理由
         return make_error(ErrorCode::ClipboardWriteFailed,
                           ErrorParams{{"detail", "Wayland: no input serial for wl_data_device.set_selection"}});
     }
@@ -526,11 +526,12 @@ auto WaylandClipboardBridge::Impl::backend_set_offer(const ClipboardOffer &offer
 auto WaylandClipboardBridge::Impl::backend_available_formats() -> Result<std::vector<std::string>> {
     if (owns) {
         std::vector<std::string> formats;
-        for (const auto &kv : data_) {
+        formats.reserve(data.size() + (offer.has_value() ? offer->formats.size() : 0U));
+        for (const auto &kv : data) {
             formats.push_back(kv.first);
         }
-        if (offer_.has_value()) {
-            for (const auto &mime : offer_->formats) {
+        if (offer.has_value()) {
+            for (const auto &mime : offer->formats) {
                 if (std::find(formats.begin(), formats.end(), mime) == formats.end()) {
                     formats.push_back(mime);
                 }

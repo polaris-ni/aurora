@@ -290,10 +290,10 @@ struct WindowsBaseline {
 /// @brief 用户配置目录（XDG_CONFIG_HOME 优先，回落后 HOME/.config）。
 /// @return 目录路径；两者都缺返回空串。
 [[nodiscard]] auto config_home() -> std::string {
-    if (const char *xdg = std::getenv("XDG_CONFIG_HOME"); xdg != nullptr && xdg[0] != '\0') {
+    if (const char *xdg = std::getenv("XDG_CONFIG_HOME"); xdg != nullptr && *xdg != '\0') {
         return xdg;
     }
-    if (const char *home = std::getenv("HOME"); home != nullptr && home[0] != '\0') {
+    if (const char *home = std::getenv("HOME"); home != nullptr && *home != '\0') {
         return std::string(home) + "/.config";
     }
     return {};
@@ -304,7 +304,7 @@ struct WindowsBaseline {
 /// @return 文本；打不开返回空串。
 [[nodiscard]] auto read_text(const std::string &path) -> std::string {
     std::ifstream file(path, std::ios::binary);
-    return std::string(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+    return {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
 }
 
 /// @brief 写文件全文。
@@ -347,7 +347,7 @@ struct WindowsBaseline {
         const auto end = text.find('\n', begin);
         const bool last = end == std::string::npos;
         std::string line = text.substr(begin, last ? std::string::npos : end - begin);
-        if (!replaced && line.rfind(prefix, 0) == 0) {
+        if (!replaced && line.starts_with(prefix)) {
             line = prefix + std::string(value);
             replaced = true;
         }
@@ -377,7 +377,7 @@ struct WindowsBaseline {
         const auto end = text.find('\n', begin);
         const bool last = end == std::string::npos;
         const std::string line = text.substr(begin, last ? std::string::npos : end - begin);
-        const bool toggle = line.rfind("Hidden=", 0) == 0 || line.rfind("X-GNOME-Autostart-enabled=", 0) == 0;
+        const bool toggle = line.starts_with("Hidden=") || line.starts_with("X-GNOME-Autostart-enabled=");
         if (!toggle) {
             out += line;
             if (!last) {

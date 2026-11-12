@@ -525,8 +525,8 @@ AURORA_TEST_CASE(accessibility_switches_reach_subtree_through_root_injection) {
         AURORA_TEST_CHECK_NEAR(seen.shapes.small, neutral.shapes.small * scale, 1e-3F);
         // 两条通道缺陷的直接反证：图表读的是 `inherit_theme(ctx).type_scale.body_medium`，
         // `Text` 未表态字号的回落点是同一枚令牌——同一 ctx 下两者必须给出同一个数。
-        AURORA_TEST_CHECK_NEAR(Text{std::string{"x"}}.font_size(*probe->ctx()), seen.type_scale.body_medium.size_pt,
-                               1e-4F);
+        AURORA_TEST_CHECK_NEAR(Text{std::string{"x"}}.font_size(require_value(probe->ctx())),
+                               seen.type_scale.body_medium.size_pt, 1e-4F);
     }
 
     // ② 减动效：时长档整族取零档（短路门不是倍率），且折叠不串档——字阶仍回到基线。

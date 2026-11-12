@@ -260,7 +260,7 @@ auto publish_frame_sample(double frame_delta, bool idle) -> void {
         }
     }
     if (!failed) {
-        s.diag.bytes_emitted += s.batch_count * sizeof(FrameSample);
+        s.diag.bytes_emitted += static_cast<std::uint64_t>(s.batch_count) * sizeof(FrameSample);
         s.batch_count = 0;
     }
 }

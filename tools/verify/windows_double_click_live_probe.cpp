@@ -32,7 +32,7 @@
 #include "aurora/core/log.h"
 #include "aurora/core/platform.h"
 
-#if !defined(AURORA_PLATFORM_WINDOWS)
+#ifndef AURORA_PLATFORM_WINDOWS
 #error "aurora_verify_windows_double_click can only be built on Windows"
 #endif
 
