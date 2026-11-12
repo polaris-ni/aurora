@@ -60,9 +60,8 @@ constexpr std::array<std::string_view, 6> AURORA_GNOME_TOKENS = {"gnome",    "un
 /// `XDG_CURRENT_DESKTOP` / `DESKTOP_SESSION` 里真出现这些词时才会命中。
 [[nodiscard]] auto hits(std::string_view value, std::span<const std::string_view> tokens) -> bool {
     const std::string folded = folded_to_lower(value);
-    return std::ranges::any_of(tokens, [&folded](const std::string_view token) {
-        return folded.find(token) != std::string::npos;
-    });
+    return std::ranges::any_of(
+        tokens, [&folded](const std::string_view token) { return folded.find(token) != std::string::npos; });
 }
 
 }  // namespace

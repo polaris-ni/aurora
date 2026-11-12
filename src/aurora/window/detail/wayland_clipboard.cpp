@@ -113,7 +113,8 @@ struct WaylandClipboardBridge::Impl {
     auto pump_send() -> void;
 
     // ---- 读入（同步）----
-    [[nodiscard]] auto read_sync(wl_data_offer *incoming_offer, const std::string &mime) const -> Result<std::vector<std::uint8_t>>;
+    [[nodiscard]] auto read_sync(wl_data_offer *incoming_offer, const std::string &mime) const
+        -> Result<std::vector<std::uint8_t>>;
 
     // ---- 后端九入口 ----
     auto backend_set_payload(const std::string &mime, const std::vector<std::uint8_t> &bytes) -> Result<bool>;
@@ -193,7 +194,8 @@ auto WaylandClipboardBridge::Impl::uninstall() -> void {
 
 // ---- selection 转发 ----
 
-auto WaylandClipboardBridge::Impl::on_selection(wl_data_offer *incoming_offer, const std::vector<std::string> &names) -> void {
+auto WaylandClipboardBridge::Impl::on_selection(wl_data_offer *incoming_offer, const std::vector<std::string> &names)
+    -> void {
     if (owns) {
         // 本端已声明选择权：此刻到达的 selection 只能是本端 source 的回环（协议事件按序送达，
         // 外来选择必先经 `cancelled` 夺权）。回环 offer 只需记账待销毁，不改所有权、不重复通知。

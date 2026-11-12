@@ -44,26 +44,26 @@
 
 // 打印视图：按页范围排版，把每页位图绘到纸张内容区（ObjC 接口不是 Doxygen 文档对象）。
 @interface AuroraPrintView : NSView {
-    NSArray *_images;  ///< NSImage 数组（按提交顺序）
-    CGFloat _pageWidth;  ///< 纸张宽（点）
-    CGFloat _pageHeight;  ///< 纸张高（点）
-    CGFloat _insetLeft;  ///< 左边距（点）
-    CGFloat _insetTop;  ///< 上边距（点）
-    CGFloat _insetRight;  ///< 右边距（点）
-    CGFloat _insetBottom;  ///< 下边距（点）
+    NSArray *images;  ///< NSImage 数组（按提交顺序）
+    CGFloat page_width;  ///< 纸张宽（点）
+    CGFloat page_height;  ///< 纸张高（点）
+    CGFloat inset_left;  ///< 左边距（点）
+    CGFloat inset_top;  ///< 上边距（点）
+    CGFloat inset_right;  ///< 右边距（点）
+    CGFloat inset_bottom;  ///< 下边距（点）
 }
 - (instancetype)initWithImages:(NSArray *)images
-                     pageWidth:(CGFloat)pageWidth
-                    pageHeight:(CGFloat)pageHeight
-                     insetLeft:(CGFloat)insetLeft
-                      insetTop:(CGFloat)insetTop
-                    insetRight:(CGFloat)insetRight
-                   insetBottom:(CGFloat)insetBottom;
+                     pageWidth:(CGFloat)page_width
+                    pageHeight:(CGFloat)page_height
+                     insetLeft:(CGFloat)inset_left
+                      insetTop:(CGFloat)inset_top
+                    insetRight:(CGFloat)inset_right
+                   insetBottom:(CGFloat)inset_bottom;
 @end
 
 // `kAEGetURL` 处理器：把 URL 交给首实例的入队回调（ObjC 接口不是 Doxygen 文档对象）。
 @interface AuroraUrlEventHandler : NSObject
-- (void)handleGetUrlEvent:(NSAppleEventDescriptor *)event withReplyEvent:(NSAppleEventDescriptor *)replyEvent;
+- (void)handleGetUrlEvent:(NSAppleEventDescriptor *)event withReplyEvent:(NSAppleEventDescriptor *)reply_event;
 @end
 
 namespace aurora::detail {
@@ -100,7 +100,7 @@ constexpr double AURORA_POINTS_PER_MM = 72.0 / 25.4;
     NSBundle *bundle = [NSBundle mainBundle];
     NSString *path = [bundle bundlePath];
     NSString *identifier = [bundle bundleIdentifier];
-    if (path == nil || identifier == nil || ![path hasSuffix:@".app"]) {
+    if (path == nil || identifier == nil || ([path hasSuffix:@".app"] == 0)) {
         return std::nullopt;
     }
     return to_utf8(identifier);
@@ -125,8 +125,10 @@ constexpr double AURORA_POINTS_PER_MM = 72.0 / 25.4;
 /// @brief Info.plist 的 `CFBundleURLTypes` 是否声明了该方案。
 [[nodiscard]] auto bundle_declares_scheme(NSString *scheme) -> bool {
     NSArray *types = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleURLTypes"];
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables): ObjC 快速枚举无需初始化
     for (NSDictionary *type in types) {
         NSArray *schemes = type[@"CFBundleURLSchemes"];
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables): ObjC 快速枚举无需初始化
         for (NSString *declared in schemes) {
             if ([declared caseInsensitiveCompare:scheme] == NSOrderedSame) {
                 return true;
@@ -143,6 +145,7 @@ constexpr double AURORA_POINTS_PER_MM = 72.0 / 25.4;
         return {};
     }
     CFStringRef uti =
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-cstyle-cast): __bridge toll-free 转换
         UTTypeCreatePreferredIdentifierForTag(kUTTagClassFilenameExtension, (__bridge CFStringRef)tag, nullptr);
     if (uti == nullptr) {
         return {};
@@ -155,12 +158,15 @@ constexpr double AURORA_POINTS_PER_MM = 72.0 / 25.4;
 /// @brief Info.plist 的 `CFBundleDocumentTypes` 是否声明了该扩展名（扩展名或 UTI 命中）。
 [[nodiscard]] auto bundle_declares_extension(const std::string &extension, const std::string &uti) -> bool {
     NSArray *types = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleDocumentTypes"];
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables): ObjC 快速枚举无需初始化
     for (NSDictionary *type in types) {
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables): ObjC 快速枚举无需初始化
         for (NSString *declared in type[@"CFBundleTypeExtensions"]) {
             if (to_utf8(declared) == extension) {
                 return true;
             }
         }
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables): ObjC 快速枚举无需初始化
         for (NSString *declared in type[@"LSItemContentTypes"]) {
             if (!uti.empty() && to_utf8(declared) == uti) {
                 return true;
@@ -189,8 +195,10 @@ auto backend_register_scheme(std::string_view scheme, std::string_view display_n
                               "' is not declared in CFBundleURLTypes of the application's Info.plist; macOS cannot "
                               "register a scheme at runtime without that static declaration");
     }
+    // NOLINTBEGIN(cppcoreguidelines-pro-type-cstyle-cast): __bridge toll-free 转换
     const OSStatus status = LSSetDefaultHandlerForURLScheme((__bridge CFStringRef)scheme_text,
                                                             (__bridge CFStringRef)ns_string(bundle.value()));
+    // NOLINTEND(cppcoreguidelines-pro-type-cstyle-cast)
     if (status != noErr) {
         return make_error(ErrorCode::UrlSchemeFailed, "url-scheme: Launch Services rejected the registration for '" +
                                                           std::string(scheme) + "' (OSStatus " +
@@ -201,6 +209,7 @@ auto backend_register_scheme(std::string_view scheme, std::string_view display_n
 
 auto backend_unregister_scheme(std::string_view scheme, const AppIdentity &identity) -> Result<void> {
     const auto owner = [&scheme]() -> Result<std::string> {
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-cstyle-cast): __bridge toll-free 转换
         CFStringRef handler = LSCopyDefaultHandlerForURLScheme((__bridge CFStringRef)ns_string(std::string(scheme)));
         if (handler == nullptr) {
             return std::string{};
@@ -230,6 +239,7 @@ auto backend_unregister_scheme(std::string_view scheme, const AppIdentity &ident
 }
 
 auto backend_scheme_owner(std::string_view scheme) -> Result<std::string> {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-cstyle-cast): __bridge toll-free 转换
     CFStringRef handler = LSCopyDefaultHandlerForURLScheme((__bridge CFStringRef)ns_string(std::string(scheme)));
     if (handler == nullptr) {
         return std::string{};  // 没有归属：空集合不是错误
@@ -246,7 +256,8 @@ auto backend_query_association(std::string_view extension) -> Result<Association
     if (uti.empty()) {
         return AssociationInfo{};  // 无可用 UTI：无关联，不是错误
     }
-    CFStringRef uti_text = (__bridge CFStringRef)ns_string(uti);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-cstyle-cast): __bridge
+    const auto *uti_text = (__bridge CFStringRef)ns_string(uti);
     CFErrorRef error = nullptr;
     CFURLRef application = LSCopyDefaultApplicationURLForContentType(uti_text, kLSRolesAll, &error);
     if (application == nullptr) {
@@ -278,7 +289,8 @@ auto backend_declare_association(const AssociationDeclaration &declaration, std:
                               "cannot declare a document type at runtime without that static declaration");
     }
     (void)mime;  // macOS 的声明口径是 UTI，不是 MIME
-    if (LSRegisterURL((__bridge CFURLRef)[[NSBundle mainBundle] bundleURL], true) != noErr) {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-cstyle-cast): __bridge toll-free 转换
+    if (LSRegisterURL((__bridge CFURLRef)[[NSBundle mainBundle] bundleURL], 1U) != noErr) {
         return make_error(ErrorCode::FileAssociationFailed,
                           "file-association: Launch Services rejected the bundle registration");
     }
@@ -315,11 +327,8 @@ auto backend_undeclare_association(std::string_view extension, const AppIdentity
             case SMAppServiceStatusEnabled:
                 return RunAtLoginState{.status = RunAtLoginStatus::Enabled};
             case SMAppServiceStatusRequiresApproval:
-                // 已登记但用户尚未在系统设置里放行：OS 此刻不会启动本应用，按「未生效」报。
-                return RunAtLoginState{.status = RunAtLoginStatus::Disabled};
-            case SMAppServiceStatusNotRegistered:
-            case SMAppServiceStatusNotFound:
             default:
+                // 已登记但用户尚未在系统设置里放行、或未登记 / 未找到：OS 此刻不会启动本应用，按「未生效」报。
                 return RunAtLoginState{.status = RunAtLoginStatus::Disabled};
         }
     }
@@ -341,7 +350,7 @@ auto backend_run_at_login_set(bool enabled, const AppIdentity &identity) -> Resu
         NSError *error = nil;
         SMAppService *service = [SMAppService mainAppService];
         const BOOL ok = enabled ? [service registerAndReturnError:&error] : [service unregisterAndReturnError:&error];
-        if (!ok) {
+        if (ok == 0) {
             const std::string detail = error_detail(error);
             return make_error(ErrorCode::RunAtLoginFailed, "run-at-login: the login item service rejected the request" +
                                                                (detail.empty() ? std::string() : ": " + detail));
@@ -361,7 +370,7 @@ struct PrintPage {
 /// @brief macOS 打印会话：累计页位图，`finish` 时交给 AppKit 打印操作（不弹系统面板）。
 class MacPrintSession final : public desktop_shell::PrintSessionBackend {
   public:
-    explicit MacPrintSession(PageSpec spec) : spec_(std::move(spec)) {}
+    explicit MacPrintSession(PageSpec spec) : spec_(spec) {}
 
     [[nodiscard]] auto submit_page(const Image &page) -> Result<void> override {
         if (finished_) {
@@ -388,26 +397,28 @@ class MacPrintSession final : public desktop_shell::PrintSessionBackend {
         @autoreleasepool {
             NSMutableArray *images = [NSMutableArray arrayWithCapacity:pages_.size()];
             for (const auto &page : pages_) {
-                NSBitmapImageRep *rep = [[NSBitmapImageRep alloc] initWithBitmapDataPlanes:nullptr
-                                                                                pixelsWide:page.image.width
-                                                                                pixelsHigh:page.image.height
-                                                                             bitsPerSample:8
-                                                                           samplesPerPixel:4
-                                                                                  hasAlpha:YES
-                                                                                  isPlanar:NO
-                                                                            colorSpaceName:NSDeviceRGBColorSpace
-                                                                               bytesPerRow:page.image.width * 4
-                                                                              bitsPerPixel:32];
+                NSBitmapImageRep *rep =
+                    [[NSBitmapImageRep alloc] initWithBitmapDataPlanes:nullptr
+                                                            pixelsWide:page.image.width
+                                                            pixelsHigh:page.image.height
+                                                         bitsPerSample:8
+                                                       samplesPerPixel:4
+                                                              hasAlpha:YES
+                                                              isPlanar:NO
+                                                        colorSpaceName:NSDeviceRGBColorSpace
+                                                           bytesPerRow:static_cast<NSInteger>(page.image.width) * 4
+                                                          bitsPerPixel:32];
                 if (rep == nil) {
                     return make_error(ErrorCode::PrintSessionFailed, "print: cannot allocate a bitmap for the page");
                 }
                 unsigned char *destination = [rep bitmapData];
                 const NSUInteger stride = [rep bytesPerRow];
+                const std::size_t row_bytes = static_cast<std::size_t>(page.image.width) * 4U;
                 for (int row = 0; row < page.image.height; ++row) {
-                    std::memcpy(destination + static_cast<std::size_t>(row) * stride,
-                                page.image.pixels.data() +
-                                    static_cast<std::size_t>(row) * static_cast<std::size_t>(page.image.width) * 4U,
-                                static_cast<std::size_t>(page.image.width) * 4U);
+                    const std::size_t row_offset = static_cast<std::size_t>(row) * static_cast<std::size_t>(stride);
+                    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic): AppKit 裸缓冲按行拷贝
+                    std::memcpy(&destination[row_offset], &page.image.pixels[static_cast<std::size_t>(row) * row_bytes],
+                                row_bytes);
                 }
                 NSImage *image = [[NSImage alloc] initWithSize:NSMakeSize(page.image.width, page.image.height)];
                 [image addRepresentation:rep];
@@ -415,8 +426,8 @@ class MacPrintSession final : public desktop_shell::PrintSessionBackend {
                 [images addObject:image];
                 [image release];
             }
-            const CGFloat page_width = static_cast<CGFloat>(spec_.width_mm * AURORA_POINTS_PER_MM);
-            const CGFloat page_height = static_cast<CGFloat>(spec_.height_mm * AURORA_POINTS_PER_MM);
+            const auto page_width = static_cast<CGFloat>(spec_.width_mm * AURORA_POINTS_PER_MM);
+            const auto page_height = static_cast<CGFloat>(spec_.height_mm * AURORA_POINTS_PER_MM);
             AuroraPrintView *view = [[AuroraPrintView alloc]
                 initWithImages:images
                      pageWidth:page_width
@@ -435,7 +446,11 @@ class MacPrintSession final : public desktop_shell::PrintSessionBackend {
             [info setHorizontalPagination:NSClipPagination];
             [info setVerticalPagination:NSClipPagination];
             if (!printer_name_.empty()) {
-                NSPrinter *printer = [NSPrinter printerWithName:ns_string(printer_name_)];
+                NSString *printer_name = ns_string(printer_name_);
+                if (printer_name == nil) {
+                    printer_name = @"";
+                }
+                NSPrinter *printer = [NSPrinter printerWithName:printer_name];
                 if (printer == nil) {
                     [view release];
                     return make_error(ErrorCode::PrintSessionFailed,
@@ -448,7 +463,7 @@ class MacPrintSession final : public desktop_shell::PrintSessionBackend {
             [operation setShowsProgressPanel:NO];
             const BOOL ok = [operation runOperation];
             [view release];
-            if (!ok) {
+            if (ok == 0) {
                 return make_error(ErrorCode::PrintSessionFailed, "print: the print operation failed");
             }
         }
@@ -477,11 +492,12 @@ class MacPrintSession final : public desktop_shell::PrintSessionBackend {
     NSString *default_name = [[[NSPrintInfo sharedPrintInfo] printer] name];
     std::vector<PrintTarget> targets;
     targets.reserve([names count]);
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables): ObjC 快速枚举无需初始化
     for (NSString *name in names) {
         PrintTarget target;
         target.name = to_utf8(name);
         target.id = target.name;
-        target.is_default = default_name != nil && [name isEqualToString:default_name];
+        target.is_default = default_name != nil && ([name isEqualToString:default_name] != 0);
         targets.push_back(std::move(target));
     }
     return targets;
@@ -490,7 +506,11 @@ class MacPrintSession final : public desktop_shell::PrintSessionBackend {
 auto backend_open_print_session(std::string_view target_id, const PageSpec &spec)
     -> Result<std::unique_ptr<desktop_shell::PrintSessionBackend>> {
     if (!target_id.empty()) {
-        NSPrinter *printer = [NSPrinter printerWithName:ns_string(std::string(target_id))];
+        NSString *printer_name = ns_string(std::string(target_id));
+        if (printer_name == nil) {
+            printer_name = @"";
+        }
+        NSPrinter *printer = [NSPrinter printerWithName:printer_name];
         if (printer == nil) {
             return make_error(ErrorCode::PrintSessionFailed,
                               "print: printer '" + std::string(target_id) + "' is not available");
@@ -510,20 +530,23 @@ auto backend_open_print_session(std::string_view target_id, const PageSpec &spec
 }
 
 /// @brief 已登记的 Apple Event 处理器（非 ARC：手动持有 / 释放）。
-id g_url_event_handler = nil;
+[[nodiscard]] auto url_event_handler() -> id & {
+    static id handler = nil;
+    return handler;
+}
 
 auto backend_acquire_instance(const AppIdentity &identity, const std::vector<std::string> &uris,
                               const std::function<void(std::string)> &sink) -> Result<SingleInstanceOutcome> {
     (void)identity;
     (void)uris;  // 首实例的命令行 URI 由公共层入队；URL 唤起走 Apple Event
     instance_sink() = sink;
-    if (g_url_event_handler == nil) {
+    if (url_event_handler() == nil) {
         AuroraUrlEventHandler *handler = [[AuroraUrlEventHandler alloc] init];
         [[NSAppleEventManager sharedAppleEventManager] setEventHandler:handler
                                                            andSelector:@selector(handleGetUrlEvent:withReplyEvent:)
                                                          forEventClass:kInternetEventClass
                                                             andEventID:kAEGetURL];
-        g_url_event_handler = handler;  // 非 ARC：由本桥持有到 release
+        url_event_handler() = handler;  // 非 ARC：由本桥持有到 release
     }
     // macOS 的 Launch Services 保证同一 .app 只有一个运行实例，唤起直接投递到本进程。
     return SingleInstanceOutcome::Primary;
@@ -534,11 +557,12 @@ auto backend_poll_instance() -> void {
 }
 
 auto backend_release_instance() -> void {
-    if (g_url_event_handler != nil) {
+    if (url_event_handler() != nil) {
         [[NSAppleEventManager sharedAppleEventManager] removeEventHandlerForEventClass:kInternetEventClass
                                                                             andEventID:kAEGetURL];
-        [(id)g_url_event_handler release];
-        g_url_event_handler = nil;
+        id handler = url_event_handler();
+        [handler release];
+        url_event_handler() = nil;
     }
     instance_sink() = nullptr;
 }
@@ -588,27 +612,27 @@ auto macos_shell_integration_ensure() -> bool {
 @implementation AuroraPrintView
 
 - (instancetype)initWithImages:(NSArray *)images
-                     pageWidth:(CGFloat)pageWidth
-                    pageHeight:(CGFloat)pageHeight
-                     insetLeft:(CGFloat)insetLeft
-                      insetTop:(CGFloat)insetTop
-                    insetRight:(CGFloat)insetRight
-                   insetBottom:(CGFloat)insetBottom {
-    self = [super initWithFrame:NSMakeRect(0, 0, pageWidth, pageHeight * (CGFloat)[images count])];
+                     pageWidth:(CGFloat)page_width
+                    pageHeight:(CGFloat)page_height
+                     insetLeft:(CGFloat)inset_left
+                      insetTop:(CGFloat)inset_top
+                    insetRight:(CGFloat)inset_right
+                   insetBottom:(CGFloat)inset_bottom {
+    self = [super initWithFrame:NSMakeRect(0, 0, page_width, page_height * (CGFloat)[images count])];
     if (self != nil) {
-        _images = [images copy];
-        _pageWidth = pageWidth;
-        _pageHeight = pageHeight;
-        _insetLeft = insetLeft;
-        _insetTop = insetTop;
-        _insetRight = insetRight;
-        _insetBottom = insetBottom;
+        self->images = [images copy];
+        self->page_width = page_width;
+        self->page_height = page_height;
+        self->inset_left = inset_left;
+        self->inset_top = inset_top;
+        self->inset_right = inset_right;
+        self->inset_bottom = inset_bottom;
     }
     return self;
 }
 
 - (void)dealloc {
-    [_images release];
+    [images release];
     [super dealloc];
 }
 
@@ -617,22 +641,22 @@ auto macos_shell_integration_ensure() -> bool {
 }
 
 - (BOOL)knowsPageRange:(NSRangePointer)range {
-    *range = NSMakeRange(1, (NSUInteger)[_images count]);
+    *range = NSMakeRange(1, [images count]);
     return YES;
 }
 
 - (NSRect)rectForPage:(NSInteger)page {
-    return NSMakeRect(0, (CGFloat)(page - 1) * _pageHeight, _pageWidth, _pageHeight);
+    return NSMakeRect(0, (CGFloat)(page - 1) * page_height, page_width, page_height);
 }
 
-- (void)drawRect:(NSRect)dirtyRect {
-    const auto page = (NSInteger)std::floor(NSMinY(dirtyRect) / _pageHeight);
-    if (page < 0 || page >= (NSInteger)[_images count]) {
+- (void)drawRect:(NSRect)dirty_rect {
+    const auto page = (NSInteger)std::floor(NSMinY(dirty_rect) / page_height);
+    if (page < 0 || std::cmp_greater_equal(page, [images count])) {
         return;
     }
-    NSImage *image = [_images objectAtIndex:(NSUInteger)page];
-    const NSRect content = NSMakeRect(_insetLeft, (CGFloat)page * _pageHeight + _insetTop,
-                                      _pageWidth - _insetLeft - _insetRight, _pageHeight - _insetTop - _insetBottom);
+    NSImage *image = [images objectAtIndex:(NSUInteger)page];
+    const NSRect content = NSMakeRect(inset_left, ((CGFloat)page * page_height) + inset_top,
+                                      page_width - inset_left - inset_right, page_height - inset_top - inset_bottom);
     [image drawInRect:content fromRect:NSZeroRect operation:NSCompositingOperationCopy fraction:1.0];
 }
 
@@ -642,8 +666,8 @@ auto macos_shell_integration_ensure() -> bool {
 
 @implementation AuroraUrlEventHandler
 
-- (void)handleGetUrlEvent:(NSAppleEventDescriptor *)event withReplyEvent:(NSAppleEventDescriptor *)replyEvent {
-    (void)replyEvent;
+- (void)handleGetUrlEvent:(NSAppleEventDescriptor *)event withReplyEvent:(NSAppleEventDescriptor *)reply_event {
+    (void)reply_event;
     NSString *uri = [[event paramDescriptorForKeyword:keyDirectObject] stringValue];
     if (uri == nil) {
         return;

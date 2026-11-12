@@ -487,8 +487,9 @@ auto run_interactive_stage() -> int {
             // `IFileDialog` **不写文件**：确认后只返回选定的路径，落盘由应用自己完成（实测本段返回
             // 路径后目录里始终没有该文件，`GetFileAttributesW` 报 error=2）。故这里没有文件要回收，
             // 只摘掉探针自建的那枚空暂存目录；目录非空（人往里放了东西）就留着不动。
-            emit(RemoveDirectoryW(scratch.c_str()) != FALSE ? "cleanup: scratch dir removed"
-                                                              : "cleanup: scratch dir kept (not empty; nothing was deleted)");
+            emit(RemoveDirectoryW(scratch.c_str()) != FALSE
+                     ? "cleanup: scratch dir removed"
+                     : "cleanup: scratch dir kept (not empty; nothing was deleted)");
         }
     }
 

@@ -146,7 +146,7 @@ struct X11ClipboardBridge::Impl {
 
     // ---- atom 工具 ----
     [[nodiscard]] auto intern(const char *name) const -> Atom;
-    [[nodiscard]] auto atom_for_mime(const std::string &mime) -> Atom;
+    [[nodiscard]] auto atom_for_mime(const std::string &mime) const -> Atom;
     [[nodiscard]] auto mime_for_target(Atom target) const -> std::optional<std::string>;
 
     // ---- 所有权 ----
@@ -179,7 +179,7 @@ struct X11ClipboardBridge::Impl {
     auto on_selection_notify(Atom selection, Atom target, Atom property) -> void;
     auto on_property_notify(Window window, Atom atom, int state) -> void;
     auto on_fixes_selection_notify(int subtype, Atom selection, Window owner) const -> void;
-    [[nodiscard]] auto on_x_event(const XEvent &event) -> bool;
+    [[nodiscard]] auto on_x_event(const XEvent &event) const -> bool;
 
     // ---- 后端九入口 ----
     auto backend_set_payload(const std::string &mime, const std::vector<std::uint8_t> &bytes) -> Result<bool>;
@@ -238,7 +238,7 @@ auto X11ClipboardBridge::Impl::uninstall() -> void {
 
 auto X11ClipboardBridge::Impl::intern(const char *name) const -> Atom { return XInternAtom(dpy, name, False); }
 
-auto X11ClipboardBridge::Impl::atom_for_mime(const std::string &mime) -> Atom {
+auto X11ClipboardBridge::Impl::atom_for_mime(const std::string &mime) const -> Atom {
     if (mime == AURORA_MIME_TEXT_PLAIN) {
         return a_utf8;  // 文本统一以 UTF8_STRING 落地（跨进程互操作基线）
     }
@@ -414,7 +414,7 @@ auto X11ClipboardBridge::Impl::send_notify(Window requestor, Atom target, Atom p
     XFlush(dpy);
 }
 
-auto X11ClipboardBridge::Impl::refuse(Window requestor, Atom target, Atom property, Time time) -> void {
+auto X11ClipboardBridge::Impl::refuse(Window requestor, Atom target, Atom property, Time time) const -> void {
     (void)property;  // 拒绝时结果属性恒为 None（ICCCM），请求方指定的名字不再使用
     send_notify(requestor, target, None, time);
 }
@@ -470,7 +470,7 @@ auto X11ClipboardBridge::Impl::pump_incr(Window requestor, Atom property) -> voi
         return;
     }
     XChangeProperty(dpy, requestor, property, send.type, 8, PropModeReplace, bytes.subspan(send.offset, chunk).data(),
-                     static_cast<int>(chunk));
+                    static_cast<int>(chunk));
     send.offset += chunk;
     XFlush(dpy);
 }
@@ -754,7 +754,7 @@ auto X11ClipboardBridge::Impl::on_fixes_selection_notify(int subtype, Atom selec
     }
 }
 
-auto X11ClipboardBridge::Impl::on_x_event(const XEvent &event) -> bool {
+auto X11ClipboardBridge::Impl::on_x_event(const XEvent &event) const -> bool {
     if (!xfixes || event.type != xfixes_event_base + XFixesSelectionNotify) {
         return false;
     }
