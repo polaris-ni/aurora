@@ -11,12 +11,14 @@
 // 重建派发器即反映新值。折算规则（非正 / 非有限 → 库级兜底，亚毫秒 → 夹 1）不在本文件，
 // 见 `macos_click_config.h` 的纯函数，理由是该折算要在非 Apple runner 上表驱动单测。
 
-#if defined(AURORA_PLATFORM_MACOS) && defined(AURORA_BACKEND_MACOS)  // NOLINT
+// 平台宏须先于下方守卫可见：本 TU 的其余 include 全在守卫内，否则守卫恒假、整个 TU 编译为空。
+#include "aurora/core/platform.h"
 
-#include "aurora/event/detail/macos_click_config.h"
+#if defined(AURORA_PLATFORM_MACOS) && defined(AURORA_BACKEND_MACOS)  // NOLINT
 
 #import <AppKit/AppKit.h>
 
+#include "aurora/event/detail/macos_click_config.h"
 #include "aurora/event/event.h"
 
 namespace aurora::detail {

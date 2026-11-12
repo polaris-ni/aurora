@@ -39,21 +39,21 @@ namespace {
 /// @brief 路由标志取自 Linux `linux/rtnetlink.h`（`RTF_UP` = 0x0001、`RTF_REJECT` = 0x0200）。
 ///
 /// 不引内核头：那会把平台 socket 头带进采集腿之外的文件。值在此就地写定并注明出处。
-constexpr std::uint32_t k_rtf_up = 0x0001U;
-constexpr std::uint32_t k_rtf_reject = 0x0200U;
+constexpr std::uint32_t AURORA_RTF_UP = 0x0001U;
+constexpr std::uint32_t AURORA_RTF_REJECT = 0x0200U;
 /// @brief `IFF_UP` 取自 Linux `linux/if.h`；`sysfs` 的 `flags` 以十六进制文本给出。
-constexpr std::uint32_t k_iff_up = 0x0001U;
+constexpr std::uint32_t AURORA_IFF_UP = 0x0001U;
 /// @brief `/proc/net/ipv6_route` 里目的地址的十六进制字符数（128 位）。
-constexpr std::size_t k_ipv6_destination_hex = 32U;
+constexpr std::size_t AURORA_IPV6_DESTINATION_HEX = 32U;
 /// @brief sysfs 接口目录前缀（路径常量，非本机特定）。
-constexpr std::string_view k_sysfs_net_dir = "/sys/class/net/";
+constexpr std::string_view AURORA_SYSFS_NET_DIR = "/sys/class/net/";
 
 /// @brief 接口状态三值：可用 / 明确不可用 / 读不到。
-enum class InterfaceStatus { Operational, NotOperational, Unreadable };
+enum class InterfaceStatus : std::uint8_t { Operational, NotOperational, Unreadable };
 
 /// @brief 路由表读取结果：缺省路由所经的接口名 + 本文件是否读得到。
 struct RouteCandidates {
-    std::vector<std::string> interfaces{};  ///< 候选接口名（去重）
+    std::vector<std::string> interfaces;  ///< 候选接口名（去重）
     bool readable = false;  ///< 本文件是否读得到（空文件 = 读得到但无缺省路由）
 };
 
@@ -136,7 +136,7 @@ struct RouteCandidates {
     if (name.empty() || name == "lo") {
         return InterfaceStatus::NotOperational;  // 回环一律排除（确定不可用，非读不到）
     }
-    const std::string base = std::string{k_sysfs_net_dir} + name + "/";
+    const std::string base = std::string{AURORA_SYSFS_NET_DIR} + name + "/";
     const auto operstate = read_text_file(base + "operstate");
     if (!operstate) {
         return InterfaceStatus::Unreadable;
@@ -153,7 +153,7 @@ struct RouteCandidates {
     if (!flags) {
         return InterfaceStatus::Unreadable;
     }
-    return (*flags & k_iff_up) != 0U ? InterfaceStatus::Operational : InterfaceStatus::NotOperational;
+    return (*flags & AURORA_IFF_UP) != 0U ? InterfaceStatus::Operational : InterfaceStatus::NotOperational;
 }
 
 /// @brief 读 `/proc/net/route`，收 IPv4 缺省路由所经的接口名。
@@ -183,7 +183,7 @@ struct RouteCandidates {
             continue;  // 非缺省路由
         }
         const auto flags = parse_hex(flags_text);
-        if (!flags || (*flags & k_rtf_up) == 0U || (*flags & k_rtf_reject) != 0U) {
+        if (!flags || (*flags & AURORA_RTF_UP) == 0U || (*flags & AURORA_RTF_REJECT) != 0U) {
             continue;  // 未启用或被黑洞 ⇒ 不算能出去
         }
         if (std::ranges::find(out.interfaces, iface) == out.interfaces.end()) {
@@ -218,7 +218,7 @@ struct RouteCandidates {
             continue;
         }
         const auto destination = trim(fields.at(0));
-        if (destination.size() != k_ipv6_destination_hex) {
+        if (destination.size() != AURORA_IPV6_DESTINATION_HEX) {
             continue;  // 列数 / 列宽对不上 ⇒ 跳过
         }
         bool all_zero = true;
@@ -236,7 +236,7 @@ struct RouteCandidates {
             continue;  // 前缀长非 0 ⇒ 非缺省路由
         }
         const auto flags = parse_hex(fields.at(8));
-        if (!flags || (*flags & k_rtf_up) == 0U) {
+        if (!flags || (*flags & AURORA_RTF_UP) == 0U) {
             continue;  // 未启用 ⇒ 不算能出去
         }
         if (std::ranges::find(out.interfaces, fields.at(9)) == out.interfaces.end()) {
