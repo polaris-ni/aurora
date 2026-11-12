@@ -43,6 +43,8 @@
 #error "wasm_fetch_live_probe targets the wasm leg only; configure with the `wasm` preset (Emscripten)."
 #endif
 
+#include <emscripten.h>
+
 #include "aurora/core/error_codes.h"
 #include "aurora/core/log.h"
 #include "aurora/core/result.h"

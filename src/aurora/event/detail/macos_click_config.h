@@ -13,12 +13,15 @@
 // 毫秒并保证返回值 ≥ 1（公共契约写「恒为正」）。
 //
 // 本层边界（刻意）：
-// - 纯函数不 include 任何平台头，非 Apple 构建同样能编译与单测；
+// - 纯函数不依赖任何平台 SDK 头，非 Apple 构建同样能编译与单测；
 // - 不做缓存：每次调用都现读，运行期改系统设置后重建派发器即反映新值（与 Windows 支同语义）；
 // - 不引入新公共类型：公共面仍是那枚既有的 `os_double_click_ms()`，本批只改它的 macOS 分支。
 
 #include <cmath>
 #include <cstdint>
+
+// 下方 macOS 条件声明依赖编译期平台宏；平台探测头零 include、零运行时成本。
+#include "aurora/core/platform.h"
 
 namespace aurora::detail {
 

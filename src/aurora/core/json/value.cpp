@@ -11,6 +11,7 @@
 #include <variant>
 
 #include "aurora/core/json.h"
+#include "aurora/core/platform.h"
 
 namespace aurora::json {
 

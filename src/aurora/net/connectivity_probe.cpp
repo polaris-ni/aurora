@@ -9,6 +9,8 @@
 // 动态存储，绝不 `connect` / `sendto` / `getaddrinfo`。
 #include "aurora/net/detail/connectivity_probe.h"
 
+#include "aurora/core/platform.h"
+
 #if defined(AURORA_PLATFORM_LINUX) && !defined(AURORA_PLATFORM_ANDROID)
 #include <algorithm>
 #include <array>

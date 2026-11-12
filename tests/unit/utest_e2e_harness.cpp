@@ -63,7 +63,7 @@ AURORA_TEST_CASE(backend_compiled_tracks_feature_macros) {
 #ifdef AURORA_BACKEND_WIN32
     win32 = true;
 #endif
-    bool const d3d11 = false;
+    bool d3d11 = false;
 #ifdef AURORA_BACKEND_D3D11
     d3d11 = true;
 #endif
@@ -71,19 +71,19 @@ AURORA_TEST_CASE(backend_compiled_tracks_feature_macros) {
 #ifdef AURORA_BACKEND_GLFW
     glfw = true;
 #endif
-    bool const x11 = false;
+    bool x11 = false;
 #ifdef AURORA_BACKEND_X11
     x11 = true;
 #endif
-    bool const wayland = false;
+    bool wayland = false;
 #ifdef AURORA_BACKEND_WAYLAND
     wayland = true;
 #endif
-    bool const wgpu = false;
+    bool wgpu = false;
 #ifdef AURORA_BACKEND_GPU_WGPU
     wgpu = true;
 #endif
-    bool const macos = false;
+    bool macos = false;
 #ifdef AURORA_BACKEND_MACOS
     macos = true;
 #endif

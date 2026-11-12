@@ -9,6 +9,8 @@
 #include <algorithm>
 #include <utility>
 
+#include "aurora/core/platform.h"
+
 namespace aurora::app {
 
 // ---- EventSourceRegistration ------------------------------------------------

@@ -11,7 +11,11 @@
 // 那句在本头**之后**才执行；其余 aurora 头之所以无恙，只因它们早被首行的头链解析过
 // （头文件 guard 生效、宏尚未定义）。故本头必须与 atspi_bridge.h 同组前置。
 #include "aurora/app/detail/clipboard_backend.h"  // 富格式剪贴板后端单槽（变更回调经 fire_change 派发）
+#include "aurora/window/detail/atspi_bridge.h"
 #include "aurora/window/detail/csd_decoration.h"  // 跨后端共享 CSD 策略/命中/绘制层
+#include "aurora/window/detail/x11_clipboard.h"  // CLIPBOARD Selection 桥（同属「先于 Xlib」组：本头不引 Xlib）
+#include "aurora/window/detail/x11_drag.h"  // Xdnd 双向桥（同属「先于 Xlib」组：内部用 ModifierKey::None）
+#include "aurora/window/detail/x11_modifiers.h"
 
 #if defined(AURORA_PLATFORM_LINUX) && !defined(AURORA_PLATFORM_ANDROID) && defined(AURORA_BACKEND_X11)
 
