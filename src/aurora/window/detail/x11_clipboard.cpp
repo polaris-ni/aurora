@@ -172,7 +172,7 @@ struct X11ClipboardBridge::Impl {
     [[nodiscard]] auto read_targets() -> Result<std::vector<std::string>>;
 
     // ---- 写出辅助 ----
-    auto refuse(Window requestor, Atom target, Atom property, Time time) -> void;
+    auto refuse(Window requestor, Atom target, Atom property, Time time) const -> void;
 
     // ---- 事件 ----
     auto on_selection_clear(Atom selection, Time time) -> void;
