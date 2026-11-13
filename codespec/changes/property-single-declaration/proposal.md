@@ -442,15 +442,16 @@
 
 ## 收口状态
 
-原「未落的整段替换清单」四项逐项核对，三项已随后续批落地：
+原「未落的整段替换清单」四项逐项核对，四项已全部落地（前三项随后续批、第四项由全量编译矩阵补上）：
 
 1. **LSP 指定初始化器补全面** —— 已落。`tools/include/lsp_features.h` 的属性补全与 hover 已按链式形态发射（`set_<key>()` 写件、行名可跳转），并带出「该控件不接受指定初始化器」的诊断，旧聚合补全面退役。
 2. **`manual-test/11|13|22` 三篇重写** —— 已落。三篇现有用例数分别为 17 / 12 / 12 条，覆盖运行时换肤、部分覆写、三档无障碍开关、覆盖面序列化往返、Inspector 与 MCP 读写等判据面。
 3. **schema 的 `consumed` 位** —— 已落。`aurora_api.json` 的 `theme_tokens` 逐组带 `consumed` 与 `consumed_rule`，未消费组与规格登记表的一致由 `check_no_theme_color_literals` 的 C1 腿判等集守护。
 
-仍未落的一件与两处挂账，性质均为「代码 / 判据未完成」而非「外部证据待取」：
+4. **「76 型 × 3 风格」全量产物编译矩阵** —— 已落。`tools/gen/gen_codegen_matrix.cpp` 按 `aurora_api.json` 的在册类型生成矩阵，`tests/integration/itest_codegen_matrix.cpp` 整份 include 后随 runner 编译，故「产物可编译」由编译器判定；当前 67 型 × 3 风格 = **201 格全部编译**，其余 9 型登记在 `tools/gen/codegen_matrix_exemptions.txt`（6 个模板 / 别名型、2 个仅位置构造型，以及 `WebView`——后者可构造但禁复制与移动，属待修的产物形态缺口）。
 
-4. **「76 型 × 3 风格」全量产物编译矩阵** —— 未落。仓库内没有对应脚本或 CI 作业；`itest_to_code` 覆盖的是单型产物，不构成全量矩阵。补法是以 `to_code` 遍历全部在册类型 × 三档风格，逐 TU 编译并断言通过，可作为独立小批落地。
+仍余两处挂账，性质均为「代码 / 判据未完成」而非「外部证据待取」：
+
 5. **八处 `font_size` 常量基线未随批迁移**（第二十四批自身登记）：`button.h` / `text_input.h` 两枚表行 provider 各回 14.0F，`chip.h` / `radio_spin.h` 两枚、`tab_bar.h`、`dropdown.h` 回 13.0F，`segmented_control.h` 回 14.0F。迁移会动像素与 golden，故挂账随观感批次处理。
 6. **未测项其九（OS 无障碍开关推送）** 仍未接线。
 
