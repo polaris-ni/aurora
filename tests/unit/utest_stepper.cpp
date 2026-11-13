@@ -58,7 +58,7 @@ AURORA_TEST_CASE(default_and_construction_state) {
     AURORA_TEST_CHECK_TRUE(empty.steps().empty());
     AURORA_TEST_CHECK_EQ(empty.current(), 0);
 
-    Stepper s{three_steps(), 1};
+    Stepper const s{three_steps(), 1};
     AURORA_TEST_CHECK_EQ(s.steps().size(), 3U);
     AURORA_TEST_CHECK_EQ(s.steps()[1].label, "Beta");
     AURORA_TEST_CHECK_EQ(s.current(), 1);
@@ -153,7 +153,7 @@ AURORA_TEST_CASE(pointer_regions_trigger_cancel_and_next) {
 }
 
 AURORA_TEST_CASE(serialize_deserialize_roundtrip) {
-    Stepper src{three_steps(), 2};
+    Stepper const src{three_steps(), 2};
     Json props = Json::object();
     src.serialize_props(props);
     AURORA_TEST_CHECK_EQ(require_field<int>(props, "current"), 2);
@@ -195,7 +195,7 @@ AURORA_TEST_CASE(paint_covers_indicator_content_and_button_labels) {
     Stepper s{three_steps(), 1};
     LayoutEngine::layout(s, bounded(400.0F, 600.0F));
     Painter painter;
-    Rect bounds{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = s.size()};
+    Rect const bounds{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = s.size()};
 
     // 中间步：覆盖 is_done/is_current 着色 + "Next →" 按钮文本。
     s.paint(painter, bounds, BuildContext{});
@@ -208,9 +208,9 @@ AURORA_TEST_CASE(paint_covers_indicator_content_and_button_labels) {
     s.set_current(0);
     s.paint(painter, bounds, BuildContext{});
 
-    std::vector<SignalViewBase *> sigs;
+    StateSink sigs;
     s.collect_signals(sigs);
-    AURORA_TEST_CHECK_EQ(sigs.size(), 0U);  // Stepper 无外露信号
+    AURORA_TEST_CHECK_EQ(sigs.sources().size(), 0U);  // Stepper 无外露信号
 }
 
 // ---- 主题跟随（迁移批）：未显式设色 → 角色回退；显式设色 → 不被主题覆盖 ----
@@ -219,7 +219,7 @@ AURORA_TEST_CASE(stepper_colors_follow_theme_when_unset) {
     // 两态语义：未显式设色时 resolve 取主题角色；主题翻转 ⇒ 解析值翻转（换肤生效）。
     // 同时构造「当前步 / 非当前步」场景各取一次 resolve 值断言（resolve 仅依赖字段与 ctx）。
     const BuildContext bare;  // 无注入：inherit_theme 回落 light（与 OS 未表态同口径）
-    Stepper s{two_steps(), 0};  // current=0 → 第 0 步为当前步，第 1 步为非当前步
+    Stepper const s{two_steps(), 0};  // current=0 → 第 0 步为当前步，第 1 步为非当前步
     AURORA_TEST_CHECK(s.resolve_active_color(bare) == Color::blue());  // light primary = (0,0,255)
     AURORA_TEST_CHECK(s.resolve_inactive_color(bare) == Color(0x47, 0x47, 0x47));  // light on_surface_variant
 

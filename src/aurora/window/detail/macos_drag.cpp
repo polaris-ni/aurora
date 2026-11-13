@@ -19,8 +19,6 @@
 
 #include "aurora/window/detail/macos_drag.h"
 
-#include "aurora/core/platform.h"
-
 #if defined(AURORA_PLATFORM_MACOS) && defined(AURORA_BACKEND_MACOS)
 
 // aurora 头先于 AppKit 头（同款纪律：平台头关在单个 TU 内，包含顺序即语义）。
@@ -340,7 +338,7 @@ auto MacOSDragBridge::Impl::uninstall() -> void {
         auto *ns_view = static_cast<NSView *>(view);
         // `unregisterDraggedTypes` 的可用性按运行期探测（保守侧：老系统没有该 selector 时
         // 不注销——视图随窗口销毁，登记自然失效，不谎报已注销）。
-        if ([ns_view respondsToSelector:@selector(unregisterDraggedTypes)]) {
+        if ([ns_view respondsToSelector:@selector(unregisterDraggedTypes)] != NO) {
             [ns_view unregisterDraggedTypes];
         }
     }
@@ -445,10 +443,13 @@ auto MacOSDragBridge::Impl::on_perform_drag_operation(void *sender) -> void {
     std::unordered_map<std::string, std::vector<std::uint8_t>> entries;
     for (const std::string &mime : in.mimes) {
         // 只读源**真的广告过**的类型（按登记序取首个命中；`in.types` 即 Enter 时记录的全集）。
+        // `chosen` 指向 `in.types` 内的条目而非候选清单：候选来自 `macos_pasteboard_types_from_mime`
+        // 的返回值（临时 vector），指向它会在循环结束后悬垂（已实测：越界读令取数整段静默跳过）。
         const std::string *chosen = nullptr;
         for (const std::string &type : drag::macos_pasteboard_types_from_mime(mime)) {
-            if (std::find(in.types.begin(), in.types.end(), type) != in.types.end()) {
-                chosen = &type;
+            const auto it = std::find(in.types.begin(), in.types.end(), type);
+            if (it != in.types.end()) {
+                chosen = &*it;
                 break;
             }
         }

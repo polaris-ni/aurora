@@ -44,7 +44,7 @@ auto IconButton::on_paint(Painter &p, const Rect &bounds, const BuildContext &ct
         AURORA_LOG_WARN("icon.button", "%s", data.error().message.c_str());
         return;
     }
-    const auto roles = inherit_theme(ctx).roles;
+    const auto &roles = inherit_theme(ctx).roles;
     // 四态取色：禁用取降透明度的变体色；按下取 primary；悬停取 on_surface；常态取 on_surface_variant。
     Color color = color_.value_or(roles.on_surface_variant);
     if (!enabled_) {

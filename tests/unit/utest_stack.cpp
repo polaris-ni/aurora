@@ -96,7 +96,7 @@ AURORA_TEST_CASE(stack_fit_expand_reruns_layout_with_tight_bbox) {
 AURORA_TEST_CASE(stack_respects_min_constraint_floor) {
     // 子项都很小但 min 抬高：包围盒被 min 撑起。
     Stack st{box(10.0F, 10.0F)};
-    Constraints c{.min = Size{.width = 80.0F, .height = 50.0F}, .max = Size{.width = 200.0F, .height = 100.0F}};
+    Constraints const c{.min = Size{.width = 80.0F, .height = 50.0F}, .max = Size{.width = 200.0F, .height = 100.0F}};
     LayoutEngine::layout(st, c);
     const Size s = st.size();
     AURORA_TEST_CHECK_NEAR(s.width, 80.0F, 1e-4F);
@@ -105,7 +105,7 @@ AURORA_TEST_CASE(stack_respects_min_constraint_floor) {
 
 AURORA_TEST_CASE(overlay_alias_is_stack) {
     static_assert(std::is_same_v<Overlay, Stack>, "Overlay must be a convenience alias of Stack");
-    Overlay st{box(10.0F, 10.0F)};
+    Overlay const st{box(10.0F, 10.0F)};
     AURORA_TEST_CHECK_EQ(std::string{st.type_name()}, "Stack");
 }
 

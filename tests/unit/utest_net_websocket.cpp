@@ -22,7 +22,6 @@
 ///           BSD socket 语义，凡触网的用例按 `AURORA_TEST_SKIP` 登记。
 
 #include <algorithm>
-#include <array>
 #include <cctype>
 #include <chrono>
 #include <cstddef>
@@ -42,12 +41,12 @@
 #include "aurora/net/blocking.h"
 #include "aurora/net/cancellation.h"
 #include "aurora/net/capabilities.h"
+#include "aurora/net/engine.h"
 #include "aurora/net/http.h"
 #include "aurora/net/http_client.h"
 #include "aurora/net/http_observability.h"
 #include "aurora/net/http_stream.h"
 #include "aurora/net/policy.h"
-#include "aurora/net/transport.h"
 #include "aurora/net/websocket.h"
 #include "aurora/state/coroutine.h"
 #include "framework/aurora_test.h"
@@ -131,7 +130,7 @@ struct DrivenHost {
 /// @brief 取协程结果的外层并搬出那枚句柄（载荷 move-only，第二次读拿到的是已搬空的值，故只读一次）。
 [[nodiscard]] auto inner(CoroTask<Result<WebSocket>> &task) -> Result<WebSocket> {
     auto outer = task.result();
-    AURORA_TEST_REQUIRE_MSG(bool(outer), outer ? std::string{} : outer.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(outer), outer ? std::string{} : outer.error().message);
     return Result<WebSocket>{std::move(outer.value())};
 }
 
@@ -274,7 +273,7 @@ struct WsScene {
     /// @return 升级后的句柄（握手失败即致命收场：会话层的用例个个都要一枚真句柄）。
     [[nodiscard]] auto open(const WebSocketOptions &options = {}, Cancellation token = {}) -> WebSocket {
         auto connected = connect_and_drive(client, Request::get(url()), sink, options, std::move(token), AURORA_WAIT);
-        AURORA_TEST_REQUIRE_MSG(bool(connected), connected ? std::string{} : connected.error().message);
+        AURORA_TEST_REQUIRE_MSG(static_cast<bool>(connected), connected ? std::string{} : connected.error().message);
         return std::move(connected.value());
     }
 
@@ -321,7 +320,7 @@ auto check_failure(const Error &error, aurora::ErrorCode expected, std::string_v
 /// @param expected 期望的错误码。
 /// @param needle 期望出现在 detail 里的片段。
 auto check_rejected(const Result<void> &outcome, aurora::ErrorCode expected, std::string_view needle) -> void {
-    AURORA_TEST_REQUIRE_MSG(!bool(outcome), "the call was accepted, expected a rejection");
+    AURORA_TEST_REQUIRE_MSG(!static_cast<bool>(outcome), "the call was accepted, expected a rejection");
     check_failure(outcome.error(), expected, needle);
 }
 
@@ -381,7 +380,7 @@ AURORA_TEST_CASE(websocket_handshake_writes_the_four_library_fields_and_strips_t
                              .header("Content-Encoding", "gzip")
                              .body(std::vector<char>{'b', 'o', 'd', 'y'});
     auto handle = connect_and_drive(client, request, sink);
-    AURORA_TEST_REQUIRE_MSG(bool(handle), handle ? std::string{} : handle.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(handle), handle ? std::string{} : handle.error().message);
 
     const std::string head = log.head(0);
     AURORA_TEST_CHECK_TRUE(head.rfind("GET /chat HTTP/1.1\r\n", 0U) == 0U);
@@ -408,9 +407,9 @@ AURORA_TEST_CASE(websocket_handshake_draws_a_fresh_key_for_every_connection) {
     allow_test_cleartext(client);
     RecordingSink sink;
     auto first = connect_and_drive(client, Request::get(loopback_ws_url(peers[0]->port())), sink);
-    AURORA_TEST_REQUIRE_MSG(bool(first), first ? std::string{} : first.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(first), first ? std::string{} : first.error().message);
     auto second = connect_and_drive(client, Request::get(loopback_ws_url(peers[1]->port())), sink);
-    AURORA_TEST_REQUIRE_MSG(bool(second), second ? std::string{} : second.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(second), second ? std::string{} : second.error().message);
 
     // 同一个客户端、同一个目标：key 相同就意味着第三方可凭请求内容预判 Accept、抢在真客户端之前占住会话。
     AURORA_TEST_CHECK_TRUE(!key_of(log.head(0)).empty());
@@ -430,7 +429,7 @@ AURORA_TEST_CASE(websocket_handshake_refuses_a_non_get_request_without_touching_
     allow_test_cleartext(client);
     RecordingSink sink;
     const auto outcome = connect_and_drive(client, Request::post(loopback_ws_url(peer.port())), sink);
-    AURORA_TEST_REQUIRE_FALSE(bool(outcome));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(outcome));
     AURORA_TEST_CHECK_EQ(outcome.error().code_enum, aurora::ErrorCode::HttpRequestInvalid);
     AURORA_TEST_CHECK(outcome.error().message.find("GET") != std::string::npos);
     AURORA_TEST_CHECK_EQ(peer.accepts(), 0);  // 方法闸在建连之前：一条连接都没发起
@@ -451,7 +450,7 @@ AURORA_TEST_CASE(websocket_handshake_refuses_a_plain_http_target_without_connect
     RecordingSink sink;
     const auto outcome =
         connect_and_drive(client, Request::get("http://127.0.0.1:" + std::to_string(peer.port()) + "/chat"), sink);
-    AURORA_TEST_REQUIRE_FALSE(bool(outcome));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(outcome));
     AURORA_TEST_CHECK_EQ(outcome.error().code_enum, aurora::ErrorCode::WsHandshakeRejected);
     AURORA_TEST_CHECK(outcome.error().message.find("not ws or wss") != std::string::npos);
     AURORA_TEST_CHECK_EQ(peer.accepts(), 0);  // scheme 闸也在建连之前：不是「连上了才发现升不了」
@@ -483,7 +482,7 @@ AURORA_TEST_CASE(websocket_handshake_reports_a_peer_that_closes_without_answerin
     allow_test_cleartext(client);
     RecordingSink sink;
     const auto outcome = connect_and_drive(client, Request::get(loopback_ws_url(peer.port())), sink);
-    AURORA_TEST_REQUIRE_FALSE(bool(outcome));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(outcome));
     AURORA_TEST_CHECK_EQ(outcome.error().code_enum, aurora::ErrorCode::WsHandshakeRejected);
     AURORA_TEST_CHECK(outcome.error().message.find("closed the connection without answering the upgrade") !=
                       std::string::npos);
@@ -513,7 +512,8 @@ AURORA_TEST_CASE(websocket_handshake_names_the_field_that_refused_the_upgrade) {
     for (std::size_t index = 0U; index < needles.size(); ++index) {
         RecordingSink sink;
         const auto outcome = connect_and_drive(client, Request::get(loopback_ws_url(peers[index]->port())), sink);
-        AURORA_TEST_REQUIRE_MSG(!bool(outcome), "connection " + std::to_string(index) + " unexpectedly upgraded");
+        AURORA_TEST_REQUIRE_MSG(!static_cast<bool>(outcome),
+                                "connection " + std::to_string(index) + " unexpectedly upgraded");
         AURORA_TEST_CHECK_EQ(outcome.error().code_enum, aurora::ErrorCode::WsHandshakeRejected);
         AURORA_TEST_CHECK_MSG(outcome.error().message.find(needles[index]) != std::string::npos,
                               outcome.error().message);
@@ -546,7 +546,8 @@ AURORA_TEST_CASE(websocket_handshake_refuses_an_unprovable_or_overreaching_accep
     for (std::size_t index = 0U; index < needles.size(); ++index) {
         RecordingSink sink;
         const auto outcome = connect_and_drive(client, Request::get(loopback_ws_url(peers[index]->port())), sink);
-        AURORA_TEST_REQUIRE_MSG(!bool(outcome), "connection " + std::to_string(index) + " unexpectedly upgraded");
+        AURORA_TEST_REQUIRE_MSG(!static_cast<bool>(outcome),
+                                "connection " + std::to_string(index) + " unexpectedly upgraded");
         AURORA_TEST_CHECK_EQ(outcome.error().code_enum, aurora::ErrorCode::WsHandshakeRejected);
         AURORA_TEST_CHECK_MSG(outcome.error().message.find(needles[index]) != std::string::npos,
                               outcome.error().message);
@@ -575,18 +576,18 @@ AURORA_TEST_CASE(websocket_handshake_honours_the_subprotocol_verdicts) {
     const WebSocketOptions offered{.subprotocols = {"chat", "json"}};
     RecordingSink sink;
     auto negotiated = connect_and_drive(client, Request::get(loopback_ws_url(peers[0]->port())), sink, offered);
-    AURORA_TEST_REQUIRE_MSG(bool(negotiated), negotiated ? std::string{} : negotiated.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(negotiated), negotiated ? std::string{} : negotiated.error().message);
     AURORA_TEST_CHECK_EQ(std::string{negotiated.value().subprotocol()}, "chat");
     AURORA_TEST_CHECK_TRUE(log.head(0).find("Sec-WebSocket-Protocol: chat, json") != std::string::npos);
 
     auto degraded = connect_and_drive(client, Request::get(loopback_ws_url(peers[1]->port())), sink, offered);
-    AURORA_TEST_REQUIRE_MSG(bool(degraded), degraded ? std::string{} : degraded.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(degraded), degraded ? std::string{} : degraded.error().message);
     AURORA_TEST_CHECK_TRUE(degraded.value().subprotocol().empty());
     AURORA_TEST_CHECK_TRUE(log.head(1).find("Sec-WebSocket-Protocol: chat, json") != std::string::npos);
 
     const WebSocketOptions required{.subprotocols = {"chat"}, .require_subprotocol = true};
     const auto refused = connect_and_drive(client, Request::get(loopback_ws_url(peers[2]->port())), sink, required);
-    AURORA_TEST_REQUIRE_FALSE(bool(refused));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(refused));
     AURORA_TEST_CHECK_EQ(refused.error().code_enum, aurora::ErrorCode::WsHandshakeRejected);
     AURORA_TEST_CHECK(refused.error().message.find("requires one of the offered subprotocols") != std::string::npos);
 }
@@ -608,7 +609,7 @@ AURORA_TEST_CASE(websocket_handshake_refuses_a_subprotocol_the_client_never_offe
     RecordingSink sink;
     const auto outcome =
         connect_and_drive(client, Request::get(loopback_ws_url(peer.port())), sink, WebSocketOptions{});
-    AURORA_TEST_REQUIRE_FALSE(bool(outcome));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(outcome));
     AURORA_TEST_CHECK_EQ(outcome.error().code_enum, aurora::ErrorCode::WsHandshakeRejected);
     AURORA_TEST_CHECK(outcome.error().message.find("never offered") != std::string::npos);
 }
@@ -631,7 +632,7 @@ AURORA_TEST_CASE(websocket_handshake_neither_follows_redirects_nor_replays) {
     auto request = Request::get(loopback_ws_url(peer.port()));
     request.retry_policy(RetryPolicy{.attempts = 3});
     const auto outcome = connect_and_drive(client, std::move(request), sink);
-    AURORA_TEST_REQUIRE_FALSE(bool(outcome));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(outcome));
     AURORA_TEST_CHECK_EQ(outcome.error().code_enum, aurora::ErrorCode::WsHandshakeRejected);
     AURORA_TEST_CHECK(outcome.error().message.find("answered 301") != std::string::npos);
     AURORA_TEST_CHECK_EQ(peer.accepts(), 1);  // 不跟重定向、不重放：一条都不多发起
@@ -664,7 +665,7 @@ AURORA_TEST_CASE(websocket_handshake_reports_a_total_timeout) {
             "connect_websocket done", [&task] { return task.is_done(); }, std::chrono::milliseconds{3000})
             .satisfied);
     const auto outcome = inner(task);
-    AURORA_TEST_REQUIRE_FALSE(bool(outcome));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(outcome));
     AURORA_TEST_CHECK_EQ(outcome.error().code_enum, aurora::ErrorCode::HttpTimeout);
     AURORA_TEST_CHECK_EQ(sink.closes, 0);
 }
@@ -692,7 +693,7 @@ AURORA_TEST_CASE(websocket_handshake_reports_a_cancellation_during_the_exchange)
             "connect_websocket done", [&task] { return task.is_done(); }, std::chrono::milliseconds{3000})
             .satisfied);
     const auto outcome = inner(task);
-    AURORA_TEST_REQUIRE_FALSE(bool(outcome));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(outcome));
     AURORA_TEST_CHECK_EQ(outcome.error().code_enum, aurora::ErrorCode::NetCancelled);
     AURORA_TEST_CHECK_EQ(sink.closes, 0);
 }
@@ -709,9 +710,28 @@ AURORA_TEST_CASE(websocket_handshake_refuses_a_leg_without_streaming_semantics) 
     Client client;
     allow_test_cleartext(client);
     const auto outcome = connect_and_drive(client, Request::get("ws://127.0.0.1:1/chat"), sink);
-    AURORA_TEST_REQUIRE_FALSE(bool(outcome));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(outcome));
     AURORA_TEST_CHECK_EQ(outcome.error().code_enum, aurora::ErrorCode::NetPlatformUnavailable);
     AURORA_TEST_CHECK_EQ(sink.closes, 0);  // 绝不退化成「物化一次交换再冒充会话」
+}
+
+AURORA_TEST_CASE(wasm_leg_refuses_a_websocket_before_any_socket_starts) {
+#ifdef AURORA_PLATFORM_WASM
+    // 浏览器腿的引擎能力位 `streaming` 为假：能力闸在发起前失败，不进入 socket、不发任何字节。
+    // 这条断言不依赖宿主 pump，故可在 wasm 测试运行器里实跑。
+    AURORA_TEST_CHECK_FALSE(aurora::net::Engine::instance().capabilities().streaming);
+    const Client client;
+    RecordingSink sink;
+    auto task = client.connect_websocket(Request::get("ws://127.0.0.1:1/chat"), sink);
+    AURORA_TEST_REQUIRE(task.is_done());
+    // 外层是「协程交付了一次结果」，内层才是这次握手的结局；两层的搬法与另两腿同用 `inner()`。
+    const auto outcome = inner(task);
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(outcome));
+    AURORA_TEST_CHECK_EQ(outcome.error().code_enum, aurora::ErrorCode::NetPlatformUnavailable);
+    AURORA_TEST_CHECK_EQ(sink.closes, 0);
+#else
+    AURORA_TEST_SKIP("the negative assertion is specific to the browser leg (AURORA_PLATFORM_WASM)");
+#endif
 }
 
 // ---- 会话层：交付、发送两拍、上限闸、心跳与收摊 ----
@@ -782,7 +802,7 @@ AURORA_TEST_CASE(websocket_reports_a_send_as_accepted_then_landed) {
     auto handle = scene.open();
     Landed landed;
     const auto accepted = handle.send("hello", landed.callback());
-    AURORA_TEST_REQUIRE(bool(accepted));  // 第一拍：被接受，文本为空即成功
+    AURORA_TEST_REQUIRE(static_cast<bool>(accepted));  // 第一拍：被接受，文本为空即成功
 
     drive_until_frames(scene.log, 1, AURORA_WAIT);
     AURORA_TEST_CHECK_EQ(landed.calls, 1);  // 第二拍：落地事实恰好一条
@@ -812,7 +832,7 @@ AURORA_TEST_CASE(websocket_splits_a_message_over_the_frame_limit_into_ordered_fr
     const std::string text(25U, 'a');
     Landed landed;
     const auto accepted = handle.send(std::string_view{text}, landed.callback());
-    AURORA_TEST_REQUIRE(bool(accepted));
+    AURORA_TEST_REQUIRE(static_cast<bool>(accepted));
 
     drive_until_frames(scene.log, 3, AURORA_WAIT);
     const auto frames = scene.log.frames();
@@ -840,17 +860,19 @@ AURORA_TEST_CASE(websocket_refuses_non_utf8_text_before_writing_a_single_frame) 
     auto handle = scene.open();
     check_rejected(handle.send(std::string_view{"bad\xff"}), aurora::ErrorCode::WsProtocolError,
                    "text payload is not valid UTF-8 at byte 3");
-    aurora::test::net::pump_idle(AURORA_QUIET);
-
-    AURORA_TEST_CHECK_EQ(scene.log.count(AURORA_OP_TEXT), std::size_t{0});  // 一个字节都没上线
     AURORA_TEST_CHECK_TRUE(handle.is_open());  // 被拒的是这次发送，不是这条会话
-    AURORA_TEST_REQUIRE(bool(handle.send("still fine")));
+    // 被拒的调用一个字节都不上线：紧接其后的合法消息必是**首枚**被对端解出的帧，且载荷恰为该消息。
+    // 同一条连接上的字节 FIFO 保证「先被拒的调用若真的写了什么，一定排在这枚之前」——故这里不需要
+    // 「静默窗口」再等一轮：那段窗口会与对端 50 ms 观察读超时叠在一起，在慢腿上把「我方暂时没说话」
+    // 放大成一次空等（CI 上实测偶发），而判据强度并未因此增加。
+    AURORA_TEST_REQUIRE(static_cast<bool>(handle.send("still fine")));
     drive_until_frames(scene.log, 1, AURORA_WAIT);
     const auto seen = scene.log.frame(0U);
     AURORA_TEST_REQUIRE(seen.has_value());
     // 前序 AURORA_TEST_REQUIRE 已断言持有值，断言宏的展开对 tidy 的路径分析不透明，属误报。
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     AURORA_TEST_CHECK_EQ(seen->payload, "still fine");
+    AURORA_TEST_CHECK_EQ(scene.log.count(AURORA_OP_TEXT), std::size_t{1});  // 且只有这一枚
 }
 
 AURORA_TEST_CASE(websocket_refuses_a_message_over_the_message_limit) {
@@ -879,7 +901,7 @@ AURORA_TEST_CASE(websocket_refuses_any_payload_when_the_frame_limit_is_zero) {
     auto handle = scene.open(zero);
     check_rejected(handle.send(std::string_view{"one byte is already too much"}), aurora::ErrorCode::NetBufferLimit,
                    "the frame limit is 0, so no non-empty payload can be framed");
-    AURORA_TEST_REQUIRE(bool(handle.send(std::string_view{})));
+    AURORA_TEST_REQUIRE(static_cast<bool>(handle.send(std::string_view{})));
 
     drive_until_frames(scene.log, 1, AURORA_WAIT);
     const auto seen = scene.log.frame(0U);
@@ -906,7 +928,7 @@ AURORA_TEST_CASE(websocket_rejects_a_send_when_the_queue_slot_limit_is_reached) 
 
     AURORA_TEST_CHECK_TRUE(handle.is_open());
     AURORA_TEST_CHECK_EQ(handle.queued_bytes(), std::size_t{0});  // 被拒的发送一字未入队
-    AURORA_TEST_REQUIRE(bool(handle.send("still open")));
+    AURORA_TEST_REQUIRE(static_cast<bool>(handle.send("still open")));
     drive_until_frames(scene.log, 1, AURORA_WAIT);
     const auto seen = scene.log.frame(0U);
     AURORA_TEST_REQUIRE(seen.has_value());
@@ -928,7 +950,7 @@ AURORA_TEST_CASE(websocket_rejects_a_send_when_the_queue_byte_limit_is_reached) 
                    "the send queue bytes needs 142 while 64 is the configured limit");
 
     AURORA_TEST_CHECK_TRUE(handle.is_open());
-    AURORA_TEST_REQUIRE(bool(handle.send("small")));
+    AURORA_TEST_REQUIRE(static_cast<bool>(handle.send("small")));
     drive_until_frames(scene.log, 1, AURORA_WAIT);
 }
 
@@ -1048,7 +1070,7 @@ AURORA_TEST_CASE(websocket_stops_accepting_sends_once_this_side_started_the_clos
     // **本端发起**的收摊（`by_peer` 为假）。
     WsScene scene{WsPlan{.watch_client_frames = true, .answer_close = true}};
     auto handle = scene.open();
-    AURORA_TEST_REQUIRE(bool(handle.close(1001U, "taking it home")));
+    AURORA_TEST_REQUIRE(static_cast<bool>(handle.close(1001U, "taking it home")));
     AURORA_TEST_CHECK_TRUE(handle.is_open());
     check_rejected(handle.send("late"), aurora::ErrorCode::WsClosed, "this side already started the close handshake");
 
@@ -1088,7 +1110,7 @@ AURORA_TEST_CASE(websocket_refuses_close_frames_that_cannot_go_on_the_wire) {
     AURORA_TEST_CHECK_EQ(scene.log.count(AURORA_OP_CLOSE), std::size_t{0});
     AURORA_TEST_CHECK_TRUE(handle.is_open());
     AURORA_TEST_CHECK_EQ(scene.sink.closes, 0);
-    AURORA_TEST_REQUIRE(bool(handle.send("still talking")));
+    AURORA_TEST_REQUIRE(static_cast<bool>(handle.send("still talking")));
     drive_until_frames(scene.log, 1, AURORA_WAIT);
 }
 
@@ -1134,7 +1156,7 @@ AURORA_TEST_CASE(websocket_stops_dispatching_when_the_handle_dies_inside_a_deliv
         handle = WebSocket{};  // 移动赋值即「收摊自己那份再接管空句柄」，等价于就地析构
     };
     handle = scene.open();
-    AURORA_TEST_REQUIRE(bool(handle.send("release the queued frames")));
+    AURORA_TEST_REQUIRE(static_cast<bool>(handle.send("release the queued frames")));
 
     drive_until_messages(scene.sink, 2, AURORA_WAIT);
     aurora::test::net::pump_idle(AURORA_QUIET);
@@ -1170,7 +1192,7 @@ AURORA_TEST_CASE(websocket_a_stop_flow_closes_dispatching_only) {
     AURORA_TEST_CHECK_EQ(scene.sink.pongs, 0);  // pong 是回给对端的，不是宿主再要一条消息
     AURORA_TEST_CHECK_EQ(scene.sink.closes, 0);
     AURORA_TEST_CHECK_TRUE(handle.is_open());
-    AURORA_TEST_REQUIRE(bool(handle.send("the link is still usable")));
+    AURORA_TEST_REQUIRE(static_cast<bool>(handle.send("the link is still usable")));
     drive_until_frames(scene.log, 1, AURORA_WAIT);
 }
 
@@ -1279,7 +1301,7 @@ AURORA_TEST_CASE(websocket_move_leaves_the_source_handle_empty_and_the_link_runn
     check_rejected(source.send("from the source"), aurora::ErrorCode::WsClosed, "holds no session");
     // NOLINTEND(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
     AURORA_TEST_CHECK_TRUE(target.is_open());
-    AURORA_TEST_REQUIRE(bool(target.send("from the target")));
+    AURORA_TEST_REQUIRE(static_cast<bool>(target.send("from the target")));
     drive_until_frames(scene.log, 1, AURORA_WAIT);
 
     const auto seen = scene.log.frame(0U);
@@ -1304,7 +1326,7 @@ AURORA_TEST_CASE(websocket_a_late_cancellation_does_not_close_the_session) {
 
     AURORA_TEST_CHECK_TRUE(handle.is_open());
     AURORA_TEST_CHECK_EQ(scene.sink.closes, 0);
-    AURORA_TEST_REQUIRE(bool(handle.send("after the host cancelled")));
+    AURORA_TEST_REQUIRE(static_cast<bool>(handle.send("after the host cancelled")));
     drive_until_frames(scene.log, 1, AURORA_WAIT);
     const auto seen = scene.log.frame(0U);
     AURORA_TEST_REQUIRE(seen.has_value());

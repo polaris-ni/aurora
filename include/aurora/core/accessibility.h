@@ -242,12 +242,16 @@ inline auto apply_semantic_pruning(AccessibilityNode &n, bool semantic) -> void 
 ///        或作为无上下文子系统（动画 / 字体度量）的进程级兜底。
 /// 取值意图对标 WAI / 各 OS 的无障碍开关：动效收敛、高对比、字号缩放、读屏是否在线。
 /// 默认全关 / 不缩放——**默认行为与接入前完全一致**（golden 逐位不变）。
+///
+/// 三个开关的消费点是**唯一物化点** `Theme::with_accessibility`（见 specification/07 §5.1）：开关作为
+/// 输入折进主题快照后即退场，控件与图表读的是折好的令牌，不再二次读这些位 —— 于是「开关置位 →
+/// 生效值变」与读取通路无关，且本类型与 `Theme` 并行的第二条通道不成立。
 /// @note Thread: main-thread only
 /// @note Side-effects: none
 struct AccessibilitySettings {
-    bool reduce_motion = false;  ///< 减弱动态效果：`AnimationController` 不再渐变而是直落端点
-    bool high_contrast = false;  ///< 高对比样式请求（色 Responder 由各控件按此位取用）
-    float font_scale = 1.0F;  ///< 字号缩放倍率（<= 0 或 NaN 视为 1.0，不缩放）
+    bool reduce_motion = false;  ///< 减弱动态效果：物化点把 `MotionScale` 整族取零档，动画一步落端点。
+    bool high_contrast = false;  ///< 高对比样式请求：物化点按对比度登记表整族调 `ColorRoles` 的 tone。
+    float font_scale = 1.0F;  ///< 字号缩放倍率（<= 0 或 NaN 视为 1.0，不缩放）：物化点折进字阶与度量族。
     /// @brief 读屏是否在线：**由平台桥在激活时回填**（heuristic——以「读屏主动取根对象」近似「有读屏
     ///        在线」；读屏退出无反向信号，故仅窗口销毁 / 桥去激活时复位。见 specification/01-core.md §7.2）。
     bool screen_reader_active = false;

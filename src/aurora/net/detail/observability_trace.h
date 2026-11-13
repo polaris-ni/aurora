@@ -1,6 +1,6 @@
 #pragma once
 
-/// @file detail/observability_trace.h
+/// @file observability_trace.h
 /// @brief 发起侧的记账句柄：一次物理往来一枚，析构未收摊即记 `abandoned`。
 ///
 /// 本头只在 `src/` 内使用，不属于公共 API。`AURORA_ENABLE_DEBUG` 未开时整类退化为零成本空壳
@@ -77,8 +77,6 @@ class ExchangeTrace {
 
   private:
     auto publish_begin() -> void;
-    auto publish_stage(const StageMark &mark) -> void;
-    auto publish_update() -> void;
     auto publish_end(bool abandoned) -> void;
 
     std::uint64_t exchange_id_{0};  ///< 主键

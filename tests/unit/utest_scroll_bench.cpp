@@ -9,7 +9,6 @@
 #include <string>
 
 #include "aurora/perf/scroll_bench.h"
-#include "aurora/render/painter.h"
 #include "aurora/widget/scroll.h"
 #include "aurora/widget/widget.h"
 #include "framework/aurora_test.h"
@@ -37,11 +36,7 @@ class FixedBox final : public Widget {
 };
 
 /// @brief 内容高 1000dp、视口 200dp 的可滚动树（行程 800dp，5 屏内容）。
-auto make_scrollable_tree() -> Node {
-    ScrollProps props;
-    props.child = Node{std::make_shared<FixedBox>(200.0F, 1000.0F)};
-    return Node{Scroll{props}};
-}
+auto make_scrollable_tree() -> Node { return Node{Scroll{Node{std::make_shared<FixedBox>(200.0F, 1000.0F)}}}; }
 
 /// @brief 统计字符出现次数（CSV 列数 = 逗号数 + 1）。
 auto count_of(const std::string &text, char ch) -> std::size_t {

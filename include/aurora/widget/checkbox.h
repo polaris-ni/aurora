@@ -9,9 +9,8 @@
 #include "aurora/core/accessibility.h"
 #include "aurora/core/color.h"
 #include "aurora/render/painter.h"
-#include "aurora/state/binding.h"
-#include "aurora/state/reactive.h"
-#include "aurora/state/signal_view.h"
+#include "aurora/state/state.h"
+#include "aurora/theming/theme.h"
 #include "aurora/theming/theme_scope.h"
 #include "aurora/widget/widget.h"
 
@@ -20,10 +19,8 @@ namespace aurora {
 
 /// @brief 复选框（叶控件）：勾选状态 `bool`，点击切换。
 ///
-/// 支持两种值来源（与 TextInput 一致的响应式模式）：
-/// - `Reactive<bool>`：内部持有状态，变化触发重绘；
-/// - `Binding<bool>`：双向绑定到上游 `State<bool>`，写回上游并随其变化刷新。
-/// 变化通过 `onChanged` 回调上报。
+/// 值来源是可写句柄 `State<bool>`：传字面量即自有来源，传外部 `State<bool>` 即共享
+/// 同一来源（点击就写回调用方那份状态）。变化通过 `onChanged` 回调上报。
 ///
 /// 视觉（对标 Material 3 Checkbox / Fluent CheckBox）：
 /// - 未勾选：圆角方框描边（`border_color`），悬停时描边转激活色并铺淡色底；
@@ -37,16 +34,11 @@ class Checkbox : public LeafWidget {
   public:
     /// @brief 默认构造：未勾选、外观取各成员默认值（勾选色跟随主题 `Theme::primary`）。
     Checkbox() = default;
-    /// @brief 以内部响应式状态构造：勾选态存于 `checked`，变化自动触发重绘。
-    /// @param checked 初始勾选态的 `Reactive<bool>`（内部持有语义）。
+    /// @brief 以值句柄构造：传字面量创建自有来源，传外部 `State<bool>` 则共享同一来源。
+    /// @param checked 勾选态句柄。
     /// @param on_changed 勾选态变化回调，可空；每次切换（点击/`set_value`/读屏 Toggle）后调用。
-    explicit Checkbox(Reactive<bool> checked, std::function<void(bool)> on_changed = {})
+    explicit Checkbox(State<bool> checked, std::function<void(bool)> on_changed = {})
         : value_(std::move(checked)), on_changed_(std::move(on_changed)) {}
-    /// @brief 以上游信号双向绑定构造：勾选态写入回上游，并随上游变化刷新。
-    /// @param binding 绑定到上游 `State<bool>` 的 `Binding<bool>`；非空时优先于内部 `value_`。
-    /// @param on_changed 勾选态变化回调，可空；语义同另一构造重载。
-    explicit Checkbox(Binding<bool> binding, std::function<void(bool)> on_changed = {})
-        : binding_(std::move(binding)), value_(binding_.get()), on_changed_(std::move(on_changed)) {}
 
     /// @brief 设置勾选态变化回调（链式）。
     /// @param cb 新回调；可为空（清空）。每次切换后以最新勾选态调用。
@@ -80,9 +72,11 @@ class Checkbox : public LeafWidget {
         return *this;
     }
 
-    /// @brief 设置方框边长 dp（链式）。
+    /// @brief 设置方框边长 dp（链式）；设定即脱离主题度量档。
     /// @param s 方框边长（dp），同时作为布局返回的宽高基准。
     /// @return 自身引用，便于链式调用。
+    /// @note 不调用本 setter 时边长跟随主题 `controls.indicator_size`（见 `resolve_size`）；
+    ///       显式设值与「未设置」是两态，后者才随风格档变化。
     auto set_size(float s) -> Checkbox & {
         size_ = s;
         return *this;
@@ -116,16 +110,14 @@ class Checkbox : public LeafWidget {
     /// @return 启用标志；false 表示禁用态（灰化并忽略点击）。
     [[nodiscard]] auto enabled() const -> bool { return enabled_; }
 
-    /// @brief 当前勾选态：有绑定时读上游信号，否则读内部 `Reactive<bool>`。
-    /// @return 勾选状态；绑定态下等于 `binding_.get()`（实时读取，不缓存）。
-    [[nodiscard]] auto value() const -> bool { return binding_.bound() ? binding_.get() : value_.get(); }
+    /// @brief 当前勾选态（实时读取来源，不缓存）。
+    /// @return 勾选状态。
+    [[nodiscard]] auto value() const -> bool { return value_.get(); }
 
-    /// @brief 写入勾选态：回写绑定（若有）、触发 `on_changed`、标脏重绘并发无障碍 ValueChanged。
+    /// @brief 写入勾选态：提交到来源（外部共享时即写回调用方）、触发 `on_changed`、
+    ///        标脏重绘并发无障碍 ValueChanged。
     /// @param v 目标勾选态。
     auto set_value(bool v) -> void {
-        if (binding_.bound()) {
-            binding_.set(v);
-        }
         value_ = v;
         if (on_changed_) {
             on_changed_(v);
@@ -134,14 +126,9 @@ class Checkbox : public LeafWidget {
         notify_accessibility_event(AccessibilityEvent{.kind = AccessibilityEventKind::ValueChanged, .target = this});
     }
 
-    /// @brief 收集本控件的响应式信号：内部 `value_`，绑定态下追加绑定目标信号。
-    /// @param out 输出向量：挂载时由基类登记依赖，信号变化即触发本控件刷新。
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override {
-        out.push_back(&value_);
-        if (binding_.bound()) {
-            out.push_back(binding_.target());
-        }
-    }
+    /// @brief 收集本控件的响应式信号：唯一的值句柄 `value_`。
+    /// @param out 采集出口：挂载时由基类登记依赖，来源变化即触发本控件刷新。
+    auto collect_signals(StateSink &out) -> void override { out.push(value_); }
 
     /// @brief widget 类型名（结构快照 JSON 用）。
     /// @return 字面量 `"Checkbox"`。
@@ -193,15 +180,15 @@ class Checkbox : public LeafWidget {
                      .json_type = "boolean"},
                     {.name = "active_color",
                      .type = "Color",
-                     .default_value = "theme.primary",
+                     .default_value = theme_token_expr<&ColorRoles::primary>(),
                      .required = false,
                      .note = "Checked fill color (defaults to theme primary)",
                      .json_type = "array"},
                     {.name = "border_color",
                      .type = "Color",
-                     .default_value = "{140,140,146,255}",
+                     .default_value = theme_token_expr<&ColorRoles::outline_variant>(),
                      .required = false,
-                     .note = "Unchecked border color",
+                     .note = "Unchecked border color (defaults to theme outline_variant)",
                      .json_type = "array"},
                     {.name = "check_color",
                      .type = "Color",
@@ -211,9 +198,9 @@ class Checkbox : public LeafWidget {
                      .json_type = "array"},
                     {.name = "size",
                      .type = "float",
-                     .default_value = "20.0",
+                     .default_value = theme_token_expr<&ControlMetrics::indicator_size>(),
                      .required = false,
-                     .note = "Box size (dp)",
+                     .note = "Box size (dp; follows theme controls.indicator_size when unset)",
                      .json_type = "number",
                      .enum_values = {},
                      .min_value = "0"},
@@ -303,9 +290,13 @@ class Checkbox : public LeafWidget {
         if (active_color_.has_value()) {
             props.set("active_color", color_to_json(*active_color_));  // 未设置不输出：保留「跟随主题」语义
         }
-        props.set("border_color", color_to_json(border_color_));
+        if (border_color_.has_value()) {
+            props.set("border_color", color_to_json(*border_color_));  // 未设置不输出：保留「跟随主题」语义
+        }
         props.set("check_color", color_to_json(check_color_));
-        props.set("size", size_);
+        if (size_.has_value()) {
+            props.set("size", *size_);  // 未设置不输出：保留「跟随主题度量档」语义
+        }
         props.set("corner_radius", corner_radius_);
         props.set("border_width", border_width_);
         props.set("enabled", Json{enabled_});
@@ -343,8 +334,17 @@ class Checkbox : public LeafWidget {
     }
 
   protected:
-    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
-        return c.constrain(Size{.width = size_, .height = size_});
+    /// @brief 解算本帧生效的方框边长：显式设过取显式值，未设取主题度量档
+    ///        `controls.indicator_size`（与 `resolve_palette` 的「未设色跟随主题」同口径）。
+    /// @param ctx 构建上下文：提供主题作用域。
+    /// @return 方框边长（dp），同时是布局返回的宽高基准。
+    [[nodiscard]] virtual auto resolve_size(const BuildContext &ctx) const -> float {
+        return size_.value_or(inherit_theme(ctx).controls.indicator_size);
+    }
+
+    auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
+        const float side = resolve_size(ctx);
+        return c.constrain(Size{.width = side, .height = side});
     }
 
     /// @brief 三态配色（勾选填充 / 未勾选描边 / 勾号），由 `resolve_palette` 一次性算出。
@@ -354,19 +354,20 @@ class Checkbox : public LeafWidget {
         Color check;  ///< 勾号颜色
     };
 
-    /// @brief 解析当前状态配色：禁用时统一灰化。子类可只覆盖配色而不改绘制几何。
+    /// @brief 解析当前状态配色：禁用时统一按主题中性档灰化。子类可只覆盖配色而不改绘制几何。
     /// @param ctx 构建上下文：提供主题作用域，未显式设置 `active_color` 时取 `inherit_theme(ctx).roles.primary`。
-    /// @return 三态配色聚合；禁用态返回固定灰化三元组（忽略显式设置的颜色）。
+    /// @return 三态配色聚合；禁用态返回主题中性三元组（忽略显式设置的颜色）。
     /// @note Side-effects: none
     [[nodiscard]] virtual auto resolve_palette(const BuildContext &ctx) -> Palette {
-        Palette pal{.active = active_color_.value_or(inherit_theme(ctx).roles.primary),
-                    .border = border_color_,
+        const auto &roles = inherit_theme(ctx).roles;
+        Palette pal{.active = active_color_.value_or(roles.primary),
+                    .border = border_color_.value_or(roles.outline_variant),
                     .check = check_color_};
         if (!enabled_) {
-            // 禁用灰化：统一降饱和（对标 Material disabled 38% 透明语义的软件光栅近似）。
-            pal.active = Color{176, 176, 180, 255};
-            pal.border = Color{200, 200, 204, 255};
-            pal.check = Color{245, 245, 247, 255};
+            // 禁用灰化：取主题描边/表面中性档（深色档随之翻转为暗中性，不再是固定浅灰）。
+            pal.active = roles.outline_variant;
+            pal.border = roles.outline_variant;
+            pal.check = roles.surface;
         }
         return pal;
     }
@@ -378,17 +379,15 @@ class Checkbox : public LeafWidget {
         return corner_radius_ >= 0.0F ? corner_radius_ : std::min(bounds.size.width, bounds.size.height) * 0.2F;
     }
 
-    /// @brief 绘制勾选态盒体：激活色填充，悬停 / 按下乘性加深（保留色相）。
+    /// @brief 绘制勾选态盒体：激活色填充（悬停 / 按下的状态层由 `on_paint` 另行叠加）。
     /// @param p 软件光栅画笔。
     /// @param bounds 盒体矩形（本控件分配到的绘制区域）。
     /// @param radius 圆角半径（dp），由 `corner_radius` 算出。
-    /// @param active 勾选态填充色（`resolve_palette` 已解析，未含 hot 加深）。
-    /// @param hot 是否处于悬停或按下态；true 时按 0.86（悬停）/0.72（按下）乘性加深。
+    /// @param active 勾选态填充基色（`resolve_palette` 已解析，未含状态层）。
+    /// @param hot 是否处于悬停或按下态；基类不再改基色，仅留给子类做自定义反馈。
     /// @note Side-effects: paints
-    virtual auto paint_checked_box(Painter &p, const Rect &bounds, float radius, Color active, bool hot) -> void {
-        if (hot) {
-            active = active.shaded(pressed_ ? 0.72F : 0.86F);
-        }
+    virtual auto paint_checked_box(Painter &p, const Rect &bounds, float radius, Color active,
+                                   [[maybe_unused]] bool hot) -> void {
         p.fill_rounded_rect(bounds, radius, active);
     }
 
@@ -435,6 +434,11 @@ class Checkbox : public LeafWidget {
         const bool hot = enabled_ && (hovered() || pressed_);
         if (value()) {
             paint_checked_box(p, bounds, radius, pal.active, hot);
+            if (hot) {
+                // 悬停/按下是半透明状态层：叠在盒体之上、勾号之下（源覆盖混合）。
+                const auto &roles = inherit_theme(ctx).roles;
+                p.fill_rounded_rect(bounds, radius, pressed_ ? roles.pressed : roles.hover);
+            }
             paint_check_mark(p, bounds, pal.check);
         } else {
             paint_idle_box(p, bounds, radius, pal, hot);
@@ -442,14 +446,12 @@ class Checkbox : public LeafWidget {
     }
 
   private:
-    Binding<bool> binding_;  // 声明须在 value_ 之前：Binding 构造器用 binding_.get() 初始化 value_，
-                             // 成员按声明顺序初始化，故 binding_ 须先就位，否则 binding_.get() 空指针解引用。
-    Reactive<bool> value_;
+    State<bool> value_;  ///< 勾选态来源（自有或与调用方共享）
     std::function<void(bool)> on_changed_;
     std::optional<Color> active_color_;  ///< 勾选态填充色；空 = 跟随主题 primary
-    Color border_color_ = Color{140, 140, 146, 255};  ///< 未勾选边框色
+    std::optional<Color> border_color_;  ///< 未勾选边框色；空 = 跟随主题 outline_variant
     Color check_color_ = colors::AURORA_WHITE;  ///< 勾号颜色
-    float size_ = 20.0F;  ///< 方框边长 dp
+    std::optional<float> size_;  ///< 方框边长 dp；空 = 跟随主题 controls.indicator_size
     float corner_radius_ = -1.0F;  ///< 圆角半径 dp；< 0 自动 = 边长 × 0.2
     float border_width_ = 1.5F;  ///< 未勾选描边宽 dp
     bool enabled_ = true;  ///< 禁用态灰化并忽略点击

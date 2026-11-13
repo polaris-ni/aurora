@@ -64,7 +64,6 @@ class ScopedCatalogGuard {
     MessageCatalog saved_;
 };
 
-#ifdef AURORA_ENABLE_DISPLAY_LIST
 /// 录制-回放探针：把 Painter 录下的 DisplayList 回放到本后端，取出每条 DrawText 的文本。
 /// 走的是生产侧同一条 `DisplayList::replay` 通路（唯一实现），不新增任何观测专用 API。
 class TextCapture final : public rhi::RhiBackend {
@@ -86,7 +85,6 @@ class TextCapture final : public rhi::RhiBackend {
     // NOLINTNEXTLINE(*-non-private-member-variables-in-classes)
     std::vector<Entry> entries;  ///< 按提交顺序记录的文本绘制
 };
-#endif
 
 /// @brief 以给定 locale 构造 `BuildContext`（`ctx.env` 指向栈上 `Environment`，生命周期归调用方）。
 /// @param env 已注入值的环境对象（须比返回的 ctx 长寿）。
@@ -400,7 +398,7 @@ AURORA_TEST_CASE(pointer_click_executes_row_and_mask_click_closes) {
 // ---- 上屏文案 i18n：占位符与空态提示走词条表 ----
 
 AURORA_TEST_CASE(placeholder_defaults_to_lookup_result_or_fallback) {
-    CommandPalette palette;
+    CommandPalette const palette;
     // 未登记译文：恒非空（判据要求），且等于库内兜底串——即改动前的那条字面量。
     AURORA_TEST_CHECK_FALSE(palette.placeholder().empty());
     AURORA_TEST_CHECK_EQ(palette.placeholder(), std::string{CommandPalette::AURORA_DEFAULT_PLACEHOLDER_TEXT});
@@ -416,7 +414,7 @@ AURORA_TEST_CASE(placeholder_defaults_to_lookup_result_or_fallback) {
 }
 
 AURORA_TEST_CASE(placeholder_and_empty_message_follow_context_locale) {
-    ScopedCatalogGuard guard;
+    ScopedCatalogGuard const guard;
     auto &table = default_catalog();
     // 只登记 fr 档：缺省档（en）仍应回退兜底串，故两条译文必须是与兜底串不同的值。
     // key 写字面量而非常量：库侧 key 被改错一位时，登记端不变、查表端落空 → 本用例转红。
@@ -446,7 +444,7 @@ AURORA_TEST_CASE(placeholder_and_empty_message_follow_context_locale) {
 }
 
 AURORA_TEST_CASE(custom_text_overrides_lookup) {
-    ScopedCatalogGuard guard;
+    ScopedCatalogGuard const guard;
     auto &table = default_catalog();
     // 连缺省档都登记上（key 写字面量）：覆盖值若被查表结果盖掉，本用例立刻转红（不是恒真）。
     AURORA_TEST_REQUIRE(table.add(Locale{}, "command_palette.placeholder", "Registered placeholder")
@@ -468,7 +466,7 @@ AURORA_TEST_CASE(custom_text_overrides_lookup) {
 }
 
 AURORA_TEST_CASE(custom_key_still_localizes) {
-    ScopedCatalogGuard guard;
+    ScopedCatalogGuard const guard;
     auto &table = default_catalog();
     // 测试词表基址 902000（文件独立区间）；自定义键同样走「登记名字 → 按 Id 查表」契约。
     static const bool VOCAB_ONCE = [] {
@@ -516,7 +514,7 @@ AURORA_TEST_CASE(custom_key_still_localizes) {
 }
 
 AURORA_TEST_CASE(empty_state_text_is_drawn_from_lookup) {
-    ScopedCatalogGuard guard;
+    ScopedCatalogGuard const guard;
     auto &table = default_catalog();
     const std::string drawn = "Nothing matched at all";
     AURORA_TEST_REQUIRE(
@@ -527,7 +525,6 @@ AURORA_TEST_CASE(empty_state_text_is_drawn_from_lookup) {
     palette.open();
     (void)palette.layout(bounded(640.0F, 480.0F), ctx);
 
-#ifdef AURORA_ENABLE_DISPLAY_LIST
     // 证明查表结果真的进了绘制，而不是只躺在 getter 里。
     Painter p;
     p.begin(648, 488);
@@ -545,9 +542,6 @@ AURORA_TEST_CASE(empty_state_text_is_drawn_from_lookup) {
         }
     }
     AURORA_TEST_CHECK_TRUE(found);
-#else
-    AURORA_TEST_SKIP("AURORA_ENABLE_DISPLAY_LIST is off; draw-record probe unavailable");
-#endif
     palette.close();
 }
 
@@ -598,7 +592,7 @@ AURORA_TEST_CASE(props_round_trip_preserves_i18n_semantics) {
 AURORA_TEST_CASE(command_palette_colors_follow_theme_when_unset) {
     // 两态语义：未显式设色时 resolve 取主题角色；主题翻转 ⇒ 解析值翻转（换肤生效）。
     const BuildContext bare;  // 无注入：inherit_theme 回落 light（与 OS 未表态同口径）
-    CommandPalette b{nullptr};
+    CommandPalette const b{nullptr};
     AURORA_TEST_CHECK(b.resolve_surface_color(bare) == Color::white());  // light surface = white
     AURORA_TEST_CHECK(b.resolve_scrim_color(bare) == Color{0, 0, 0});  // light scrim = black
     AURORA_TEST_CHECK(b.resolve_divider_color(bare) == Color{0xC6, 0xC6, 0xC6});  // light outline_variant

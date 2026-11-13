@@ -373,7 +373,8 @@ AURORA_TEST_CASE(spec_invalid_error_carries_the_reason) {
     AURORA_TEST_REQUIRE_FALSE(result);
     AURORA_TEST_CHECK(result.error().code_enum == au::ErrorCode::CliSpecInvalid);
     AURORA_TEST_CHECK_THAT(result.error().message, m::has_substr("long name"));
-    AURORA_TEST_CHECK(result.error().category == au::ErrorCategory::Validation);
+    AURORA_TEST_CHECK(result.error().domain == au::ErrorDomain::Cli);
+    AURORA_TEST_CHECK(result.error().kind == au::ErrorKind::Invalid);
 }
 
 // ------------------------------------------------------------ 派生文本

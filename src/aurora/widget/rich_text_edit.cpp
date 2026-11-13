@@ -1,5 +1,7 @@
 #include "aurora/widget/rich_text_edit.h"
 
+#include "aurora/theming/theme.h"
+
 // 完整 BuildContext 定义（explicit_text_direction 模板在 on_layout 内实例化，需用到
 // ctx.environment<Directionality>()，前向声明不足以编译）。
 #include <algorithm>
@@ -66,7 +68,7 @@ auto RichTextEdit::describe_static() -> WidgetDescriptor {
                  .json_type = "string"},
                 {.name = "current_color",
                  .type = "Color",
-                 .default_value = "\"theme.on_surface\"",
+                 .default_value = theme_token_expr<&ColorRoles::on_surface>(),
                  .required = false,
                  .note = "Current input color (follows theme on_surface when unset)",
                  .json_type = "array"},
@@ -355,22 +357,32 @@ auto RichTextEdit::handle_move_key(KeyEvent &e, bool shift, std::size_t n) -> bo
         return true;
     }
     if (e.key == static_cast<int>(KeyCode::Home)) {
-        caret_ = 0;
+        // 行内 Home：跳到当前行首；Ctrl+Home：跳到文档头。
+        const bool ctrl = (e.modifiers & ModifierKey::Control) != 0U;  // NOLINT(*-redundant-parentheses)
+        const auto [line_begin, line_end] = line_bounds_for(caret_);
+        (void)line_end;  // 行内 Home 仅需行首
+        const std::size_t target = ctrl ? 0U : line_begin;
+        caret_ = target;
         if (!shift) {
-            sel_start_ = sel_end_ = 0;
+            sel_start_ = sel_end_ = target;
         } else {
-            sel_end_ = 0;
+            sel_end_ = target;
         }
         mark_needs_paint();
         e.is_handled = true;
         return true;
     }
     if (e.key == static_cast<int>(KeyCode::End)) {
-        caret_ = n;
+        // 行内 End：跳到当前行尾；Ctrl+End：跳到文档尾。
+        const bool ctrl = (e.modifiers & ModifierKey::Control) != 0U;  // NOLINT(*-redundant-parentheses)
+        const auto [line_begin, line_end] = line_bounds_for(caret_);
+        (void)line_begin;  // 行内 End 仅需行尾
+        const std::size_t target = ctrl ? n : line_end;
+        caret_ = target;
         if (!shift) {
-            sel_start_ = sel_end_ = n;
+            sel_start_ = sel_end_ = target;
         } else {
-            sel_end_ = n;
+            sel_end_ = target;
         }
         mark_needs_paint();
         e.is_handled = true;
@@ -772,6 +784,20 @@ auto RichTextEdit::cancel_composition() -> void {
     preedit_cursor_ = 0;
     preedit_sel_start_ = 0;
     preedit_sel_end_ = AURORA_NO_PREEDIT_SELECTION;
+}
+
+auto RichTextEdit::line_bounds_for(std::size_t caret) const -> std::pair<std::size_t, std::size_t> {
+    std::size_t doc_idx = 0;
+    for (const auto &line : lines_) {
+        const std::size_t line_begin = doc_idx;
+        const std::size_t line_end = doc_idx + line.chars.size();
+        if (caret >= line_begin && caret <= line_end) {
+            return {line_begin, line_end};
+        }
+        doc_idx = line_end + 1;  // 跳过行尾换行符
+    }
+    // 越界或空文档：回退为整文档区间。
+    return {0U, doc_.size()};
 }
 
 auto RichTextEdit::caret_box_at(const Rect &bounds) const -> std::optional<Rect> {

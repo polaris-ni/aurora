@@ -39,19 +39,21 @@ struct OsHotkeyHandle {
 /// @brief OS 级全局热键注册表：把键组合注册到操作系统，**应用无焦点时也触发**。
 ///
 /// 与 `ShortcutRegistry` 的分工：后者是应用内快捷键（只在窗口有焦点、经事件派发命中），
-/// 本类走 OS 接口（Windows `RegisterHotKey` / `WM_HOTKEY`），焦点在别的进程里同样生效。
+/// 本类走 OS 接口（Windows `RegisterHotKey` / `WM_HOTKEY`；macOS Carbon `RegisterEventHotKey` /
+/// `kEventHotKeyPressed`），焦点在别的进程里同样生效。
 ///
 /// **失败口径**（一律机器可见，不做静默 no-op）：
 ///
 /// | 情形 | 结果 |
 /// |:---|:---|
-/// | 本平台没有全局热键后端（Wayland / GLFW / macOS / WASM 等） | `OsHotkeyRegisterFailed` |
+/// | 本平台没有全局热键后端（Wayland / GLFW / WASM 等） | `OsHotkeyRegisterFailed` |
 /// | 主键无法映射到原生虚拟键，或组合未指定主键 | `OsHotkeyRegisterFailed` |
 /// | 同一组合在本注册表内重复注册 | `OsHotkeyRegisterFailed` |
 /// | OS 侧注册失败（组合已被别的进程抢占 / 无桌面会话） | `OsHotkeyRegisterFailed` |
 ///
-/// **触发时机**：命中不在消息泵内同步执行回调。`WM_HOTKEY` 到达时只把命中的 ID 推进内部
-/// 队列，由 `drain_pending()` 在帧循环里（主线程、栈上没有窗口过程帧）排空并调用动作。
+/// **触发时机**：命中不在消息泵内同步执行回调。平台事件（Windows `WM_HOTKEY` / macOS
+/// `kEventHotKeyPressed`）到达时只把命中的 ID 推进内部队列，由 `drain_pending()` 在帧循环里
+/// （主线程、栈上没有窗口过程帧）排空并调用动作。
 /// 回调可能重建页面 / 触发重排，在消息泵内重入会把布局与绘制切到半途的状态。
 ///
 /// @note Thread: main-thread only（注册、注销、排空必须在建窗与跑消息泵的同一线程）
@@ -59,7 +61,8 @@ struct OsHotkeyHandle {
 /// @note Rebuildable: no
 class OsHotkeyRegistry {
   public:
-    /// @brief 构造：接上本库共享的隐藏消息窗口（平台不支持时为空注册表，`enabled()` 为 false）。
+    /// @brief 构造：接上本库的 OS 事件通道（Windows 共享隐藏消息窗口；macOS 应用事件目标）；
+    /// 平台不支持时为空注册表，`enabled()` 为 false。
     OsHotkeyRegistry();
     /// @brief 禁止拷贝：注册表持有 OS 资源与钩子 ID，拷贝会导致双重注销。
     OsHotkeyRegistry(const OsHotkeyRegistry &) = delete;
@@ -94,7 +97,7 @@ class OsHotkeyRegistry {
     [[nodiscard]] auto drain_pending() const -> std::size_t;
 
     /// @brief 本平台的 OS 级全局热键后端是否可用。
-    /// @return 平台提供全局热键能力时为 `true`（如 Windows）；Wayland / GLFW / macOS 等
+    /// @return 平台提供全局热键能力时为 `true`（Windows / macOS）；Wayland / GLFW / WASM 等
     /// 无后端时为 `false`，此时 `add()` 恒返回错误、`remove()` 恒返回 false。
     [[nodiscard]] static auto enabled() -> bool;
 

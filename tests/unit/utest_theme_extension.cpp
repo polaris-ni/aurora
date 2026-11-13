@@ -69,7 +69,7 @@ AURORA_TEST_CASE(copy_is_deep_value_clone) {
 AURORA_TEST_CASE(move_steals_from_source) {
     ThemeExtensions src;
     src.set(Palette{{4, 5}});
-    ThemeExtensions dst = std::move(src);
+    ThemeExtensions const dst = std::move(src);
     AURORA_TEST_CHECK(dst.get<Palette>() != nullptr);
     // moved-from 态检查本身就是本用例的测试点：源表转空是移动语义的契约。
     AURORA_TEST_CHECK(src.get<Palette>() == nullptr);  // NOLINT(bugprone-use-after-move) 有意检查移出后源态
@@ -84,7 +84,7 @@ AURORA_TEST_CASE(remove_reports_presence) {
 }
 
 AURORA_TEST_CASE(empty_registry_holds_nothing) {
-    ThemeExtensions ext;
+    ThemeExtensions const ext;
     AURORA_TEST_CHECK(ext.get<Palette>() == nullptr);
     AURORA_TEST_CHECK(ext.get<Metric>() == nullptr);
 }

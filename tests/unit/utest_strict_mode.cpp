@@ -1,7 +1,8 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/core/strict_mode.h
 /// 测试说明: 覆盖 StrictMode 开关的默认值与读写、on_strict_failure 的处理器注入（消息透传 +
-/// 可捕获）与默认处理器（std::terminate）死亡行为
+/// 可捕获）与默认处理器（std::terminate）死亡行为，以及 on_contract_violation 同一条注入面
+/// （与 strict 开关无关的进程级契约硬失败）
 
 #include <cstdint>
 #include <stdexcept>
@@ -46,11 +47,28 @@ AURORA_TEST_CASE(injected_handler_receives_message_and_is_catchable) {
     aurora::set_strict_failure_handler(nullptr);
 }
 
+AURORA_TEST_CASE(contract_violation_shares_the_same_injection_point) {
+    // 发起侧硬失败与严格模式共用一枚处理器：契约违规同样先入处理器，处理器抛异常即可被调用方捕获。
+    // 与 strict 开关无关是本条的要害——worker/主线程的 thread_local 开关管不到这条路径。
+    std::string captured;
+    aurora::set_strict_failure_handler([&captured](std::string_view message) -> void {
+        captured.assign(message);
+        throw std::runtime_error{std::string{message}};
+    });
+
+    AURORA_TEST_CHECK_THROW(aurora::on_contract_violation("async-initiation"), std::runtime_error);
+    AURORA_TEST_CHECK_STREQ(captured, "async-initiation");
+
+    aurora::set_strict_failure_handler(nullptr);
+}
+
 AURORA_TEST_CASE(default_handler_terminates_process) {
     // 默认（handler 为空）路径：硬失败必须终止进程（std::terminate），保证 Release/CI 阻断。
     // 防御性复位一次，确保父/子进程都处于默认处理器状态。
     aurora::set_strict_failure_handler(nullptr);
     AURORA_TEST_CHECK_DEATH(aurora::on_strict_failure("strict-default-terminate"), "");
+    // 契约违规走同一枚处理器的缺省分支，故同一死亡口径同样成立。
+    AURORA_TEST_CHECK_DEATH(aurora::on_contract_violation("contract-default-terminate"), "");
 }
 
 }  // namespace aurora::test_cases::utest_strict_mode

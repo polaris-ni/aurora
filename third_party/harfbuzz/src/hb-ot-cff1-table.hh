@@ -28,6 +28,7 @@
 #define HB_OT_CFF1_TABLE_HH
 
 #include "hb-ot-cff-common.hh"
+#include "hb-depend-data.hh"
 #include "hb-subset-cff-common.hh"
 #include "hb-draw.hh"
 #include "hb-paint.hh"
@@ -204,6 +205,7 @@ struct Encoding
 
     case 1:
     {
+      if (unlikely (!c->check_success (code_ranges.length <= 0xFF))) return_trace (false);
       Encoding1 *fmt1 = c->allocate_size<Encoding1> (Encoding1::min_size + Encoding1_Range::static_size * code_ranges.length);
       if (unlikely (!fmt1)) return_trace (false);
       fmt1->nRanges () = code_ranges.length;
@@ -326,7 +328,7 @@ struct Charset0
 
   void collect_glyph_to_sid_map (glyph_to_sid_map_t *mapping, unsigned int num_glyphs) const
   {
-    mapping->resize_dirty  (num_glyphs);
+    if (!mapping->resize_dirty  (num_glyphs)) return;
     for (hb_codepoint_t gid = 1; gid < num_glyphs; gid++)
       mapping->arrayZ[gid] = {sids[gid - 1], gid};
   }
@@ -426,10 +428,12 @@ struct Charset1_2 {
 
   void collect_glyph_to_sid_map (glyph_to_sid_map_t *mapping, unsigned int num_glyphs) const
   {
-    mapping->resize_dirty  (num_glyphs);
+    if (!mapping->resize_dirty  (num_glyphs)) return;
+
     hb_codepoint_t gid = 1;
     if (gid >= num_glyphs)
       return;
+
     for (unsigned i = 0;; i++)
     {
       hb_codepoint_t sid = ranges[i].first;
@@ -492,6 +496,19 @@ typedef Charset_Range<HBUINT16> Charset2_Range;
 
 struct Charset
 {
+  static unsigned int get_format1_range_count (const hb_vector_t<code_pair_t>& sid_ranges)
+  {
+    unsigned int count = 0;
+    for (const auto &_ : sid_ranges)
+      count += _.glyph / 0x100 + 1;
+    return count;
+  }
+
+  static size_t get_size_for_format1 (const hb_vector_t<code_pair_t>& sid_ranges)
+  {
+    return Charset1::get_size_for_ranges (get_format1_range_count (sid_ranges));
+  }
+
   /* serialize a fullset Charset */
   bool serialize (hb_serialize_context_t *c, const Charset &src, unsigned int num_glyphs)
   {
@@ -527,18 +544,25 @@ struct Charset
 
     case 1:
     {
-      Charset1 *fmt1 = c->allocate_size<Charset1> (Charset1::get_size_for_ranges (sid_ranges.length), false);
+      Charset1 *fmt1 = c->allocate_size<Charset1> (get_size_for_format1 (sid_ranges), false);
       if (unlikely (!fmt1)) return_trace (false);
-      hb_codepoint_t all_glyphs = 0;
+      unsigned int j = 0;
       for (unsigned int i = 0; i < sid_ranges.length; i++)
       {
-        auto &_ = sid_ranges.arrayZ[i];
-        all_glyphs |= _.glyph;
-	fmt1->ranges[i].first = _.code;
-	fmt1->ranges[i].nLeft = _.glyph;
+        hb_codepoint_t sid = sid_ranges.arrayZ[i].code;
+        unsigned int left = sid_ranges.arrayZ[i].glyph;
+        for (;;)
+        {
+	  unsigned int chunk = hb_min (left, 0xFFu);
+	  fmt1->ranges[j].first = sid;
+	  fmt1->ranges[j].nLeft = chunk;
+	  j++;
+	  if (left <= 0xFF)
+	    break;
+	  sid += 0x100;
+	  left -= 0x100;
+	}
       }
-      if (unlikely (!(all_glyphs <= 0xFF)))
-	return_trace (false);
     }
     break;
 
@@ -770,8 +794,7 @@ struct cff1_top_dict_opset_t : top_dict_opset_t<cff1_top_dict_val_t>
 {
   static void process_op (op_code_t op, cff1_top_dict_interp_env_t& env, cff1_top_dict_values_t& dictval)
   {
-    cff1_top_dict_val_t  val;
-    val.last_arg_offset = (env.last_offset-1) - dictval.opStart;  /* offset to the last argument */
+    cff1_top_dict_val_t  val {};
 
     switch (op) {
       case OpCode_version:
@@ -815,6 +838,9 @@ struct cff1_top_dict_opset_t : top_dict_opset_t<cff1_top_dict_val_t>
 	dictval.nameSIDs[name_dict_values_t::ordering] = env.argStack.pop_uint ();
 	dictval.nameSIDs[name_dict_values_t::registry] = env.argStack.pop_uint ();
 	env.clear_args ();
+	if (unlikely (env.in_error ())) return;
+	assert (env.last_offset > dictval.opStart);
+	val.last_arg_offset = (env.last_offset - 1) - dictval.opStart;  /* offset to the last argument */
 	break;
 
       case OpCode_Encoding:
@@ -1244,6 +1270,8 @@ struct cff1
     hb_codepoint_t glyph_to_code (hb_codepoint_t glyph,
 				  code_pair_t *glyph_to_sid_cache = nullptr) const
     {
+      if (unlikely (glyph >= num_glyphs)) return CFF_UNDEF_CODE;
+
       if (encoding != &Null (Encoding))
 	return encoding->get_code (glyph);
       else
@@ -1463,8 +1491,8 @@ struct cff1
       return true;
     }
 
-    HB_INTERNAL bool get_extents (hb_font_t *font, hb_codepoint_t glyph, hb_glyph_extents_t *extents) const;
-    HB_INTERNAL bool get_path (hb_font_t *font, hb_codepoint_t glyph, hb_draw_session_t &draw_session) const;
+    HB_INTERNAL bool get_extents (hb_font_t *font, hb_codepoint_t glyph, hb_glyph_extents_t *extents, int64_t *budget = nullptr) const;
+    HB_INTERNAL bool get_path (hb_font_t *font, hb_codepoint_t glyph, hb_draw_session_t &draw_session, int64_t *budget = nullptr) const;
 
     private:
     struct gname_t
@@ -1492,7 +1520,7 @@ struct cff1
 
   struct accelerator_subset_t : accelerator_templ_t<cff1_private_dict_opset_subset_t, cff1_private_dict_values_subset_t>
   {
-    accelerator_subset_t (hb_face_t *face) : SUPER (face) {}
+    HB_INTERNAL accelerator_subset_t (hb_face_t *face);
     ~accelerator_subset_t ()
     {
       if (cff_accelerator)
@@ -1505,6 +1533,7 @@ struct cff1
     HB_INTERNAL bool get_seac_components (hb_codepoint_t glyph, hb_codepoint_t *base, hb_codepoint_t *accent) const;
 
     mutable CFF::cff_subset_accelerator_t* cff_accelerator = nullptr;
+    bool subrs_may_end_in_seac = false;
 
     typedef accelerator_templ_t<cff1_private_dict_opset_subset_t, cff1_private_dict_values_subset_t> SUPER;
   };
@@ -1533,6 +1562,20 @@ struct cff1_accelerator_t : cff1::accelerator_t {
 
 struct cff1_subset_accelerator_t : cff1::accelerator_subset_t {
   cff1_subset_accelerator_t (hb_face_t *face) : cff1::accelerator_subset_t (face) {}
+
+  void depend (hb_depend_data_builder_t *builder) const
+  {
+    if (!is_valid ()) return;
+    for (hb_codepoint_t gid = 0; gid < num_glyphs; gid++)
+    {
+      hb_codepoint_t base_gid, accent_gid;
+      if (get_seac_components (gid, &base_gid, &accent_gid))
+      {
+        builder->add_depend (gid, HB_TAG('C','F','F',' '), base_gid);
+        builder->add_depend (gid, HB_TAG('C','F','F',' '), accent_gid);
+      }
+    }
+  }
 };
 
 } /* namespace OT */

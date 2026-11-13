@@ -47,7 +47,6 @@
 #include "aurora/net/detail/async_io.h"
 #include "aurora/net/detail/ws_handshake.h"
 #include "aurora/net/transport.h"
-#include "framework/aurora_test.h"
 #include "framework/scripted_peer.h"
 
 namespace aurora::test::ws {

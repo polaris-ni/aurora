@@ -25,6 +25,7 @@
 #include "aurora/state/coroutine.h"
 #include "framework/async_wait.h"
 #include "framework/aurora_test.h"
+#include "framework/net_wait.h"
 
 namespace aurora::test_cases::utest_net_http_auth {
 namespace {
@@ -73,16 +74,44 @@ auto challenge(bool proxy, std::vector<AuthMechanism> mechanisms) -> AuthChallen
     return asked;
 }
 
+/// @brief 有界泵到协程收尾的产物：等待结果 + 已收尾的协程帧（取双层 `result()` 用）。
+/// @tparam Task 协程任务类型。
+template <typename Task>
+struct Driven {
+    aurora::test::WaitOutcome outcome;  ///< 收尾事实（预算内命中为真）
+    Task task;  ///< 已收尾的协程帧，供调用方取 `result()`
+};
+
+/// @brief 有界泵到协程收尾：续体经进程级唯一队列回投，等待方须自己领值班并排水。
+///
+/// 内置件从不挂起（帧在创建表达式内即收尾），谓词首判即中，替身只领一拍空租约、不留孤儿项。
+/// 值班租约必须在协程**挂起之前**就位——`co_async` 在 `await_suspend` 时捕获当前值班世代，若挂起
+/// 先于 `MainQueueLoop` 上岗，捕获世代为 0，后台线程回投 `post(resume, 0)` 时仍无值班者即被「打烊
+/// 取消」（`main_queue.h` 落地相拒绝），续体永不被 resume、谓词恒假、超时。故本函数先领值班、再发起任务。
+/// @tparam MakeTask 可调用体，返回待收尾的协程任务；在值班就位后调用，使 `co_async` 捕获到正确世代。
+/// @param subject 等待主题，进超时文本。
+/// @param make_task 构造待收尾协程任务的可调用体。
+/// @return 收尾事实 + 已收尾协程帧。
+template <typename MakeTask>
+[[nodiscard]] auto drive_done(std::string_view subject, MakeTask &&make_task) -> Driven<decltype(make_task())> {
+    const aurora::test::net::MainQueueLoop duty;  // 先上岗，再让协程挂起
+    auto task = std::forward<MakeTask>(make_task)();
+    const auto outcome = aurora::test::net::drive_until(subject, [&task] { return task.is_done(); });
+    return Driven<decltype(make_task())>{.outcome = outcome, .task = std::move(task)};
+}
+
 /// @brief 按双层解包取出已收尾帧的答复。
 ///
 /// 双层是本层的固定形态（`CoroTask<Result<T>>::result()` 求得 `Result<Result<T>>`）：外层是「这帧协程有没有
-/// 跑完」、内层才是「提供方有没有给出凭据」，两枚失败各有各的说法，不在这里合流。
-/// @param task 提供方的协程任务（未收尾时有界等待；谓词先判后睡，故内置件零睡眠）。
+/// 跑完」、内层才是「提供方有没有给出凭据」，两枚失败各有各的说法，不在这里合流。`make_task` 在值班就位后
+/// 调用，确保 `co_async` 捕获到正确值班世代（见 `drive_done` 的时序约束）。
+/// @param make_task 构造提供方协程任务的可调用体（在值班就位后调用）。
 /// @return 答复；任一层失败即致命失败。
-[[nodiscard]] auto settled(const AuthTask &task) -> AuthDecision {
-    const auto outcome = aurora::test::wait_until("auth provider frame", [&task]() -> bool { return task.is_done(); });
-    AURORA_TEST_REQUIRE_MSG(outcome.satisfied, outcome.report());
-    const auto outer = task.result();
+template <typename MakeTask>
+[[nodiscard]] auto settled(MakeTask &&make_task) -> AuthDecision {
+    auto driven = drive_done("auth provider frame", std::forward<MakeTask>(make_task));
+    AURORA_TEST_REQUIRE_MSG(driven.outcome.satisfied, driven.outcome.report());
+    const auto outer = driven.task.result();
     // 消息实参在宏里无条件求值，故 `error()` 只在失败分支取——成功态取它是 `bad_variant_access`。
     AURORA_TEST_REQUIRE_MSG(outer.ok(), outer ? std::string{"outer frame"} : outer.error().message);
     const auto &inner = outer.value();
@@ -90,14 +119,15 @@ auto challenge(bool proxy, std::vector<AuthMechanism> mechanisms) -> AuthChallen
     return inner.value();
 }
 
-/// @brief 问一次内置件并取出答复：内置件从不挂起，故先当场断言帧已收尾。
+/// @brief 问一次内置件并取出答复：内置件从不挂起，故帧在值班就位后当场收尾。
+///
+/// 仍走 `settled` 的双层解包（外层=帧跑完、内层=提供方是否给凭据），只是 `drive_until` 首判即中，
+/// 与原「先断言 done 再取」同义；值班先于任务就位，与派生件的修复同一条时序约束。
 /// @param provider 凭据提供方。
 /// @param asked 对端说出的挑战。
 /// @return 答复；提供方报错时致命失败。
 auto answer(const Authenticator &provider, const AuthChallenge &asked) -> AuthDecision {
-    const auto task = provider.authenticate(asked);
-    AURORA_TEST_REQUIRE_MSG(task.is_done(), "the provider did not finish on the spot");
-    return settled(task);
+    return settled([&provider, &asked]() -> AuthTask { return provider.authenticate(asked); });
 }
 
 /// @brief 派生方：跨挂起点换取令牌，只带走挑战的副本。
@@ -262,18 +292,17 @@ AURORA_TEST_CASE(a_derived_provider_can_await_the_credential_exchange) {
     const auto provider = DeferredTokenAuthenticator{};
 
     // 挑战在帧还在挂起时就越出作用域：协程体只能用让出前抄下的副本，这正是存活期契约要钉的那一条。
-    const auto task = [&provider]() -> AuthTask {
+    const auto answered = settled([&provider]() -> AuthTask {
         const auto asked = challenge(false, {mechanism(AuthScheme::Bearer, "Bearer", "offline")});
         return provider.authenticate(asked);
-    }();
-    const auto answered = settled(task);
+    });
     // 挂起点之后用的仍是 `realm` 与 `proxy` 的副本：两者都早在让出前抄进了协程帧。
     AURORA_TEST_CHECK_EQ(answered.headers.get("Authorization").value_or(std::string{}),
                          std::string{"Bearer offline-7"});
     AURORA_TEST_CHECK(!answered.empty());
 
     const auto proxied = challenge(true, {mechanism(AuthScheme::Bearer, "Bearer", "squid")});
-    const auto back = settled(provider.authenticate(proxied));
+    const auto back = settled([&provider, &proxied]() -> AuthTask { return provider.authenticate(proxied); });
     // 同一枚派生方按挑战类型落位：代理在问就只补 `Proxy-Authorization`。
     AURORA_TEST_CHECK_EQ(back.headers.get("Proxy-Authorization").value_or(std::string{}),
                          std::string{"Bearer squid-7"});
@@ -285,11 +314,9 @@ AURORA_TEST_CASE(a_failed_exchange_propagates_the_provider_error) {
     const auto provider = FailingAuthenticator{};
     const auto asked = challenge(false, {mechanism(AuthScheme::Basic, "Basic", "api")});
 
-    const auto task = provider.authenticate(asked);
-    const auto outcome =
-        aurora::test::wait_until("failing provider frame", [&task]() -> bool { return task.is_done(); });
-    AURORA_TEST_REQUIRE_MSG(outcome.satisfied, outcome.report());
-    const auto outer = task.result();
+    const auto driven = drive_done("failing provider frame", [&] { return provider.authenticate(asked); });
+    AURORA_TEST_REQUIRE_MSG(driven.outcome.satisfied, driven.outcome.report());
+    const auto outer = driven.task.result();
     AURORA_TEST_REQUIRE(outer.ok());  // 外层成功：帧跑完了
     const auto &inner = outer.value();
     // 内层失败：换取没换成，那份错误就是本次交换的结局，本库不拿一份没到手的凭据去重发。

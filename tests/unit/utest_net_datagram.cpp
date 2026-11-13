@@ -20,7 +20,6 @@
 ///    AURORA_TEST_SKIP。
 
 #include <atomic>
-#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -76,7 +75,7 @@ auto pump_until(aurora::app::EventSourceRegistry &registry, const std::function<
 /// @param pred 目标条件。
 /// @return 预算内成立为 true。
 [[maybe_unused]] auto wait_until(const std::function<bool()> &pred) -> bool {
-    return aurora::test::wait_until(AURORA_ENGINE_SUBJECT, pred).satisfied;
+    return aurora::test::net::engine_driven_wait(AURORA_ENGINE_SUBJECT, pred).satisfied;
 }
 
 /// @brief 绑出一枚回环数据报套接字（端口交给系统分配）。

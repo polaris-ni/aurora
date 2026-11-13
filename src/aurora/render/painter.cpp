@@ -145,21 +145,29 @@ auto Painter::rounded_full_x_range(const ClipRegion &cr, int y, float t) -> std:
     const float hw = (right - left) * 0.5F;
     const float hh = (bottom - top) * 0.5F;
     const float py = std::fabs(static_cast<float>(y) - cy) - hh + rad;
-    if (py > -t) {
+    const float rr = rad + t;  // 有效半径：AA 阈值把全覆写边界外扩 |t|
+    if (py > rr) {
         return {0, 0};
     }
     float half_range = NAN;
     if (py <= 0.0F) {
-        half_range = hw;
+        // 直边段：coverage==1 的精确边界是 |px| ≤ hw + t（t=-0.5 时收进半像素），
+        // 用 hw 会把「覆盖率恰为 0.5」的边界列当成全覆写（整数锚点的圆角矩形左沿
+        // 因此硬化一像素）。加 t 后与逐像素 SDF 逐位一致。
+        half_range = hw + t;
     } else {
-        const float disc = (t * t) - (py * py);
+        const float disc = (rr * rr) - (py * py);
         if (disc < 0.0F) {
             return {0, 0};
         }
         half_range = hw - rad + std::sqrt(disc);
     }
+    // 采样点是整数像素坐标：全覆写区为 |x−cx| ≤ half_range，故左界取 ceil
+    // （首个落入区间的像素）、右界取 floor+1（末个落入者再加一，构成半开区间）。
+    // 旧式右界用 ceil(cx+half_range)+1，当锚点非整数时会多含一个采样点——该点覆盖率
+    // 恒小于 1，被误当全覆写会硬化边缘；此处按 floor 精确收口。
     int x0 = static_cast<int>(std::ceil(cx - half_range));
-    int x1 = static_cast<int>(std::ceil(cx + half_range)) + 1;
+    int x1 = static_cast<int>(std::floor(cx + half_range)) + 1;
     x0 = std::max(x0, static_cast<int>(std::ceil(left)));
     x1 = std::min(x1, static_cast<int>(std::floor(right)) + 1);
     return {x0, x1};

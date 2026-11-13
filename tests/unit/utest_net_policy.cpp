@@ -45,7 +45,7 @@ using aurora::testing::require_value;
 /// @return 解析好的 URL。
 [[nodiscard]] auto url(std::string_view text) -> aurora::Url {
     auto parsed = aurora::Url::parse(text);
-    AURORA_TEST_REQUIRE_MSG(bool(parsed), parsed ? std::string{} : parsed.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(parsed), parsed ? std::string{} : parsed.error().message);
     return parsed.value();
 }
 
@@ -71,7 +71,7 @@ struct DefaultPolicyScope {
 /// @return 解析 `http://relay.test:3128` 得到的配置。
 [[nodiscard]] auto proxied_hop() -> ProxyConfig {
     auto parsed = ProxyConfig::parse("http://relay.test:3128");
-    AURORA_TEST_REQUIRE(bool(parsed));
+    AURORA_TEST_REQUIRE(static_cast<bool>(parsed));
     return parsed.value();
 }
 
@@ -92,7 +92,7 @@ AURORA_TEST_CASE(construction_is_the_conservative_default) {
 
     // 缺省构造就把明文全拒：这不是「功能没做完」的占位，而是本库对凭据与用户数据中转的默认回答。
     const auto refused = policy.evaluate(url("http://example.com/"), direct_hop(), TlsContext{});
-    AURORA_TEST_REQUIRE_FALSE(bool(refused));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(refused));
     AURORA_TEST_CHECK_EQ(refused.error().code_enum, aurora::ErrorCode::NetPolicyViolated);
     AURORA_TEST_CHECK(refused.error().message.find("allow_cleartext_hosts") != std::string::npos);
     AURORA_TEST_CHECK(refused.error().message.find("http://example.com") != std::string::npos);
@@ -150,12 +150,13 @@ AURORA_TEST_CASE(no_implicit_loopback_exception) {
     AURORA_TEST_CHECK_FALSE(policy.allows_cleartext_host("localhost"));
 
     const auto refused = policy.evaluate(url("http://127.0.0.1:8080/"), direct_hop(), TlsContext{});
-    AURORA_TEST_REQUIRE_FALSE(bool(refused));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(refused));
     AURORA_TEST_CHECK_EQ(refused.error().code_enum, aurora::ErrorCode::NetPolicyViolated);
 
     // 点名回环即放行：清单就是这条决定的可见记录。
     const NetPolicy listed{.allow_cleartext_hosts = {"127.0.0.1"}};
-    AURORA_TEST_CHECK_TRUE(bool(listed.evaluate(url("http://127.0.0.1:8080/"), direct_hop(), TlsContext{})));
+    AURORA_TEST_CHECK_TRUE(
+        static_cast<bool>(listed.evaluate(url("http://127.0.0.1:8080/"), direct_hop(), TlsContext{})));
 }
 
 AURORA_TEST_CASE(the_tls_floor_refuses_a_context_that_can_talk_below_it) {
@@ -164,7 +165,7 @@ AURORA_TEST_CASE(the_tls_floor_refuses_a_context_that_can_talk_below_it) {
     TlsContext loose;
     loose.min_version = TlsVersion::Tls12;  // 下界比策略低：谈到的版本取决于对端
     const auto refused = policy.evaluate(url("https://example.com/"), direct_hop(), loose);
-    AURORA_TEST_REQUIRE_FALSE(bool(refused));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(refused));
     AURORA_TEST_CHECK_EQ(refused.error().code_enum, aurora::ErrorCode::NetPolicyViolated);
     // detail 同时点名两侧取值：只报「策略拒绝」的现场要让人去猜是哪一枚配置低了。
     AURORA_TEST_CHECK(reason_of(refused).find("TLS 1.2") != std::string::npos);
@@ -175,12 +176,12 @@ AURORA_TEST_CASE(the_tls_floor_refuses_a_context_that_can_talk_below_it) {
     capped.min_version = TlsVersion::Tls13;
     capped.max_version = TlsVersion::Tls11;
     const auto capped_refusal = policy.evaluate(url("https://example.com/"), direct_hop(), capped);
-    AURORA_TEST_REQUIRE_FALSE(bool(capped_refusal));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(capped_refusal));
     AURORA_TEST_CHECK(reason_of(capped_refusal).find("TLS 1.1") != std::string::npos);
 
     TlsContext strict;
     strict.min_version = TlsVersion::Tls13;
-    AURORA_TEST_CHECK_TRUE(bool(policy.evaluate(url("https://example.com/"), direct_hop(), strict)));
+    AURORA_TEST_CHECK_TRUE(static_cast<bool>(policy.evaluate(url("https://example.com/"), direct_hop(), strict)));
 
     // 只判不改：判定之后调用方那份上下文的版本界逐值如故（策略从不替它抬高）。
     AURORA_TEST_CHECK_EQ(loose.min_version, TlsVersion::Tls12);
@@ -193,24 +194,24 @@ AURORA_TEST_CASE(the_tls_floor_is_silent_for_cleartext_targets) {
     TlsContext loose;
     loose.min_version = TlsVersion::Tls10;
     const auto verdict = policy.evaluate(url("http://example.com/"), direct_hop(), loose);
-    AURORA_TEST_CHECK_MSG(bool(verdict), reason_of(verdict));
+    AURORA_TEST_CHECK_MSG(static_cast<bool>(verdict), reason_of(verdict));
 }
 
 AURORA_TEST_CASE(require_proxy_refuses_every_direct_hop) {
     const NetPolicy policy{.allow_cleartext_hosts = {"*"}, .min_tls_version = TlsVersion::Tls12, .require_proxy = true};
 
     const auto refused = policy.evaluate(url("http://example.com/"), direct_hop(), TlsContext{});
-    AURORA_TEST_REQUIRE_FALSE(bool(refused));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(refused));
     AURORA_TEST_CHECK_EQ(refused.error().code_enum, aurora::ErrorCode::NetPolicyViolated);
     AURORA_TEST_CHECK(reason_of(refused).find("proxy") != std::string::npos);
 
     const auto relayed = policy.evaluate(url("http://example.com/"), proxied_hop(), TlsContext{});
-    AURORA_TEST_CHECK_MSG(bool(relayed), reason_of(relayed));
+    AURORA_TEST_CHECK_MSG(static_cast<bool>(relayed), reason_of(relayed));
 
     // 关掉这一维，直连照常放行：被拒的从来只有「要求了代理而本跳直连」这一种组合。
     const NetPolicy relaxed{.allow_cleartext_hosts = {"*"}, .min_tls_version = TlsVersion::Tls12};
     AURORA_TEST_CHECK_FALSE(relaxed.require_proxy);
-    AURORA_TEST_CHECK_TRUE(bool(relaxed.evaluate(url("http://example.com/"), direct_hop(), TlsContext{})));
+    AURORA_TEST_CHECK_TRUE(static_cast<bool>(relaxed.evaluate(url("http://example.com/"), direct_hop(), TlsContext{})));
 }
 
 AURORA_TEST_CASE(the_three_dimensions_are_asked_in_order) {
@@ -220,20 +221,20 @@ AURORA_TEST_CASE(the_three_dimensions_are_asked_in_order) {
     loose.min_version = TlsVersion::Tls10;
 
     const auto cleartext = policy.evaluate(url("http://example.com/"), direct_hop(), loose);
-    AURORA_TEST_REQUIRE_FALSE(bool(cleartext));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(cleartext));
     AURORA_TEST_CHECK(cleartext.error().message.find("allow_cleartext_hosts") != std::string::npos);
 
     // 明文放行后，下一维才是版本下限（同一份策略、同一个上下文，只是 scheme 换成 https）。
     const NetPolicy cleartext_open{.allow_cleartext_hosts = {"example.com"}, .min_tls_version = TlsVersion::Tls13};
     const auto version = cleartext_open.evaluate(url("https://example.com/"), direct_hop(), loose);
-    AURORA_TEST_REQUIRE_FALSE(bool(version));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(version));
     AURORA_TEST_CHECK(version.error().message.find("TLS 1.0") != std::string::npos);
 
     // 版本也谈妥后，最后一维才问代理。
     const NetPolicy need_proxy{
         .allow_cleartext_hosts = {"example.com"}, .min_tls_version = TlsVersion::Tls12, .require_proxy = true};
     const auto routing = need_proxy.evaluate(url("https://example.com/"), direct_hop(), TlsContext{});
-    AURORA_TEST_REQUIRE_FALSE(bool(routing));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(routing));
     AURORA_TEST_CHECK(routing.error().message.find("proxy") != std::string::npos);
 }
 
@@ -241,9 +242,10 @@ AURORA_TEST_CASE(evaluation_does_not_look_at_method_path_or_port) {
     // 判据只看 scheme、主机与本跳决策：路径与端口不参与其中，方法更是压根不给它。
     const NetPolicy policy{.allow_cleartext_hosts = {".example.com"}};
     AURORA_TEST_CHECK_TRUE(
-        bool(policy.evaluate(url("http://a.example.com/deep/path?q=1#f"), direct_hop(), TlsContext{})));
-    AURORA_TEST_CHECK_TRUE(bool(policy.evaluate(url("http://example.com:8080/"), direct_hop(), TlsContext{})));
-    AURORA_TEST_CHECK_FALSE(bool(policy.evaluate(url("http://example.org/"), direct_hop(), TlsContext{})));
+        static_cast<bool>(policy.evaluate(url("http://a.example.com/deep/path?q=1#f"), direct_hop(), TlsContext{})));
+    AURORA_TEST_CHECK_TRUE(
+        static_cast<bool>(policy.evaluate(url("http://example.com:8080/"), direct_hop(), TlsContext{})));
+    AURORA_TEST_CHECK_FALSE(static_cast<bool>(policy.evaluate(url("http://example.org/"), direct_hop(), TlsContext{})));
 }
 
 AURORA_TEST_CASE(the_process_default_round_trips_and_clears) {

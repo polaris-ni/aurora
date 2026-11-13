@@ -1,7 +1,7 @@
 #pragma once
 
 /// @brief 传输引擎的运行期能力声明。
-/// @file net/capabilities.h
+/// @file capabilities.h
 ///
 /// 使用方据本结构**运行期**降级，而不是靠平台宏猜（`SPEC.PLATFORM.ZERO-IFDEF.001` 的同构要求）。
 /// 唯一真值源是 `Engine::instance().capabilities()`：引擎未落地某形态时该位恒为 false，随对应切片
@@ -25,8 +25,6 @@
 /// @endcode
 /// @note Thread: thread-safe（值类型；由 `Engine::capabilities()` 每次按当前运行期状态组装）
 /// @note Side-effects: none
-
-#include <cstdint>
 
 namespace aurora::net {
 

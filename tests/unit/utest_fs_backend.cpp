@@ -84,7 +84,7 @@ namespace m = aurora::testing::matchers;
 AURORA_TEST_CASE(open_explicit_root_reports_open) {
     // 已存在的目录 + 默认选项：后端打开成功且可写。
     const auto dir = fresh_dir("open_ok");
-    aus::FilesystemBackend be{aus::FilesystemOptions{.root = dir}};
+    aus::FilesystemBackend const be{aus::FilesystemOptions{.root = dir}};
     AURORA_TEST_CHECK(be.is_open());
     std::error_code ec;
     std::filesystem::remove_all(dir, ec);
@@ -96,7 +96,7 @@ AURORA_TEST_CASE(auto_create_dir_creates_missing_root) {
     std::error_code ec;
     std::filesystem::remove_all(make_case_dir("auto_create"), ec);
 
-    aus::FilesystemBackend be{aus::FilesystemOptions{.root = dir, .auto_create_dir = true}};
+    aus::FilesystemBackend const be{aus::FilesystemOptions{.root = dir, .auto_create_dir = true}};
     AURORA_TEST_CHECK(be.is_open());
     AURORA_TEST_CHECK(std::filesystem::is_directory(dir));
     std::filesystem::remove_all(make_case_dir("auto_create"), ec);
@@ -300,7 +300,8 @@ AURORA_TEST_CASE(missing_binary_sidecar_reports_corrupt) {
 AURORA_TEST_CASE(cross_process_lock_option_opens) {
     // cross_process_lock=true：advisory 锁获取成功、后端打开、锁文件落在 root 下。
     const auto dir = fresh_dir("lock");
-    aus::FilesystemBackend be{aus::FilesystemOptions{.root = dir, .auto_create_dir = true, .cross_process_lock = true}};
+    aus::FilesystemBackend const be{
+        aus::FilesystemOptions{.root = dir, .auto_create_dir = true, .cross_process_lock = true}};
     AURORA_TEST_REQUIRE(be.is_open());
     AURORA_TEST_CHECK(std::filesystem::exists(dir / "aurora_storage.lock"));
     std::error_code ec;

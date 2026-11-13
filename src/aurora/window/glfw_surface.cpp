@@ -14,7 +14,9 @@
 #elif defined(AURORA_PLATFORM_MACOS)
 // macOS 无 <GL/gl.h>：GL 头位于 OpenGL.framework（GL 1.1 立即模式子集仍在，本文件仅用之）。
 // Apple 自 10.14 起将整个 OpenGL 标记 deprecated，须在包含前定义厂商宏消噪（宏名为厂商规定）。
-#define GL_SILENCE_DEPRECATION 1  // NOLINT(*-identifier-naming)
+// `macro-usage` 建议换 constexpr，但 GLFW 判的是「该宏是否已定义」，常量无法满足，故同厂商命名
+// 一并豁免。
+#define GL_SILENCE_DEPRECATION 1  // NOLINT(*-identifier-naming,*-macro-usage)
 #include <OpenGL/gl.h>
 #else
 #include <GL/gl.h>
@@ -138,6 +140,10 @@ auto glfw_release() -> void {
 }  // namespace
 
 // pimpl：全部 GLFW/OpenGL 状态与回调都在这里；公共头仅持有 unique_ptr<Impl>。
+// 成员按语义分组排布（窗口句柄 → 尺寸/缩放 → 渲染态 → 回调 → 窗口状态位），按对齐重排虽可收回
+// 填充，但打散分组且每窗口仅一份实例，收益不在一次分配的零头里，故不作优化目标（同一处置见
+// src/aurora/window/wayland_surface.cpp 与 include/aurora/window/window.h）。
+// NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding)
 struct GlfwSurface::Impl {
     GLFWwindow *window = nullptr;
     /// 逻辑尺寸（dp）——对外 `size()` 的值，由帧缓冲物理像素除以 `scale` 得。
@@ -151,6 +157,12 @@ struct GlfwSurface::Impl {
     bool active = true;  ///< 是否前台激活（GLFW focus 回调）。初值 true：创建即激活。
     bool maximized = false;  ///< 是否最大化（GLFW maximize 回调）。
     WindowMode mode = WindowMode::Normal;  ///< 当前几何态（变化时上报）。
+    bool fullscreen = false;  ///< 是否处于 borderless 全屏（由 `set_fullscreen` 进入）。
+    int saved_x = 0;  ///< 进入全屏前存档几何（退出还原）。
+    int saved_y = 0;
+    int saved_w = 0;
+    int saved_h = 0;
+    bool saved_decorated = true;  ///< 进入全屏前存档装饰态（退出还原）。
     WindowState state = WindowState::Visible;  ///< 当前可见性状态（变化时上报）。
 
     // ---- GL 资源（OpenGL 1.1 立即模式，仅需纹理对象）----
@@ -189,7 +201,9 @@ struct GlfwSurface::Impl {
     Impl(Impl &&) = delete;
     auto operator=(Impl &&) -> Impl & = delete;
 
-    auto set_window_mode(WindowMode m) const -> void;
+    auto set_window_mode(WindowMode m) -> void;
+    /// @brief 进入/退出 borderless 全屏（幂等）：存/还原几何与装饰态，铺满所在显示器（不改视频模式）。
+    auto set_fullscreen(bool on) -> void;
     auto begin_frame(int width, int height) -> Result<bool>;
     auto painter() -> Painter & { return painter_impl; }
     auto present() -> Result<bool>;
@@ -262,7 +276,7 @@ struct GlfwSurface::Impl {
 
     /// @brief 由最小化/最大化标志重算几何态，仅实际改变时上报。
     auto update_window_mode() -> void {
-        const WindowMode want = compute_window_mode(minimized, maximized, false);
+        const WindowMode want = compute_window_mode(minimized, maximized, fullscreen);
         if (want != mode) {
             mode = want;
             if (window_mode_handler) {
@@ -485,7 +499,7 @@ auto GlfwSurface::set_cursor(CursorShape shape) -> void {
     glfwSetCursor(pimpl_->window, handle);
 }
 
-auto GlfwSurface::Impl::set_window_mode(WindowMode m) const -> void {
+auto GlfwSurface::Impl::set_window_mode(WindowMode m) -> void {
     if (window == nullptr) {
         return;
     }
@@ -502,11 +516,47 @@ auto GlfwSurface::Impl::set_window_mode(WindowMode m) const -> void {
             glfwIconifyWindow(window);
             break;
         case WindowMode::FullScreen:
-            // 本后端无 monitor 切换通道（glfwSetWindowMonitor 会改视频模式，超出本批范围）：
-            // 留痕，不装懂。
-            AURORA_LOG_WARN("window", "GlfwSurface::set_window_mode: FullScreen is not implemented on this backend");
+            // borderless 全屏：经 `set_fullscreen(true)` 铺满所在显示器（存/还原几何 + 装饰态，不改视频模式）。
+            set_fullscreen(true);
             break;
     }
+}
+
+auto GlfwSurface::Impl::set_fullscreen(bool on) -> void {
+    if (window == nullptr) {
+        return;
+    }
+    if (on == fullscreen) {
+        return;  // 幂等：重复进入/退出不冗余动作。
+    }
+    if (on) {
+        // 存档当前几何与装饰态，供退出还原。
+        glfwGetWindowPos(window, &saved_x, &saved_y);
+        glfwGetWindowSize(window, &saved_w, &saved_h);
+        saved_decorated = (glfwGetWindowAttrib(window, GLFW_DECORATED) == GLFW_TRUE);
+        // 取窗口所在显示器（无则回退主显示器）的物理视口，铺满整屏（含任务栏带，与 Win32 borderless 同口径）。
+        GLFWmonitor *mon = glfwGetWindowMonitor(window);
+        if (mon == nullptr) {
+            mon = glfwGetPrimaryMonitor();
+        }
+        int mx = 0;
+        int my = 0;
+        const GLFWvidmode *vm = (mon != nullptr) ? glfwGetVideoMode(mon) : nullptr;
+        if (mon != nullptr) {
+            glfwGetMonitorPos(mon, &mx, &my);
+        }
+        const int mw = (vm != nullptr) ? vm->width : saved_w;
+        const int mh = (vm != nullptr) ? vm->height : saved_h;
+        glfwSetWindowAttrib(window, GLFW_DECORATED, GLFW_FALSE);
+        glfwSetWindowPos(window, mx, my);
+        glfwSetWindowSize(window, mw, mh);
+    } else {
+        glfwSetWindowAttrib(window, GLFW_DECORATED, saved_decorated ? GLFW_TRUE : GLFW_FALSE);
+        glfwSetWindowPos(window, saved_x, saved_y);
+        glfwSetWindowSize(window, saved_w, saved_h);
+    }
+    fullscreen = on;
+    update_window_mode();  // 按 fullscreen 标志重算并上报几何态（请求语义，与 Wayland configure 同构）。
 }
 
 auto GlfwSurface::Impl::begin_frame(int width, int height) -> Result<bool> {
@@ -789,6 +839,26 @@ auto GlfwSurface::set_window_mode_handler(WindowModeHandler h) -> void { pimpl_-
 auto GlfwSurface::set_window_mode(WindowMode m) -> void {
     if (pimpl_ != nullptr) {
         pimpl_->set_window_mode(m);
+    }
+}
+
+auto GlfwSurface::set_fullscreen(bool on) -> void {
+    if (pimpl_ != nullptr) {
+        pimpl_->set_fullscreen(on);
+    }
+}
+
+auto GlfwSurface::minimize() -> void {
+    if (pimpl_ != nullptr) {
+        pimpl_->set_window_mode(WindowMode::Minimized);
+    }
+}
+
+auto GlfwSurface::toggle_maximize() -> void {
+    if (pimpl_ != nullptr) {
+        // 按当前 maximized 标志算目标态（Normal <-> Maximized），与 Impl::set_window_mode 的
+        // glfwMaximizeWindow / glfwRestoreWindow 请求语义一致；回调回来经 update_window_mode() 定档。
+        pimpl_->set_window_mode(pimpl_->maximized ? WindowMode::Normal : WindowMode::Maximized);
     }
 }
 auto GlfwSurface::set_scale_change_handler(ScaleChangeHandler h) -> void {

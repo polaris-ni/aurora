@@ -82,7 +82,9 @@ struct FlexLayoutContext {
 
   public:
     /// @brief 按主轴/交叉轴写入两轴的供给性质（loose = 按需剩余空间，非既定槽位）。
+    /// @param cc 待写入的约束对象。
     /// @param main_loose 主轴性质；交叉轴沿用父容器同轴性质（父级本就宽松时，本容器的该轴也不是槽位）。
+    /// @param horizontal 主轴是否为水平方向（决定主轴/交叉轴到宽高的映射）。
     auto apply_supply(Constraints &cc, bool main_loose, bool horizontal) const -> void {
         const bool cross_loose = horizontal ? parent.loose_height : parent.loose_width;
         cc.loose_width = horizontal ? main_loose : cross_loose;

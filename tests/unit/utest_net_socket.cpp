@@ -12,7 +12,9 @@
 ///           **地址族无关面**（`connect(Endpoint)` / `bind(Endpoint, backlog)` / `peer_endpoint()`：
 ///           不合用的端点在发起系统调用前拒、IPv6 作用域号只认十进制、`[::1]` 往返与回环判定、
 ///           双栈监听口上的 `::ffff:127.0.0.1` 内嵌形态仍认回环；无 IPv6 或 v6-only 主机按环境缺失
-///           跳过）。
+///           跳过）、**监听口并发停机**（多线程 `close()` 恒收敛到无效态、关闭后两条读侧入口按失败
+///           口径回报而不把 -1 交给系统调用、`close()` 唤醒另一线程阻塞中的等待，且新建监听口仍
+///           能完成一次回环接受）。
 ///           全程同线程即可（TCP 握手由内核 backlog 完成，无需 accept 线程）；唯一例外是
 ///           1MiB+7 往返用例的读侧住独立线程——Windows 回环无读者时仅缓冲约 320KiB，
 ///           单线程先写后读必死锁（Linux 缓冲自动调大无此限制）。端口一律 0 =
@@ -22,6 +24,7 @@
 ///    被 #ifdef 摘掉的声明在另一种构建里必然单边失踪）；wasm 无 BSD socket 语义，用例体退化
 ///    为 AURORA_TEST_SKIP。
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <span>
@@ -76,7 +79,7 @@ AURORA_TEST_CASE(listen_reports_assigned_port) {
     moved.close();  // 幂等
     AURORA_TEST_CHECK_FALSE(moved.is_valid());
 
-    aurora::net::blocking::Listener placeholder;
+    aurora::net::blocking::Listener const placeholder;
     AURORA_TEST_CHECK_FALSE(placeholder.is_valid());
     AURORA_TEST_CHECK_EQ(placeholder.port(), std::uint16_t{0});
 #endif
@@ -107,7 +110,7 @@ AURORA_TEST_CASE(wait_readable_polls_then_accepts) {
     AURORA_TEST_CHECK_TRUE(peer.value().is_loopback_peer());
 
     // 无效句柄的查询面：默认构造 StreamSocket 既非回环对端也不报错路径乱入。
-    aurora::net::blocking::StreamSocket invalid;
+    aurora::net::blocking::StreamSocket const invalid;
     AURORA_TEST_CHECK_FALSE(invalid.is_loopback_peer());
 #endif
 }
@@ -276,10 +279,10 @@ AURORA_TEST_CASE(nested_sessions_stay_ok) {
 #ifdef AURORA_PLATFORM_WASM
     AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
 #else
-    aurora::net::detail::Session outer;
+    aurora::net::detail::Session const outer;
     AURORA_TEST_CHECK_TRUE(outer.ok());
     {
-        aurora::net::detail::Session inner;
+        aurora::net::detail::Session const inner;
         AURORA_TEST_CHECK_TRUE(inner.ok());
         AURORA_TEST_CHECK_TRUE(outer.ok());
     }  // inner 析构：引用计数尚未归零
@@ -314,19 +317,19 @@ AURORA_TEST_CASE(connect_rejects_unusable_endpoints) {
     AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
 #else
     const auto zero_port = aurora::net::blocking::StreamSocket::connect(aurora::net::Endpoint::loopback(0));
-    AURORA_TEST_REQUIRE_FALSE(bool(zero_port));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(zero_port));
     AURORA_TEST_CHECK_EQ(zero_port.error().code_enum, ErrorCode::NetEndpointInvalid);
 
     // 路径文本只是「本机 IPC 族」的载体，本用例不创建也不写任何文件（connect 在装配地址前就拒）。
     auto local = aurora::net::Endpoint::local("test_temp/aurora-net-probe.sock");
-    AURORA_TEST_REQUIRE(bool(local));
+    AURORA_TEST_REQUIRE(static_cast<bool>(local));
     const auto ipc = aurora::net::blocking::StreamSocket::connect(local.value());
-    AURORA_TEST_REQUIRE_FALSE(bool(ipc));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(ipc));
     AURORA_TEST_CHECK_EQ(ipc.error().code_enum, ErrorCode::NetEndpointInvalid);
 
     const aurora::net::Endpoint placeholder;
     const auto invalid = aurora::net::blocking::StreamSocket::connect(placeholder);
-    AURORA_TEST_REQUIRE_FALSE(bool(invalid));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(invalid));
     AURORA_TEST_CHECK_EQ(invalid.error().code_enum, ErrorCode::NetEndpointInvalid);
 #endif
 }
@@ -339,13 +342,13 @@ AURORA_TEST_CASE(ipv6_zone_scope_rules) {
     AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
 #else
     auto named = aurora::net::Endpoint::from_ip("fe80::1%eth0", 80);
-    AURORA_TEST_REQUIRE(bool(named));
+    AURORA_TEST_REQUIRE(static_cast<bool>(named));
     const auto rejected = aurora::net::blocking::StreamSocket::connect(named.value());
-    AURORA_TEST_REQUIRE_FALSE(bool(rejected));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(rejected));
     AURORA_TEST_CHECK_EQ(rejected.error().code_enum, ErrorCode::NetEndpointInvalid);
 
     auto numeric = aurora::net::Endpoint::from_ip("fe80::1%1", 80);
-    AURORA_TEST_REQUIRE(bool(numeric));
+    AURORA_TEST_REQUIRE(static_cast<bool>(numeric));
     const auto attempted = aurora::net::blocking::StreamSocket::connect(numeric.value());
     if (!attempted.ok()) {
         // 只核「已通过端点校验」：链路上的不可达因机器而异，不在本用例的判据里。
@@ -369,25 +372,25 @@ AURORA_TEST_CASE(ipv6_loopback_roundtrip) {
     AURORA_TEST_REQUIRE_NE(listener.port(), std::uint16_t{0});
 
     auto dialed = aurora::net::blocking::StreamSocket::connect(aurora::net::Endpoint::loopback_v6(listener.port()));
-    AURORA_TEST_REQUIRE(bool(dialed));
+    AURORA_TEST_REQUIRE(static_cast<bool>(dialed));
     auto client = std::move(dialed.value());
 
     const std::string_view payload = "dual-stack";
     AURORA_TEST_REQUIRE(client.write_all(payload).ok());
     auto peer = listener.accept();
-    AURORA_TEST_REQUIRE(bool(peer));
+    AURORA_TEST_REQUIRE(static_cast<bool>(peer));
     auto server = std::move(peer.value());
 
     char buffer[16]{};
     const auto read = server.read_some(std::span<char>(buffer, payload.size()));
-    AURORA_TEST_REQUIRE(bool(read));
+    AURORA_TEST_REQUIRE(static_cast<bool>(read));
     AURORA_TEST_CHECK_EQ(read.value(), payload.size());
     AURORA_TEST_CHECK_EQ(std::string_view(buffer, payload.size()), payload);
     AURORA_TEST_CHECK_TRUE(server.is_loopback_peer());
     AURORA_TEST_CHECK_TRUE(client.is_loopback_peer());
 
     auto client_peer = client.peer_endpoint();
-    AURORA_TEST_REQUIRE(bool(client_peer));
+    AURORA_TEST_REQUIRE(static_cast<bool>(client_peer));
     AURORA_TEST_CHECK_EQ(client_peer.value().family(), aurora::net::AddressFamily::IPv6);
     AURORA_TEST_CHECK_EQ(client_peer.value().port(), listener.port());
     AURORA_TEST_CHECK(client_peer.value().is_loopback());
@@ -412,16 +415,84 @@ AURORA_TEST_CASE(dual_stack_listener_still_recognizes_loopback) {
     }
     auto client = std::move(dialed.value());
     auto peer = listener.accept();
-    AURORA_TEST_REQUIRE(bool(peer));
+    AURORA_TEST_REQUIRE(static_cast<bool>(peer));
     auto server = std::move(peer.value());
 
     AURORA_TEST_CHECK_TRUE(server.is_loopback_peer());
     auto endpoint = server.peer_endpoint();
-    AURORA_TEST_REQUIRE(bool(endpoint));
+    AURORA_TEST_REQUIRE(static_cast<bool>(endpoint));
     AURORA_TEST_CHECK_TRUE(endpoint.value().is_loopback());
     // 两族之一：内嵌形态按 IPv6 回报，独立 v4 通路按 IPv4 回报，二者都算认出来了。
     const auto family = endpoint.value().family();
     AURORA_TEST_CHECK_TRUE(family == aurora::net::AddressFamily::IPv4 || family == aurora::net::AddressFamily::IPv6);
+#endif
+}
+
+AURORA_TEST_CASE(concurrent_close_is_idempotent_and_closes_both_read_sides) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#else
+    auto listener = make_listener();
+    AURORA_TEST_REQUIRE_TRUE(listener.is_valid());
+    AURORA_TEST_REQUIRE_NE(listener.port(), std::uint16_t{0});
+
+    // 两个工作线程与用例线程同时进入 close：只有拿到真实句柄快照的那一方执行 shutdown + close。
+    std::thread first([&listener]() -> void { listener.close(); });
+    std::thread second([&listener]() -> void { listener.close(); });
+    listener.close();
+    first.join();
+    second.join();
+
+    AURORA_TEST_CHECK_FALSE(listener.is_valid());
+    AURORA_TEST_CHECK_EQ(listener.port(), std::uint16_t{0});
+    AURORA_TEST_CHECK_EQ(listener.native_handle(), std::intptr_t{-1});
+
+    // 关闭后两条读侧入口按既有失败口径回报：无效句柄绝不落到 FD_SET / accept 的系统调用里。
+    const auto ready = listener.wait_readable(AURORA_NET_POLL_TIMEOUT);
+    AURORA_TEST_CHECK_FALSE(ready.ok());
+    const auto accepted = listener.accept();
+    AURORA_TEST_CHECK_FALSE(accepted.ok());
+
+    // 对照组：并发关闭没有误伤系统后续分配的句柄，新监听口仍能完成一次真实的回环接受。
+    auto replacement = make_listener();
+    auto client = aurora::net::blocking::StreamSocket::connect_loopback(replacement.port());
+    AURORA_TEST_REQUIRE(client.ok());
+    const auto pending = replacement.wait_readable(AURORA_NET_POLL_TIMEOUT);
+    AURORA_TEST_REQUIRE(pending.ok());
+    AURORA_TEST_CHECK_TRUE(pending.value());
+    auto peer = replacement.accept();
+    AURORA_TEST_REQUIRE(peer.ok());
+    AURORA_TEST_CHECK_TRUE(peer.value().is_loopback_peer());
+#endif
+}
+
+AURORA_TEST_CASE(close_wakes_a_waiter_on_another_thread) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#else
+    auto listener = make_listener();
+    std::atomic<bool> entered{false};
+    aurora::Result<bool> observed{false};
+
+    const auto started = std::chrono::steady_clock::now();
+    std::thread waiter([&listener, &entered, &observed]() -> void {
+        entered.store(true);
+        // 线程内不做断言（框架计数器非线程安全）：读侧结局由出参带回用例线程核账。
+        observed = listener.wait_readable(std::chrono::milliseconds{2000});
+    });
+    while (!entered.load()) {
+        std::this_thread::yield();
+    }
+    listener.close();
+    waiter.join();
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+
+    AURORA_TEST_CHECK_TRUE(entered.load());
+    AURORA_TEST_CHECK_FALSE(listener.is_valid());
+    // 判据钉的是「被 close 唤醒」而非「等满自己的 2 秒窗口」：没被唤醒就要挂到窗口尽头。
+    AURORA_TEST_CHECK_TRUE(elapsed < std::chrono::milliseconds{1000});
+    // 唤醒后的合法形态只有两种：select 报可读，或观察到一个失效监听口而按失败口径回报。
+    AURORA_TEST_CHECK_TRUE(!observed.ok() || observed.value());
 #endif
 }
 

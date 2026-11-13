@@ -129,7 +129,7 @@ max_cross = max(max_cross, size_i.cross)
 
 ### 3.4.1 容器轴向归属
 
-`Flex::direction` 不在 `Column` / `Row` 的可配置面里：轴向由控件类型固定（`Column` 恒纵向、`Row` 恒横向），既不序列化也不进自描述。经 `ColumnProps{ .flex = Flex{...} }` 传入的字面量常是部分指定（如 `Flex{.main_axis = Center}`），未写出的 `direction` 会落到 `Flex` 的默认值 `Row`，构造时按容器自身轴向归一，避免 `Column` 被静默换成横向布局器；本轴家族的 `Reverse` 取值仍生效（`Column` 收 `RowReverse` 归一为 `ColumnReverse`）。反向排布的通用语义见 §3.7。
+`Flex::direction` 不在 `Column` / `Row` 的属性面里：轴向由控件类型固定（`Column` 恒纵向、`Row` 恒横向），既不序列化也不进自描述。属性对象只剩 `main_axis_alignment` / `cross_axis_alignment` / `main_axis_size` / `gap` 四行，`Flex` 由容器在布局期按读件现组（轴向按自身类型落 `Column` / `Row`）；**反向排布是控件级开关** `set_reverse(bool = true)` / `reverse()`，同样不进属性表、不序列化，落 `ColumnReverse` / `RowReverse`。反向排布的通用语义见 §3.7。
 
 ### 3.5 容器尺寸
 
@@ -208,12 +208,12 @@ origin.main = container_main - (origin.main + size.main)
 
 ### 4.1 参数
 
-```cpp
-struct GridProps {
-    int   columns;  // 列数（默认 1）
-    float gap;      // 单元格间距（默认 4px）
-};
+```text
+columns: int   = 1     // columns_row()，常量档，下界 1
+gap:     float = 4.0   // gap_row()，常量档，下界 0（px）
 ```
+
+两枚参数即 `widget/grid.h` 里 `GridProps` 权威表的两行（属性单一声明形态，见 `04-widget.md` §2.5）；布局入口按 `max(1, columns)` 保底，负间距由反序列化通道按描述不变量拒写。
 
 ### 4.2 算法
 
@@ -342,14 +342,11 @@ for col in 0..cols:
 - `LayoutEngine` / `LayoutBox`（`layout/layout_engine.h`、`layout/layout_box.h`）：静态布局入口。`LayoutEngine::layout(Widget& root, const Constraints&, const BuildContext& = {})` 驱动 `Widget::layout` 两阶段布局，结果写入各 widget 的 `bounds` / `size`；`LayoutEngine::layout_to_box(Node& root, const Constraints&, ...)` 布局后一次性产出 `LayoutBox` 树（每盒含 `rect` + `children`；`constraints` 字段预留，当前不入盒），供命中测试、调试快照与无头渲染复用；`LayoutEngine::build_box(const Node&)` 仅从已布局的 `Node` 树收集几何，不施加约束。
 
 ```cpp
-au::Text a{ au::TextProps{ .content = "A" } };
-au::Text b{ au::TextProps{ .content = "B" } };
+au::Text a{ au::TextProps().set_content("A") };
+au::Text b{ au::TextProps().set_content("B") };
 b.width(au::px(120)); // 宽度意图走 Widget::width(Length)，返回 Widget&（引用，供原地链式），不可 std::move 其结果塞进 Node
-auto row = au::Row(au::RowProps{
-    // 指定初始化器须按成员声明序：RowProps 中 children 在前、gap 在后
-    .children = { au::Node{ std::move(a) }, au::Node{ std::move(b) } },
-    .gap = 8.0F,
-});
+auto row = au::Row({ au::Node{ std::move(a) }, au::Node{ std::move(b) } },
+                   au::RowProps().set_gap(8.0F));  // 子节点是构造首参，属性走链式写件
 row.modifier = au::Modifier{}.padding(8);
 ```
 
@@ -357,7 +354,7 @@ row.modifier = au::Modifier{}.padding(8);
 
 ### 7.2 Column / Row 的对齐 API
 
-`Column` / `Row` 通过挂载的 `Flex` 承载 `main_axis`、`cross_axis` 与 `main_axis_size`，并提供链式 setter：
+`Column` / `Row` 的四行属性（`main_axis_alignment` / `cross_axis_alignment` / `main_axis_size` / `gap`）承载 `Flex` 的全部可配置面，布局期由容器现组本地 `Flex` 交给 `FlexLayouter`；控件面保留链式 setter（返回控件引用）：
 
 ```cpp
 au::Column{}
@@ -367,7 +364,7 @@ au::Column{}
     .set_gap(8.0F);
 ```
 
-三者均为**固有属性**，随 `Column` / `Row` 序列化（键 `main_axis_alignment` / `cross_axis_alignment` / `main_axis_size` / `gap`），可经 `to_json` / `from_json` / `diff` / `apply_patch` 往返。
+四行均为**属性表内的固有属性**，随 `Column` / `Row` 序列化（键 `main_axis_alignment` / `cross_axis_alignment` / `main_axis_size` / `gap`），可经 `to_json` / `from_json` / `diff` / `apply_patch` 往返；反向排布 `set_reverse` 是控件级开关、不序列化（§3.4.1）。
 
 ### 7.3 共享枚举
 
@@ -391,7 +388,7 @@ au::Column{}
 控件可配置性由两层构成：
 
 - **固有属性**（`XxxProps` 字段）描述控件自身身份，随控件序列化、可被 Inspector 枚举。
-- **`Modifier`** 承载跨切面、可叠加、可 `Reactive` 变化的通用装饰（padding / background / border / align / opacity / rotate / scale / transform / clickable）。
+- **`Modifier`** 承载跨切面、可叠加、可响应式换源的通用装饰（padding / background / border / align / opacity / rotate / scale / transform / clickable）；链本身是只读句柄 `ReadOnlyState<Modifier>`，换源走 `Widget::set_modifier_source(...)`。
 
 两者重叠的能力（如 `padding` / `corner_radius` / `background_color`）以**控件固有属性优先**；`Modifier` 同类项保留用于「给任意控件套一层」的跨切面场景。绘制时 `Modifier` 在外、固有属性在内。
 
@@ -508,6 +505,14 @@ au::Column{}
 
 **默认字体**是内置 Noto Sans（OFL），引擎首次使用时自动注册为 `""` / `"sans-serif"` / `"Noto Sans"` / `"default"`，含 Headless，保证跨机文本渲染逐位确定。缺字按候选 `FT_Face` 链回退（含系统 CJK 字体）避免豆腐块；无任何可用字体文件时回退内置 `BitmapFont` 保底。
 
+**系统保底链的平台清单**（`register_system_fallbacks()`，库内部、经 `add_default_face()` 追加在内置 Noto Sans **之后**，故纯拉丁度量逐位不变、只补齐此前无面可落的 CJK 请求）：Windows 8 个文件名（msyh / simsun / MSGOTHIC 等）、Linux 10 个路径、**macOS 9 个路径**（`Helvetica.ttc` / `LucidaGrande.ttc` / `Supplemental/Songti.ttc` / `Hiragino Sans GB.ttc` / `PingFang.ttc` / `AquaKana.ttc` / `AppleSDGothicNeo.ttc` / 两处 `Arial Unicode`）——清单形态三平台一致（显式候选、不存在者跳过），不引 CoreText、不依赖发现层成败。本批实测（macOS 26.7.2 虚拟机）：除 `PingFang.ttc` 缺席外均在位，默认链首仍是 Noto Sans，`中` / `あ` 经全链 `FT_Get_Char_Index` 取得真实字形索引；该条由 `tests/unit/utest_font_discovery.cpp` 的平台门控用例钉住（非 Apple 构建记 SKIP，本机无 CJK 字体文件时也如实 SKIP 而非假绿）。
+
+**主题风格档带来的族名偏好**（口径详见 [`07-environment-modifier.md`](07-environment-modifier.md) §5.1）：四套平台风格在标定字阶时整组替换 `Font::family`——Windows 档 `Segoe UI Variable Text`、macOS 档 `SF Pro Text`、GNOME 档 `Adwaita Sans`、KDE 档 `Noto Sans`；Material 档不动族名，十五档保持默认键 `sans-serif`。**族名是偏好而非保证**：`resolve_faces` 先在注册表命中（内置 Noto Sans 的四个键即在此层），未命中才按系统字体目录懒加载该族，仍解析不到则落默认链，**全程不报错**。
+
+对 §10.1 的确定性渲染需求（SPEC.TEST.RENDER.DETERMINISTIC-SNAPSHOT.001）的影响分两面。**无头 / CI / 未装该系统字体的机器**上四档的族名一律解析到同一份内置 Noto Sans，字面与度量逐位不变——风格档换的是取值表，不是字形来源，golden 基线因此与风格轴正交（字号仍随档变，但那是同一字面下的确定缩放）。**真机装了该系统字体**时，文本度量随平台所装字体而异，这是「观感跟随平台」的预期结果而非漂移；两机的字体确定性差值属仍在测项，不作为本节的既成承诺。
+
+由这两面得出一条测试纪律：**做绝对宽度或像素断言的用例，须先钉 Material 档**（`Theme::from_style(ThemeStyle::Material, …)` / `set_theme_style(Material)`），或经 `register_font` 注入同一份 TTF 把字面锁死——与 [`07-environment-modifier.md`](07-environment-modifier.md) §5.2 的既有测试约定同源，否则同一份用例在 Windows 构建与 Linux 构建上判据漂移。KDE 档恰好把族名写成 `Noto Sans`，而注册表命中优先于目录懒加载，故它恒取内置面，**不**随系统所装 Noto Sans 的版本变化——这不是巧合，是「内置键先命中」这条解析顺序的直接推论。
+
 **抗锯齿**：`enum class TextAAMode { Supersample, ClearType }` 加进程级 `set_text_aa_mode(mode)` / `text_aa_mode()`，默认 `Supersample`。`Supersample` 用 `FT_RENDER_MODE_NORMAL` 输出 A8 灰度覆盖度，与背景无关；`ClearType` 用 `FT_RENDER_MODE_LCD` 输出 3× 水平 RGB 子像素覆盖度，经 `Painter::blend_subpixel` 逐通道合成，**仅当文本不透明时启用**，半透明或字体不可用时自动回退 `Supersample`。
 
 **光栅状态世代**：`FontEngine::raster_generation()` 返回全局计数。三个字体注入接口（`set_default_font` / `register_font` / `register_font_from_memory`，换用不同字面同样改变字形光栅结果）**无条件**自增它；`set_text_aa_mode` 仅在写入值真正变化时自增（同值写入短路返回）。控件的 Display List 与离屏层缓存在录制/生成那一刻固化了 AA 模式与字面，而 `Widget::mark_needs_paint()` 只沿父链向上传播失效、不触及后代缓存——故控件必须把本世代纳入缓存命中条件（`Widget::paint` 已内置），否则切换后后代仍回放旧光栅，表现为「切换瞬间无变化、过一会儿才随无关失效零星生效」。字形图集键已含 AA 模式与 `px`，世代失效只触发重录、不产生脏条目。
@@ -606,12 +611,12 @@ au::Column{}
 >
 > | 档位 | 语义 | 各宿主落地 |
 > |:---|:---|:---|
-> | `Normal` | 正常显示并激活（默认，行为与既往一致） | Win32 `ShowWindow(SW_SHOW)`；GLFW 默认 hint；X11 / Wayland 映射（map）窗口 |
-> | `NoActivate` | 显示但不激活：不抢焦点、不打断用户当前前台窗口 | Win32 `ShowWindow(SW_SHOWNA)`；GLFW `GLFW_VISIBLE=TRUE` + `GLFW_FOCUS_ON_SHOW=FALSE`；**X11 / Wayland 无对应请求**（聚焦由 WM / 合成器策略决定，Aurora 从不主动 `XSetInputFocus`），故与 `Normal` 同路 |
-> | `Hidden` | 不显示：窗口不进入用户视野，但渲染与像素读回照常工作 | Win32 `ShowWindow(SW_HIDE)`（窗口本就以无 `WS_VISIBLE` 的 `WS_OVERLAPPEDWINDOW` 创建）；GLFW `GLFW_VISIBLE=FALSE`；X11 不调 `XMapWindow`；Wayland `present()` 不 attach / commit 缓冲（构造期那次「无缓冲 commit 宣告表面存在」必须保留——xdg-shell 要求先收 configure 才能 attach） |
+> | `Normal` | 正常显示并激活（默认，行为与既往一致） | Win32 `ShowWindow(SW_SHOW)`；GLFW 默认 hint；X11 / Wayland 映射（map）窗口；macOS `makeKeyAndOrderFront:` + 应用激活 |
+> | `NoActivate` | 显示但不激活：不抢焦点、不打断用户当前前台窗口 | Win32 `ShowWindow(SW_SHOWNA)`；GLFW `GLFW_VISIBLE=TRUE` + `GLFW_FOCUS_ON_SHOW=FALSE`；**X11 / Wayland 无对应请求**（聚焦由 WM / 合成器策略决定，Aurora 从不主动 `XSetInputFocus`），故与 `Normal` 同路；macOS `orderFrontRegardless` |
+> | `Hidden` | 不显示：窗口不进入用户视野，但渲染与像素读回照常工作 | Win32 `ShowWindow(SW_HIDE)`（窗口本就以无 `WS_VISIBLE` 的 `WS_OVERLAPPEDWINDOW` 创建）；GLFW `GLFW_VISIBLE=FALSE`；X11 不调 `XMapWindow`；Wayland `present()` 不 attach / commit 缓冲（构造期那次「无缓冲 commit 宣告表面存在」必须保留——xdg-shell 要求先收 configure 才能 attach）；macOS 不调 `orderFront`，窗口保持离屏 |
 >
 > 枚举器显式赋值且**无条件出现**，不随 `AURORA_BACKEND_*` 宏裁剪（稳定性契约同 `SurfaceKind`）。
-> `MacOSSurface`（骨架）与 `WasmSurface`（无窗口可见性概念，浏览器自管）不落地。E2E 驱动内核
+> `WasmSurface`（无窗口可见性概念，浏览器自管）不落地；其余后端均按下表落地。E2E 驱动内核
 > 的 `WindowSpec::visibility` 默认 `Hidden`（见 [`08-tooling.md`](08-tooling.md) §8.2），与公共
 > `WindowOptions::visibility` 的默认 `Normal` 刻意不同；各宿主参数由建窗时下发（而非「先可见后
 > 隐藏」），避免一帧闪烁。
@@ -691,7 +696,7 @@ au::Column{}
 | `GlfwSurface` | GLFW/OpenGL 3.3 兼容剖面 | `AURORA_BACKEND_GLFW` |
 | `X11Surface` | X11/Xlib 原生窗口，仅 Linux 桌面 | `AURORA_BACKEND_X11`（默认 OFF） |
 | `WaylandSurface` | 原生 Wayland（`wl_shm` + `xdg-shell` + `xkbcommon`） | `AURORA_BACKEND_WAYLAND`（默认 OFF） |
-| `MacOSSurface` | AppKit / CoreGraphics，仅 Apple | `AURORA_BACKEND_MACOS`（默认 OFF） |
+| `MacOSSurface` | AppKit / CoreGraphics，仅 Apple | `AURORA_BACKEND_MACOS`（Apple 默认 ON、其余 OFF；Apple 上关闭 FATAL，口径见 [`BUILD_OPTIONS.md`](../BUILD_OPTIONS.md) §3） |
 | `WasmSurface` | Emscripten / Canvas 2D，浏览器 rAF 驱动 | `AURORA_BACKEND_WASM`（默认 OFF） |
 
 全部开关的默认值与 `AURORA_BUILD_*` / `AURORA_ENABLE_*` 完整列表见 [`BUILD_OPTIONS.md`](../BUILD_OPTIONS.md)。
@@ -883,7 +888,7 @@ class RhiBackend {
 | `on_tap()` / `on_double_tap()` | `virtual`，手势回调 |
 | `on_pointer_event(MouseEvent&)` / `wants_click()` | 输入处理（public override） |
 
-**信号**：`playing_signal()` / `progress_signal()` / `volume_signal()` / `muted_signal()` 返回对应 `Reactive<...>*`。
+**信号**：`playing_signal()` / `progress_signal()` / `volume_signal()` / `muted_signal()` 返回对应只读句柄 `ReadOnlyState<bool>` / `ReadOnlyState<double>`；可经 `computed` 派生展示文本或直接交给只读属性（见 [`02-state.md`](02-state.md) §2）。
 
 **播放时钟接线（两处必备门，缺一即画面恒停）**：
 
@@ -937,9 +942,11 @@ class RhiBackend {
 
 **WASAPI 后端**（Windows，`AURORA_ENABLE_AUDIO_WASAPI`，pimpl 隔离于 `src/aurora/media/audio_wasapi.*`，windows.h 不外泄）：shared mode event-driven——引擎事件驱动设备线程逐块 `GetCurrentPadding → render → GetBuffer/ReleaseBuffer`；格式协商优先以图契约格式（48000/2 float32）+ `AUTOCONVERTPCM` 初始化（引擎侧转换吸收设备差异，重路由后契约不变），旧系统回退 float32 stereo 混合格式直用；协商失败 → `start()` 返回 false → 静默降级。**重路由**：`IMMNotificationClient` 监听默认设备变更/设备状态变化，设备线程重建端点客户端（失败退避 200ms 重试），期间时钟冻结（对齐 suspend 语义）。**采集后端**（`WasapiCaptureBackend`，库内部）：默认捕获端点 event-driven，GetMixFormat 原生率/声道回调、SILENT 包补零；启动期设备不可用 → `start()` false（调用方转显式 `AudioDeviceUnavailable`）；**中段失败**（端点移除/GetBuffer 出错）→ 采集线程退出、回调止流，经内部观察口 `failed()` 申报（内部 `running` 标志是 stop 握手位、承载 join 义务，不可作死活判据——若在退出时清零，`stop()` 早退不 join 将令 `~thread` `std::terminate`）。**守卫审计**修出三处：① `DeviceNotifyClient` 引用计数归零不自毁（每次后端生命周期泄漏一份）→ 标准 COM `delete this`；② `start()` 半途失败漏关事件句柄（重试覆盖旧值 → 句柄泄漏）→ 失败路径统一 `CloseHandle`；③ 采集中段失败注释声称「由调用方感知」但无观察通道 → 落 `failed()` 口并修正契约。探针 `aurora_verify_wasapi_audio` 自动段新增第 7 项直连验收（`failed()` 干净启停不误报 + 停后再启成功；本机无可用采集设备落 SKIP，实测走 start 失败清理路径）。真机探针 `aurora_verify_wasapi_audio`（`tools/verify/`，自动段 + `--interactive` 出声段，不进 CTest）。
 
-**ALSA 后端**（Linux，`AURORA_ENABLE_AUDIO_ALSA`，pimpl 隔离于 `src/aurora/media/audio_alsa.*`，与 WASAPI 后端逐项对称）：**运行时绑定**——`dlopen("libasound.so.2")` 解析 `snd_pcm_*` 简单参数 API 最小符号集，ABI 常量按内核 UAPI 本地转录，**零构建期依赖**（不需 libasound dev 包、不链 libasound；库缺失/符号不全 → `start()` false → 与 WASAPI 同一静默降级/显式报错口径；`dlopen` 成功但个别符号缺失时，调用点须**逐符号判空后再调用**——含 `drop`/`close`/`recover` 这类生命周期收尾路径，它们不经 `start()` 的前置校验，空函数指针调用即崩溃）。渲染线程 `"default"` 端点 + `snd_pcm_set_params`（RW_INTERLEAVED float32 48000/2，soft_resync，20ms 缓冲——插件层 plug/dmix/pulse 桥吸收设备差异，图侧契约恒定），循环 `avail_update → render（≤ 20ms 块）→ writei`，阻塞式写入天然节流、`wait` 20ms 超时保 stop 响应性；XRUN(-EPIPE)/系统挂起(-ESTRPIPE) 经 `snd_pcm_recover` 自愈，不可恢复错误或 DISCONNECTED → 关闭端点退避 200ms 重开（对齐 WASAPI 重路由与 suspend 冻结语义）。**采集后端**（`AlsaCaptureBackend`）：捕获端点格式顺位协商（48000/2 → 48000/1 → 44100/2 → 44100/1，readi 交付协商后 float32 交错、回调携带实际 rate/channels）；`failed()` 中段失败观察口与 `running`=stop 握手位纪律直接继承 WASAPI 审计结论。与 WASAPI 的已知口径差异：无默认设备变更通知源（snd_pcm 仅断连/错误重开），切换系统默认输出不改变 `"default"` 插件指向属设计内行为。**工厂择路**：`create_default_device_backend()/create_default_capture_backend()` 按 `AURORA_ENABLE_AUDIO_ALSA` 宏选 ALSA，否则 WASAPI（Windows 真实实现 / 其余 disabled 桩），AudioContext 契约不变。真机探针 `aurora_verify_alsa_audio`（同段结构 + 采集观察口第 7 项，无 libasound 或无设备的机器退出码 2 报 ENV-UNAVAILABLE 属合法降级；本机 WSL 无 ALSA 栈即此形态），单测 `utest_audio_alsa` 覆盖环境无关不变量（格式契约 / stop 幂等 / 重启生命周期 join 义务 / 启动期失败不置 `failed()`）。
+**ALSA 后端**（Linux，`AURORA_ENABLE_AUDIO_ALSA`，pimpl 隔离于 `src/aurora/media/audio_alsa.*`，与 WASAPI 后端逐项对称）：**运行时绑定**——`dlopen("libasound.so.2")` 解析 `snd_pcm_*` 简单参数 API 最小符号集，ABI 常量按内核 UAPI 本地转录，**零构建期依赖**（不需 libasound dev 包、不链 libasound；库缺失/符号不全 → `start()` false → 与 WASAPI 同一静默降级/显式报错口径；`dlopen` 成功但个别符号缺失时，调用点须**逐符号判空后再调用**——含 `drop`/`close`/`recover` 这类生命周期收尾路径，它们不经 `start()` 的前置校验，空函数指针调用即崩溃）。渲染线程 `"default"` 端点 + `snd_pcm_set_params`（RW_INTERLEAVED float32 48000/2，soft_resync，20ms 缓冲——插件层 plug/dmix/pulse 桥吸收设备差异，图侧契约恒定），循环 `avail_update → render（≤ 20ms 块）→ writei`，阻塞式写入天然节流、`wait` 20ms 超时保 stop 响应性；XRUN(-EPIPE)/系统挂起(-ESTRPIPE) 经 `snd_pcm_recover` 自愈，不可恢复错误或 DISCONNECTED → 关闭端点退避 200ms 重开（对齐 WASAPI 重路由与 suspend 冻结语义）。**采集后端**（`AlsaCaptureBackend`）：捕获端点格式顺位协商（48000/2 → 48000/1 → 44100/2 → 44100/1，readi 交付协商后 float32 交错、回调携带实际 rate/channels）；`failed()` 中段失败观察口与 `running`=stop 握手位纪律直接继承 WASAPI 审计结论。与 WASAPI 的已知口径差异：无默认设备变更通知源（snd_pcm 仅断连/错误重开），切换系统默认输出不改变 `"default"` 插件指向属设计内行为。**工厂择路**：`create_default_device_backend()/create_default_capture_backend()` 按 `AURORA_PLATFORM_WASM` → Web Audio、`AURORA_ENABLE_AUDIO_COREAUDIO` → CoreAudio、`AURORA_ENABLE_AUDIO_ALSA` → ALSA、其余 → WASAPI 四分支路（各自宏关闭时为 disabled 桩，Apple 上 ALSA 开关被 CMake 判 FATAL 故两路不歧义），AudioContext 契约不变。真机探针 `aurora_verify_alsa_audio`（同段结构 + 采集观察口第 7 项，无 libasound 或无设备的机器退出码 2 报 ENV-UNAVAILABLE 属合法降级；本机 WSL 无 ALSA 栈即此形态），单测 `utest_audio_alsa` 覆盖环境无关不变量（格式契约 / stop 幂等 / 重启生命周期 join 义务 / 启动期失败不置 `failed()`）。
 
-**Web Audio 后端**（浏览器，`AURORA_ENABLE_AUDIO_WEBAUDIO`，隔离于 `src/aurora/media/audio_webaudio.*`，与桌面两后端构成「Windows WASAPI / Linux ALSA / 浏览器 Web Audio」三足对称）：与桌面的**根本差异是没有设备线程**——Web Audio 的音频线程在 JS 侧且调不进 wasm，可达的只有主线程回调（`ScriptProcessorNode.onaudioprocess`），而主线程即 UI 线程，故桌面的「音频线程不阻塞于 UI」不变量在此退化为「同一线程、靠事件循环交错」。接线形态是**推式环**而非拉式回调：JS 无法调用 wasm 函数（`EXPORT_KEEPALIVE` 默认 0 时导出符号不进 `Module`，`embind` 在本工具链又是须显式 `--use-port=` 的 port），故反由 C++ 经 `emscripten_set_interval` 每 20ms 把图渲染成帧推入线性内存里的交错 float32 定长环（`detail::WebAudioRing`，恒留一格空以辨满/空），JS 按 `writer`/`reader`/`underrun` 三个 int32 的地址直接消费——**零链接标志、零导出符号，跨边界只传地址**。协商：`format()` 在 `start()` **之前**被上下文查询，故采样率取构造期 `ctx.sampleRate`（实测 48000），声道**不随设备**——图侧契约恒 stereo，多声道输出由浏览器在 `connect(destination)` 时自动上混（与桌面「设备差异不外露」同口径）。水位 ≈85ms（不低于 2 个 2048 块）⇒ 端到端延迟约 60–150ms（WASAPI event-driven 约 20ms），欠载即补零并累加计数（`underruns()` 可观测）。**自动播放闸门**：非用户手势下 `new AudioContext()` 得到 `suspended` 上下文且 `resume()` 需瞬时激活，故 `start()` 返回 true 只表示「设备存在且在收样」，**不等于出声**；后端在未 running 的排空拍**不渲染**（图时钟如实冻结，免 `current_time()` 领先实际出声）并按 20ms×50 限速重试 `resume()`，页面一有交互即自动开声——`AudioContext::suspend()/resume()` 与此正交（前者靠渲染静音实现）。状态只经内部观察口 `context_state()` 申报（-1 无实例 / 0 suspended / 1 running / 2 其他），不进公共 API。**采集未接线**：`getUserMedia` 是异步权限流，与同步 `start() -> bool` 契约不同形，故 `WebAudioCaptureBackend` 恒为 disabled 桩（`create_microphone_source()` 显式报 `AudioDeviceUnavailable`，不静默降级）。`AudioWorklet` + `SharedArrayBuffer` 才是桌面对位的正解（真音频线程 + 拉式），但要求 `-pthread` 构建与跨源隔离，与本仓 WASM 线程模型的收口同批（见 specification/06-app-platform.md §12.1）。**工厂择路**：`create_default_device_backend()/create_default_capture_backend()` 按平台三分——`AURORA_PLATFORM_WASM` 选 Web Audio，`AURORA_ENABLE_AUDIO_ALSA` 选 ALSA，否则 WASAPI（各自宏关闭时为 disabled 桩），AudioContext 契约不变。真机探针 `aurora_verify_wasm_audio` + CDP 驱动 `tools/verify/wasm_audio_cdp_drive.mjs`（浏览器产物、须本地 http，不进聚合 `aurora_verify` 也不进 CTest），单测 `utest_audio_webaudio` 覆盖环境无关不变量（环几何归一 / 满空可辨 / 回绕两段写不串序 / 对端推进记账 / 欠载计数由读端写入 / stop 未 start 幂等 / 生命周期两向可析构）。
+**CoreAudio 后端**（macOS，`AURORA_ENABLE_AUDIO_COREAUDIO`，pimpl 隔离于 `src/aurora/media/audio_coreaudio.*`，AudioToolbox / CoreAudio 头不外泄，与 WASAPI / ALSA 逐项对称）：**AudioQueue 腿而非 AudioUnit**——① 队列自带客户端格式到设备格式的采样率/声道转换，故图侧契约可恒 48000/2 float32 交错（与 ALSA 插件层、WASAPI `AUTOCONVERTPCM` 同口径，AudioUnit 则要自协 `AudioChannelLayout` / `MaximumFramesPerSlice` 并把交错 stereo 拆成非交错双 buffer）；② 队列自持线程周期性回调填块，`AudioQueueStop/Dispose(sync=true)` 为**同步**语义，直接满足「`stop()` 须等设备线程退出」契约。代价如实申报：3 块 × 20ms 水位 ⇒ 端到端约 40–60ms，高于 WASAPI event-driven 的约 20ms（与 Web Audio 的 60–150ms 同数量级）；低延迟（监听回环）与 AudioUnit 路径属独立优化批次。**无运行期绑定**：ALSA 的 `dlopen` 逃逸是为让无 dev 包的 Linux 构建机能编译，而这两枚 framework 属系统 SDK，恒在且无版本漂移，故直接 `-framework` 链接。**失败口径（实测）**：无输出设备的机器上 `AudioQueueNewOutput` 仍返回 `noErr`，失败落在 `AudioQueueStart` = `kAudioQueueErr_InvalidDevice`(-66680)——故拒启判据取 start 的返回码而非队列创建，`start()` false → 静默降级。**重路由**：`kAudioHardwarePropertyDefaultOutputDevice` 属性监听**只置位不重建**（不在 CoreAudio 通知线程里做设备级操作），重建由自持控制线程在 200ms 节拍上做，失败按同节拍退避重试、期间队列不存在 ⇒ 无回调 ⇒ 图时钟冻结（对齐 ALSA 断连重开与 WASAPI 重路由）；事件不到的拔除形态由同节拍轮询 `kAudioQueueProperty_IsRunning` 兜底。**回调里的共享位纪律**：`render` 于建队列**之前**写好（Start 后回调可立即到达，空调用即崩溃），队列句柄与缓冲清单只由 mutex 护、回调一律用入参句柄，跨线程可见性由 `armed` 原子闸门承担（关闸后在飞回调只丢块）。**采集后端**（`CoreAudioCaptureBackend`）：直取默认输入设备的 `NominalSampleRate` 与 Input scope `StreamConfiguration` 的**原生**率/声道建队列、回调携带该实际值（不做输入侧重采样——CoreAudio 输入队列不保证率转换，猜格式的建立失败率高于读设备真值，与 ALSA「顺位协商 + 交付什么就报什么」同语义）；`failed()` 中段失败观察口与 `running` = stop 握手位纪律逐字继承 WASAPI 审计结论（采集不自动重开，设备消失即止流 + 置观察位）。**麦克风权限是安全边界而非可选项**：macOS 对未声明 `NSMicrophoneUsageDescription` 就访问麦克风的进程是**终止**而非报错，故建队列前先用 CoreFoundation 查 main bundle 的该 Info.plist 键，缺键直接拒启并点名键名——裸可执行文件（CTest 单测、无壳探针）据此永不被 TCC 杀掉；不主动 `requestAccessForMediaType:`（那要么阻塞调用线程、违 `start() -> bool` 同步契约，要么引入 AVFoundation 依赖），授权流按宿主自身声明走系统常规，另申报一条 macOS 行为：**TCC 拒绝时 CoreAudio 交付静音流而非返回错误**，故采集 `start()` 成功不等于拿到真声。**未验证面（诚实标注）**：本仓开发用的 VMware Fusion 虚拟机 CoreAudio `device_count == 0`（无虚拟声卡可驱动），真机出声与设备热切换段须在有音频设备的真机补做；本机合法读数是无设备形态——探针自动段退出码 2 报 ENV-UNAVAILABLE、`AudioContext` 落 `Silent` 且不崩溃（ALSA 探针在无 ALSA 栈的 WSL 上同形态）。真机探针 `aurora_verify_coreaudio_audio`（`tools/verify/`，段结构与 WASAPI / ALSA 对齐 + `--interactive` 出声与热切换人工段，不进 CTest），单测 `utest_audio_coreaudio` 覆盖环境无关不变量（格式契约 / stop 幂等 / restart 生命周期 join 义务 / 启动期失败不置 `failed()` / 无宿主声明时拒启不误报）。
+
+**Web Audio 后端**（浏览器，`AURORA_ENABLE_AUDIO_WEBAUDIO`，隔离于 `src/aurora/media/audio_webaudio.*`，与桌面三后端构成「Windows WASAPI / Linux ALSA / macOS CoreAudio / 浏览器 Web Audio」四足对称）：与桌面的**根本差异是没有设备线程**——Web Audio 的音频线程在 JS 侧且调不进 wasm，可达的只有主线程回调（`ScriptProcessorNode.onaudioprocess`），而主线程即 UI 线程，故桌面的「音频线程不阻塞于 UI」不变量在此退化为「同一线程、靠事件循环交错」。接线形态是**推式环**而非拉式回调：JS 无法调用 wasm 函数（`EXPORT_KEEPALIVE` 默认 0 时导出符号不进 `Module`，`embind` 在本工具链又是须显式 `--use-port=` 的 port），故反由 C++ 经 `emscripten_set_interval` 每 20ms 把图渲染成帧推入线性内存里的交错 float32 定长环（`detail::WebAudioRing`，恒留一格空以辨满/空），JS 按 `writer`/`reader`/`underrun` 三个 int32 的地址直接消费——**零链接标志、零导出符号，跨边界只传地址**。协商：`format()` 在 `start()` **之前**被上下文查询，故采样率取构造期 `ctx.sampleRate`（实测 48000），声道**不随设备**——图侧契约恒 stereo，多声道输出由浏览器在 `connect(destination)` 时自动上混（与桌面「设备差异不外露」同口径）。水位 ≈85ms（不低于 2 个 2048 块）⇒ 端到端延迟约 60–150ms（WASAPI event-driven 约 20ms），欠载即补零并累加计数（`underruns()` 可观测）。**自动播放闸门**：非用户手势下 `new AudioContext()` 得到 `suspended` 上下文且 `resume()` 需瞬时激活，故 `start()` 返回 true 只表示「设备存在且在收样」，**不等于出声**；后端在未 running 的排空拍**不渲染**（图时钟如实冻结，免 `current_time()` 领先实际出声）并按 20ms×50 限速重试 `resume()`，页面一有交互即自动开声——`AudioContext::suspend()/resume()` 与此正交（前者靠渲染静音实现）。状态只经内部观察口 `context_state()` 申报（-1 无实例 / 0 suspended / 1 running / 2 其他），不进公共 API。**采集未接线**：`getUserMedia` 是异步权限流，与同步 `start() -> bool` 契约不同形，故 `WebAudioCaptureBackend` 恒为 disabled 桩（`create_microphone_source()` 显式报 `AudioDeviceUnavailable`，不静默降级）。`AudioWorklet` + `SharedArrayBuffer` 才是桌面对位的正解（真音频线程 + 拉式），但要求 `-pthread` 构建与跨源隔离，与本仓 WASM 线程模型的收口同批（见 specification/06-app-platform.md §12.1）。**工厂择路**：四分支路（Web Audio / CoreAudio / ALSA / WASAPI）的唯一权威口径见上「ALSA 后端」段末——本后端的动因是浏览器**没有可调的音频线程**，与择路顺序无关。真机探针 `aurora_verify_wasm_audio` + CDP 驱动 `tools/verify/wasm_audio_cdp_drive.mjs`（浏览器产物、须本地 http，不进聚合 `aurora_verify` 也不进 CTest），单测 `utest_audio_webaudio` 覆盖环境无关不变量（环几何归一 / 满空可辨 / 回绕两段写不串序 / 对端推进记账 / 欠载计数由读端写入 / stop 未 start 幂等 / 生命周期两向可析构）。
 
 **应用接线**（`media/audio_sink_bridge.h` + `VideoPlayer`）：`AudioSinkGraphBridge` 实现既有 `AudioSink` 契约——`play_samples` 推入自持 `AudioStreamSourceNode`，音量/静音经图内 `GainNode` 单点施加；析构断边，未连图/上下文关闭时推入即丢弃（兜底路径不报错）。`VideoPlayer::set_audio_context(ctx)`（典型取 `app.audio_shared()`，见 `Application::audio()`，specification/06 §2.2）自动接管 `set_audio_callback` 的 PCM 通道：桥以 shared_ptr 进源回调（解码器线程推流无悬垂），换源自动重绑，`set_audio_context(nullptr)` 断边并清空回调；接线后 `set_volume`/`set_muted` 路由到图内 GainNode（不转发源，避免双重衰减），未接线保持既有转发语义。
 
@@ -970,7 +977,7 @@ Level 3  像素快照（PNG）—— 人类视觉回归测试用
 **快照测试：**
 
 ```cpp
-au::Node btn_node{ au::Button(au::ButtonProps{ .label = "Test" }) };
+au::Node btn_node{ au::Button(au::ButtonProps().set_label("Test")) };
 btn_node->width(au::px(100)).height(au::px(40));
 const au::Json snap = au::render_to_logical_snapshot(btn_node, 100, 40);
 AURORA_TEST_CHECK(std::string{ snap["type"].get<std::string>() } == "Button");
@@ -993,7 +1000,7 @@ AURORA_TEST_CHECK(std::abs(snap["box"]["w"].get<float>() - 100.0F) < 0.001f);
 
 ```cpp
 // 规则 1：盒模型完全显式，无隐式行为
-auto hi = au::Text(au::TextProps{ .content = "Hi" });
+auto hi = au::Text(au::TextProps().set_content("Hi"));
 hi.modifier = au::Modifier{}
     .padding(8)                   // 内边距，永远加在内容尺寸之外
     .border(1, au::colors::AURORA_GRAY)  // 边框（命名空间级色常量为 AURORA_ + 全大写，见 core/color.h）
@@ -1008,7 +1015,7 @@ child.width(au::percent(0.5));
 // 规则 3：布局方程可求解、可验证
 // 父容器宽度 = Σ(子宽度) + Σ(间距) + padding_left + padding_right
 // 方程无解（子总宽 > 父宽）时有明确的溢出策略：Scroll 包裹，或依赖约束 clamp
-au::Scroll(au::ScrollProps{ .child = au::Row(au::RowProps{ .children = { /* ... */ } }) });
+au::Scroll(au::Node{ au::Row({ /* ... */ }) });
 
 // 规则 4：布局结果可查询
 auto snap = au::render_to_logical_snapshot(root, 800, 600);

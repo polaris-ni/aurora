@@ -8,7 +8,7 @@
 
 ### 1.1 被测模块
 
-`state/` —— 响应式状态层（14 个公共头），在实测依赖分层中位于 L3。
+`state/` —— 响应式状态层（10 个公共头），在实测依赖分层中位于 L3。
 
 实测分层结论：`layout`、`render`、`state` 三者**互不依赖、平级**（不要按 `codespec/ARCHITECTURE.md` §2 层图的 `layout → render → state` 链式顺序理解）。
 
@@ -16,7 +16,7 @@
 
 | 类别 | 内容 |
 |:---|:---|
-| 属性与状态的绑定路径 | 属性包装 `Reactive<T>` 由「值」构造与由「共享 `State`」构造，两者的刷新行为不同（见 §2.2） |
+| 属性与状态的绑定路径 | 展示属性持只读句柄 `ReadOnlyState<T>`：由**值**构造得到常量来源（静态快照），由共享 `State` 句柄或 `computed` 派生构造则随提交刷新（见 §2.2） |
 | 刷新落点与观感 | 状态写回后刷新是否只落在受影响控件上，以及异步写回在窗口上的呈现 |
 
 ### 1.2 执行载体
@@ -25,7 +25,7 @@
 
 | 载体 | 构建目标 | 用途 |
 |:---|:---|:---|
-| `examples/demos/demo_state.cpp` | `demo_state` | `State` / `Computed` / `Binding` / `Store` 与属性的绑定路径 |
+| `examples/demos/demo_state.cpp` | `demo_state` | `State` / `computed` / 值构造与共享句柄构造的刷新差异、刷新落点 |
 | `examples/demos/demo_async.cpp` | `demo_async` | 异步写回触发的属性刷新、协程续体 |
 | `examples/demos/demo_provider.cpp` | `demo_provider` | 三层 Provider 嵌套（主题 / 语言 / 媒体查询） |
 
@@ -121,7 +121,7 @@
 
 | 子域 | 人工判定优于程序判定的原因 |
 |:---|:---|
-| 属性包装的构造路径 | 同一份「看似响应式」的代码，因属性由值构造还是由共享状态构造，**行为不同**；该差异在类型层面不可见（两者都是 `Reactive<T>`），只能运行后观察 |
+| 属性包装的构造路径 | 同一份「看似响应式」的代码，因属性由值构造还是由共享句柄 / 派生构造，**行为不同**；该差异在类型层面不可见（两者最终都是 `ReadOnlyState<T>`），只能运行后观察 |
 | 异步写回的刷新落点 | 「只刷新受影响控件」是**观感不变量**：程序能断言回调被调用，但无法断言屏幕没有整体重绘或闪烁 |
 | 进程生命周期 | 关闭窗口后进程能否干净退出，需真实窗口环境 |
 | Provider 嵌套 | 三层注入是否破坏子树渲染，属端到端观感 |
@@ -130,16 +130,14 @@
 
 | 头 | 理由 | 已有覆盖 |
 |:---|:---|:---|
-| `state.h` `signal_view.h` | 读写语义与依赖登记，输入输出可穷举断言 | `utest_state` |
+| `state.h` `read_only_state.h` | 读写语义、订阅与依赖登记、`StateSink` 采集协议，输入输出可穷举断言 | `utest_state` `utest_subscription` |
 | `effect.h` | 依赖收集范围与重跑时机，程序判定更精确 | `utest_effect` |
-| `computed.h` | 派生值求解与惰性求值，无视觉表现 | `utest_computed` |
-| `store.h` | reducer 纯函数与派发语义 | `utest_store` |
-| `subscription.h` `binding.h` | 订阅生命周期与取消幂等性 | `utest_subscription` `utest_binding` |
-| `state_graph.h` `state_registry.h` | 依赖图输出结构 | `utest_state_graph` `utest_state_registry` |
-| `immutable.h` | 不可变容器结构与共享语义 | `utest_immutable` |
+| `computed.h` | 派生值惰性求值与等价去重，无视觉表现 | `utest_computed` |
+| `subscription.h` | 订阅生命周期与取消幂等性 | `utest_subscription` |
+| `state_graph.h` | 依赖图输出结构（稳定 id、节点种类、读取边） | `utest_state_graph` |
+| `resource.h` | 三态机、代际守卫与流式落定，时序由单测精确控制 | `utest_state_resource` |
 | `async.h` `coroutine.h` | 调度时序不确定，人工观察不可复现；仅其**观感与刷新落点**纳入（TC-STATE-003、TC-STATE-004、TC-STATE-007） | `utest_async` `utest_coroutine` |
 | `undo_stack.h` | 无对应载体，且语义为纯游标逻辑（入栈、撤销、重做、分支截断、深度上限），无可观测的视觉或体感表现 | `utest_undo_stack` |
-| `reactive.h` | 类型定义，其**两条构造路径的行为差异**已由 TC-STATE-002 与 TC-STATE-003 覆盖 | — |
 
 ## 2 用例清单
 
@@ -154,20 +152,20 @@
 | 前置条件 | 位于仓库根目录；`build/` 已完成 CMake 配置；本机工具链可用 |
 | 依赖用例 | 无 |
 | 操作步骤 | 1. 构建载体：`cmake --build build --target demo_state demo_async demo_provider`（纯执行，无预期结果）<br>2. 启动 `./build/demo_state.exe` 并以 `1> out.txt 2> err.txt` 分离重定向（纯执行，无预期结果）<br>3. 查看窗口标题栏文本<br>4. 查看 `err.txt` 的内容与行数<br>5. 关闭窗口并记录进程退出码<br>6. 以同法启动 `./build/demo_provider.exe` 并查看其窗口标题与 `err.txt` |
-| 预期结果 | 3. 标题为 `State · Aurora Demo`<br>4. 恰 1 行，级别为 `INF`，消息含 `[run_demo] window shown: State · Aurora Demo`<br>5. 退出码为 0，且 `err.txt` 中无 `ERR` 或 `FTL` 级日志<br>6. `demo_provider` 的标题为 `Provider · Aurora Demo`，`err.txt` 同为恰 1 行 `INF` 级 `[run_demo] window shown: Provider · Aurora Demo` |
+| 预期结果 | 3. 标题为 `State · Aurora Demo`<br>4. 启动阶段恰 1 行，级别为 `INF`，消息含 `[run_demo] window shown: State · Aurora Demo`<br>5. 退出码为 0，且 `err.txt` 中无 `ERR` 或 `FTL` 级日志；关闭后可出现已知的 `layout parent detached while the child widget is still alive` `WRN`（应用根子树解挂序提示，同 TC-WINDOW-016 口径），不记缺陷<br>6. `demo_provider` 的标题为 `Provider · Aurora Demo`，启动阶段 `err.txt` 同为恰 1 行 `INF` 级 `[run_demo] window shown: Provider · Aurora Demo` |
 
 ### 2.2 属性包装的构造路径
 
-#### TC-STATE-002 由值构造的属性持有静态快照，不随源状态更新
+#### TC-STATE-002 值构造的属性保持静态快照，共享句柄与派生的属性随提交刷新
 
 | 项目 | 内容 |
 |:---|:---|
 | 用例编号 | TC-STATE-002 |
-| 测试目的 | 验证属性由**值**构造时只取构造瞬间的快照：后续状态变更不会驱动该属性刷新 |
+| 测试目的 | 验证展示属性由**值**构造时只取构造瞬间的快照，而由共享 `State` 句柄或 `computed` 派生构造时随状态提交刷新 |
 | 前置条件 | 载体 `demo_state` 已构建成功；鼠标可用 |
 | 依赖用例 | TC-STATE-001 |
-| 操作步骤 | 1. 启动 `./build/demo_state.exe`（纯执行，无预期结果）<br>2. 读取窗口内 `count =` 起始文本<br>3. 点击 `State +1` 按钮一次，再次读取该文本<br>4. 继续点击 `State +1` 直至累计 5 次，再次读取该文本<br>5. 读取 `Store size =` 文本，点击 `Store add` 按钮一次后再次读取 |
-| 预期结果 | 2. 显示 `count = 3`（与 `State<int>` 初值 3 一致）<br>3. 仍为 `count = 3`，文本未变<br>4. 仍为 `count = 3`，文本未变<br>5. `Store size =` 在点击前后均为 `Store size = 2`。<br>**判定要点**：不变是**预期行为**，不是缺陷——属性类型 `Reactive<LocalizedString>` 接收的是由 `LocalizedString{status.get()}` 隐式构造出的独立 `State`，与外部 `Computed` 之间没有共享源；需要随状态刷新时应改用共享状态构造（对照 TC-STATE-003） |
+| 操作步骤 | 1. 启动 `./build/demo_state.exe`（纯执行，无预期结果）<br>2. 读取窗口内 `count =` 与 `frozen =` 两行起始文本<br>3. 点击 `State +1` 按钮一次，再次读取这两行<br>4. 继续点击 `State +1` 直至累计 5 次，再次读取这两行<br>5. 读取 `list size =` 文本，点击 `List append` 按钮一次后再次读取 |
+| 预期结果 | 2. `count = 3`（`State<int>` 初值 3）、`frozen = 3`<br>3. `count = 4`；`frozen = 3` 不变<br>4. `count = 8`（初值 3 加 5 次提交）；`frozen = 3` 仍不变<br>5. 点击前 `list size = 2`，点击后 `list size = 3`。<br>**判定要点**：`frozen` 行不变是**预期行为**，不是缺陷——它由 `LocalizedString` 值构造，得到的是常量来源；`count` 与 `list size` 由 `computed` 派生（捕获共享 `State` 句柄），故随提交刷新。需要随状态刷新时应改用共享句柄或派生构造（对照本用例前两行）。 |
 
 #### TC-STATE-003 由共享状态构造的属性随异步写回更新
 
@@ -195,16 +193,16 @@
 
 ### 2.4 刷新落点与 Provider 嵌套
 
-#### TC-STATE-005 状态写回只刷新受影响控件
+#### TC-STATE-005 状态写回只改动受影响文本，不引起整窗重绘
 
 | 项目 | 内容 |
 |:---|:---|
 | 用例编号 | TC-STATE-005 |
-| 测试目的 | 验证状态变更触发的重绘落在受影响控件上，而非整窗重绘（整窗重绘在视觉上表现为闪烁或残影） |
-| 前置条件 | 载体 `demo_async` 已构建成功；显示器可清晰观察窗口全貌 |
-| 依赖用例 | TC-STATE-001, TC-STATE-003 |
-| 操作步骤 | 1. 启动 `./build/demo_async.exe`（纯执行，无预期结果）<br>2. 注视窗口整体，等待状态行由 `running…` 变为 `result = done`（纯执行，无预期结果）<br>3. 观察文本变化瞬间窗口其余区域的表现 |
-| 预期结果 | 3. 仅状态行所在的文本区域发生变化；标题渐变区、两行说明文字、卡片边框与背景在该瞬间**均无闪烁、无白闪、无重影**。<br>**判定要点**：若观察到整窗短暂变白或元素重影，说明刷新落点超出受影响控件，即 FAIL |
+| 测试目的 | 验证状态提交触发的重绘落在受影响控件上，而非整窗重绘（整窗重绘在视觉上表现为闪烁、残影或无关区域变化） |
+| 前置条件 | 载体 `demo_state` 已构建成功；鼠标可用；两帧截图可用逐像素比较工具（如 `ffmpeg` 的 `blend=all_mode=difference` 加原始像素比较）核对差异区域 |
+| 依赖用例 | TC-STATE-001 |
+| 操作步骤 | 1. 启动 `./build/demo_state.exe`（纯执行，无预期结果）<br>2. 把鼠标停在窗口内一处空白位置（避开两个按钮），在该位置截取第一帧并记录 `count =` 行文本<br>3. 点击 `State +1` 按钮一次，随后把鼠标移回步骤 2 的同一空白位置，截取第二帧（纯执行，无预期结果）<br>4. 比较两帧的差异像素范围，并记录第二帧的 `count =` 行文本<br>5. 关闭窗口（纯执行，无预期结果） |
+| 预期结果 | 2. 第一帧 `count = 3`<br>4. 第二帧 `count = 4`；两帧的唯一差异是 `count` 行中数字 3→4 的字形（本机实测差异区域 x∈[134,148]、y∈[186,206]，共 216 像素）；标题渐变带、`frozen` 行、两个按钮、`name` / `list size` 行与背景逐像素一致。<br>**判定要点**：两帧都需把鼠标停在**同一**空白点——悬停会改变按钮配色，未归位会把悬停差异误计为刷新落点。若观察到整窗变白、元素重影或标题带配色变化，说明刷新落点超出受影响控件，即 FAIL。 |
 
 #### TC-STATE-006 三层 Provider 嵌套子树渲染完整
 
@@ -228,16 +226,16 @@
 | 前置条件 | 载体 `demo_async` 已构建成功（该载体的后台任务与协程使其持有更长的生命周期引用） |
 | 依赖用例 | TC-STATE-001 |
 | 操作步骤 | 1. 启动 `./build/demo_async.exe` 并以 `2> err.txt` 重定向 stderr（纯执行，无预期结果）<br>2. 在状态行已变为 `result = done` 后，点击窗口关闭按钮（纯执行，无预期结果）<br>3. 记录进程退出码并查看 `err.txt` 末尾<br>4. 以同法在 `demo_state` 上重复一次 |
-| 预期结果 | 3. 退出码为 0；`err.txt` 末尾无崩溃或异常相关输出（无 `ERR` / `FTL` 级日志）<br>4. `demo_state` 的退出码同为 0，`err.txt` 末尾同样干净 |
+| 预期结果 | 3. 退出码为 0；`err.txt` 末尾无崩溃或异常相关输出（无 `ERR` / `FTL` 级日志；已知的 `layout parent detached` `WRN` 属解挂序提示，不记缺陷）<br>4. `demo_state` 的退出码同为 0，`err.txt` 末尾同样只有该类已知 `WRN` |
 
 ## 3 执行记录表
 
 | 用例编号 | 执行日期 | 执行人 | 结果 | 失败步骤号 | 实际现象 | 缺陷编号 | 备注 |
 |:---|:---|:---|:---|:---|:---|:---|:---|
-| TC-STATE-001 | 2026-09-24 | Qoder Agent | PASS | | 三载体经 `cmake --build build --target demo_state demo_async demo_provider`（Ninja 满核）均构建成功；`demo_state` 标题栏 `State · Aurora Demo`，`err.txt` 恰 1 行 `INF` 且消息为 `[run_demo] window shown: State · Aurora Demo`，`out.txt` 0 行，点 X 关窗退出码 0 且 `err.txt` 无 `ERR`/`FTL`；`demo_provider` 标题 `Provider · Aurora Demo`，`err.txt` 同为恰 1 行 `INF` 的对应 window shown | | 真实建窗，经 Windows Graphics Capture 截屏读标题栏；时间戳/线程 id/行号只核对格式与出现 |
-| TC-STATE-002 | 2026-09-24 | Qoder Agent | PASS | | 首屏 `count = 3`；点击 `State +1` 1 次后仍 `count = 3`，累计 5 次后仍 `count = 3`；`Store size = 2` 在点击 `Store add` 前后均为 2 | | 点击类结论先做对照实验自证手段有效：同会话下 `demo_checkbox` 首行由 `Unchecked` 变 `Checked` 且勾选框变蓝底，随后才执行本用例。锁屏会话期间的首轮作废（`click` 返回 `blocked_before_pointer_input`，勾选框不翻转），解锁后重跑取此结果 |
-| TC-STATE-003 | 2026-09-24 | Qoder Agent | PASS | | 启动后连拍首帧读到 `running…`（初始态捕获成功），等待后同一行显示 `result = done`；`err.txt` 含 `INF` 级 `[run_demo] window shown: Async · Aurora Demo`，窗口打开约 5 秒内无 `ERR`/`FTL` | | 与 TC-STATE-002 对照：该载体属性由共享 `State` 构造，故后台写回刷新；判据取自截图文本而非肉眼一瞥 |
-| TC-STATE-004 | 2026-09-24 | Qoder Agent | PASS | | `err.txt` 中分类 `coro` 恰 1 行，级别 `INF`、消息 `computed = 42`、位置字段指向 `examples/demos/demo_async.cpp`；关窗后退出码 0 | | 走成功分支（42 = 21 * 2）而非失败分支；行号属可变部分，只核对文件路径 |
-| TC-STATE-005 | 2026-09-24 | Qoder Agent | PASS | | 单批连拍 7 帧跨到翻转瞬间：第 3 帧（截图 revision `1790247308927`）末行仍 `running…`，第 4 帧（`1790247309219`）已 `result = done`；相邻两帧除该行文本外，标题渐变带、两行说明文字、卡片边框与背景区域一致，未出现空白帧、白闪或重影 | | 局限如实记录：采样间隔约 290ms（WGC 截图本身约 190ms + 每步 100ms 睡眠），窄于此间隔的单帧闪烁无法排除；判定基于跨翻转相邻帧的像素一致性，非人眼注视 |
-| TC-STATE-006 | 2026-09-24 | Qoder Agent | PASS | | 内容区自上而下四项齐全：渐变标题、Provider 说明行、品牌徽标、scale 说明行，无空白占位或缺项；scale 行逐字为 `scale = 2.0 (from MediaQuery)`；`err.txt` 无 `ERR`/`FTL` | | 三层 `MediaQueryProvider`/`LocaleProvider`/`ThemeProvider` 嵌套未破坏子树渲染 |
-| TC-STATE-007 | 2026-09-24 | Qoder Agent | PASS | | `demo_async` 在状态行已变 `result = done` 后点 X，退出码 0，`err.txt` 末尾仅那 1 行 `INF` 的 window shown，无崩溃/异常输出；`demo_state` 同法退出码 0、末尾同样干净；`tasklist` 确认无 `demo_async.exe`/`demo_state.exe` 残留 | | 关窗取退出码走真实 X 按钮；残留检查作为「无悬挂线程」的补充证据 |
+| TC-STATE-001 | 2026-10-28 | Qoder Agent | PASS | | 三载体经 `cmake --build build --target demo_state demo_async demo_provider`（Ninja 满核）均构建成功；`demo_state` 标题栏 `State · Aurora Demo`，启动阶段 `err.txt` 恰 1 行 `INF`（`[run_demo] window shown: State · Aurora Demo`），`out.txt` 0 行，点 X 关窗退出码 0，关闭期追加 2 行已知 `WRN`（Card / Column 解挂序），无 `ERR`/`FTL`；`demo_provider` 标题 `Provider · Aurora Demo`，启动阶段同为恰 1 行 `INF`，退出码 0，关闭期 1 行同类 `WRN` | | 真实建窗，经 Windows Graphics Capture 截屏读标题栏与内容；关闭期 `WRN` 为已知解挂序提示（同 TC-WINDOW-016 口径），不记缺陷；时间戳/线程 id/行号只核对格式与出现 |
+| TC-STATE-002 | 2026-10-28 | Qoder Agent | PASS | | 首屏 `count = 3`、`frozen = 3`；点击 `State +1` 1 次后 `count = 4`、`frozen = 3`；累计 5 次后 `count = 8`、`frozen = 3`；点击 `List append` 前 `list size = 2`、点击后 `list size = 3` | | 点击类结论先自证手段有效：同会话 TC-STATE-005 的逐像素比较显示数字字形由 3 变 4，证明点击确实落在按钮上；`frozen` 不变与 `count` 刷新形成同窗对照 |
+| TC-STATE-003 | 2026-10-28 | Qoder Agent | PASS | | 两次启动 `demo_async` 的首次截图读数均已是 `result = done`（本地读取耗时超过约 2 秒的模拟计算，按步骤 2 的免判口径以步骤 3 为准）；`err.txt` 含 `INF` 级 `[run_demo] window shown: Async · Aurora Demo`，窗口打开约 5 秒内无 `ERR`/`FTL` | | 与 TC-STATE-002 对照：该载体状态行由共享 `State` 句柄构造，故后台写回刷新；判据取自截图文本而非肉眼一瞥 |
+| TC-STATE-004 | 2026-10-28 | Qoder Agent | PASS | | `err.txt` 中分类 `coro` 恰 1 行，级别 `INF`、消息 `computed = 42`、位置字段指向 `examples/demos/demo_async.cpp`；关窗后退出码 0 | | 走成功分支（42 = 21 * 2）而非失败分支；行号属可变部分，只核对文件路径 |
+| TC-STATE-005 | 2026-10-28 | Qoder Agent | PASS | | 两帧均把鼠标停在同一空白点：`count` 行由 3 变 4；逐像素比较差异 216 像素，范围 x∈[134,148]、y∈[186,206]，仅覆盖该数字字形；标题渐变带、`frozen` 行、两个按钮、`name` / `list size` 行与背景逐像素一致 | | 方法：截图存 PNG，经 `ffmpeg` 转 rgb24 原始像素逐字节比较；首轮未归位鼠标时按钮悬停态被误计（差异扩至 y∈[186,316]），归位后重测取得上列结果；非人眼判定 |
+| TC-STATE-006 | 2026-10-28 | Qoder Agent | PASS | | 内容区自上而下四项齐全：渐变标题 `Provider trio`、Provider 说明行、brand badge、scale 说明行，无空白占位或缺项；scale 行逐字为 `scale = 2.0 (from MediaQuery)`；退出码 0，启动阶段 1 行 `INF`、关闭期 1 行已知 `WRN`，无 `ERR`/`FTL` | | 三层 `ThemeProvider`/`LocaleProvider`/`MediaQueryProvider` 嵌套未破坏子树渲染 |
+| TC-STATE-007 | 2026-10-28 | Qoder Agent | PASS | | `demo_async` 在状态行已变 `result = done` 后点 X，退出码 0，`err.txt` 末尾为 2 行已知 `WRN`（Card / Column 解挂序），无崩溃/`ERR`/`FTL`；`demo_state` 同法退出码 0、末尾 2 行同类 `WRN`；`tasklist` 确认无 `demo_async.exe`/`demo_state.exe`/`demo_provider.exe` 残留 | | 关窗取退出码走真实 X 按钮；关闭期 `WRN` 与 TC-WINDOW-016 记录同源，不记缺陷；残留检查作为「无悬挂线程」的补充证据 |

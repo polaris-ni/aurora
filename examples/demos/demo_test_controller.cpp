@@ -14,7 +14,7 @@
 namespace {
 
 auto run() -> int {
-    auto btn = std::make_shared<au::Button>(au::ButtonProps{.label = au::LocalizedString{"Tap me"}});
+    auto btn = std::make_shared<au::Button>(au::ButtonProps().set_label(au::LocalizedString{"Tap me"}));
     auto counter = std::make_shared<au::State<int>>(0);
     auto count_text = std::make_shared<au::State<au::LocalizedString>>(au::LocalizedString{"clicks = 0"});
 
@@ -30,7 +30,7 @@ auto run() -> int {
     // 给节点打 key：find_by_key 走 Node::set_id（须在装入容器前设置）。
     auto btn_node = au::Node{btn};
     btn_node.set_id("tap");
-    auto label_node = au::Node{au::Text{au::TextProps{.content = au::Reactive{count_text}}}};
+    auto label_node = au::Node{au::Text{au::TextProps().set_content(*count_text)}};
     label_node.set_id("counter");
     auto input_node = au::Node{input};
     input_node.set_id("name");

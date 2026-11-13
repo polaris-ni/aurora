@@ -23,6 +23,7 @@
 #include <string_view>
 #include <vector>
 
+#include "aurora/app/detail/clipboard_backend.h"  // 富格式剪贴板后端单槽（变更回调经 fire_change 派发）
 #include "aurora/core/log.h"
 #include "aurora/core/version.h"
 #include "aurora/event/event.h"
@@ -34,6 +35,7 @@
 #include "aurora/window/detail/csd_shadow_compose.h"
 #include "aurora/window/detail/ime_composition.h"
 #include "aurora/window/detail/title_bar_painter.h"
+#include "aurora/window/detail/wayland_clipboard.h"
 #include "aurora/window/detail/wayland_drag.h"
 #include "aurora/window/detail/wayland_output_scale.h"
 #include "aurora/window/keysym_map.h"
@@ -129,6 +131,17 @@ struct WaylandSurface::Impl {
     /// @brief 内容（window geometry）逻辑 dp 尺寸——configure 口径，不含阴影边距。
     /// 整幅表面 = full_size() = size + 2×shadow_margin()；Wayland 表面坐标即逻辑坐标。
     Size size{.width = 0.0F, .height = 0.0F};
+    /// @brief 样式限定的内容尺寸约束（构造期由 `WindowStyleOptions` 解析；0 = 该轴无约束）。
+    /// 运行期 `set_size` 的「提议」临时把 min/max 收窄到目标值，configure 到达后必须还原
+    /// 这四项——否则窗口被永久锁成固定尺寸，用户再也拖不动边框。
+    std::int32_t style_min_w = 0;
+    std::int32_t style_min_h = 0;
+    std::int32_t style_max_w = 0;
+    std::int32_t style_max_h = 0;
+    /// @brief 在途的尺寸提议（内容 window geometry 口径，逻辑 dp；0 = 无）。
+    /// xdg-shell 只允许 client 提约束，configure 是合成器对该提议的回答（接受或拒绝）。
+    std::int32_t request_w = 0;
+    std::int32_t request_h = 0;
     int scale = 1;
     bool configured = false;  ///< 收到首个 xdg_surface.configure 前不得 attach buffer。
     // xdg_toplevel.configure 暂存（ack 于 xdg_surface.configure 时统一应用）。
@@ -160,6 +173,10 @@ struct WaylandSurface::Impl {
     // 持有者只能是本 Impl：桥在析构里要销毁数据设备对象并收摊在途会话，故必须先于 seat /
     // display 销毁（析构次序见 `~WaylandSurface`）。
     std::unique_ptr<detail::WaylandDragBridge> drag;
+    // CLIPBOARD 剪贴板桥（富格式 / 惰性要约 / 变更监听）：复用拖放桥创建的那枚 `wl_data_device`
+    // （每 seat 唯一，不可复刻），selection 变更经拖放桥的转发器到达。析构须**先于**拖放桥
+    // （转发器闭包捕获本桥；销毁顺序见 `~WaylandSurface`）。
+    std::unique_ptr<detail::WaylandClipboardBridge> clipboard;
     // 宿主注入的「附加事件源」（WebView 引擎的 GLib 主上下文）：wait_events 把其 fd 并入
     // poll 集、poll 返回后推进一次。语义与 atspi 并入同构；未安装时两通道均空。
     std::function<std::vector<Surface::ExtraWatch>()> extra_watches;
@@ -199,6 +216,8 @@ struct WaylandSurface::Impl {
     int geometry_gw = -1;
     int geometry_gh = -1;
     std::uint32_t last_press_serial = 0;  ///< 最近按键 serial：控件经 begin_window_move/resize 同步调用时有效
+    /// 最近一次输入事件的 serial（指针按键 / 键盘按键）：`wl_data_device.set_selection` 的协议必需实参。
+    std::uint32_t last_input_serial = 0;
     // ---- 光标形状（客户端主题光标：libwayland-cursor 取位图 → cursor wl_surface → set_cursor）----
     CursorShape pending_cursor_shape = CursorShape::Arrow;  ///< 期望的语义形状（set_cursor 落盘）。
     std::uint32_t pointer_enter_serial = 0;  ///< 最近 wl_pointer.enter 的 serial（wl_pointer_set_cursor 必需）。
@@ -344,6 +363,9 @@ struct WaylandSurface::Impl {
     auto on_global(std::uint32_t name, const char *iface, std::uint32_t version) -> void;
     auto on_xdg_surface_configure(std::uint32_t serial) -> void;
     auto on_toplevel_configure(std::int32_t w, std::int32_t h, wl_array *states) -> void;
+    /// @brief 按 `style_min_*` / `style_max_*` 重新下发 xdg_toplevel 尺寸约束（双缓冲）。
+    /// 调用方负责随后 `wl_surface.commit`，使约束在合成器侧生效。
+    auto apply_style_size_limits() const -> void;
     auto on_seat_capabilities(std::uint32_t caps) -> void;
     auto on_key(std::uint32_t key, std::uint32_t state_v) const -> void;
     auto on_keymap(std::int32_t fd, std::uint32_t sz) -> void;
@@ -525,6 +547,9 @@ void ptr_button(void *data, wl_pointer * /*p*/, std::uint32_t serial, std::uint3
     }
 
     d.last_press_serial = serial;  // 缓存本次按键 serial：xdg move/resize 协议要求
+    // 剪贴板 `set_selection` 也要求真实输入 serial：指针按键同样是一枚合格来源，
+    // 与键盘按键共用同一槽（后到者覆盖——合成器只校验「最近一次发给本客户端的输入 serial」）。
+    d.last_input_serial = serial;
     // 拖出发起用的也是同一个 serial：拖放由控件在**本次按键的派发期内**发起
     // （`Widget::begin_system_drag`），Wayland 协议要求 `start_drag` 用本客户端某次按下的
     // serial，故此刻刷新即唯一正确的值（多窗口场景下同理只可能是本窗口的按下）。
@@ -723,8 +748,10 @@ void kb_leave(void *data, wl_keyboard * /*k*/, std::uint32_t /*serial*/, wl_surf
 #endif
 }
 
-void kb_key(void *data, wl_keyboard * /*k*/, std::uint32_t /*serial*/, std::uint32_t /*time*/, std::uint32_t key,
+void kb_key(void *data, wl_keyboard * /*k*/, std::uint32_t serial, std::uint32_t /*time*/, std::uint32_t key,
             std::uint32_t state_v) {
+    // 键盘按键也是 `set_selection` 认可的输入 serial 来源：Ctrl+C 一类快捷复制由它支撑。
+    static_cast<Impl *>(data)->last_input_serial = serial;
     static_cast<Impl *>(data)->on_key(key, state_v);
 }
 
@@ -890,13 +917,29 @@ auto WaylandSurface::Impl::on_global(std::uint32_t name, const char *iface, std:
     }
 }
 
+auto WaylandSurface::Impl::apply_style_size_limits() const -> void {
+    if (toplevel == nullptr) {
+        return;
+    }
+    // 0 在 xdg-shell 里就是「该轴无约束」，故与原构造路径的「有值才下发」等价，
+    // 但还原点只有这一处，不会出现两套口径。
+    xdg_toplevel_set_min_size(toplevel, style_min_w, style_min_h);
+    xdg_toplevel_set_max_size(toplevel, style_max_w, style_max_h);
+}
+
 auto WaylandSurface::Impl::on_xdg_surface_configure(std::uint32_t serial) -> void {
     xdg_surface_ack_configure(xsurface, serial);
     configured = true;
-    // 应用 xdg_toplevel.configure 暂存：尺寸（0=客户端自定，保持现值）与几何态。
+    // 应用 xdg_toplevel.configure 暂存：尺寸与几何态。
+    // 尺寸来源优先级：合成器给出的正尺寸 > set_size 的提议。configure 宽/高为 0 表示合成器
+    // 把尺寸决定权交回 client（xdg-shell 语义；Weston 对 min/max 约束变化的回答即 0×0），
+    // 此时按提议的内容尺寸更新本地值，下一次 present 以该尺寸 attach buffer 并
+    // set_window_geometry，合成器据此把窗口设为该尺寸。
+    const std::int32_t want_w = (pending_w > 0) ? pending_w : request_w;
+    const std::int32_t want_h = (pending_h > 0) ? pending_h : request_h;
     bool resized = false;
-    if (pending_w > 0 && pending_h > 0) {
-        const Size want{.width = static_cast<float>(pending_w), .height = static_cast<float>(pending_h)};
+    if (want_w > 0 && want_h > 0) {
+        const Size want{.width = static_cast<float>(want_w), .height = static_cast<float>(want_h)};
         if (want.width != size.width || want.height != size.height) {
             size = want;
             resized = true;
@@ -919,6 +962,16 @@ auto WaylandSurface::Impl::on_xdg_surface_configure(std::uint32_t serial) -> voi
     if (active != pending_act) {
         active = pending_act;
         update_state();
+    }
+    // set_size 的尺寸提议：toplevel configure 就是合成器对该提议的回答（接受或拒绝）。
+    // 无论结果如何都立即还原样式 min/max 并 commit——不还原会把窗口永久锁成固定尺寸；
+    // 若合成器拒绝了提议，继续保留约束也只会阻止用户手动缩放，不会让请求生效。
+    if (request_w > 0 && request_h > 0) {
+        request_w = 0;
+        request_h = 0;
+        apply_style_size_limits();
+        wl_surface_commit(surface);
+        wl_display_flush(dpy);
     }
     if ((resized || margin_state_changed) && self->present_request_) {
         // 几何/边距变化当下同步重渲染（对齐 Win32 WM_SIZE / X11 ConfigureNotify）：
@@ -1425,19 +1478,20 @@ WaylandSurface::WaylandSurface(int w, int h, const std::string &title, const Win
     xdg_toplevel_set_title(d.toplevel, title.c_str());
     xdg_toplevel_set_app_id(d.toplevel, "aurora");
     // 样式映射：尺寸限制经 xdg_toplevel（逻辑坐标）；always_on_top 无核心协议对应（忽略并告警）。
+    // 约束值同时记入 Impl：运行期 set_size 的临时提议用过后要还原到这一组值
+    // （见 apply_style_size_limits），否则会把窗口锁成固定尺寸。
     if (!style.resizable) {
-        xdg_toplevel_set_min_size(d.toplevel, w, h);
-        xdg_toplevel_set_max_size(d.toplevel, w, h);
+        d.style_min_w = std::max(1, w);
+        d.style_min_h = std::max(1, h);
+        d.style_max_w = std::max(1, w);
+        d.style_max_h = std::max(1, h);
     } else {
-        if (style.min_size.width > 0.0F || style.min_size.height > 0.0F) {
-            xdg_toplevel_set_min_size(d.toplevel, static_cast<std::int32_t>(style.min_size.width),
-                                      static_cast<std::int32_t>(style.min_size.height));
-        }
-        if (style.max_size.width > 0.0F || style.max_size.height > 0.0F) {
-            xdg_toplevel_set_max_size(d.toplevel, static_cast<std::int32_t>(style.max_size.width),
-                                      static_cast<std::int32_t>(style.max_size.height));
-        }
+        d.style_min_w = static_cast<std::int32_t>(style.min_size.width);
+        d.style_min_h = static_cast<std::int32_t>(style.min_size.height);
+        d.style_max_w = static_cast<std::int32_t>(style.max_size.width);
+        d.style_max_h = static_cast<std::int32_t>(style.max_size.height);
     }
+    d.apply_style_size_limits();
     if (style.always_on_top) {
         AURORA_LOG_WARN("window", "WaylandSurface: always_on_top has no core Wayland protocol; ignored.");
     }
@@ -1509,6 +1563,19 @@ WaylandSurface::WaylandSurface(int w, int h, const std::string &title, const Win
     } else {
         AURORA_LOG_INFO("window", "WaylandSurface: compositor lacks wl_data_device_manager; system drag unavailable.");
     }
+    // 剪贴板桥：必须晚于拖放桥（复用其 `wl_data_device`），install 失败即本窗口不参与富格式
+    // 剪贴板——如实降级，不谎报已有通路（与 X11 / Win32 桥同款处置）。
+    if (d.drag != nullptr) {
+        d.clipboard = std::make_unique<detail::WaylandClipboardBridge>(
+            d.dpy, d.data_device_mgr, d.data_device_mgr_version, d.drag->data_device(), d.seat,
+            detail::WaylandClipboardBridge::Hooks{
+                .on_change = []() -> void { clipboard::detail::fire_change(); },
+                .input_serial = [impl = impl_.get()]() -> std::uint32_t { return impl->last_input_serial; }});
+        if (!d.clipboard->install()) {
+            d.clipboard.reset();
+            AURORA_LOG_WARN("window", "WaylandSurface: clipboard bridge install failed; rich clipboard unavailable.");
+        }
+    }
 }
 
 WaylandSurface::~WaylandSurface() {
@@ -1518,7 +1585,10 @@ WaylandSurface::~WaylandSurface() {
     window_state_handler_ = nullptr;
     window_mode_handler_ = nullptr;
     present_request_ = nullptr;
-    // 拖放桥先收摊：它持有 `wl_data_device`（seat 的子对象）与在途会话，且 `uninstall` 里要
+    // 剪贴板桥先于拖放桥销毁：它的 selection 转发器登记在拖放桥上（闭包捕获本桥），且读侧
+    // offer / 写侧 source 都依附拖放桥创建的 `wl_data_device`。
+    d.clipboard.reset();
+    // 拖放桥次之：它持有 `wl_data_device`（seat 的子对象）与在途会话，且 `uninstall` 里要
     // 兑现「在途拖出按 Cancelled」——必须早于 seat / display 销毁，也早于上层回调解绑后的
     // 任何一次事件泵。
     d.drag.reset();
@@ -1856,6 +1926,52 @@ auto WaylandSurface::size() const -> Size {
     return impl_->full_size();
 }
 
+auto WaylandSurface::set_position(Point /*p*/) -> void {
+    // xdg-shell 没有客户端可用的定位请求：窗口位置由合成器（含平铺/吸附策略）决定，
+    // 客户端既不能查询也不能设置（`position()` 亦为基类默认 (0,0)）。
+    // 保留显式覆写而非依赖基类空实现，使「本后端不支持」在代码与文档里可见：
+    // 几何持久化的位置腿在本后端如实降级，尺寸腿仍按 set_size 的提议语义工作。
+}
+
+auto WaylandSurface::set_size(Size s) -> void {
+    Impl &d = *impl_;
+    if (d.dpy == nullptr || d.toplevel == nullptr || d.window_gone) {
+        return;
+    }
+    // 入参是**整窗外框**逻辑尺寸（与 size() / 几何快照同口径）：xdg_toplevel 的 min/max
+    // 约束作用在 window geometry（内容）上，故先减去当前态 CSD 阴影边距（塌缩态为 0）。
+    const int margin = d.shadow_margin();
+    std::int32_t w = std::max(1, static_cast<std::int32_t>(std::lround(s.width)) - (2 * margin));
+    std::int32_t h = std::max(1, static_cast<std::int32_t>(std::lround(s.height)) - (2 * margin));
+    // 样式约束是内容口径：把提议夹回用户声明的 min/max 内，避免越界后被合成器直接拒绝。
+    if (d.style_min_w > 0) {
+        w = std::max(w, d.style_min_w);
+    }
+    if (d.style_min_h > 0) {
+        h = std::max(h, d.style_min_h);
+    }
+    if (d.style_max_w > 0) {
+        w = std::min(w, d.style_max_w);
+    }
+    if (d.style_max_h > 0) {
+        h = std::min(h, d.style_max_h);
+    }
+    if (w == static_cast<std::int32_t>(std::lround(d.size.width)) &&
+        h == static_cast<std::int32_t>(std::lround(d.size.height))) {
+        return;  // 已是目标尺寸：不下发约束，避免多余的 configure 往返
+    }
+    // xdg-shell 没有「程序化设置窗口尺寸」请求：client 只能给约束，最终尺寸由合成器经
+    // xdg_toplevel.configure 决定。把 min 与 max 同时收窄到目标值，即「提议此尺寸」的
+    // 标准做法（合成器须回一个满足约束的 configure）；不能长期保留该约束，否则窗口被
+    // 锁成 fixed-size。还原点在 on_xdg_surface_configure——configure 就是合成器的回答。
+    d.request_w = w;
+    d.request_h = h;
+    xdg_toplevel_set_min_size(d.toplevel, w, h);
+    xdg_toplevel_set_max_size(d.toplevel, w, h);
+    wl_surface_commit(d.surface);
+    wl_display_flush(d.dpy);
+}
+
 auto WaylandSurface::frame_count() const -> int { return impl_->presented; }
 
 auto WaylandSurface::scale_factor() const -> float { return static_cast<float>(impl_->scale); }
@@ -2176,6 +2292,10 @@ auto WaylandSurface::poll_platform_events() -> void {
     // 帧内看守：管道读写的逐帧推进与「落放后迟迟不给数据」的墙钟超时在此兑现（不悬挂、不虚假成功）。
     if (d.drag != nullptr) {
         d.drag->tick();
+    }
+    // 剪贴板写侧（`wl_data_source.send`）的管道写出同理：对端节奏不可控，逐帧推进。
+    if (d.clipboard != nullptr) {
+        d.clipboard->tick();
     }
 }
 

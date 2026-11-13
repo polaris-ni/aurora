@@ -33,7 +33,7 @@ namespace aurora::demo_scenes {
 [[nodiscard]] inline auto build_dismissible() -> Node {
     auto make_card = [](const std::string &label, au::Color tint, bool custom_cb) -> au::Node {
         au::Text title{label};
-        title.modifier.set(au::Modifier{}.background(tint).size(280.0F, 56.0F));
+        title.set_modifier(au::Modifier{}.background(tint).size(280.0F, 56.0F));
         const auto dis = std::make_shared<au::Dismissible>(au::Node{std::move(title)});
         if (custom_cb) {
             // 自定义回调接管默认摘除：这里只记录（真实场景多为删除数据后重建子树）。
@@ -47,30 +47,20 @@ namespace aurora::demo_scenes {
         return au::Node{dis};
     };
 
-    auto list = au::Column{
-        au::ColumnProps{
-            .children =
-                {
-                    make_card("swipe me ->", pal::AURORA_PRIMARY_SOFT, false),
-                    make_card("swipe away ->", pal::AURORA_OK, false),
-                    make_card("custom callback", pal::AURORA_ACCENT, true),
-                },
-        },
-    };
+    auto list = au::Column({
+        make_card("swipe me ->", pal::AURORA_PRIMARY_SOFT, false),
+        make_card("swipe away ->", pal::AURORA_OK, false),
+        make_card("custom callback", pal::AURORA_ACCENT, true),
+    });
     const auto list_ptr = std::make_shared<au::Column>(std::move(list));
 
-    au::Node root = au::Column{
-        au::ColumnProps{
-            .children =
-                {
-                    GradientTitle{"Dismissible"},
-                    gap(12),
-                    au::Text{"Drag a card horizontally; release past half to dismiss."},
-                    gap(16),
-                    Card{au::Node{list_ptr}},
-                },
-        },
-    };
+    au::Node root = au::Column({
+        GradientTitle{"Dismissible"},
+        gap(12),
+        au::Text{"Drag a card horizontally; release past half to dismiss."},
+        gap(16),
+        Card{au::Node{list_ptr}},
+    });
     return root;
 }
 

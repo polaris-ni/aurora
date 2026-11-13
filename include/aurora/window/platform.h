@@ -7,6 +7,7 @@
 #include "aurora/core/platform.h"
 #include "aurora/environment/media_query.h"
 #include "aurora/theming/color_scheme.h"
+#include "aurora/theming/theme_style.h"
 #include "aurora/window/window.h"
 
 namespace aurora {
@@ -29,6 +30,87 @@ struct PlatformCapabilities {
     bool system_drag_in = false;
     /// @brief 支持发起系统拖出（从应用拖到其它进程）。语义同上（机制存在性，非运行期保证）。
     bool system_drag_out = false;
+    /// @brief OS 侧存在「最近文档」机制，且本库已把 `RecentDocuments::project_to_os()` 接到该机制。
+    ///
+    /// 能力位只表「机制是否存在」：运行期不可用（投影通路建立失败等）仍走 `Result` 错误，
+    /// 二者不互相替代（与 `system_drag_in` 同款口径）。**只在桥已落地的方向翻位**——
+    /// Win32 / D3D11 由 `SHAddToRecentDocs` 桥接线（两者共用同一宿主，只是上屏形态不同，故同翻）；
+    /// `MacOS` 由 `NSDocumentController` 的 `noteNewRecentDocumentURL:` 桥接线（应用级集合，清空
+    /// 走 `clearRecentDocuments:`）。`X11` / `Wayland` / `Glfw` / `Wasm` / `Headless` 恒 false：
+    /// Linux 侧唯一沾边的 XDG `recently-used.xbel` 是 GTK 生态共读的用户态文件、不是 OS 提供的
+    /// 机制，写它要自备跨进程合并与文件锁而收益只有一处选择器显示，代价不成立，故如实缺位——
+    /// 应用内列表在全平台照常工作，不因此降级。
+    bool recent_documents_os_projection = false;
+    /// @brief 存在 OS 原生菜单栏机制，且本库已把 `NativeMenuBar` 接到该机制（Win32 `HMENU` / macOS `NSMenu` 桥）。
+    ///
+    /// 能力位只表「机制是否存在」：运行期不可用（菜单安装失败、无窗口宿主等）仍走 `Result` 错误，
+    /// 二者不互相替代（与 `system_drag_in` 同款口径）。**只在桥已落地的方向翻位**——
+    /// Win32 / D3D11 由 `HMENU` 桥接线（两者共用同一宿主，故同翻）；`MacOS` 由 `NSMenu` 桥接线
+    /// （应用级 `NSApp.mainMenu`，不随窗口销毁而消失）；`X11` / `Wayland` / `Glfw` / `Wasm` /
+    /// `Headless` 恒 false：Linux 侧无 OS 级菜单栏机制（GNOME 取消全局菜单、GTK4 窗口内自绘即
+    /// GTK 同款形态），回落自绘 `MenuBar`，故如实缺位。
+    bool native_menu_bar = false;
+    /// @brief 存在 OS 运行期显隐机制，且本库已把 `Surface::set_visible()` / `is_visible()` 接到该机制。
+    ///
+    /// 能力位只表「机制是否存在且已接线」：与运行期失败不互相替代（同 `system_drag_in` 口径）。
+    /// **只在桥已落地的方向翻位**——Win32 / D3D11 共用同一 `Win32Host`
+    /// （`ShowWindow(SW_SHOWNA / SW_HIDE)`），故同翻；`MacOS` 走 `MacOSSurface` 的 `orderOut:` /
+    /// `orderFrontRegardless`（显示不激活），读回原生 `isVisible`；wgpu 是**渲染后端偏好**而非独立
+    /// `SurfaceKind`（其宿主仍是 Win32），不在此单列。其余恒 false：`X11` 的 `XMapWindow` /
+    /// `XUnmapWindow` 与 `Glfw` 的 `glfwHideWindow` / `glfwShowWindow` 机制在但本库未接线，
+    /// `Wayland` 没有「隐藏顶层窗口」的核心协议（只有 minimize），`Wasm` 的
+    /// canvas 没有窗口可见性概念，`Headless` 是记录值 seam 而非 OS 机制。缺位平台上
+    /// `set_visible()` 是可观测的 no-op（`is_visible()` 保持基类默认 `true`），不静默。
+    bool runtime_visibility = false;
+    /// @brief 存在 OS 运行期置顶机制，且本库已把 `Surface::set_always_on_top()` 接到该机制。
+    ///
+    /// 翻位口径同 `runtime_visibility`：Win32 / D3D11（同一宿主的 `SetWindowPos(HWND_TOPMOST /
+    /// HWND_NOTOPMOST)`，wgpu 是渲染偏好而非独立 `SurfaceKind`，不另列）与 `MacOS`
+    /// （`MacOSSurface` 的 `setLevel:`，Floating / Normal 两档，读回原生 `level`）；
+    /// `Wayland` 无核心协议对应（其置顶属 `xdg_window` 的扩展或 compositor 策略，本库不引），
+    /// `X11` 需 `_NET_WM_STATE_ABOVE` 客户机消息、`Glfw` 需 `glfwSetWindowAttrib(GLFW_FLOATING)`，
+    /// 两者机制在但未接线，故如实缺位。
+    bool runtime_always_on_top = false;
+    /// @brief 程序化窗控三原语（`minimize()` / `toggle_maximize()` / `set_window_mode()`）已接到 OS。
+    ///
+    /// 能力位答的是「**公共入口是否全部接通**」，不是「OS 有没有这个机制」（与 `runtime_visibility`
+    /// 同款口径）。Win32 / D3D11 共用同一 `Win32Host`（`SC_*` 目标态 + `WM_SIZE` 回报定档）故同翻；
+    /// `Wayland` 走 xdg_toplevel 的 set_minimized/set_maximized，`MacOS` 走 AppKit
+    /// `miniaturize:` / `zoom:`；`X11` 的 minimize 经 `XIconifyWindow`、toggle_maximize 经
+    /// `_NET_WM_STATE_MAXIMIZED_*` 目标态请求（与 CSD 钮同源），`Glfw` 经 `glfwIconifyWindow` /
+    /// `glfwMaximizeWindow`（回调回来定档上报）——六家桌面后端三腿皆齐，故全 true；`Wasm` 无窗口概念、
+    /// `Headless` 的 `set_window_mode` 是测试 seam（不代表 OS 能力），恒 false。
+    bool runtime_window_mode = false;
+    /// @brief 全屏切换（`set_fullscreen()` 与 `set_window_mode(FullScreen)`）已接到 OS。
+    ///
+    /// 口径同 `runtime_window_mode`：`Win32` / `D3D11`（同一 `Win32Host` 的 borderless 全屏：
+    /// monitor 枚举 + 还原几何 + `WM_SIZE` 定档上报）/ `Wayland` / `MacOS` 四家已齐故为 true；
+    /// `X11` 虽有 `_NET_WM_STATE_FULLSCREEN` 但公共切换腿未接线，`Glfw` 无 monitor 通道——
+    /// 二者如实 false，应用先查询再决定画不画全屏钮。
+    bool runtime_fullscreen = false;
+    /// @brief 存在 OS 打印会话机制，且本库已接线 `PrintSession`（Windows GDI 打印会话 / macOS AppKit
+    /// 打印操作）。Linux 恒 false：本库不引入 libcups（第三方形态全是 vendored 源码，系统动态库是
+    /// 新开的口子），替代路径是导出 PDF 后交给默认处理程序——结论见
+    /// `specification/06-app-platform.md`。位为 false 时 `print_targets()` 报
+    /// `print-session-unsupported`，不静默返回空列表。
+    bool native_print_session = false;
+    /// @brief 存在 OS 级 URL 方案登记机制，且本库已接线 `register_url_scheme()` 一系。
+    ///
+    /// Windows 写 `HKCU\Software\Classes`；Linux 写用户级桌面条目与 `mimeapps.list`；macOS 靠包内
+    /// `CFBundleURLTypes` + Launch Services（不在 `.app` 包内时调用走 `Result` 失败并点名原因，
+    /// 能力位仍为 true——机制在、桥已接）。
+    bool url_scheme_registration = false;
+    /// @brief 存在 OS 级文件关联数据库，且本库已接线「查询 + 声明候选」一系。
+    ///
+    /// 三平台同 `url_scheme_registration` 的翻位口径。声明**不抢默认处理程序**（默认归用户偏好）；
+    /// 查询只答「当前实际生效的归属」。
+    bool file_association = false;
+    /// @brief 存在 OS 登录项机制，且本库已接线三态查询 / 开关（Windows HKCU Run / Linux 自动启动
+    /// 桌面条目 / macOS `SMAppService`）。
+    ///
+    /// 位为 false 时 `set_run_at_login` 报 `run-at-login-unsupported`、`run_at_login()` 报
+    /// `Unsupported` 并点名原因——三态不压成布尔。
+    bool run_at_login = false;
 };
 
 /// @brief 平台与运行环境快照（显式查询，跳过 Surface 探测，specification/06-app-platform.md §5）。
@@ -60,7 +142,21 @@ struct Platform {
     /// @return 聚合结果：desktop/mobile 按 DeviceKind 判定；multitouch 与 high_frequency_pointer
     /// 在 Win32/Glfw/X11/Wayland/MacOS 五类真实显示 Surface 下为 true；`system_drag_in` / `system_drag_out`
     /// 仅在已接线的后端下为 true（当前为 Win32 / D3D11 / X11 / Wayland / MacOS，两方向同口径；
-    /// 未接线的方向不预先声称支持）。
+    /// 未接线的方向不预先声称支持）；`recent_documents_os_projection` 仅在已落 OS 投影桥的后端下为
+    /// true；`native_menu_bar` 与之同口径（当前均为 Win32 / D3D11 / MacOS，macOS 两条桥同批落地）；
+    /// `runtime_visibility` 与 `runtime_always_on_top` 同样仅在已接运行期窗口开关的后端下为 true
+    /// （当前为 Win32 / D3D11 / MacOS：MacOS 经 `NSApp` 激活态与 `setLevel` 置顶；其余后端为
+    /// 「可查询的不支持」，公共 setter 是可观测的 no-op 而非静默失效）；
+    /// `runtime_window_mode` / `runtime_fullscreen` 按「公共入口是否全部接通」置位——两者均为
+    /// 六家桌面后端（Win32 / D3D11 / Wayland / MacOS / X11 / Glfw）全 true（`runtime_window_mode`
+    /// 三原语腿现已全部接通：Win32/D3D11 经 `Win32Host`、`Wayland`/`MacOS` 经各后端既有通道、
+    /// `X11` 经 `XIconifyWindow` + `_NET_WM_STATE_MAXIMIZED_*`、`Glfw` 经 `glfwIconifyWindow` /
+    /// `glfwMaximizeWindow`；`runtime_fullscreen` 中 Win32 / D3D11 经 `Win32Host::set_fullscreen` 的
+    /// borderless 实现、Wayland / MacOS 经各后端既有通道、X11 经 `_NET_WM_STATE_FULLSCREEN` 原子、
+    /// Glfw 经 borderless 铺满显示器）；Wasm / Headless 非 OS 能力，恒 false，应用先查询再决定画不画全屏钮；
+    /// `native_print_session` / `url_scheme_registration` / `file_association` / `run_at_login`
+    /// 与 `SurfaceKind` 无关（入口是进程级自由函数），按平台桥的编译期接线整体置位；Linux 的
+    /// `native_print_session` 恒 false（不引入 libcups）。
     [[nodiscard]] auto capabilities() const -> PlatformCapabilities {
         // 待填充的能力标志聚合：默认值起步，先按设备形态、再按 SurfaceKind 逐项置位。
         PlatformCapabilities c;
@@ -81,8 +177,8 @@ struct Platform {
         //
         // ⚠️ 能力位是**编译期后端**的静态声明，不看运行期桥是否 install 成功：X11 会话缺失
         // （无 DISPLAY）时 `X11Surface` 构造即失败、不会有该 `SurfaceKind` 被产出，故此处不必
-        // 也无法回读运行期状态。MacOS 同口径（与 `multitouch` 等位一致，只表机制归属）：其窗口壳
-        // 尚为骨架、无内容视图可登记拖放类型，运行期 `install()` 必失败并由宿主记日志降级。
+        // 也无法回读运行期状态。MacOS 同口径（与 `multitouch` 等位一致，只表机制归属）：窗口壳
+        // 的真实 AppKit 视图负责登记拖放类型，运行期 install 失败仍由宿主记日志降级。
         c.system_drag_in =
             (surface == SurfaceKind::Win32 || surface == SurfaceKind::D3D11 || surface == SurfaceKind::X11 ||
              surface == SurfaceKind::Wayland || surface == SurfaceKind::MacOS);
@@ -95,6 +191,53 @@ struct Platform {
         c.system_drag_out =
             (surface == SurfaceKind::Win32 || surface == SurfaceKind::D3D11 || surface == SurfaceKind::X11 ||
              surface == SurfaceKind::Wayland || surface == SurfaceKind::MacOS);
+        // OS 级最近文档投影：Win32 / D3D11 走 `SHAddToRecentDocs`（共用同一宿主故同翻）；
+        // MacOS 走 `NSDocumentController`（应用级集合，随窗口宿主接线、无窗口也可自举）。
+        // Linux 三形态与 Glfw / Wasm / Headless 恒 false：OS 侧无该机制
+        // （XDG `recently-used.xbel` 是 GTK 生态共读文件而非 OS 机制），应用内列表照常工作。
+        c.recent_documents_os_projection =
+            (surface == SurfaceKind::Win32 || surface == SurfaceKind::D3D11 || surface == SurfaceKind::MacOS);
+        // 原生菜单栏：Win32 / D3D11 由 `HMENU` 桥接线（同一宿主故同翻），MacOS 由应用级
+        // `NSMenu`（`NSApp.mainMenu`）桥接线，不随窗口销毁而消失；其余方向无 OS 级机制，回落自绘 MenuBar。
+        c.native_menu_bar =
+            (surface == SurfaceKind::Win32 || surface == SurfaceKind::D3D11 || surface == SurfaceKind::MacOS);
+        c.runtime_visibility =
+            (surface == SurfaceKind::Win32 || surface == SurfaceKind::D3D11 || surface == SurfaceKind::MacOS);
+        c.runtime_always_on_top =
+            (surface == SurfaceKind::Win32 || surface == SurfaceKind::D3D11 || surface == SurfaceKind::MacOS);
+        // 程序化窗控三原语：Win32 / D3D11 接线（同一 `Win32Host` 的 `SC_*` 目标态 + `WM_SIZE`
+        // 回报定档）；Wayland / MacOS 四槽原已齐全；X11 / Glfw 经本批落地（minimize 经
+        // `XIconifyWindow` / `glfwIconifyWindow`，toggle_maximize 经 `_NET_WM_STATE_MAXIMIZED_*` /
+        // `glfwMaximizeWindow`）亦全接——六家桌面后端均 true。Wasm 无窗口概念；Headless 的
+        // `set_window_mode` 是测试 seam（不代表 OS 能力），恒 false。
+        c.runtime_window_mode =
+            (surface == SurfaceKind::Win32 || surface == SurfaceKind::D3D11 || surface == SurfaceKind::Wayland ||
+             surface == SurfaceKind::MacOS || surface == SurfaceKind::X11 || surface == SurfaceKind::Glfw);
+        // 全屏切换：Win32 / D3D11（同一 Win32Host 的 borderless 全屏：monitor 枚举 + 还原几何 +
+        // WM_SIZE 定档上报）/ Wayland / MacOS 四家已接到 OS；X11 经 `set_window_mode(FullScreen)` 发
+        // `_NET_WM_STATE_FULLSCREEN` 原子（WM 接管几何还原），`set_fullscreen` 覆写转发同源；Glfw 经
+        // borderless 铺满所在显示器（存/还原几何 + 装饰态，不改视频模式）落地——四家桌面后端 + Glfw 全
+        // true；Wasm / Headless 非 OS 能力，恒 false，应用先查询再决定是否提供全屏入口。
+        c.runtime_fullscreen =
+            (surface == SurfaceKind::Win32 || surface == SurfaceKind::D3D11 || surface == SurfaceKind::Wayland ||
+             surface == SurfaceKind::MacOS || surface == SurfaceKind::X11 || surface == SurfaceKind::Glfw);
+        // 桌面外壳集成四枚位：入口是进程级自由函数（`include/aurora/app/` 的五个新头），与
+        // `SurfaceKind` 无关——平台桥按编译期 OS 宏接线（见 `src/aurora/app/detail/` 的三套
+        // `*_shell_integration.cpp`），故这里按平台整体置位，不随 Surface 变化；Headless 在
+        // Windows / Linux 上同样持有这些 OS 机制。Linux 的 `native_print_session` 恒 false：
+        // 本库不引入 libcups，替代路径是导出 PDF 后交给默认处理程序（结论见
+        // `specification/06-app-platform.md`）。文档输出（PDF）**不入**能力位——纯库内能力，
+        // 不依赖任何 OS 机制。
+#if defined(AURORA_PLATFORM_WINDOWS) || (defined(AURORA_PLATFORM_MACOS) && defined(AURORA_BACKEND_MACOS))
+        c.native_print_session = true;
+        c.url_scheme_registration = true;
+        c.file_association = true;
+        c.run_at_login = true;
+#elif defined(AURORA_PLATFORM_LINUX)
+        c.url_scheme_registration = true;
+        c.file_association = true;
+        c.run_at_login = true;
+#endif
         return c;
     }
 };
@@ -122,12 +265,38 @@ struct Platform {
     return p;
 }
 
+/// @brief 显式查询桌面外壳证据（Linux/BSD 的风格解算输入；specification/06-app-platform.md §5）。
+///
+/// 与 `platform()` 的关系：`platform().kind` 表 **OS 家族**（Windows / macOS / Linux / 其余），
+/// 分不出同一台 Linux 机器跑的是 GNOME 还是 KDE，而这两者的观感应当不同——风格轴需要第二枚证据，
+/// 它就是本函数的返回值。它**不并进** `Platform` 快照：`Platform` 的口径是「编译期 OS + 自动探测
+/// Surface」，且 `platform()` 被大量既有断言逐字段比较，扩字段会牵动它们。
+///
+/// 证据口径与局限（读进程环境，实现在 `src/aurora/theming/detail/theme_probe.cpp`，全库唯一一份）：
+/// 只有 Linux / BSD 分支读 `XDG_CURRENT_DESKTOP` → `DESKTOP_SESSION`；Windows / macOS / WASM /
+/// Android / 无头恒返回 `Unknown`——它们的外壳证据在 `kind` 那一轴。裸 X11、自建合成器、无会话
+/// 变量的环境同样 `Unknown`，这是**证据缺失**而不是「没有桌面」。
+///
+/// 与 `os_color_scheme()` 并列的一条口径：**创建时读一次，不随运行期环境变化**。本函数自身每次
+/// 调用都直读环境变量（供诊断与测试如实取数）；风格解算侧的缓存发生在
+/// `Theme::default_style()`，故换桌面外壳要重启应用。
+/// @return 外壳证据；`Unknown`（无证据）与 `Other`（有证据但不认识）分列。
+/// @note Side-effects: reads the process environment（仅 Linux / BSD 分支）。
+[[nodiscard]] inline auto desktop_environment() -> DesktopEnvironment { return detail::probe_desktop_environment(); }
+
 #ifdef AURORA_PLATFORM_WINDOWS
 namespace detail {
 /// @brief Win32 注册表读取 OS 明暗偏好（`os_color_scheme` 的 Windows 分支实现）。
 /// 定义见 `src/aurora/window/win32_platform.cpp`——公共头不引入 `<windows.h>`。
 /// @return Dark/Light；打不开注册表键时 `Unspecified`。
 [[nodiscard]] auto win32_os_color_scheme() -> ColorScheme;
+}  // namespace detail
+#elif defined(AURORA_PLATFORM_MACOS) && defined(AURORA_BACKEND_MACOS)
+namespace detail {
+/// @brief macOS `NSAppearance` 读取 OS 明暗偏好（`os_color_scheme` 的 macOS 分支实现）。
+/// 定义见 `src/aurora/window/macos_platform.cpp`——公共头不引入 `<AppKit/AppKit.h>`。
+/// @return Dark/Light；AppKit 尚未初始化（`NSApp == nil`）时 `Unspecified`。
+[[nodiscard]] auto macos_os_color_scheme() -> ColorScheme;
 }  // namespace detail
 #endif
 
@@ -141,8 +310,10 @@ namespace detail {
 /// - **Windows**：读注册表 `HKCU\...\Themes\Personalize\AppsUseLightTheme`（REG_DWORD，
 ///   0=Dark、1=Light）。键不存在（Win10 1803 之前）按 Light；打不开键返回 `Unspecified`。
 ///   无缓存轮询（每次直读，OS 偏好可能被用户随时更改）。
-/// - **macOS**：契约 = `NSAppearance` bestMatch（Dark→Dark）。
-///   **未在本仓库无头构建内编译验证。**
+/// - **macOS**：`NSApp.effectiveAppearance` 的 bestMatch（`NSAppearanceNameDarkAqua`
+///   → Dark，Aqua → Light）。AppKit 未初始化时返回 `Unspecified`。运行期明暗切换经
+///   `MacOSSurface` 内容视图的 `viewDidChangeEffectiveAppearance` 上报
+///   `notify_os_color_scheme_change`（已在本仓库真机 AppKit 构建内验证）。
 /// - 其余平台：`Unspecified`。
 /// @return OS 档位；无证据时不猜，返回 `Unspecified` 交由调用方回落。
 [[nodiscard]] inline auto os_color_scheme() -> ColorScheme {
@@ -179,8 +350,10 @@ namespace detail {
         }
     }
     return ColorScheme::Unspecified;
+#elif defined(AURORA_PLATFORM_MACOS) && defined(AURORA_BACKEND_MACOS)
+    return detail::macos_os_color_scheme();
 #elif defined(AURORA_PLATFORM_MACOS)
-    // 见函数头契约注记：NSAppearance 查询未在本仓库无头构建内编译验证。
+    // 无 macOS 窗口后端：不初始化 AppKit（init 有进程级副作用），如实无证据。
     return ColorScheme::Unspecified;
 #else
     return ColorScheme::Unspecified;

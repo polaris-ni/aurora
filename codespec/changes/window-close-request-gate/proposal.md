@@ -109,3 +109,8 @@ app.set_on_close_requested([](aurora::WindowId id, aurora::CloseRequestSource sr
 
 blast radius 最大，放最后落。建议次序：CHG-031 → CHG-033 → CHG-032 → **CHG-034**。
 实施切片：**S1** 枚举 + `surface.h` 虚函数 + 无头覆写 + `window_host` + `application` 询问步 + 无头用例（此时除无头外全部后端走 fail-open WARN，正是分片价值）；**S2** 后端清位（GLFW → Win32 → X11 → Wayland → macOS 骨架 → WASM）+ 真机探针；**S3** 文档与门禁收口。
+
+## 实施记录与偏离（落码期回写）
+
+1. **macOS 腿已随窗口壳实写落地**（上方「macOS 骨架」只反映提案期状态）：`windowShouldClose:` 置 `should_close = true` 并返回 NO（不让 AppKit 抢先 `orderOut` / 回收窗口），`close()` 只置位、窗口回收仍归宿主；`cancel_close()` 在窗口仍存活时清位，窗口已被 OS 销毁的路径拒绝清位（否则造出永远收不掉的僵尸宿主）。`should_close()` 在窗口壳不存在时返回 true（视同已请求关闭）。
+2. **验收**：`tools/verify/macos_surface_live_probe.mm` 覆盖 `close()` 置位 / `cancel_close()` 撤销 / 再次 `close()` 置位三项；`windowShouldClose:` 路径由同一探针的真实 `NSWindow` 间接证明（探针真实建窗并驱动 AppKit）。关闭闸门的跨后端语义由既有 `utest_window_shell` 等用例覆盖，未新增专用真机用例。

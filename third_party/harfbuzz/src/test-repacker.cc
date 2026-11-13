@@ -96,6 +96,24 @@ static void add_gsubgpos_header (unsigned lookup_list,
   c->pop_pack (false);
 }
 
+static void add_gsubgpos_header_1_2 (unsigned lookup_list,
+                                     hb_serialize_context_t* c)
+{
+  char header[] = {
+    0, 1, 0, 2, // version
+    0, 0, // script list
+    0, 0, // feature list
+    0, 0, // lookup list
+    0, 0, 0, 0, // feature variations
+    0, 0, 0, 0, // script list 2
+    0, 0, 0, 0, // feature list 2
+  };
+
+  start_object (header, sizeof (header), c);
+  add_wide_offset (lookup_list, c);
+  c->pop_pack (false);
+}
+
 static unsigned add_lookup_list (const unsigned* lookups,
                                  char count,
                                  hb_serialize_context_t* c)
@@ -105,6 +123,19 @@ static unsigned add_lookup_list (const unsigned* lookups,
 
   for (int i = 0; i < count; i++)
     add_offset (lookups[i], c);
+
+  return c->pop_pack (false);
+}
+
+static unsigned add_lookup_list_1_2 (const unsigned* lookups,
+                                     char count,
+                                     hb_serialize_context_t* c)
+{
+  char lookup_count[] = {0, count};
+  start_object ((char *) &lookup_count, 2, c);
+
+  for (int i = 0; i < count; i++)
+    add_wide_offset (lookups[i], c);
 
   return c->pop_pack (false);
 }
@@ -483,30 +514,33 @@ static void run_resolve_overflow_test (const char* name,
   printf (">>> Testing overflowing resolution for %s\n",
           name);
 
-  graph_t graph (overflowing.object_graph ());
+  graph_t graph = graph_t::create (overflowing.object_graph ()).value ();
 
-  graph_t expected_graph (expected.object_graph ());
-  if (graph::will_overflow (expected_graph))
+  graph_t expected_graph = graph_t::create (expected.object_graph ()).value ();
+  if (graph::will_overflow (expected_graph).value ())
   {
     if (check_binary_equivalence) {
       printf("when binary equivalence checking is enabled, the expected graph cannot overflow.");
       hb_always_assert(!check_binary_equivalence);
     }
-    expected_graph.assign_spaces ();
-    expected_graph.sort_shortest_distance ();
+    hb_always_assert (expected_graph.assign_spaces ().is_ok ());
+    hb_always_assert (expected_graph.sort_shortest_distance ().is_ok ());
   }
 
   // Check that overflow resolution succeeds
   hb_always_assert (overflowing.offset_overflow ());
-  hb_always_assert (hb_resolve_graph_overflows (tag,
+  auto r = hb_resolve_graph_overflows (tag,
                                       num_iterations,
                                       recalculate_extensions,
-                                      graph));
+                                      graph);
+  if (r.is_err())
+    printf("run_resolve_overflow_test: overflow resolution failed, cause: %s\n", graph::to_string(r.error()));
+  hb_always_assert (r.is_ok());
 
   // Check the graphs can be serialized.
-  hb_blob_t* out1 = graph::serialize (graph);
+  hb_blob_t* out1 = graph::serialize (graph).value ();
   hb_always_assert (out1);
-  hb_blob_t* out2 = graph::serialize (expected_graph);
+  hb_blob_t* out2 = graph::serialize (expected_graph).value ();
   hb_always_assert (out2);
   if (check_binary_equivalence) {
     unsigned l1, l2;
@@ -705,6 +739,42 @@ populate_serializer_with_multiple_dedup_overflow (hb_serialize_context_t* c)
     add_wide_offset(mid_nodes[i], c);
   }
   c->pop_pack(false);
+
+  c->end_serialize();
+}
+
+static void
+populate_serializer_with_unresolvable_priority_overflow (hb_serialize_context_t* c)
+{
+  // One parent larger than 64kb with thousands of distinct leaf children, a few of which
+  // are shared with a small parent that packs before it. No 16 bit offset from the large
+  // parent can reach past it, so this can't be packed; but it shouldn't take long to find
+  // that out.
+  std::string large_string(70000, 'a');
+  c->start_serialize<char> ();
+
+  constexpr unsigned num_leaves = 10000;
+  constexpr unsigned num_shared = 40;
+  hb_vector_t<unsigned> leaves;
+  for (unsigned i = 0; i < num_leaves; i++) {
+    char leaf[3] = {'l', (char) (i >> 8), (char) i};
+    leaves.push (add_object (leaf, 3, c));
+  }
+
+  start_object ("s", 1, c);
+  for (unsigned i = 0; i < num_shared; i++)
+    add_offset (leaves[i], c);
+  unsigned small_parent = c->pop_pack (false);
+
+  start_object (large_string.c_str (), 70000, c);
+  for (unsigned i = 0; i < num_leaves; i++)
+    add_offset (leaves[i], c);
+  unsigned large_parent = c->pop_pack (false);
+
+  start_object ("r", 1, c);
+  add_offset (small_parent, c);
+  add_offset (large_parent, c);
+  c->pop_pack (false);
 
   c->end_serialize();
 }
@@ -1408,7 +1478,8 @@ populate_serializer_with_24_and_32_bit_offsets (hb_serialize_context_t* c)
 static void
 populate_serializer_with_extension_promotion (hb_serialize_context_t* c,
                                               int num_extensions = 0,
-                                              bool shared_subtables = false)
+                                              bool shared_subtables = false,
+                                              bool version_1_2 = false)
 {
   constexpr int num_lookups = 5;
   constexpr int num_subtables = num_lookups * 2;
@@ -1455,9 +1526,14 @@ populate_serializer_with_extension_promotion (hb_serialize_context_t* c,
     lookups[i] = finish_lookup (c);
   }
 
-  unsigned lookup_list = add_lookup_list (lookups, num_lookups, c);
+  unsigned lookup_list = version_1_2
+                         ? add_lookup_list_1_2 (lookups, num_lookups, c)
+                         : add_lookup_list (lookups, num_lookups, c);
 
-  add_gsubgpos_header (lookup_list, c);
+  if (version_1_2)
+    add_gsubgpos_header_1_2 (lookup_list, c);
+  else
+    add_gsubgpos_header (lookup_list, c);
 
   c->end_serialize();
 }
@@ -1503,6 +1579,56 @@ populate_serializer_with_large_pair_pos_1 (hb_serialize_context_t* c,
     add_offset (pair_pos_1[i], c);
   add_offset (pair_pos_2, c);
 
+  unsigned lookup = finish_lookup (c);
+
+  unsigned lookup_list = add_lookup_list (&lookup, 1, c);
+
+  add_gsubgpos_header (lookup_list, c);
+
+  c->end_serialize();
+}
+
+// One PairPosFormat1 with num_pair_set PairSet offsets which all point at one
+// of num_shared small PairSets. PairSet i points at shared PairSet i % num_shared.
+template<int num_pair_set, int num_shared>
+static void
+populate_serializer_with_shared_pair_pos_1 (hb_serialize_context_t* c)
+{
+  c->start_serialize<char> ();
+
+  unsigned pair_set[num_shared];
+  for (int i = num_shared - 1; i >= 0; i--)
+  {
+    char pair_set_table[] = {
+      0, 1, // count
+      0, (char) i, // second glyph
+    };
+    pair_set[i] = add_object (pair_set_table, 4, c);
+  }
+
+  unsigned coverage = add_coverage (0, num_pair_set - 1, c);
+
+  char format[] = {
+    0, 1
+  };
+  start_object (format, 2, c);
+  add_offset (coverage, c);
+
+  char value_format[] = {
+    0, 0,
+    0, 0,
+    (char) ((num_pair_set >> 8) & 0xFF),
+    (char) (num_pair_set & 0xFF),
+  };
+  extend (value_format, 6, c);
+
+  for (int i = 0; i < num_pair_set; i++)
+    add_offset (pair_set[i % num_shared], c);
+
+  unsigned pair_pos_1 = c->pop_pack (false);
+
+  start_lookup (2, 1, c);
+  add_offset (pair_pos_1, c);
   unsigned lookup = finish_lookup (c);
 
   unsigned lookup_list = add_lookup_list (&lookup, 1, c);
@@ -1813,6 +1939,83 @@ populate_serializer_with_large_liga_overlapping_clone_result (hb_serialize_conte
   c->end_serialize();
 }
 
+static void
+populate_serializer_with_large_liga_null_offsets (hb_serialize_context_t* c, bool split)
+{
+  std::string large_string(100000, 'a');
+  c->start_serialize<char> ();
+
+  constexpr unsigned liga_size = 30000;
+  const char null_offsets[6] = {0};
+
+  unsigned liga[3];
+  unsigned liga_subst[2];
+  unsigned liga_set[2];
+  unsigned liga_subst_count = split ? 2 : 1;
+  unsigned coverage;
+
+  if (split) {
+    // LigaSubst 2
+    coverage = add_coverage(1, 1, c);
+    start_object (large_string.c_str(), liga_size, c);
+    add_virtual_offset(coverage, c);
+    liga[2] = c->pop_pack (false);
+
+    add_liga_set_header(1, c);
+    add_virtual_offset(coverage, c);
+    add_offset(liga[2], c);
+    liga_set[0] = c->pop_pack(false);
+
+    add_liga_header(coverage, 1, c);
+    add_offset(liga_set[0], c);
+    liga_subst[1] = c->pop_pack(false);
+  }
+
+  // LigaSubst 1
+  coverage = add_coverage(0, 1, c);
+  for (int i = split ? 1 : 2; i >= 0; i--) {
+    start_object (large_string.c_str(), liga_size, c);
+    add_virtual_offset(coverage, c);
+    liga[i] = c->pop_pack (false);
+  }
+
+  add_liga_set_header(split ? 1 : 2, c);
+  add_virtual_offset(coverage, c);
+  add_offset(liga[1], c);
+  if (!split)
+    add_offset(liga[2], c);
+  liga_set[1] = c->pop_pack(false);
+
+  // One liga followed by three null offsets.
+  add_liga_set_header(4, c);
+  add_virtual_offset(coverage, c);
+  add_offset(liga[0], c);
+  extend(null_offsets, 6, c);
+  liga_set[0] = c->pop_pack(false);
+
+  add_liga_header(coverage, 2, c);
+  add_offset(liga_set[0], c);
+  add_offset(liga_set[1], c);
+  liga_subst[0] = c->pop_pack(false);
+
+  for (int l = liga_subst_count - 1; l >= 0; l--) {
+    liga_subst[l] = add_extension(liga_subst[l], 4, c);
+  }
+
+  start_lookup (7, liga_subst_count, c);
+  for (unsigned l = 0; l < liga_subst_count; l++) {
+    add_offset(liga_subst[l], c);
+  }
+
+  unsigned lookup = finish_lookup (c);
+
+  unsigned lookup_list = add_lookup_list (&lookup, 1, c);
+
+  add_gsubgpos_header (lookup_list, c);
+
+  c->end_serialize();
+}
+
 template<unsigned liga_subst_count,
          unsigned liga_set_count,
          unsigned liga_per_set_count,
@@ -1894,10 +2097,9 @@ static void test_sort_shortest ()
   hb_serialize_context_t e (buffer_e, buffer_size);
   populate_serializer_complex_2 (&a);
 
-  graph_t graph (a.object_graph ());
-  graph.sort_shortest_distance ();
+  graph_t graph = graph_t::create (a.object_graph ()).value ();
+  hb_always_assert (graph.sort_shortest_distance ().is_ok());
   graph.normalize();
-  hb_always_assert (!graph.in_error ());
 
   // Expected graph
   e.start_serialize();
@@ -1920,7 +2122,7 @@ static void test_sort_shortest ()
   e.pop_pack (false);
   e.end_serialize();
 
-  graph_t expected(e.object_graph());
+  graph_t expected = graph_t::create (e.object_graph ()).value ();
   expected.normalize();
 
   assert(expected == graph);
@@ -1938,8 +2140,8 @@ static void test_duplicate_leaf ()
   hb_serialize_context_t e (buffer_e, buffer_size);
   populate_serializer_complex_2 (&a);
 
-  graph_t graph (a.object_graph ());
-  graph.duplicate (4, 1);
+  graph_t graph = graph_t::create (a.object_graph ()).value ();
+  hb_always_assert (graph.duplicate (4, 1, false).is_ok ());
   graph.normalize();
 
   e.start_serialize();
@@ -1962,7 +2164,7 @@ static void test_duplicate_leaf ()
   add_offset(mn, &e);
   e.pop_pack(false);
 
-  graph_t expected(e.object_graph());
+  graph_t expected = graph_t::create (e.object_graph ()).value ();
   expected.normalize();
 
   assert(expected == graph);
@@ -1978,8 +2180,8 @@ static void test_duplicate_interior ()
   hb_serialize_context_t c (buffer, buffer_size);
   populate_serializer_complex_3 (&c);
 
-  graph_t graph (c.object_graph ());
-  graph.duplicate (3, 2);
+  graph_t graph = graph_t::create (c.object_graph ()).value ();
+  hb_always_assert (graph.duplicate (3, 2, false).is_ok ());
 
   hb_always_assert(strncmp (graph.object (6).head, "jkl", 3) == 0);
   hb_always_assert(graph.object (6).real_links.length == 1);
@@ -2021,8 +2223,8 @@ test_serialize ()
   populate_serializer_simple (&c1);
   hb_bytes_t expected = c1.copy_bytes ();
 
-  graph_t graph (c1.object_graph ());
-  hb_blob_t* out = graph::serialize (graph);
+  graph_t graph = graph_t::create (c1.object_graph ()).value ();
+  hb_blob_t* out = graph::serialize (graph).value ();
   free (buffer_1);
 
   hb_bytes_t actual = out->as_bytes ();
@@ -2038,9 +2240,9 @@ static void test_will_overflow_1 ()
   hb_serialize_context_t c (buffer, buffer_size);
 
   populate_serializer_complex_2 (&c);
-  graph_t graph (c.object_graph ());
+  graph_t graph = graph_t::create (c.object_graph ()).value ();
 
-  hb_always_assert (!graph::will_overflow (graph, nullptr));
+  hb_always_assert (!graph::will_overflow (graph, nullptr).value ());
 
   free (buffer);
 }
@@ -2051,9 +2253,9 @@ static void test_will_overflow_2 ()
   void* buffer = malloc (buffer_size);
   hb_serialize_context_t c (buffer, buffer_size);
   populate_serializer_with_overflow (&c);
-  graph_t graph (c.object_graph ());
+  graph_t graph = graph_t::create (c.object_graph ()).value ();
 
-  hb_always_assert (graph::will_overflow (graph, nullptr));
+  hb_always_assert (graph::will_overflow (graph, nullptr).value ());
 
   free (buffer);
 }
@@ -2064,9 +2266,51 @@ static void test_will_overflow_3 ()
   void* buffer = malloc (buffer_size);
   hb_serialize_context_t c (buffer, buffer_size);
   populate_serializer_with_dedup_overflow (&c);
-  graph_t graph (c.object_graph ());
+  graph_t graph = graph_t::create (c.object_graph ()).value ();
 
-  hb_always_assert (graph::will_overflow (graph, nullptr));
+  hb_always_assert (graph::will_overflow (graph, nullptr).value ());
+
+  free (buffer);
+}
+
+static void test_will_overflow_records ()
+{
+  size_t buffer_size = 160000;
+  void* buffer = malloc (buffer_size);
+  hb_serialize_context_t c (buffer, buffer_size);
+
+  std::string large_string(70000, 'a');
+  c.start_serialize<char> ();
+
+  unsigned obj_leaf = add_object ("d", 1, &c);
+  unsigned obj_large = add_object (large_string.c_str(), 70000, &c);
+
+  start_object ("c", 1, &c);
+  add_offset (obj_leaf, &c);
+  add_offset (obj_leaf, &c);
+  unsigned obj_c = c.pop_pack (false);
+
+  start_object ("b", 1, &c);
+  add_offset (obj_leaf, &c);
+  add_offset (obj_leaf, &c);
+  unsigned obj_b = c.pop_pack (false);
+
+  start_object ("a", 1, &c);
+  add_offset (obj_b, &c);
+  add_offset (obj_c, &c);
+  add_offset (obj_large, &c);
+  c.pop_pack (false);
+
+  c.end_serialize();
+
+  graph_t graph = graph_t::create (c.object_graph ()).value ();
+
+  // One record per overflowing (parent, child) pair, even if linked more than once.
+  hb_vector_t<graph::overflow_record_t> overflows;
+  hb_always_assert (graph::will_overflow (graph, &overflows).value ());
+  hb_always_assert (overflows.length == 2);
+  hb_always_assert (overflows[0].parent != overflows[1].parent);
+  hb_always_assert (overflows[0].child == overflows[1].child);
 
   free (buffer);
 }
@@ -2077,7 +2321,7 @@ static void test_resolve_overflows_via_sort ()
   void* buffer = malloc (buffer_size);
   hb_serialize_context_t c (buffer, buffer_size);
   populate_serializer_with_overflow (&c);
-  graph_t graph (c.object_graph ());
+  graph_t graph = graph_t::create (c.object_graph ()).value ();
 
   hb_blob_t* out = hb_resolve_overflows (c.object_graph (), HB_TAG_NONE);
   hb_always_assert (out);
@@ -2094,7 +2338,7 @@ static void test_resolve_overflows_via_duplication ()
   void* buffer = malloc (buffer_size);
   hb_serialize_context_t c (buffer, buffer_size);
   populate_serializer_with_dedup_overflow (&c);
-  graph_t graph (c.object_graph ());
+  graph_t graph = graph_t::create (c.object_graph ()).value ();
 
   hb_blob_t* out = hb_resolve_overflows (c.object_graph (), HB_TAG_NONE);
   hb_always_assert (out);
@@ -2111,7 +2355,7 @@ static void test_resolve_overflows_via_multiple_duplications ()
   void* buffer = malloc (buffer_size);
   hb_serialize_context_t c (buffer, buffer_size);
   populate_serializer_with_multiple_dedup_overflow (&c);
-  graph_t graph (c.object_graph ());
+  graph_t graph = graph_t::create (c.object_graph ()).value ();
 
   hb_blob_t* out = hb_resolve_overflows (c.object_graph (), HB_TAG_NONE, 5);
   hb_always_assert (out);
@@ -2145,7 +2389,7 @@ static void test_resolve_overflows_via_isolation ()
   void* buffer = malloc (buffer_size);
   hb_serialize_context_t c (buffer, buffer_size);
   populate_serializer_with_isolation_overflow (&c);
-  graph_t graph (c.object_graph ());
+  graph_t graph = graph_t::create (c.object_graph ()).value ();
 
   hb_always_assert (c.offset_overflow ());
   hb_blob_t* out = hb_resolve_overflows (c.object_graph (), HB_TAG ('G', 'S', 'U', 'B'), 0);
@@ -2220,7 +2464,7 @@ static void test_resolve_overflows_via_isolation_spaces ()
   void* buffer = malloc (buffer_size);
   hb_serialize_context_t c (buffer, buffer_size);
   populate_serializer_with_isolation_overflow_spaces (&c);
-  graph_t graph (c.object_graph ());
+  graph_t graph = graph_t::create (c.object_graph ()).value ();
 
   hb_always_assert (c.offset_overflow ());
   hb_blob_t* out = hb_resolve_overflows (c.object_graph (), HB_TAG ('G', 'S', 'U', 'B'), 0);
@@ -2241,7 +2485,7 @@ static void test_resolve_mixed_overflows_via_isolation_spaces ()
   void* buffer = malloc (buffer_size);
   hb_serialize_context_t c (buffer, buffer_size);
   populate_serializer_with_24_and_32_bit_offsets (&c);
-  graph_t graph (c.object_graph ());
+  graph_t graph = graph_t::create (c.object_graph ()).value ();
 
   hb_always_assert (c.offset_overflow ());
   hb_blob_t* out = hb_resolve_overflows (c.object_graph (), HB_TAG ('G', 'S', 'U', 'B'), 0);
@@ -2309,6 +2553,73 @@ static void test_resolve_with_shared_extension_promotion ()
   free (expected_buffer);
 }
 
+#ifndef HB_NO_BEYOND_64K
+static void test_resolve_with_extension_promotion_1_2 ()
+{
+  size_t buffer_size = 200000;
+  void* buffer = malloc (buffer_size);
+  hb_always_assert (buffer);
+  hb_serialize_context_t c (buffer, buffer_size);
+  populate_serializer_with_extension_promotion (&c, 0, false, true);
+
+  void* expected_buffer = malloc (buffer_size);
+  hb_always_assert (expected_buffer);
+  hb_serialize_context_t e (expected_buffer, buffer_size);
+  populate_serializer_with_extension_promotion (&e, 3, false, true);
+
+  run_resolve_overflow_test ("test_resolve_with_extension_promotion_1_2",
+                             c,
+                             e,
+                             20,
+                             true);
+  free (buffer);
+  free (expected_buffer);
+}
+#endif
+
+static void test_resolve_with_repeated_extension_promotion ()
+{
+  size_t buffer_size = 1000;
+  void* buffer = malloc (buffer_size);
+  hb_always_assert (buffer);
+  hb_serialize_context_t c (buffer, buffer_size);
+
+  c.start_serialize<char> ();
+  unsigned subtable = add_object ("subt", 4, &c);
+  start_lookup (5, 2, &c);
+  add_offset (subtable, &c);
+  add_offset (subtable, &c);
+  unsigned lookup = finish_lookup (&c);
+  unsigned lookup_list = add_lookup_list (&lookup, 1, &c);
+  add_gsubgpos_header (lookup_list, &c);
+  c.end_serialize ();
+
+  graph_t graph = graph_t::create (c.object_graph ()).value ();
+  auto context = graph::gsubgpos_graph_context_t::create (HB_TAG ('G', 'S', 'U', 'B'),
+                                                          graph).value ();
+  hb_always_assert (context.lookups.get_population () == 1);
+  unsigned lookup_index = *context.lookups.keys ();
+  graph::Lookup* lookup_table = context.lookups.get (lookup_index);
+  hb_always_assert (lookup_table->make_extension (context, lookup_index).is_ok ());
+
+  const auto& lookup_vertex = graph.vertices_[lookup_index];
+  hb_always_assert (lookup_vertex.obj ().real_links.length == 2);
+  unsigned extension_index = lookup_vertex.obj ().real_links[0].objidx;
+  hb_always_assert (lookup_vertex.obj ().real_links[1].objidx == extension_index);
+
+  auto* extension = graph.vertices_[extension_index].as<
+      graph::ExtensionFormat1<OT::Layout::GSUB_impl::ExtensionSubst>*> ();
+  unsigned promoted_subtable = extension->get_subtable_index (graph, extension_index).value ();
+  hb_always_assert (graph.vertices_[promoted_subtable].table_size () == 4);
+  hb_always_assert (graph.update_parents ().is_ok ());
+  hb_always_assert (graph.vertices_[extension_index].incoming_edges () == 2);
+  hb_always_assert (graph.vertices_[promoted_subtable].incoming_edges () == 1);
+
+  hb_blob_t* out = graph::serialize (graph).value ();
+  hb_blob_destroy (out);
+  free (buffer);
+}
+
 static void test_resolve_with_basic_pair_pos_1_split ()
 {
   size_t buffer_size = 200000;
@@ -2353,6 +2664,69 @@ static void test_resolve_with_extension_pair_pos_1_split ()
                              HB_TAG('G', 'P', 'O', 'S'));
   free (buffer);
   free (expected_buffer);
+}
+
+static void test_resolve_with_shared_pair_set_pair_pos_1_split ()
+{
+  // A PairPosFormat1 whose offset array alone is over the 16 bit limit, so it
+  // has to be split, and whose PairSets are all shared. Splitting must keep
+  // the PairSets in order and must not be quadratic in the number of PairSets.
+  constexpr int num_pair_set = 40000;
+  constexpr int num_shared = 4;
+
+  size_t buffer_size = 200000;
+  void* buffer = malloc (buffer_size);
+  hb_always_assert (buffer);
+  hb_serialize_context_t c (buffer, buffer_size);
+  populate_serializer_with_shared_pair_pos_1 <num_pair_set, num_shared>(&c);
+
+  graph_t graph = graph_t::create (c.object_graph ()).value ();
+  auto context = graph::gsubgpos_graph_context_t::create (HB_TAG ('G', 'P', 'O', 'S'),
+                                                          graph).value ();
+  hb_always_assert (context.lookups.get_population () == 1);
+  unsigned lookup_index = *context.lookups.keys ();
+  graph::Lookup* lookup = context.lookups.get (lookup_index);
+  hb_always_assert (lookup->split_subtables_if_needed (context, lookup_index).is_ok ());
+
+  const auto& lookup_vertex = graph.vertices_[lookup_index];
+  const char* lookup_table = lookup_vertex.obj ().head;
+  unsigned subtable_count = *(const OT::HBUINT16*) (lookup_table + 4);
+  hb_always_assert (subtable_count > 1);
+  hb_always_assert (lookup_vertex.obj ().real_links.length == subtable_count);
+  auto subtables = lookup_vertex.position_to_index_map ().value ();
+
+  unsigned pair_set_count = 0;
+  for (unsigned i = 0; i < subtable_count; i++)
+  {
+    unsigned subtable_position = 6 + 2 * i;
+    hb_always_assert (subtables.has (subtable_position));
+    unsigned subtable_index = subtables.get (subtable_position);
+
+    const auto& subtable_vertex = graph.vertices_[subtable_index];
+    const char* subtable = subtable_vertex.obj ().head;
+    hb_always_assert (subtable_vertex.table_size () >= 10);
+    hb_always_assert (*(const OT::HBUINT16*) subtable == 1); // format
+    unsigned count = *(const OT::HBUINT16*) (subtable + 8); // pairSetCount
+    hb_always_assert (count > 0);
+    hb_always_assert (subtable_vertex.table_size () == 10 + 2 * count);
+    // coverage + one link per PairSet
+    hb_always_assert (subtable_vertex.obj ().real_links.length == count + 1);
+
+    auto pair_sets = subtable_vertex.position_to_index_map ().value ();
+    hb_always_assert (pair_sets.has (2)); // coverage
+    for (unsigned j = 0; j < count; j++)
+    {
+      unsigned pair_set_position = 10 + 2 * j;
+      hb_always_assert (pair_sets.has (pair_set_position));
+      const auto& pair_set = graph.object (pair_sets.get (pair_set_position));
+      hb_always_assert (pair_set.tail - pair_set.head == 4);
+      hb_always_assert (pair_set.head[3] == (char) ((pair_set_count + j) % num_shared));
+    }
+    pair_set_count += count;
+  }
+  hb_always_assert (pair_set_count == num_pair_set);
+
+  free (buffer);
 }
 
 static void test_resolve_with_basic_pair_pos_2_split ()
@@ -2516,6 +2890,29 @@ static void test_resolve_with_liga_split_overlapping_clone ()
   free (expected_buffer);
 }
 
+static void test_resolve_with_liga_split_null_offsets ()
+{
+  size_t buffer_size = 400000;
+  void* buffer = malloc (buffer_size);
+  hb_always_assert (buffer);
+  hb_serialize_context_t c (buffer, buffer_size);
+  populate_serializer_with_large_liga_null_offsets(&c, false);
+
+  void* expected_buffer = malloc (buffer_size);
+  hb_always_assert (expected_buffer);
+  hb_serialize_context_t e (expected_buffer, buffer_size);
+  populate_serializer_with_large_liga_null_offsets(&e, true);
+
+  run_resolve_overflow_test ("test_resolve_with_liga_split_null_offsets",
+                             c,
+                             e,
+                             20,
+                             true,
+                             HB_TAG('G', 'S', 'U', 'B'));
+  free (buffer);
+  free (expected_buffer);
+}
+
 static void test_resolve_with_liga_split_shared_table ()
 {
   size_t buffer_size = 400000;
@@ -2619,6 +3016,21 @@ static void test_resolve_overflows_via_priority ()
                              3);
   free (buffer);
   free (expected_buffer);
+}
+
+static void test_unresolvable_priority_overflow ()
+{
+  size_t buffer_size = 300000;
+  void* buffer = malloc (buffer_size);
+  hb_serialize_context_t c (buffer, buffer_size);
+  populate_serializer_with_unresolvable_priority_overflow (&c);
+
+  // Once every child of the large parent is at max priority further overflows
+  // from it must not re-walk all of its links, in every round.
+  hb_blob_t* out = hb_resolve_overflows (c.object_graph (), HB_TAG_NONE);
+  hb_always_assert (!out);
+
+  free (buffer);
 }
 
 
@@ -2732,21 +3144,404 @@ test_dont_duplicate_virtual ()
   free (expected_buffer);
 }
 
+static void
+test_deep_graph_traversal ()
+{
+  size_t buffer_size = 1000000;
+  void* buffer = malloc (buffer_size);
+  hb_serialize_context_t c (buffer, buffer_size);
+
+  c.start_serialize ();
+  unsigned prev = add_object ("leaf", 4, &c);
+  for (unsigned i = 0; i < 2000; i++)
+  {
+    start_object ("node", 4, &c);
+    add_offset (prev, &c);
+    prev = c.pop_pack (false);
+  }
+  c.end_serialize ();
+
+  graph_t graph = graph_t::create (c.object_graph ()).value ();
+
+  // Test find_subgraph (set)
+  hb_set_t visited_set;
+  hb_always_assert (graph.find_subgraph (graph.root_idx (), visited_set).is_ok ());
+  hb_always_assert (visited_set.get_population () == 2001);
+
+  // Test find_subgraph_size
+  hb_set_t size_set;
+  size_t sz = graph.find_subgraph_size (graph.root_idx (), size_set).value ();
+  hb_always_assert (sz == 4 + 2000 * 6);
+
+  // Test find_subgraph (map)
+  hb_map_t map;
+  map.set (graph.root_idx (), 1);
+  hb_always_assert (graph.find_subgraph (graph.root_idx (), map).is_ok ());
+  hb_always_assert (map.get_population () == 2001);
+
+  // Test assign_spaces (which exercises find_connected_nodes and find_space_roots)
+  hb_always_assert (graph.assign_spaces ().is_ok ());
+
+  // Test duplicate_subgraph
+  hb_map_t index_map;
+  hb_always_assert (graph.duplicate_subgraph (graph.root_idx (), index_map).is_ok ());
+  hb_always_assert (index_map.get_population () == 2001);
+
+  free (buffer);
+}
+
+static void
+test_duplicate_subgraph_vertex_limit ()
+{
+  size_t buffer_size = 100;
+  void* buffer = malloc (buffer_size);
+  hb_serialize_context_t c (buffer, buffer_size);
+
+  c.start_serialize ();
+  unsigned leaf = add_object ("leaf", 4, &c);
+  start_object ("root", 4, &c);
+  add_offset (leaf, &c);
+  c.pop_pack (false);
+  c.end_serialize ();
+
+  graph_t graph = graph_t::create (c.object_graph ()).value ();
+  while (graph.vertices_.length < HB_REPACKER_MAX_VERTICES - 1)
+    hb_always_assert (graph.new_node (nullptr, nullptr).is_ok ());
+
+  // There's only room left for one of the two nodes, the failure must be reported.
+  hb_map_t index_map;
+  auto result = graph.duplicate_subgraph (graph.root_idx (), index_map);
+  hb_always_assert (result.is_err ());
+  hb_always_assert (result.error () == graph::LIMIT_EXCEEDED);
+
+  free (buffer);
+}
+
+static void
+test_resolve_shared_overflow_vertex_limit ()
+{
+  size_t buffer_size = 100;
+  void* buffer = malloc (buffer_size);
+  hb_serialize_context_t c (buffer, buffer_size);
+
+  c.start_serialize ();
+  unsigned leaf = add_object ("leaf", 4, &c);
+
+  start_object ("a", 4, &c);
+  add_offset (leaf, &c);
+  unsigned a = c.pop_pack (false);
+
+  start_object ("b", 4, &c);
+  add_offset (leaf, &c);
+  unsigned b = c.pop_pack (false);
+
+  start_object ("root", 4, &c);
+  add_offset (a, &c);
+  add_offset (b, &c);
+  c.pop_pack (false);
+  c.end_serialize ();
+
+  graph_t graph = graph_t::create (c.object_graph ()).value ();
+  while (graph.vertices_.length < HB_REPACKER_MAX_VERTICES)
+    hb_always_assert (graph.new_node (nullptr, nullptr).is_ok ());
+
+  // 'a' (1) is not shared so it can't be duplicated, other resolution options may be tried.
+  hb_vector_t<graph::overflow_record_t> overflows;
+  overflows.push (graph::overflow_record_t {3, 1});
+  auto result = _resolve_shared_overflow (overflows, 0, graph);
+  hb_always_assert (result.is_ok ());
+  hb_always_assert (!*result);
+
+  // 'leaf' (0) is shared by 'a' (1) and 'b' (2), but there's no room left to duplicate it.
+  // The limit must be reported instead of continuing the overflow resolution.
+  overflows.reset ();
+  overflows.push (graph::overflow_record_t {1, 0});
+  result = _resolve_shared_overflow (overflows, 0, graph);
+  hb_always_assert (result.is_err ());
+  hb_always_assert (result.error () == graph::LIMIT_EXCEEDED);
+
+  free (buffer);
+}
+
+static void
+test_32bit_roots_traversal ()
+{
+  size_t buffer_size = 1000;
+  void* buffer = malloc (buffer_size);
+  hb_serialize_context_t c (buffer, buffer_size);
+
+  c.start_serialize ();
+  unsigned leaf1 = add_object ("l1", 2, &c);
+  unsigned leaf2 = add_object ("l2", 2, &c);
+
+  start_object ("mid", 3, &c);
+  add_wide_offset (leaf1, &c);
+  unsigned mid = c.pop_pack (false);
+
+  start_object ("root", 4, &c);
+  add_offset (mid, &c);
+  add_wide_offset (leaf2, &c);
+  c.pop_pack (false);
+  c.end_serialize ();
+
+  graph_t graph = graph_t::create (c.object_graph ()).value ();
+
+  hb_set_t roots;
+  hb_always_assert (graph.find_32bit_roots (graph.root_idx (), roots).is_ok ());
+  hb_always_assert (roots.has (leaf1 - 1));
+  hb_always_assert (roots.has (leaf2 - 1));
+  hb_always_assert (!roots.has (mid - 1));
+  hb_always_assert (roots.get_population () == 2);
+
+  free (buffer);
+
+  // Test case where DFS fails but BFS succeeds:
+  // root -16-> a
+  // root -32-> a
+  // a -32-> b
+  //
+  // DFS will first explore the 16 bit link to a and then recurse the 32 bit link from a to b
+  // and consider b a root. However, b should not be a root since it's not a top level 32 bit link.
+  // BFS will handle this correctly by discovering a as a top level root and then avoiding further
+  // exploring it.
+  buffer_size = 1000;
+  buffer = malloc (buffer_size);
+  hb_serialize_context_t c2 (buffer, buffer_size);
+
+  c2.start_serialize ();
+  unsigned b = add_object ("b", 1, &c2);
+
+  start_object ("a", 1, &c2);
+  add_wide_offset (b, &c2);
+  unsigned a = c2.pop_pack (false);
+
+  start_object ("r", 1, &c2);
+  add_offset (a, &c2);
+  add_wide_offset (a, &c2);
+  c2.pop_pack (false);
+
+  c2.end_serialize ();
+
+  graph_t graph2 = graph_t::create (c2.object_graph ()).value ();
+
+  hb_set_t roots2;
+  hb_always_assert (graph2.find_32bit_roots (graph2.root_idx (), roots2).is_ok ());
+  hb_always_assert (roots2.get_population () == 1);
+  hb_always_assert (roots2.has (a - 1));
+  hb_always_assert (!roots2.has (b - 1));
+
+  free (buffer);
+}
+
+static void
+test_isolate_subgraph_shared_wide_parents ()
+{
+  // Several parents each have 32 bit links to the same set of leaves, as
+  // FeatureVariations ConditionSets do. One leaf also has a 16 bit link from
+  // outside the subgraph, so isolating the leaves must duplicate that leaf only.
+  //
+  // root -16-> p1, p2, p3
+  // root -16-> l1
+  // p1, p2, p3 -32-> l1, l2, l3
+  constexpr unsigned num_parents = 3;
+  constexpr unsigned num_leaves = 3;
+
+  size_t buffer_size = 1000;
+  void* buffer = malloc (buffer_size);
+  hb_serialize_context_t c (buffer, buffer_size);
+
+  c.start_serialize ();
+  unsigned leaves[num_leaves];
+  for (unsigned i = 0; i < num_leaves; i++)
+    leaves[i] = add_object ("leaf", 4, &c);
+
+  unsigned parents[num_parents];
+  for (unsigned i = 0; i < num_parents; i++)
+  {
+    start_object ("parent", 6, &c);
+    for (unsigned j = 0; j < num_leaves; j++)
+      add_wide_offset (leaves[j], &c);
+    parents[i] = c.pop_pack (false);
+  }
+
+  start_object ("root", 4, &c);
+  for (unsigned i = 0; i < num_parents; i++)
+    add_offset (parents[i], &c);
+  add_offset (leaves[0], &c);
+  c.pop_pack (false);
+  c.end_serialize ();
+
+  graph_t graph = graph_t::create (c.object_graph ()).value ();
+  unsigned num_vertices = graph.vertices_.length;
+  hb_always_assert (num_vertices == 1 + num_parents + num_leaves);
+
+  hb_set_t roots;
+  for (unsigned i = 0; i < num_leaves; i++)
+    roots.add (leaves[i] - 1);
+
+  // leaves[0] has an incoming 16 bit edge from root, so it's duplicated.
+  hb_always_assert (graph.isolate_subgraph (roots).value ());
+  hb_always_assert (graph.vertices_.length == num_vertices + 1);
+  hb_always_assert (roots.get_population () == num_leaves);
+  hb_always_assert (!roots.has (leaves[0] - 1));
+  hb_always_assert (roots.has (num_vertices));
+  for (unsigned i = 1; i < num_leaves; i++)
+    hb_always_assert (roots.has (leaves[i] - 1));
+
+  hb_always_assert (graph.update_parents ().is_ok ());
+  hb_always_assert (graph.vertices_[leaves[0] - 1].incoming_edges () == 1);
+  hb_always_assert (graph.vertices_[num_vertices].incoming_edges () == num_parents);
+  for (unsigned i = 1; i < num_leaves; i++)
+    hb_always_assert (graph.vertices_[leaves[i] - 1].incoming_edges () == num_parents);
+
+  // Now that all incoming edges to the roots are 32 bit, nothing is left to isolate.
+  hb_always_assert (!graph.isolate_subgraph (roots).value ());
+  hb_always_assert (graph.vertices_.length == num_vertices + 1);
+
+  free (buffer);
+}
+
+static void test_invalid_link_objidx ()
+{
+  size_t buffer_size = 100;
+  void* buffer = malloc (buffer_size);
+  hb_serialize_context_t c (buffer, buffer_size);
+  populate_serializer_complex_2 (&c);
+
+  graph_t graph = graph_t::create (c.object_graph ()).value ();
+
+  // Poison a link to point to (unsigned) -1
+  auto links = graph.vertices_[graph.root_idx ()].real_links_writer();
+  links->objidx = (unsigned) -1;
+
+  // Running Dijkstra / shortest distance sorting must not crash or OOB access,
+  // and must return an error.
+  hb_always_assert (!graph.sort_shortest_distance ().is_ok ());
+
+  free (buffer);
+}
+
+static void test_invalid_link_add_and_move ()
+{
+  size_t buffer_size = 100;
+  void* buffer = malloc (buffer_size);
+  hb_serialize_context_t c (buffer, buffer_size);
+  populate_serializer_complex_2 (&c);
+
+  graph_t graph = graph_t::create (c.object_graph ()).value ();
+
+  // add_link with out-of-bounds child
+  OT::Offset16 dummy;
+  hb_always_assert (!graph.add_link (&dummy, 0, (unsigned) -1).is_ok ());
+
+  // move_child with non-existent offset
+  auto res = graph.move_child (0, &dummy, 1, &dummy);
+  hb_always_assert (!res.is_ok ());
+
+  free (buffer);
+}
+
+static void test_anchor_matrix_sanitize_size_overflow ()
+{
+  // 2 * 46341 * 46341 wraps around to 9266 in 32-bit arithmetic.
+  const unsigned count = 46341;
+  std::string buffer (graph::AnchorMatrix::min_size + 2 * count, '\0');
+  auto* matrix = reinterpret_cast<graph::AnchorMatrix*> (&buffer[0]);
+  matrix->rows = count;
+  graph_t::vertex_t vertex;
+  vertex.set_buffer (&buffer[0], &buffer[0] + buffer.size ());
+
+  hb_always_assert (matrix->sanitize (vertex, 1).is_ok ());
+  hb_always_assert (!matrix->sanitize (vertex, 2).is_ok ());
+  hb_always_assert (!matrix->sanitize (vertex, count).is_ok ());
+
+  matrix->rows = 0;
+  hb_always_assert (matrix->sanitize (vertex, count).is_ok ());
+  vertex.set_buffer (&buffer[0], &buffer[0] + graph::AnchorMatrix::min_size - 1);
+  hb_always_assert (!matrix->sanitize (vertex, count).is_ok ());
+}
+
+static void test_pair_pos_format_2_sanitize_size_overflow ()
+{
+  // 32769 * 65535 * 4 wraps around to 131068 in 32-bit arithmetic.
+  struct pair_pos_t : graph::PairPosFormat2
+  {
+    using graph::PairPosFormat2::valueFormat1;
+    using graph::PairPosFormat2::valueFormat2;
+    using graph::PairPosFormat2::class1Count;
+    using graph::PairPosFormat2::class2Count;
+  };
+  const unsigned min_size = pair_pos_t::min_size;
+  std::string buffer (min_size + 131068, '\0');
+  auto* pair_pos = reinterpret_cast<pair_pos_t*> (&buffer[0]);
+  pair_pos->valueFormat1 = 1;
+  pair_pos->valueFormat2 = 1;
+  pair_pos->class1Count = 32769;
+  pair_pos->class2Count = 65535;
+  graph_t::vertex_t vertex;
+  vertex.set_buffer (&buffer[0], &buffer[0] + buffer.size ());
+
+  hb_always_assert (!pair_pos->sanitize (vertex).is_ok ());
+
+  pair_pos->class1Count = 3;
+  pair_pos->class2Count = 2;
+  vertex.set_buffer (&buffer[0], &buffer[0] + min_size + 3 * 2 * 4);
+  hb_always_assert (pair_pos->sanitize (vertex).is_ok ());
+  vertex.shrink_buffer (1);
+  hb_always_assert (!pair_pos->sanitize (vertex).is_ok ());
+
+  pair_pos->class1Count = 0;
+  vertex.set_buffer (&buffer[0], &buffer[0] + min_size);
+  hb_always_assert (pair_pos->sanitize (vertex).is_ok ());
+  vertex.shrink_buffer (1);
+  hb_always_assert (!pair_pos->sanitize (vertex).is_ok ());
+}
+
+static void test_invalid_link_position ()
+{
+  size_t buffer_size = 100;
+  void* buffer = malloc (buffer_size);
+  hb_serialize_context_t c (buffer, buffer_size);
+  populate_serializer_simple (&c);
+
+  graph_t graph = graph_t::create (c.object_graph ()).value ();
+
+  // Poison a link position so that position + width wraps around in
+  // 32 bit arithmetic. Serialization must reject it rather than write
+  // outside of the output buffer.
+  auto links = graph.vertices_[graph.root_idx ()].real_links_writer();
+  links->position = (unsigned) -1;
+  hb_always_assert (!graph::serialize (graph).is_ok ());
+
+  // The same poisoned link must be rejected when building the graph.
+  c.object_graph ().tail ()->real_links[0].position = (unsigned) -1;
+  hb_always_assert (!graph_t::create (c.object_graph ()).is_ok ());
+
+  free (buffer);
+}
+
 // TODO(garretrieger): update will_overflow tests to check the overflows array.
 // TODO(garretrieger): add tests for priority raising.
 
 int
 main (int argc, char **argv)
 {
+  test_anchor_matrix_sanitize_size_overflow ();
+  test_pair_pos_format_2_sanitize_size_overflow ();
+  test_invalid_link_objidx ();
+  test_invalid_link_add_and_move ();
+  test_invalid_link_position ();
   test_serialize ();
   test_sort_shortest ();
   test_will_overflow_1 ();
   test_will_overflow_2 ();
   test_will_overflow_3 ();
+  test_will_overflow_records ();
   test_resolve_overflows_via_sort ();
   test_resolve_overflows_via_duplication ();
   test_resolve_overflows_via_multiple_duplications ();
   test_resolve_overflows_via_priority ();
+  test_unresolvable_priority_overflow ();
   test_resolve_overflows_via_space_assignment ();
   test_resolve_overflows_via_isolation ();
   test_resolve_overflows_via_isolation_with_recursive_duplication ();
@@ -2763,8 +3558,13 @@ main (int argc, char **argv)
   test_shared_node_with_virtual_links ();
   test_resolve_with_extension_promotion ();
   test_resolve_with_shared_extension_promotion ();
+#ifndef HB_NO_BEYOND_64K
+  test_resolve_with_extension_promotion_1_2 ();
+#endif
+  test_resolve_with_repeated_extension_promotion ();
   test_resolve_with_basic_pair_pos_1_split ();
   test_resolve_with_extension_pair_pos_1_split ();
+  test_resolve_with_shared_pair_set_pair_pos_1_split ();
   test_resolve_with_basic_pair_pos_2_split ();
   test_resolve_with_pair_pos_2_split_with_device_tables ();
   test_resolve_with_close_to_limit_pair_pos_2_split ();
@@ -2773,8 +3573,14 @@ main (int argc, char **argv)
   test_resolve_with_liga_split_move ();
   test_dont_duplicate_virtual ();
   test_resolve_with_liga_split_overlapping_clone ();
+  test_resolve_with_liga_split_null_offsets ();
   test_resolve_with_liga_split_shared_table ();
   test_resolve_with_liga_split_shared_coverage ();
+  test_deep_graph_traversal ();
+  test_duplicate_subgraph_vertex_limit ();
+  test_resolve_shared_overflow_vertex_limit ();
+  test_32bit_roots_traversal ();
+  test_isolate_subgraph_shared_wide_parents ();
 
   // TODO(grieger): have run overflow tests compare graph equality not final packed binary.
   // TODO(grieger): split test where multiple subtables in one lookup are split to test link ordering.

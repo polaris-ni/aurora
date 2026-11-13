@@ -52,7 +52,7 @@ struct Stage {
     Stage() {
         txt = std::make_shared<Text>("Click the button to change the count (visible in the run log)");
         btn = std::make_shared<Button>();
-        col = std::make_shared<Column>(ColumnProps{.children = {Node{txt}, Node{btn}}});
+        col = std::make_shared<Column>(std::vector<Node>{Node{txt}, Node{btn}});
         col->set_focusable(false);  // 容器不抢占焦点，焦点应落在叶控件上
         col->mount(ctx);
         constexpr Constraints cc{.min = Size{.width = 0.0F, .height = 0.0F},
@@ -101,8 +101,8 @@ struct Stage {
 
 /// 统计 [r] 盒内「蓝色染色」像素数（b - r > 30，即选区高亮）。
 auto count_blue_in(const Painter &p, const Rect &r) -> int {
-    int x0 = std::max(static_cast<int>(std::floor(r.origin.x)), 0);
-    int y0 = std::max(static_cast<int>(std::floor(r.origin.y)), 0);
+    int const x0 = std::max(static_cast<int>(std::floor(r.origin.x)), 0);
+    int const y0 = std::max(static_cast<int>(std::floor(r.origin.y)), 0);
     const int x1 = std::min(static_cast<int>(std::ceil(r.origin.x + r.size.width)), p.width());
     const int y1 = std::min(static_cast<int>(std::ceil(r.origin.y + r.size.height)), p.height());
     int hl = 0;

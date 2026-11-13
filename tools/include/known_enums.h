@@ -63,6 +63,12 @@ namespace aurora::tools {
     enums["Curve"] = {"Linear",      "EaseIn",        "EaseOut",        "EaseInOut",   "EaseInSine",
                       "EaseOutSine", "EaseInOutSine", "EaseInQuad",     "EaseOutQuad", "EaseInOutQuad",
                       "EaseInCubic", "EaseOutCubic",  "EaseInOutCubic", "BounceOut",   "Custom"};
+    // 动画域其余两枚只读判别枚举**不入表**，理由是它们不构成任何可填写的取值域：
+    // `AnimationStatus`（播放/反向/完成/停止）与 `PlaybackMode`（Once/Repeat）都只经 getter 读出
+    // （`AnimationController::status()` / `mode()`），既不是 widget 属性键（`props[].type` 零命中），
+    // 也不作为工具链入参出现（`repeat(int count, bool alternate)` 收的是计数与布尔，不收枚举）。
+    // 入表会让 LSP / MCP 把「读出来的状态」当成「填进去的值」提示出去，那类建议根本编译不过；
+    // `itest_known_enums.cpp` 的覆盖腿也只按属性类型对账，不要求公共枚举全量入表。
 
     // ---- input ----
     enums["CursorShape"] = {"Arrow",      "IBeam", "PointingHand", "ResizeNS",   "ResizeEW", "ResizeNWSE",
@@ -155,6 +161,16 @@ namespace aurora::tools {
     // ---- gesture ----
     enums["DragAxis"] = {"None", "Horizontal", "Vertical"};
 
+    // ---- theming (both axes of the theme model must be enumerable for AI codegen) ----
+    // Style axis (aurora/theming/theme_style.h): the design language a Theme instance belongs to.
+    // `Material` doubles as the fallback for environments with no style evidence.
+    enums["ThemeStyle"] = {"Material", "Windows", "MacOs", "Gnome", "Kde"};
+    // Desktop shell evidence feeding the style resolution on Linux/BSD (same header).
+    enums["DesktopEnvironment"] = {"Unknown", "Gnome", "Kde", "Other"};
+    // Light/dark axis (aurora/theming/color_scheme.h): previously absent from this registry, which
+    // left the second axis un-enumerable while the first one was registered.
+    enums["ColorScheme"] = {"Unspecified", "Light", "Dark"};
+
     // ---- webview ----
     // 取值逐字来自 `web_view.cpp` 的 `mode_to_string`（序列化落盘的字符串即这两枚），
     // 不是枚举成员的 C++ 限定名——属性值校验与补全都按字符串比对。
@@ -169,6 +185,10 @@ namespace aurora::tools {
 
     // ---- network (aurora::net public enums; not widget property types, but AI-enumerable API surface) ----
     enums["AddressFamily"] = {"IPv4", "IPv6", "LocalPath"};
+    enums["ConnectivityChangeCause"] = {"SubscriptionStart", "PeriodicSample", "FailureEvidence",
+                                        "SuccessfulConnect", "HostRefresh",    "StalenessMarked"};
+    enums["ConnectivitySource"] = {"None", "IpHelper", "DynamicStore", "LinkFiles"};
+    enums["NetworkState"] = {"Unknown", "Online", "Offline"};
     enums["ExportSurface"] = {"Log", "Timeline", "InspectorJson", "ErrorDetail"};
     enums["ExchangeLeg"] = {"Send", "Stream", "ServerSentEvents", "WebSocket"};
     enums["FieldClass"] = {"Public", "Sensitive", "Secret"};

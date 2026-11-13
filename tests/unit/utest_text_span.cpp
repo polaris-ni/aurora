@@ -84,7 +84,7 @@ AURORA_TEST_CASE(spans_assemble_and_subrange_preserves_styles) {
 
 AURORA_TEST_CASE(span_copy_is_independent) {
     // 值语义深拷贝：修改副本不影响原件。
-    TextSpan original{.text = LocalizedString{"origin"}, .font = Font{.size_pt = 12.0F}, .color = Color::gray()};
+    TextSpan const original{.text = LocalizedString{"origin"}, .font = Font{.size_pt = 12.0F}, .color = Color::gray()};
     TextSpan copy = original;
     copy.text.text = "changed";
     copy.font.size_pt = 99.0F;
@@ -131,7 +131,7 @@ AURORA_TEST_CASE(localized_span_keeps_tr_metadata) {
 AURORA_TEST_CASE(text_span_color_follows_theme_when_unset) {
     // 两态语义：未显式设色时 resolve 取主题 on_surface；主题翻转 ⇒ 解析值翻转（换肤生效）。
     const BuildContext bare;  // 无注入：inherit_theme 回落 light（与 OS 未表态同口径）
-    TextSpan span;
+    TextSpan const span;
     AURORA_TEST_CHECK_FALSE(span.color.has_value());  // 默认未设色
     AURORA_TEST_CHECK(span.resolve_color(bare) == Color{0, 0, 0});  // light on_surface = 黑
 

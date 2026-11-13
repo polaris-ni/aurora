@@ -1,6 +1,7 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/widget/chip.h
-/// 测试说明: 覆盖 Chip——标签/头像/颜色/字号链式 setter 与序列化、删除回调的命中区域语义
+/// 测试说明: 覆盖 Chip——标签/头像/颜色/字号链式 setter 与序列化（字号未表态即跟随主题字阶正文档、
+/// 只写意图）、删除回调的命中区域语义
 /// （右半区左键按下触发、其余忽略）、布局尺寸由文本度量构成；附带同头 Badge 的计数、
 /// 尺寸加成、序列化与 describe
 
@@ -66,7 +67,8 @@ AURORA_TEST_CASE(default_and_labeled_construction) {
     AURORA_TEST_CHECK_FALSE(props.contains("background"));
     AURORA_TEST_CHECK_FALSE(props.contains("text_color"));
     AURORA_TEST_CHECK_FALSE(props.contains("delete_color"));
-    AURORA_TEST_CHECK_NEAR(require_field<float>(props, "font_size"), 13.0F, 1e-4F);
+    // 字号同口径：未表态不落盘，回落点是主题字阶正文档而不是常量。
+    AURORA_TEST_CHECK_FALSE(props.contains("font_size"));
 }
 
 AURORA_TEST_CASE(chain_setters_update_serialized_props) {
@@ -90,17 +92,58 @@ AURORA_TEST_CASE(chain_setters_update_serialized_props) {
     AURORA_TEST_CHECK_NEAR(require_field<float>(props, "corner_radius"), 6.0F, 1e-4F);
 }
 
-AURORA_TEST_CASE(font_size_non_positive_degrades_to_13) {
-    Chip c;
-    c.set_font_size(0.0F);  // 非正字号回落默认 13pt
+AURORA_TEST_CASE(font_size_non_positive_drops_stating) {
+    Chip c("Tag");
+    c.set_font_size(15.0F);
+    c.set_font_size(0.0F);  // 非正字号 = 退出表态，回落点交回主题字阶（不另立常量）
 
     Json props = Json::object();
     c.serialize_props(props);
-    AURORA_TEST_CHECK_NEAR(require_field<float>(props, "font_size"), 13.0F, 1e-4F);
+    AURORA_TEST_CHECK_FALSE(props.contains("font_size"));
+    AURORA_TEST_CHECK_NEAR(c.resolve_font_size(BuildContext{}), 14.0F, 1e-4F);  // 进程级 light 档正文档
+}
+
+AURORA_TEST_CASE(font_size_follows_type_scale_when_unset) {
+    // ① 未表态 ⇒ 解作用域主题的字阶正文档（进程级 light 档 = Material 正文基准 14pt）。
+    const Chip bare("Tag");
+    AURORA_TEST_CHECK_NEAR(bare.resolve_font_size(BuildContext{}), 14.0F, 1e-4F);
+
+    // ② 换档 ⇒ 未表态的 Chip 跟着字阶走（无障碍字号缩放与风格档基准的唯一通道）。
+    Theme tuned;
+    tuned.type_scale.body_medium.size_pt = 17.5F;
+    const auto [env, ctx] = themed_ctx(tuned);
+    (void)env;
+    AURORA_TEST_CHECK_NEAR(bare.resolve_font_size(ctx), 17.5F, 1e-4F);
+
+    // ③ 显式表态钉住：两档作用域都读显式值，主题覆盖不了它。
+    Chip stated("Tag");
+    stated.set_font_size(11.0F);
+    AURORA_TEST_CHECK_NEAR(stated.resolve_font_size(ctx), 11.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(stated.resolve_font_size(BuildContext{}), 11.0F, 1e-4F);
+
+    // ④ 只写意图：表态过才落键，未表态不落键。
+    Json stated_props = Json::object();
+    stated.serialize_props(stated_props);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(stated_props, "font_size"), 11.0F, 1e-4F);
+    Json bare_props = Json::object();
+    bare.serialize_props(bare_props);
+    AURORA_TEST_CHECK_FALSE(bare_props.contains("font_size"));
+
+    // ⑤ 回填：合法值重新表态；非法值退出表态（交回主题，不退化成零高度文本）。
+    Chip restored;
+    restored.deserialize_props(stated_props);
+    AURORA_TEST_CHECK_NEAR(restored.resolve_font_size(BuildContext{}), 11.0F, 1e-4F);
+    Json junk = Json::object();
+    junk.set("font_size", Json{"not-a-number"});
+    restored.deserialize_props(junk);
+    AURORA_TEST_CHECK_NEAR(restored.resolve_font_size(BuildContext{}), 14.0F, 1e-4F);
+    Json junk_props = Json::object();
+    restored.serialize_props(junk_props);
+    AURORA_TEST_CHECK_FALSE(junk_props.contains("font_size"));  // 对照：非法值确实清了表态
 }
 
 AURORA_TEST_CASE(layout_sizes_from_text_metrics) {
-    const Font f{.size_pt = 13.0F};  // 与 Chip 默认字号一致
+    const Font f{.size_pt = 14.0F};  // 未表态 ⇒ 取进程级 light 档字阶正文档（Material 正文基准）
 
     Chip plain("hi");
     LayoutEngine::layout(plain, bounded(1000.0F, 200.0F));

@@ -1,11 +1,4 @@
 // 测试框架入口：main 由框架唯一提供，测试文件禁止自定义 main()。
-#include "aurora/core/platform.h"  // NOLINT
-
-// Windows CRT 家族（MSVC/clang-cl 与 MinGW 同走 ucrtbase，abort 行为控制一致）。
-#ifdef AURORA_PLATFORM_WINDOWS
-#include <crtdbg.h>  // _set_abort_behavior / _CrtSetReportMode（关闭 Debug CRT abort 弹窗）
-#endif
-
 #include <algorithm>
 #include <charconv>
 #include <condition_variable>
@@ -18,6 +11,15 @@
 #include <string_view>
 #include <thread>
 #include <vector>
+
+#include "aurora/core/platform.h"  // NOLINT
+
+// `_set_abort_behavior` / `_CrtSetReportMode` 只存在于 UCRT 实现。探测宏 `_UCRT` 由 CRT 头
+// （MinGW 的 `_mingw.h`、MSVC/clang-cl 的 `corecrt.h`）按所用运行时版本落定，因此本块必须
+// 排在标准头之后：MSVCRT 变体的 MinGW 两条件皆不成立，其 `crtdbg.h` 也不含这两组入口。
+#if defined(AURORA_PLATFORM_WINDOWS) && (defined(AURORA_COMPILER_MSVC) || defined(_UCRT))
+#include <crtdbg.h>  // _set_abort_behavior / _CrtSetReportMode（关闭 Debug CRT abort 弹窗）
+#endif
 
 #include "aurora/cli/args.h"
 #include "aurora/cli/command.h"
@@ -366,8 +368,8 @@ auto run_selected(const std::vector<const TestCase *> &selected, const CliOption
 // 与 examples/ 下各 demo 入口同口径（框架对**用例体**的异常另有捕获，不在此路径）。
 // NOLINTNEXTLINE(bugprone-exception-escape)
 auto main(int argc, char **argv) -> int {
-#ifdef AURORA_PLATFORM_WINDOWS
-    // Windows CRT（MSVC/clang-cl 与 MinGW 的 abort 同在 ucrtbase 实现）：abort() 默认带
+#if defined(AURORA_PLATFORM_WINDOWS) && (defined(AURORA_COMPILER_MSVC) || defined(_UCRT))
+    // Windows CRT（UCRT 实现：MSVC / clang-cl / MinGW-UCRT）：abort() 默认带
     // _CALL_REPORTFAULT，以 fail-fast（0xC0000409，WER 事件类型 BEX64）终止——Debug CRT
     // 会弹「abort() has been called」模态对话框挂住无人值守运行；Release 下则触发 WER
     // 崩溃报告管线（实测死亡测试每个站点被拖慢约 5s，伴随 WerFault 与杀软行为分析）。

@@ -398,7 +398,7 @@ auto check_hit_grid(aurora::Win32Surface &surf, const aurora::TitleBarStyle &tb,
 /// @param ly 逻辑 y。
 /// @return 像素 RGB（忽略 alpha）；缓冲未就绪时回 0。
 [[nodiscard]] auto pixel_at(aurora::Win32Surface &surf, double lx, double ly) -> std::uint32_t {
-    aurora::Painter &p = surf.painter();
+    aurora::Painter const &p = surf.painter();
     const std::uint8_t *d = p.data();
     if (d == nullptr) {
         return 0U;

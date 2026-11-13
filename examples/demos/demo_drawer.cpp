@@ -22,7 +22,7 @@ auto main() -> int {
                                      au::Node{au::Column{au::Text{"Sidebar menu"}, au::Text{"Click overlay to close"}}},
                                      au::DrawerSide::Left, 200.0F);
 
-    au::Button open_btn{au::ButtonProps{.label = "Open drawer"}};
+    au::Button open_btn{au::ButtonProps().set_label("Open drawer")};
     open_btn.on_click = [drawer]() -> void { drawer->set_open(true); };
 
     au::Node root = au::Column{

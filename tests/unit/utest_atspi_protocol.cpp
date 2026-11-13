@@ -211,14 +211,15 @@ AURORA_TEST_CASE(state_name_table_pins_event_minors) {
 }
 
 AURORA_TEST_CASE(interfaces_derivation) {
-    AccessibilityNode btn = with_actions(AccessibilityNode{.role = AccessibilityRole::Button});  // Click|Invoke|Focus
+    AccessibilityNode const btn =
+        with_actions(AccessibilityNode{.role = AccessibilityRole::Button});  // Click|Invoke|Focus
     auto ifaces = atspi_interfaces_of(btn);
     AURORA_TEST_CHECK_TRUE(contains_str(ifaces, k_iface_accessible));
     AURORA_TEST_CHECK_TRUE(contains_str(ifaces, k_iface_component));
     AURORA_TEST_CHECK_TRUE(contains_str(ifaces, k_iface_action));
     AURORA_TEST_CHECK_FALSE(contains_str(ifaces, k_iface_text));
 
-    AccessibilityNode txt = with_actions(AccessibilityNode{.role = AccessibilityRole::TextInput});
+    AccessibilityNode const txt = with_actions(AccessibilityNode{.role = AccessibilityRole::TextInput});
     AURORA_TEST_CHECK_TRUE(contains_str(atspi_interfaces_of(txt), k_iface_text));
     // TextInput 的 Value 动作不产出 Action 行（AT-SPI 设值走 Value 接口）：无 Action 接口。
     AURORA_TEST_CHECK_FALSE(contains_str(atspi_interfaces_of(txt), k_iface_action));

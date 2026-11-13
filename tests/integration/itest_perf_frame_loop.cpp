@@ -56,7 +56,7 @@ auto build_scene() -> Node {
     for (int i = 0; i < 20; ++i) {
         children.emplace_back(Button("Button " + std::to_string(i + 1)));
     }
-    return Node{Column{ColumnProps{.children = std::move(children)}}};
+    return Node{Column(std::move(children))};
 }
 
 // 使用 Application + 自定义 Surface 运行 N 帧。

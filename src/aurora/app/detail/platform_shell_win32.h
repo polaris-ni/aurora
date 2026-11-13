@@ -8,7 +8,7 @@
 // 故把「取（必要时建）进程共享的隐藏消息窗口」+「往该窗口挂消息钩子」两件事收敛在这里，
 // 上层单元只认平台无关的类型与回调。
 //
-// 平台口径与 `system_tray_win32.cpp` 一致：本文件在全部目标上编译，Win32 专有代码用
+// 平台口径与 `system_tray.cpp` 一致：本文件在全部目标上编译，Win32 专有代码用
 // `AURORA_PLATFORM_WINDOWS`（不是原生 `_WIN32`，见 `core/platform.h`）在函数体内隔离，
 // 非 Windows 目标上 `ensure_message_window()` 恒返回 nullptr、`add_message_hook()` 恒返回 0，
 // 调用方据此走降级路径，不需要额外的 feature 宏。

@@ -218,8 +218,8 @@
 | 测试目的 | 验证诊断条目桥接到日志后，级别由错误码表驱动而非调用函数名决定；并核对结构化字段齐全 |
 | 前置条件 | 载体 `demo_core` 已构建成功；当前目录可写 |
 | 依赖用例 | TC-CORE-001 |
-| 操作步骤 | 1. 运行：`./build/demo_core.exe 1> out.txt 2> err.txt`（纯执行，无预期结果）<br>2. 在 `err.txt` 中定位分类为 `diagnostics` 的两行（纯执行，无预期结果）<br>3. 核对这两行的通道归属、消息体形态与必备字段<br>4. 核对第一条（`warn` 来源）的级别与字段取值<br>5. 核对第二条（`degraded` 来源）的级别与字段取值<br>6. 在 `out.txt` 中核对「环形缓冲内诊断条数」及其后两行明细 |
-| 预期结果 | 3. 两行均出现于 stderr，消息体为**单行 JSON**（不跨行），且均含 `message` 与 `where` 字段，`message` 为人类可读描述<br>4. 级别为 `WRN`；JSON 中**无** `code` 字段，`severity` 为 `warning`，`category` 为 `general`<br>5. 级别为 `ERR`；JSON 的 `code` 为 `general-invalid-argument`（取自错误码表，表中该码 severity 为 error），`severity` 为 `error`<br>6. 显示 `环形缓冲内诊断条数: 2`，其后两行明细分别为 `severity=warning category=general code=<empty>` 与 `severity=error category=general code=general-invalid-argument`，与步骤 4、5 的 JSON 字段一致 |
+| 操作步骤 | 1. 运行：`./build/demo_core.exe 1> out.txt 2> err.txt`（纯执行，无预期结果）<br>2. 在 `err.txt` 中定位分类为 `diagnostics` 的两行（纯执行，无预期结果）<br>3. 核对这两行的通道归属、消息体形态与必备字段<br>4. 核对第一条（`warn` 来源）的级别与字段取值<br>5. 核对第二条（`degraded` 来源）的级别与字段取值<br>6. 在 `out.txt` 中核对「Diagnostics in the ring buffer」及其后两行明细 |
+| 预期结果 | 3. 两行均出现于 stderr，消息体为**单行 JSON**（不跨行），且均含 `message` 与 `where` 字段，`message` 为人类可读描述<br>4. 级别为 `WRN`；JSON 中**无** `code` 字段，`severity` 为 `warning`，`domain` 为 `general`，`kind` 为 `internal`<br>5. 级别为 `ERR`；JSON 的 `code` 为 `general-invalid-argument`（取自错误码表，表中该码 severity 为 error、kind 为 invalid），`severity` 为 `error`，`domain` 为 `general`，`kind` 为 `invalid`<br>6. 显示 `Diagnostics in the ring buffer: 2`，其后两行明细分别为 `severity=warning domain=general kind=internal code=<empty>` 与 `severity=error domain=general kind=invalid code=general-invalid-argument`，与步骤 4、5 的 JSON 字段一致 |
 
 #### TC-CORE-007 降级不改变控制流
 
@@ -267,7 +267,7 @@
 | TC-CORE-003 | 2026-09-24 | Qoder Agent | PASS | | `out_trace.txt` 与 `out_fatal.txt` 均 25 行且 `diff` 无差异；`err` 为 8 行 / 1 行 | | stdout 唯一方括号是载体自印的 `[stderr 分界]` 业务文本，非日志前缀 |
 | TC-CORE-004 | 2026-09-24 | Qoder Agent | PASS | | 行数 `8/7/6/5/3/1`、首行级别 `TRC/DBG/INF/WRN/ERR/FTL`，六次退出码均 0、stdout 均 25 行 | | 各文件级别标签集合均无低于阈值者；`error`/`fatal` 两档各降 2 行系诊断日志桥接 `WRN`/`ERR` 被滤，属预期 |
 | TC-CORE-005 | 2026-09-24 | Qoder Agent | PASS | | 退出码 2、`out.txt` 0 字节、`err.txt` 恰 1 行 `[ERR] … Value 'bogus' is not a valid log-level for option '--level'` | | 载体命令行已改由 `aurora::cli` 声明表承担（`demo_core.cpp` 的 `build_spec()`），故拒绝文案来自库派生而非本地串；`--help` 对照退出码 0、14 行 usage 走 stdout、stderr 0 行 |
-| TC-CORE-006 | 2026-09-24 | Qoder Agent | PASS | | `diagnostics` 两行均在 stderr、消息体单行 JSON；首条无 `code` 且 `severity=warning category=general`，次条 `code=general-invalid-argument severity=error`；`环形缓冲内诊断条数: 2` 及两行明细一致 | | `ERROR_CATALOG.md` 第 9 行该码 severity 确为 `error`，级别由表驱动 |
+| TC-CORE-006 | 2026-10-29 | Qoder Agent | PASS | | `diagnostics` 两行均在 stderr、消息体单行 JSON；首条无 `code` 且 `severity=warning domain=general kind=internal`，次条 `code=general-invalid-argument severity=error domain=general kind=invalid`；stdout 的 `Diagnostics in the ring buffer: 2` 与两行明细逐项一致 | | 级别与两轴归属都由表驱动；原单键 `category` 已分成 `domain` + `kind` 两键，明细则同步成 `domain=` / `kind=` 双字段，同一份 JSON 行两侧读到的取值同源 |
 | TC-CORE-007 | 2026-09-24 | Qoder Agent | PASS | | 退出码 0；`explain_diagnostic` 段完整（两已知码 + 一未知码）；末行为结束行；提示行在第 17 行 | | 降级后流程确实推进到进程正常退出 |
 | TC-CORE-008 | 2026-09-24 | Qoder Agent | PASS | | 两条已知码提示与 `ERROR_CATALOG.md` 第 8/9 行 hint 逐字一致；`no-such-code` 返回兜底文案并指路清单，其后仍有结束行 | | |
 | TC-CORE-009 | 2026-09-24 | Qoder Agent | PASS | | 严格模式段首行为「已捕获硬失败信号 → …」；`err` 8 行（比非严格多 `ERR diagnostics` JSON 与 `FTL strict` 各 1 行，位置字段 `strict_mode.h:55` 即 `on_strict_failure`）；`out` 29 行（新增 4 行，其余逐行一致） | | 退出码 0 系载体注入了抛异常处理器；生产未注入时为 `std::terminate()` |

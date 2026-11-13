@@ -287,7 +287,7 @@ AURORA_TEST_CASE(application_wires_hover_cursor_to_surface) {
     Scene scene{Node{root}};
 
     auto surface = std::make_unique<HeadlessSurface>("", Size{.width = 200.0F, .height = 80.0F});
-    HeadlessSurface *probe = surface.get();
+    HeadlessSurface *const probe = surface.get();
     Application app{std::move(scene), std::move(surface),
                     WindowOptions{.size = Size{.width = 200.0F, .height = 80.0F}}};
     AURORA_TEST_REQUIRE_TRUE(app.window() != nullptr);  // 无 Window 时 wire_cursor 不落到 Surface
@@ -304,7 +304,7 @@ AURORA_TEST_CASE(application_wires_hover_cursor_to_surface) {
     AURORA_TEST_CHECK_EQ(probe->cursor_log().size(), std::size_t{1});
 
     // 3) 悬停链声明改为 Crosshair → 形状变化 → 再次下发（证明修饰链经 Application 生效）。
-    root->modifier = Modifier{}.cursor(CursorShape::Crosshair);
+    root->set_modifier(Modifier{}.cursor(CursorShape::Crosshair));
     move_to(120.0F, 40.0F);
     AURORA_TEST_REQUIRE_EQ(probe->cursor_log().size(), std::size_t{2});
     AURORA_TEST_CHECK_EQ(require_value(probe->last_cursor()), CursorShape::Crosshair);
@@ -385,7 +385,7 @@ AURORA_TEST_CASE(active_window_programmatic_entry_matrix) {
         [&]() -> void { app.dispatch_click(5.0F, 5.0F); },
         [&]() -> void { app.dispatch_pointer(5.0F, 5.0F, MouseAction::Press); },
         [&]() -> void {
-            KeyEvent e = make_key_down();
+            KeyEvent const e = make_key_down();
             (void)app.dispatch_key(e);
         },
         [&]() -> void {
@@ -409,7 +409,7 @@ AURORA_TEST_CASE(active_window_programmatic_entry_matrix) {
     const std::vector<std::function<void()>> host_entries = {
         [&]() -> void { host_b->dispatch_pointer(5.0F, 5.0F, MouseAction::Press); },
         [&]() -> void {
-            KeyEvent e = make_key_down();
+            KeyEvent const e = make_key_down();
             (void)host_b->dispatch_key(e);
         },
         [&]() -> void {
@@ -560,11 +560,11 @@ AURORA_TEST_CASE(active_window_keeps_last_surviving_host) {
 
 AURORA_TEST_CASE(active_window_equals_main_in_single_window) {
     // 判据 9（回归保护）：单窗下任意派发后恒等于 main_window()。
-    Application app{make_scene(), 320, 240};
+    Application const app{make_scene(), 320, 240};
     const WindowId id_main = app.main_window();
     app.dispatch_pointer(5.0F, 5.0F, MouseAction::Press);
     AURORA_TEST_CHECK_EQ(app.active_window(), id_main);
-    KeyEvent e = make_key_down();
+    KeyEvent const e = make_key_down();
     (void)app.dispatch_key(e);
     AURORA_TEST_CHECK_EQ(app.active_window(), id_main);
     app.dispatch_pointer(6.0F, 6.0F, MouseAction::Move);

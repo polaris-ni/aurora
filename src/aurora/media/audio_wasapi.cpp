@@ -167,7 +167,11 @@ struct WasapiDeviceBackend::Impl {
         }
         // NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast)
         notify = new DeviceNotifyClient(reroute);
-        enumerator->RegisterEndpointNotificationCallback(notify);
+        if (FAILED(enumerator->RegisterEndpointNotificationCallback(notify))) {
+            // 通知不可用只降级为重路由失效，音频初始化不因此失败
+            notify->Release();
+            notify = nullptr;
+        }
         return true;
     }
 
@@ -276,7 +280,7 @@ struct WasapiDeviceBackend::Impl {
         if (FAILED(client->GetCurrentPadding(&padding))) {
             return false;
         }
-        UINT32 avail = buffer_frames > padding ? buffer_frames - padding : 0;
+        UINT32 const avail = buffer_frames > padding ? buffer_frames - padding : 0;
         if (avail == 0) {
             return true;
         }

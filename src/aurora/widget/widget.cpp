@@ -20,6 +20,7 @@
 #include "aurora/render/font_engine.h"
 #include "aurora/render/painter.h"
 #include "aurora/theming/theme_scope.h"
+#include "aurora/widget/props.h"
 
 namespace aurora {
 
@@ -148,7 +149,7 @@ Node::~Node() {
         notify_accessibility_widget_destroying(widget_.get());
         // 目标取**宿主容器**而非正在析构的控件自身：后者的 `Widget*` 返回后即失效（悬垂）。
         // 宿主未知（控件尚未接入树）时传 nullptr —— UIA ChildrenInvalidated 不要求具体节点。
-        Widget *host = widget_->layout_parent();
+        Widget *const host = widget_->layout_parent();
         notify_accessibility_structure_changed(host);
     }
     // **不再**在此清 `layout_parent_`。
@@ -297,12 +298,11 @@ auto Widget::layout(const Constraints &c, const BuildContext &ctx) -> Size {
         flush_pending_mounts(ctx);
     }
 
-    if (!show.get()) {
+    if (!show()) {
         size_ = Size{.width = 0.0F, .height = 0.0F};
         return size_;
     }
 
-#ifdef AURORA_ENABLE_LAYOUT_CACHE
     // 缓存命中：约束未变、缓存有效、且本控件允许布局缓存（上层已保证“缓存有效 ⇒ 无脏后代”）。
     // 直接复用缓存尺寸，完全跳过修饰链构建 + on_layout + 子树递归。
     // `can_cache_layout()` 为 false 的控件（on_layout 含时间/状态依赖副作用，如骨架→内容切换）
@@ -311,7 +311,6 @@ auto Widget::layout(const Constraints &c, const BuildContext &ctx) -> Size {
         size_ = cached_size_;
         return size_;  // 缓存命中即「已测量过」：缓存的存在本身以测量过一次为前提
     }
-#endif
     // 缓存未命中：本节点将真正重新测量（含修饰链构建 + on_layout + 子树递归）。
     // 计数只统计「真实布局工作量」，缓存命中不计——复杂度门槛即基于此语义。
     AURORA_PROFILE_COUNT(layout_nodes, 1);
@@ -347,7 +346,7 @@ auto Widget::layout(const Constraints &c, const BuildContext &ctx) -> Size {
 
     std::function measure = [this, &ctx](const Constraints &inner) -> Size { return this->on_layout(inner, ctx); };
 
-    const Modifier &mod = modifier.get();
+    const Modifier &mod = modifier();
     for (const auto &it : std::views::reverse(mod.nodes())) {
         const ModifierNode *node = it.get();
         auto inner = std::move(measure);
@@ -376,7 +375,6 @@ auto Widget::layout(const Constraints &c, const BuildContext &ctx) -> Size {
     }
     // 几何权威完全收敛到 Node::bounds_：布局只确定自身尺寸，位置由父节点经
     // Node::set_bounds 写入（含真实 origin）。Widget 不再持有任何几何缓存。
-#ifdef AURORA_ENABLE_LAYOUT_CACHE
     cached_constraints_ = c;
     cached_size_ = size_;
     // 布局缓存决策：仅基于本控件自身的 can_cache_layout()。
@@ -389,13 +387,12 @@ auto Widget::layout(const Constraints &c, const BuildContext &ctx) -> Size {
     // 对于「父控件缓存会跳过调用子控件 layout()」的场景（如 Scroll），由该父控件自行在
     // 其 can_cache_layout() 覆写中检查直接子控件（见 Scroll::can_cache_layout）。
     layout_cache_valid_ = can_cache_layout();
-#endif
     return size_;
 }
 
 auto Widget::paint_content(Painter &p, const Rect &visual_box, const Rect &content_box, const BuildContext &ctx)
     -> void {
-    const Modifier &mod = modifier.get();
+    const Modifier &mod = modifier();
     // Paint 类修饰的作用盒按链上位置分段（见 Modifier::paint_boxes）：外侧 Align 展开出的
     // 空间不属于本控件自身，其内侧的 Paint 节点只取对齐后的子盒；Padding 不参与分段（规格 §7.4）。
     // 例 `.align(Center).size(120,40).background(c)` → 背景画在居中的 120×40 而非展开后的整行。
@@ -591,9 +588,12 @@ auto Widget::paint_content(Painter &p, const Rect &visual_box, const Rect &conte
     // 自绘聚焦态外观的控件（TextInput 等）经 `wants_focus_ring()` 关闭，避免双环。
     painted_focus_ring_ = false;  // 本次是否留下盒外环带，由下方画环分支认定（见 dirty_bounds()）
     if (focus_ring_shown()) {
-        constexpr float ring_gap = Widget::AURORA_FOCUS_RING_GAP;  // 与自身边框/内容的最小间距
-        constexpr float ring_thickness = Widget::AURORA_FOCUS_RING_THICKNESS;  // 环宽
-        constexpr float ring_radius = Widget::AURORA_FOCUS_RING_RADIUS;  // 环圆角
+        // 环间距 / 环宽改读主题令牌（默认 2 / 2 与改动前常量逐位相同）；环圆角仍取常量。
+        // 本分支写下的 out 同时供 dirty_bounds() 使用，绘制与标脏因此不会取到两份宽度。
+        const Theme &theme = inherit_theme(ctx);
+        const float ring_gap = std::max(0.0F, theme.controls.focus_ring_inset);
+        const float ring_thickness = std::max(0.0F, theme.controls.focus_ring_width);
+        constexpr float ring_radius = Widget::AURORA_FOCUS_RING_RADIUS;
         Rect ring_box = visual_box;  // 链上无盒收缩节点 → 与历史行为逐位一致
         if (!paint_boxes.empty()) {
             ring_box = content_box;  // 有收缩但无 Paint 节点 → 罩住实际内容盒
@@ -604,16 +604,18 @@ auto Widget::paint_content(Painter &p, const Rect &visual_box, const Rect &conte
                 }
             }
         }
-        constexpr float out = ring_gap + ring_thickness;
+        const float out = ring_gap + ring_thickness;
         const Rect ring{
             .origin = Point{.x = ring_box.origin.x - out, .y = ring_box.origin.y - out},
             .size = Size{.width = ring_box.size.width + (2.0F * out), .height = ring_box.size.height + (2.0F * out)}};
 
         if (ring.size.width > 0.0F && ring.size.height > 0.0F) {
             // 焦点环取极性色角色（旧 "focus.ring" 令牌的类型化承接）。
-            const Theme theme = inherit_theme(ctx);
             p.draw_rounded_border(ring, ring_radius, ring_thickness, theme.roles.focus_ring);
             painted_focus_ring_ = true;  // 环像素落在自身盒外：标脏须按外扩盒，见 Widget::dirty_bounds()
+            // 缓存两帧外扩：换主题那帧的脏区取并集，环宽由小变大 / 由大变小都不留残影。
+            focus_ring_out_previous_ = focus_ring_out_last_;
+            focus_ring_out_last_ = out;
         }
     }
 }
@@ -624,7 +626,7 @@ auto Widget::render_into(Painter &dst, const Rect &local, const BuildContext &ct
     // 供 repaint_highlight 判定「本帧是否重绘」。与 present_root 的调试帧计数器比较。
     debug_paint_frame_ = debug::current_debug_frame();
 #endif
-    const Modifier &mod = modifier.get();
+    const Modifier &mod = modifier();
     const Modifier::TransformInfo tf = mod.transform(local.size);
 
     const double saved_alpha = dst.global_alpha();
@@ -660,10 +662,10 @@ auto Widget::paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> v
 #ifdef AURORA_ENABLE_DEBUG
     // 渲染纯度守卫接线（GUIDELINE.md §27.5）：进入绘制上下文即递增 g_paint_depth，
     // 配合 current_timestamp() 的 !g_paint_depth 断言捕获「绘制中读全局时钟」的反模式。
-    debug::PaintPurityGuard aurora_paint_purity_guard;
+    debug::PaintPurityGuard const aurora_paint_purity_guard;
     debug::check_render_purity();
 #endif
-    if (!show.get()) {
+    if (!show()) {
         return;
     }
     AURORA_PROFILE_COUNT(paint_nodes, 1);  // 本帧真正参与 paint 遍历的节点数（DL 命中的子树不计）
@@ -671,7 +673,7 @@ auto Widget::paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> v
     paint_bounds_ = bounds;  // 记录绝对（窗口逻辑 dp）盒，供脏区裁剪绘制精确标记几何
     focus_bounds_ = bounds;  // 同源同值：方向键焦点导航的几何基准（见 focus_bounds_）
 
-    const Modifier &mod = modifier.get();
+    const Modifier &mod = modifier();
     const bool cache = std::ranges::any_of(mod.nodes(), [](const std::shared_ptr<ModifierNode> &n) -> bool {
         return n->paint_kind() == ModifierNode::PaintKind::CacheLayer;
     });
@@ -722,7 +724,6 @@ auto Widget::paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> v
         return;
     }
 
-#ifdef AURORA_ENABLE_DISPLAY_LIST
     // Display List 快路径：仅恒等变换（无非离屏合成）参与录制/回放；
     // 旋转/缩放（非恒等 Transform）走 render_into 的离屏合成，保持原样不录制。
     // 含绘制副作用 / 每帧变动内容的控件（Hero / 转场层 / 导航宿主）不可缓存。
@@ -765,7 +766,6 @@ auto Widget::paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> v
     if (p.is_recording()) {
         p.mark_recording_dynamic();
     }
-#endif
 
     render_into(p, bounds, ctx);
 }
@@ -776,11 +776,11 @@ auto Widget::invalidate_paint_cache() const -> void {
 }
 
 auto Widget::hit_test(const Point &local, const Rect &bounds, const BuildContext &ctx) -> Widget * {
-    if (!show.get()) {
+    if (!show()) {
         return nullptr;
     }
 
-    const Modifier &mod = modifier.get();
+    const Modifier &mod = modifier();
     // Transform 切片：命中区随内容盒平移/仿射变换（与绘制一致）。
     const Modifier::TransformInfo tf = mod.transform(bounds.size);
     const Point local_adj = adjust_for_transform(tf, local);
@@ -810,11 +810,11 @@ auto Widget::hit_test(const Point &local, const Rect &bounds, const BuildContext
 }
 
 auto Widget::hit_test_chain(const Point &local, const Rect &bounds, const BuildContext &ctx) -> std::vector<HitNode> {
-    if (!show.get()) {
+    if (!show()) {
         return {};
     }
 
-    const Modifier &mod = modifier.get();
+    const Modifier &mod = modifier();
     // Transform 切片：命中区随内容盒平移/仿射变换（与 hit_test / paint 一致）。
     const Modifier::TransformInfo tf = mod.transform(bounds.size);
     const Point local_adj = adjust_for_transform(tf, local);
@@ -896,7 +896,7 @@ auto Widget::extra_hit_box(const BuildContext &ctx, const Point &ancestor_offset
 auto Widget::window_bounds() const -> std::optional<Rect> {
     // 与 `paint_bounds()` 的根本区别：那个是**绘制期写入**、坐标系随祖先的缓冲录制方式而变；本入口
     // 查询时现算、恒为窗口逻辑 dp。故不读任何绘制期缓存成员（它们有 DL 缓存缺口，见 paint_bounds）。
-    if (!show.get()) {
+    if (!show()) {
         return std::nullopt;  // show==false ⇒ 布局期尺寸被夹成零盒，无有效几何
     }
     if (!has_measured_) {
@@ -959,7 +959,7 @@ auto Widget::window_bounds() const -> std::optional<Rect> {
         parent->scroll_content_offset(cb.origin, scroll_delta);
         // 父 Modifier 的平移按**该父实际用于绘制的盒尺寸**重算：绘制侧 `render_into` 收到的是
         // 「父下传的子盒尺寸」，故这里用 cb.size 而非父的 size_——相等时无差别，不等时与绘制同源。
-        const Modifier::TransformInfo tf = parent->modifier.get().transform(cb.size);
+        const Modifier::TransformInfo tf = parent->modifier().transform(cb.size);
         origin = origin + cb.origin + scroll_delta + tf.translation;
         const Widget *grand = parent->layout_parent();
         if (grand == nullptr) {
@@ -1024,18 +1024,11 @@ auto Widget::mount(const BuildContext &ctx) -> void {
     }
     mounted_ = true;
     mount_ctx_ = ctx;
-    std::vector<SignalViewBase *> sigs;
-    collect_signals(sigs);
-    sigs.push_back(&modifier);
-    sigs.push_back(&show);
-
-    for (SignalViewBase *s : sigs) {
-        track(*s, effects_);
-    }
+    wire_signals();
 
     // 含需每帧计时的手势（LongPress/Draggable）或 Tooltip 延迟检测时，开启 tick 驱动，
     // 使 Widget::tick 不提前返回，从而正确推进 Tooltip 延迟计时。
-    const Modifier &mod = modifier.get();
+    const Modifier &mod = modifier();
     if (mod.has_gesture() || mod.has_tooltip()) {
         needs_gesture_tick_ = true;
     }
@@ -1043,14 +1036,22 @@ auto Widget::mount(const BuildContext &ctx) -> void {
     on_mount(ctx);
 }
 
+auto Widget::wire_signals() -> void {
+    StateSink sink;
+    collect_signals(sink);
+    sink.push(modifier_source_);
+    sink.push(show_source_);
+    signal_subscriptions_ = sink.watch([this]() { on_signal_dirty(); });
+}
+
 auto Widget::unmount() -> void {
     if (!mounted_) {
         return;  // 幂等：未挂载即调用是空操作，不留半个退订状态
     }
     mounted_ = false;
-    // 先派发再清订阅：子类在 on_unmount 里仍可安全读自己的状态；effects_ 的销毁（退订）发生在其后。
+    // 先派发再清订阅：子类在 on_unmount 里仍可安全读自己的状态；订阅凭证的销毁（退订）发生在其后。
     on_unmount(mount_ctx_);
-    effects_.clear();
+    signal_subscriptions_.clear();
     needs_gesture_tick_ = false;
     mount_ctx_ = BuildContext{};
 }
@@ -1058,6 +1059,38 @@ auto Widget::unmount() -> void {
 auto Widget::request_focus() -> void {
     if (FocusManager *fm = current_focus_manager()) {
         fm->request_focus(this);
+    }
+}
+
+// ---- 属性链接槽的移动面（`widget.h` 中声明，定义点收在此 TU）----
+//
+// 两件都要越出 `PropsHost` 自己的指针：`take_over` 要把 `PropsHost *` 下行成 `Widget *`（本类的定义点在
+// `Widget` 之前，且 `props_link_->host` 按控件记账），`drop` 要经 `PropsLink` 置空宿主指针（它定义在
+// `widget/props.h`）——都只能离头定义。那次下行由构造保证：`PropsHost` 除了 `Widget` 的基类子对象没有
+// 第二种用途，故 `dynamic_cast` 在这里既拿不到「不是 Widget」的负例，又要给每只控件移动都要走的钩子
+// 加上 RTTI 判定；lint 口径见 `CODING_STANDARDS.md` §5.2 与 `include/aurora/window/window.h` 的先例。
+//
+// `take_over()` 只做一件事：把这条链接位的宿主指针改成本控件，而且**只在它确实还绑在刚被搬空的那只
+// 来源控件上时**才改。它不做任何「属性子对象在宿主里的位置」推算 —— 那是被否决过的相对偏移形态
+// （切出宿主搬移属性对象时会在宿主之外算出一个地址当 owner 用，即伪造指针）。宿主的槽认回新的属性
+// 子对象是属性侧移动构造的活，见 `AbstractProps` 的 `adopt()`；判据不同、各补一半，两端合起来才是
+// 一次完整的重绑。
+auto detail::PropsHost::take_over(PropsHost &source) -> void {
+    // NOLINTBEGIN(cppcoreguidelines-pro-type-static-cast-downcast): PropsHost 仅作为 Widget 的基类存在
+    if (props_link_ != nullptr && props_link_->host == static_cast<Widget *>(&source)) {
+        props_link_->host = static_cast<Widget *>(this);
+    } else {
+        // 来源那条链接已脱钩（或已被切出宿主的属性对象认走到别处）：本槽不认它，否则两只控件会争
+        // 同一条链接，先析构的一边会把另一边的接线清掉。
+        props_link_ = nullptr;
+    }
+    // NOLINTEND(cppcoreguidelines-pro-type-static-cast-downcast)
+}
+
+auto detail::PropsHost::drop() -> void {
+    if (props_link_ != nullptr) {
+        props_link_->drop_host();
+        props_link_ = nullptr;
     }
 }
 
@@ -1123,11 +1156,11 @@ auto Widget::begin_system_drag() -> Result<void> {
     return {};
 }
 
-auto Widget::collect_signals(std::vector<SignalViewBase *> & /*out*/) -> void {}
+auto Widget::collect_signals(StateSink & /*out*/) -> void {}
 
 auto Widget::describe() const -> WidgetDescriptor { return WidgetDescriptor{.name = type_name()}; }
 
-auto Container::collect_signals(std::vector<SignalViewBase *> &out) -> void {
+auto Container::collect_signals(StateSink &out) -> void {
     for (Node &child : children_) {
         child.widget().collect_signals(out);
     }

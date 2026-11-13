@@ -37,7 +37,7 @@ AURORA_TEST_CASE(construction_starts_clock_with_nonnegative_readings) {
 
 AURORA_TEST_CASE(elapsed_readings_are_monotonic) {
     // 同一实例连续读取：读数不回退（单调时钟）；us 读数与 ms 读数同刻度换算一致。
-    Stopwatch sw;
+    Stopwatch const sw;
     const double ms_first = sw.elapsed_ms();
     const double ms_second = sw.elapsed_ms();
     AURORA_TEST_CHECK_GE(ms_second, ms_first);

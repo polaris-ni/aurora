@@ -31,6 +31,12 @@
 | `tools/verify/glfw_dpi_live_probe.cpp` | `aurora_verify_glfw_dpi` | **GLFW 后端**的 DPI 缩放换算自洽与缩放变化上报（探针，非 demo） |
 | `tools/verify/x11_csd_live_probe.cpp` | `aurora_verify_x11_csd` | **X11 后端**的客户端自绘装饰（CSD）离屏像素级判据：`ClientSide` 撤 WM 口沿后标题栏带真绘出、`content_inset` 上报栏高、`Auto`/`Frameless` 零入侵口径（探针，非 demo） |
 | `tools/verify/win32_csd_live_probe.cpp` | `aurora_verify_win32_csd` | **Win32 后端**的客户端自绘装饰（CSD）离屏像素级判据：`WM_NCCALCSIZE` 吞框（最大化拉回工作区）、五档策略的 `content_inset` / 像素 / `WM_NCHITTEST` 热区回归、按钮释放触发与拖离取消、降级归零、热更（探针，非 demo） |
+| `tools/verify/win32_window_mode_live_probe.cpp` | `aurora_verify_win32_window_mode` | **Win32 / D3D11 家族**程序化窗控四槽公共入口（minimize / toggle_maximize / set_window_mode / set_fullscreen）的 OS 实值判据：`IsIconic` / `IsZoomed` / `GetWindowRect` 独立取证、上报链同链、目标态幂等、全屏档覆盖所在显示器整屏且退出还原、无 WARN，三档装饰（default / borderless / frameless）逐条重跑（探针，非 demo） |
+| `tools/verify/x11_window_mode_live_probe.cpp` | `aurora_verify_x11_window_mode` | **X11 后端**程序化窗控三腿真机验收：`set_fullscreen` 经 EWMH `_NET_WM_STATE_FULLSCREEN` 原子独立取证（WM 已受理）+ 应用快照 `FullScreen` + 零 WARN + 几何覆盖（单显示器硬断言、多显示器降级 NOTE）；`toggle_maximize()` 经 `_NET_WM_STATE_MAXIMIZED_*` 原子取证（Normal <-> Maximized，与 CSD 钮 `csd_toggle_maximize` 同源）；`minimize()` 转 `set_window_mode(Minimized)` 经 `XIconifyWindow` 收走窗口（`map_state == IsUnmapped` 独立取证）；能力位 `runtime_fullscreen` 与 `runtime_window_mode` 翻 true 的自证（探针，非 demo） |
+| `tools/verify/glfw_window_mode_live_probe.cpp` | `aurora_verify_glfw_window_mode` | **GLFW 后端**程序化窗控三腿真机验收：原生几何观测（Linux Xlib / Windows HWND）比对 GLFW 显示器视口覆盖整屏（±2px）+ 应用快照 `FullScreen` + 零 WARN + 退出还原；`toggle_maximize()` 经 `glfwMaximizeWindow` / `glfwRestoreWindow` 请求语义取证（Normal <-> Maximized，Linux `MAXIMIZED` 原子 / Windows `IsZoomed`，回调 `update_window_mode()` 定档上报）；`minimize()` 经 `glfwIconifyWindow` 取证（Linux `IsUnmapped` / Windows `IsIconic`）；能力位 `runtime_fullscreen` 与 `runtime_window_mode` 翻 true 的自证（探针，非 demo） |
+| `tools/verify/macos_surface_live_probe.mm` | `aurora_verify_macos_surface` | **macOS AppKit** Surface 真机判据：软件上屏与帧缓冲、逻辑/物理尺寸、几何与显示器 id、OS 明暗跟随、运行期显隐与置顶、`capture_window` 内容视图缓存截图，以及**装饰档位映射**（`Borderless` 保住原生边缘缩放、`Frameless` 无缩放）——本模块只在 TC-WINDOW-025 就装饰档位段立判据，其余段由 `specification/08-tooling.md` §7.5 登记（探针，非 demo） |
+| `tools/verify/macos_ax_live_probe.mm` | `aurora_verify_macos_ax` | **macOS AppKit** 的无障碍桥投影读回（协议面 `accessibilityChildren` / `accessibilityHitTest:` / `accessibilityPerformPress` + 已授权 `AXUIElement` 客户端加强腿），见 TC-WINDOW-023（探针，非 demo） |
+| `tools/verify/macos_os_input_live_probe.mm` | `aurora_verify_macos_os_input` | **macOS** 的 OS 级输入注入判据：同进程 AppKit 事件队列（`[NSApp postEvent:]`）驱动指针点击与键盘字符两条通道，判据取控件语义状态 + 语义盒区域像素；已授予辅助功能授权时追加 `CGEvent` 全局注入加强腿，未授权时如实申报不可用并复核「静默无效」形态（探针，非 demo），见 TC-WINDOW-024 |
 
 **第三个载体的构建口径与前两个不同，须单独构建目录**（探针受两个开关门控，二者在本模块的默认
 `build/` 里都不满足，故前两个载体的构建步骤不能覆盖它）：
@@ -57,6 +63,37 @@ cmake --build build-verify-x11 --target aurora_verify_x11_csd
 cmake -S . -B build-verify-win32 -G Ninja -DAURORA_BACKEND_WIN32=ON -DAURORA_ENABLE_DEBUG=ON -DAURORA_BUILD_VERIFY_TOOLS=ON
 cmake --build build-verify-win32 --target aurora_verify_win32_csd
 ```
+
+**X11 窗控全屏探针**：仅须 `AURORA_BACKEND_X11=ON` 与 `AURORA_BUILD_VERIFY_TOOLS=ON`（不读像素，无需
+`AURORA_ENABLE_DEBUG`），在真实 X 会话（含运行中的 WM）下运行：
+
+```
+cmake -S . -B build-verify-x11 -G Ninja -DAURORA_BACKEND_X11=ON -DAURORA_BUILD_VERIFY_TOOLS=ON
+cmake --build build-verify-x11 --target aurora_verify_x11_window_mode
+```
+
+**GLFW 窗控全屏探针**：仅须 `AURORA_BACKEND_GLFW=ON` 与 `AURORA_BUILD_VERIFY_TOOLS=ON`（不读像素，无需
+`AURORA_ENABLE_DEBUG`），在真实桌面会话（Linux / Windows）下运行：
+
+```
+cmake -S . -B build-verify-glfw -G Ninja -DAURORA_BACKEND_GLFW=ON -DAURORA_BUILD_VERIFY_TOOLS=ON
+cmake --build build-verify-glfw --target aurora_verify_glfw_window_mode
+```
+
+**macOS 两探针（AX / OS 输入）的构建口径同 X11 的三开关**（像素判据直读帧缓冲，须
+`AURORA_ENABLE_DEBUG=ON`，另需 `AURORA_BACKEND_MACOS=ON` 与 `AURORA_BUILD_VERIFY_TOOLS=ON`；
+二者须在 macOS 真机上执行，且须**已登录的图形会话**——无 WindowServer 时探针以退出码 2 报环境
+不可用，不冒充判据）：
+
+```
+cmake -S . -B build-verify-macos -G Ninja -DAURORA_BACKEND_MACOS=ON -DAURORA_ENABLE_DEBUG=ON -DAURORA_BUILD_VERIFY_TOOLS=ON
+cmake --build build-verify-macos --target aurora_verify_macos_ax aurora_verify_macos_os_input
+```
+
+OS 输入探针另含一条 **opt-in 加强腿**：已授予辅助功能（Accessibility）授权时才真投递 `CGEvent`
+全局输入；未授权时该腿如实记 `SKIP` 并复核「静默无效」形态（口径见
+`specification/08-tooling.md` §8.2）。同一构建目录下跑 etest 腿须置环境变量
+`AURORA_E2E_OS_INPUT=1`（OS 级注入无法虚拟化，须独占执行）。
 
 探针的判据段（`content_inset` / 标题栏带像素 / 零入侵）为**自动段**，退出码语义同上；悬停 / 按压 /
 拖拽 / 双击的**人工目视段**由用例步骤承载（见 TC-WINDOW-014），不受探针退出码覆盖。
@@ -92,7 +129,7 @@ cmake --build build-verify-win32 --target aurora_verify_win32_csd
 | `AURORA_BACKEND_GLFW` / `D3D11` / `GPU_GL` / `GPU_WGPU` | OFF |
 | `AURORA_BACKEND_X11` / `WAYLAND` / `MACOS` / `WASM` | OFF |
 
-因此 **D3D11、wgpu、Wayland、macOS、WASM 五个后端的人工验证在本机不可执行**，本模块不为它们
+因此 **D3D11、wgpu、Wayland、WASM 四个后端的人工验证在本机不可执行**，本模块不为它们
 编写用例（其窗口表现差异属跨平台真机验收的范畴）。TC-WINDOW-001 的方案 B 覆盖 Headless 路径，
 其余用例覆盖 Win32 路径。
 
@@ -107,6 +144,12 @@ X11 CSD 探针段），故 TC-WINDOW-014 覆盖 X11 的自绘装饰自动判据�
 **GLFW 后端的例外**：它是**本机可执行**的——只需另建一个开启 `AURORA_BACKEND_GLFW` 的构建目录
 （口径见 §1.2），不依赖本节表格所列的 `build/` 配置。故 TC-WINDOW-013 覆盖 GLFW 的 DPI 换算与
 缩放上报；其跨屏段与其他后端一样受单显示器限制（见该用例前置条件）。
+
+**macOS 后端的例外**：上一段表格描述的是 Windows 载体的 `build/`，macOS 的两个探针（无障碍投影、
+OS 输入注入）**不在该 Windows 本机执行，而在 macOS 真机执行**——构建口径见 §1.2 的 macOS 探针段，
+须已登录的图形会话（无 WindowServer 时以退出码 2 报环境不可用）。故 TC-WINDOW-023 与
+TC-WINDOW-024 覆盖 macOS 的投影读回与输入注入自动判据；二者各自的授权加强腿受 TCC「辅助功能」
+授权约束（本机 SIP 开启，无法脚本授予），未授权时按 §1.7 记 `SKIP` 而非 `FAIL`。
 
 ### 1.4 用例编号规则
 
@@ -419,7 +462,7 @@ X11 CSD 探针段），故 TC-WINDOW-014 覆盖 X11 的自绘装饰自动判据�
 | 操作步骤 | 1. 启动载体：`./build/demo_csd_gallery.exe 1> out.txt 2> err.txt`（纯执行，无预期结果）<br>2. 在主控制窗点击 `ClientSide preview` 按钮，等预览窗出现（纯执行，无预期结果）<br>3. 按预览窗内 `Cycle title-bar theme (host self-draw)` 按钮的可见位置点击一次（纯执行，无预期结果）<br>4. 读取预览窗状态行文本与顶部自绘标题带的整带配色<br>5. 按 `Toggle window frame shadow` 按钮的可见位置点击一次（纯执行，无预期结果）<br>6. 读取状态行文本<br>7. 按 `Toggle title-bar icon` 按钮的可见位置点击一次（纯执行，无预期结果）<br>8. 读取状态行文本与标题带左端图标槽<br>9. 把该预览窗先缩矮到 `Close this preview` 按钮完全不可见，再向下拉长使该按钮重新可见（纯执行，无预期结果）<br>10. 按拉长后 `Close this preview` 按钮的可见位置点击一次（纯执行，无预期结果）<br>11. 查看预览窗存活状态与 `err.txt` 的新增行<br>12. 点击主控制窗 `Borderless preview` 按钮，在出现的预览窗内依次点击控件级 TitleBar 上的 `Info`、`−`、`□`、`×`（纯执行，无预期结果）<br>13. 查看预览窗存活状态与 `err.txt` 的新增行<br>14. 在该预览窗内按可见位置点击 `Close this preview`（纯执行，无预期结果）<br>15. 查看窗口状态与 `err.txt` 的新增行<br>16. 点击主控制窗 `Frameless preview` 按钮，重复步骤 12 与 14 的点击序列（纯执行，无预期结果）<br>17. 查看窗口状态与 `err.txt` 的新增行<br>18. 查看 `err.txt` 全文 |
 | 预期结果 | 4. 状态行由 `host title-bar theme → <主题名>` 更新为循环序（AdwaitaDark → AdwaitaLight → WindowsDark → WindowsLight）的下一档；顶部自绘标题带整带配色随主题即时重绘<br>6. 状态行更新为 `window frame shadow → off`（若点击前已为 `off` 则更新为 `on`，即与点击前状态翻转）<br>8. 状态行更新为 `title-bar icon → set`（若点击前已为 `set` 则 `cleared`）；`set` 后标题带左端出现 24×24 双色演示图标，`cleared` 后图标消失<br>11. 预览窗关闭消失；`err.txt` 新增 1 行，级别 `INF`，消息形如 `[app] window host closed and reaped: id= <N>`（`<N>` 为该预览窗 id）。**判据要点**：点击发生在拉长后按钮的可见位置——修复前该点击落空（须上移约一个标题栏高度才生效），此步骤即原始缺陷场景<br>13. 窗口保持存活不关闭；`err.txt` 恰新增 1 行，级别 `INF`，消息含 `csdg: info clicked`（控件在其绘制位置被命中）；`−` / `□` / `×` 三钮不产生新增行（其表现为 Win32 平台范围空动作，见下方注记）<br>15. 预览窗关闭消失；`err.txt` 新增 1 行回收行（与步骤 11 同格式）<br>17. 与步骤 13 / 15 同口径：`Info` 命中日志新增 1 行、`−` / `□` / `×` 无新增行且窗口存活、`Close this preview` 后窗口消失并新增 1 行回收行<br>18. 除上述 `INF` 行外无 `ERR` / `FTL` 级日志；可出现既有观察性 `WRN`（预览窗关闭时布局父链解除提示，详见执行记录备注） |
 
-**本例与 、及控件级 TitleBar 三钮的平台范围**：步骤 9–11 复原 `demo_csd_gallery` 的原始缺陷场景（的动因）——向下拉长窗口露出 `Close this preview` 后，修复前按按钮可见位置点击无效、须点击其上方约一个标题栏高度才生效；修复后同一可见位置点击即命中。步骤 12–17 的控件级 TitleBar 走查中，`−` / `□` / `×` 经 `WindowChrome` 转发的 `Surface::close()` / `minimize()` / `toggle_maximize()` / `set_fullscreen()` 为默认空实现、仅 Wayland（`xdg_toplevel`）覆盖（见 `specification/07-environment-modifier.md` 的「程序化窗口控制」段）——在 Win32 真机上表现为无害空动作，属既有平台范围、非缺陷，更非本次命中修复的回归；命中是否对齐以 `Info` 动作日志与 `Close this preview` 的可见位置点击判定，不得把三钮的空动作记为失败。
+**本例与 、及控件级 TitleBar 三钮的平台范围**：步骤 9–11 复原 `demo_csd_gallery` 的原始缺陷场景（的动因）——向下拉长窗口露出 `Close this preview` 后，修复前按按钮可见位置点击无效、须点击其上方约一个标题栏高度才生效；修复后同一可见位置点击即命中。步骤 12–17 的控件级 TitleBar 走查中，`−` / `□` / `×` 经 `WindowChrome` 转发的 `Surface::close()` / `minimize()` / `toggle_maximize()` / `set_fullscreen()` ：minimize / toggle_maximize / set_fullscreen 在 Win32 / D3D11 经共享宿主已接 OS（与用户走系统菜单同路径），仅 close() 仍默认空实现、仅 Wayland（`xdg_toplevel`）额外覆盖（见 `specification/07-environment-modifier.md` 的「程序化窗口控制」段）——本次 2026-10-12 走查时 Win32 尚未接线，故录为无害空动作，属当时平台范围、非缺陷，更非本次命中修复的回归；命中是否对齐以 `Info` 动作日志与 `Close this preview` 的可见位置点击判定，不得把三钮的空动作记为失败。
 
 ### 2.9 关闭请求闸门（跨后端真机走查）
 
@@ -431,8 +474,8 @@ X11 CSD 探针段），故 TC-WINDOW-014 覆盖 X11 的自绘装饰自动判据�
 | 测试目的 | 验证关闭请求闸门在真实窗口环境下的三项表现：OS 关闭钮的置位时点、否决后窗口不销毁且窗口管理器是否重发请求、各后端清位落点的实测差异 |
 | 前置条件 | 仓库根目录；关闭闸门真机探针已按被测后端的口径构建（Win32 腿用本机默认 `build/` 追加 `AURORA_BUILD_VERIFY_TOOLS=ON` 重 configure，X11 / GLFW 腿按 §1.2 的独立构建目录，Wayland / macOS / WASM 三腿需对应平台真机）；活动桌面会话（锁屏时窗口收不到 OS 关闭消息）；真实指针或等效注入通道 |
 | 依赖用例 | 无 |
-| 操作步骤 | 1. 启动装载了「首问否决、再问放行」闸门回调的关闭闸门真机探针，取 Win32 腿，确认主窗已显示（纯执行，无预期结果）<br>2. 点击探针主窗标题栏的关闭按钮一次（纯执行，无预期结果）<br>3. 读取探针输出的关闭请求置位时点记录（相对 `pump_all_once` 与 `on_frame_` 的先后）与窗口存活状态<br>4. 等待约两帧后再次点击同一关闭钮一次（纯执行，无预期结果）<br>5. 读取闸门询问计数与窗口存活状态<br>6. 判定本后端在否决后**是否重发**关闭请求（以询问计数是否自增为据）<br>7. 切到放行档，再次点击关闭钮（纯执行，无预期结果）<br>8. 读取窗口存活状态与 `err.txt` 的回收行<br>9. 在 X11 会话（`DISPLAY` 指向可达 X server）下按同口径重跑步骤 1 至 8（纯执行，无预期结果）<br>10. 记录 X11 腿的三项实测（置位时点 / 是否重发 / 否决后是否存活）<br>11. 在 Wayland 会话下按同口径重跑步骤 1 至 8（纯执行，无预期结果）<br>12. 记录 Wayland 腿的三项实测<br>13. 在 GLFW 构建目录下按同口径重跑步骤 1 至 8（纯执行，无预期结果）<br>14. 记录 GLFW 腿的三项实测（含 `glfwSetWindowShouldClose` 清位后 `glfwWindowShouldClose` 是否回到假）<br>15. 在 macOS 真机上按同口径重跑步骤 1 至 8（纯执行，无预期结果）<br>16. 记录 macOS 腿的三项实测（骨架后端：清位是否生效、是否出现 fail-open `WRN`）<br>17. 在 WASM 页面壳下按同口径重跑步骤 1 至 8（纯执行，无预期结果）<br>18. 记录 WASM 腿的三项实测（含「否决任一窗口即否决全部」的共享标志降级是否如申报发生）<br>19. 汇总六腿记录，与 `specification/06-app-platform.md` §2.4 的申报逐条核对 |
-| 预期结果 | 3. 置位时点落在帧内的 `pump_all_once` 之后、`on_frame_` 之前（即 OS 关闭消息由本帧 pump 带进来的当帧旗标）；窗口仍存活且当帧继续出图<br>5. 询问计数为 2（第一次置位与再置位各一次抬沿，同帧多次置位不重复问）；窗口**仍存活**，`err.txt` 无回收行<br>6. 计数自增即证明本后端的窗口管理器在否决后**不再重发**关闭请求；若计数持续自增则记为「重发」，须在记录表备注中写明重发频率（二者都属可接受实测，但必须与规格申报一致）<br>8. 窗口消失；`err.txt` 恰新增 1 行 `INF`，消息形如 `[app] window host closed and reaped: id= <N>`<br>10. 三项齐全且与 Win32 腿的口径逐项可比：置位时点同样落在 pump 之后，否决后窗口存活<br>12. 三项齐全；Wayland 的程序化 `Surface::close()` 写的是同一个后端位，故「程序化 / OS」两路在宿主记账位上须可分（来源判为 `Programmatic` 而非 `OperatingSystem`）<br>14. 三项齐全，且清位后 `glfwWindowShouldClose` 读回假<br>16. 三项齐全；macOS 骨架后端如实记录清位是否生效与是否出现 fail-open `WRN`（不得记为缺陷，属骨架后端的既有范围）<br>18. 三项齐全；页面级单标志共享导致的「否决任一窗口即否决全部」须如实记录是否与规格申报一致<br>19. 六腿记录与规格申报逐条一致；凡申报为降级的项（WASM 共享标志、macOS 骨架）在实测中确有对应表现，未申报的项不得出现降级 |
+| 操作步骤 | 1. 启动装载了「首问否决、再问放行」闸门回调的关闭闸门真机探针，取 Win32 腿，确认主窗已显示（纯执行，无预期结果）<br>2. 点击探针主窗标题栏的关闭按钮一次（纯执行，无预期结果）<br>3. 读取探针输出的关闭请求置位时点记录（相对 `pump_all_once` 与 `on_frame_` 的先后）与窗口存活状态<br>4. 等待约两帧后再次点击同一关闭钮一次（纯执行，无预期结果）<br>5. 读取闸门询问计数与窗口存活状态<br>6. 判定本后端在否决后**是否重发**关闭请求（以询问计数是否自增为据）<br>7. 切到放行档，再次点击关闭钮（纯执行，无预期结果）<br>8. 读取窗口存活状态与 `err.txt` 的回收行<br>9. 在 X11 会话（`DISPLAY` 指向可达 X server）下按同口径重跑步骤 1 至 8（纯执行，无预期结果）<br>10. 记录 X11 腿的三项实测（置位时点 / 是否重发 / 否决后是否存活）<br>11. 在 Wayland 会话下按同口径重跑步骤 1 至 8（纯执行，无预期结果）<br>12. 记录 Wayland 腿的三项实测<br>13. 在 GLFW 构建目录下按同口径重跑步骤 1 至 8（纯执行，无预期结果）<br>14. 记录 GLFW 腿的三项实测（含 `glfwSetWindowShouldClose` 清位后 `glfwWindowShouldClose` 是否回到假）<br>15. 在 macOS 真机上按同口径重跑步骤 1 至 8（纯执行，无预期结果）<br>16. 记录 macOS 腿的三项实测（AppKit 腿：`windowShouldClose:` 的置位时点、`cancel_close()` 清位是否生效、是否出现 fail-open `WRN`）<br>17. 在 WASM 页面壳下按同口径重跑步骤 1 至 8（纯执行，无预期结果）<br>18. 记录 WASM 腿的三项实测（含「否决任一窗口即否决全部」的共享标志降级是否如申报发生）<br>19. 汇总六腿记录，与 `specification/06-app-platform.md` §2.4 的申报逐条核对 |
+| 预期结果 | 3. 置位时点落在帧内的 `pump_all_once` 之后、`on_frame_` 之前（即 OS 关闭消息由本帧 pump 带进来的当帧旗标）；窗口仍存活且当帧继续出图<br>5. 询问计数为 2（第一次置位与再置位各一次抬沿，同帧多次置位不重复问）；窗口**仍存活**，`err.txt` 无回收行<br>6. 计数自增即证明本后端的窗口管理器在否决后**不再重发**关闭请求；若计数持续自增则记为「重发」，须在记录表备注中写明重发频率（二者都属可接受实测，但必须与规格申报一致）<br>8. 窗口消失；`err.txt` 恰新增 1 行 `INF`，消息形如 `[app] window host closed and reaped: id= <N>`<br>10. 三项齐全且与 Win32 腿的口径逐项可比：置位时点同样落在 pump 之后，否决后窗口存活<br>12. 三项齐全；Wayland 的程序化 `Surface::close()` 写的是同一个后端位，故「程序化 / OS」两路在宿主记账位上须可分（来源判为 `Programmatic` 而非 `OperatingSystem`）<br>14. 三项齐全，且清位后 `glfwWindowShouldClose` 读回假<br>16. 三项齐全；macOS 腿如实记录清位是否生效与是否出现 fail-open `WRN`（`windowShouldClose:` 返回 NO 保住窗口、`cancel_close()` 清位为已接线实现）<br>18. 三项齐全；页面级单标志共享导致的「否决任一窗口即否决全部」须如实记录是否与规格申报一致<br>19. 六腿记录与规格申报逐条一致；凡申报为降级的项（WASM 共享标志）在实测中确有对应表现，未申报的项不得出现降级 |
 
 **本例编号的取定**：现最高为 016；017 / 018 为同批预留后未落用的断档序号，按 §1.4「序号不复用」不作回填，本例取下一个可用序号 019。
 
@@ -450,12 +493,12 @@ X11 CSD 探针段），故 TC-WINDOW-014 覆盖 X11 的自绘装饰自动判据�
 | 测试目的 | 验证落盘的窗口几何态（Normal / Maximized / FullScreen）重启后能否回到那一档，以及 Minimized 按政策恢复为 Normal 并留 INFO——真实 OS 窗口环境下的端到端走查 |
 | 前置条件 | 仓库根目录；几何态恢复真机探针已按被测后端的口径构建（Win32 腿用本机默认 `build/` 追加 `AURORA_BUILD_VERIFY_TOOLS=ON` 重 configure，X11 / GLFW 腿按 §1.2 的独立构建目录，Wayland / macOS / WASM 腿需对应平台真机）；探针宿主声明持久化键并挂接可落盘的 `Preferences`；活动桌面会话（锁屏时窗口收不到 OS 消息）；真实指针或等效注入通道 |
 | 依赖用例 | 无 |
-| 操作步骤 | 1. 启动几何态恢复真机探针，取 Win32 腿，指定目标档 `Normal`：把主窗拖到非默认位置并缩放到非默认尺寸，正常关闭探针使几何落盘，再启动第二趟（纯执行，无预期结果）<br>2. 读取第二趟启动时的 mode 读数、主窗位置与尺寸，并查看 `err.txt` 新增行<br>3. 按同口径把目标档切为 `Maximized`：首趟切档后正常关闭落盘，启动次趟读取 mode 读数与窗口外观，并查看 `err.txt` 新增行<br>4. 按同口径把目标档切为 `FullScreen`：首趟切档后正常关闭落盘，启动次趟读取 mode 读数、窗口外观与 `err.txt` 新增行<br>5. 把主窗最小化后正常关闭落盘，启动次趟读取 mode 读数、窗口是否可见与 `err.txt` 新增行<br>6. 在 X11 会话（`DISPLAY` 指向可达 X server）下按同口径重跑 `Normal` / `Maximized` / `FullScreen` / `Minimized` 四组（纯执行，无预期结果）<br>7. 记录 X11 腿四组实测：mode 是否回到那一档、`Minimized` 是否如政策变 `Normal`、位置与尺寸是否恢复<br>8. 在 Wayland 会话下按同口径重跑四组（纯执行，无预期结果）<br>9. 记录 Wayland 腿四组实测<br>10. 在 GLFW 构建目录下按同口径重跑四组（纯执行，无预期结果）<br>11. 记录 GLFW 腿四组实测（含 `FullScreen` 一档的 WRN 留痕是否出现）<br>12. 在 macOS 真机上按同口径重跑四组（纯执行，无预期结果）<br>13. 记录 macOS 腿四组实测（骨架后端：`set_window_mode` 为默认空实现，mode 是否停在 `Normal`）<br>14. 在 WASM 页面壳下按同口径重跑四组（纯执行，无预期结果）<br>15. 记录 WASM 腿四组实测（无 OS 窗口语义，mode 是否停在 `Normal`、位置尺寸是否未动）<br>16. 汇总各腿记录，与 `specification/06-app-platform.md` §2.4「几何态恢复」的申报逐条核对，并将 mode 读数与「缩放与跨屏不更新」「X11 / Wayland 位置与尺寸未实现」两条既有偏差分开记录 |
-| 预期结果 | 2. Win32 腿 `Normal`：mode 读数为 `Normal`；主窗位置与尺寸回到首趟落盘值（物理像素口径，Win32 的 `set_size` / `set_position` 为真实现，该档应逐位恢复）；`err.txt` 无新增 `ERR` / `FTL`（Normal 档恢复不产生日志）<br>3. Win32 腿 `Maximized`：mode 读数回到 `Maximized`，窗口以最大化外观呈现；`err.txt` 无新增行（该档只追几何态，不产生日志）<br>4. Win32 腿 `FullScreen`：本后端无 monitor 切换通道（申报内缺口）——`err.txt` 应出现 1 行 WRN（tag `"window"`，消息含 `FullScreen is not implemented on this backend`），mode 实际读数如实记录（预期停在原档而非 `FullScreen`）；此为申报内降级，不得记缺陷，也不得记「读不回」式失败<br>5. Win32 腿 `Minimized`：mode 读数为 `Normal` 且窗口可见（非最小化外观）；`err.txt` 恰新增 1 行 `INF`（tag `"app"`），消息形如 `stored window mode is Minimized; restoring as Normal (key=<k>)`<br>7. X11 腿四组齐全：`Normal` 档的位置与尺寸**按未实现缺口单独记录**（该后端 `set_size` / `set_position` 为空动作，no-op 属申报内，不得记缺陷）；`Maximized` / `FullScreen` 两档 mode 读数应各自回到那一档；`Minimized` 一档同 Win32 口径（变 `Normal` + INFO）。mode 读数与位置尺寸读数**不得混为一谈**<br>9. Wayland 腿四组齐全，口径同 X11 腿（位置与尺寸同样按未实现缺口单独记录）；`Maximized` / `FullScreen` 应经 `xdg_toplevel` 最大化 / 全屏态真实生效<br>11. GLFW 腿四组齐全；`FullScreen` 一档同 Win32 口径（WRN 留痕 + mode 不声称到位）；其余三档 mode 读数各自回到那一档<br>13. macOS 腿四组齐全；骨架后端 `set_window_mode` 为默认空实现 ⇒ mode 停在 `Normal`、无模式切换外观，如实记录，不得记为缺陷（骨架后端的既有范围）<br>15. WASM 腿四组齐全；浏览器无 OS 窗口几何语义 ⇒ mode 停在 `Normal`、位置尺寸不动，属申报内平台范围，不得记为缺陷<br>16. 各腿记录与规格申报逐条一致；凡申报为降级的项（Win32 / GLFW 的 FullScreen、macOS 骨架、WASM 无 OS 语义、X11 / Wayland 位置尺寸未实现）在实测中确有对应表现；mode 读数与「缩放与跨屏不更新」（Linux 三后端缩放变化上报未实现）是两个独立偏差，须分开记录，不得互相解释 |
+| 操作步骤 | 1. 启动几何态恢复真机探针，取 Win32 腿，指定目标档 `Normal`：把主窗拖到非默认位置并缩放到非默认尺寸，正常关闭探针使几何落盘，再启动第二趟（纯执行，无预期结果）<br>2. 读取第二趟启动时的 mode 读数、主窗位置与尺寸，并查看 `err.txt` 新增行<br>3. 按同口径把目标档切为 `Maximized`：首趟切档后正常关闭落盘，启动次趟读取 mode 读数与窗口外观，并查看 `err.txt` 新增行<br>4. 按同口径把目标档切为 `FullScreen`：首趟切档后正常关闭落盘，启动次趟读取 mode 读数、窗口外观与 `err.txt` 新增行<br>5. 把主窗最小化后正常关闭落盘，启动次趟读取 mode 读数、窗口是否可见与 `err.txt` 新增行<br>6. 在 X11 会话（`DISPLAY` 指向可达 X server）下按同口径重跑 `Normal` / `Maximized` / `FullScreen` / `Minimized` 四组（纯执行，无预期结果）<br>7. 记录 X11 腿四组实测：mode 是否回到那一档、`Minimized` 是否如政策变 `Normal`、位置与尺寸是否恢复<br>8. 在 Wayland 会话下按同口径重跑四组（纯执行，无预期结果）<br>9. 记录 Wayland 腿四组实测<br>10. 在 GLFW 构建目录下按同口径重跑四组（纯执行，无预期结果）<br>11. 记录 GLFW 腿四组实测（含 `FullScreen` 一档的 WRN 留痕是否出现）<br>12. 在 macOS 真机上按同口径重跑四组（纯执行，无预期结果）<br>13. 记录 macOS 腿四组实测（`set_window_mode` 走 `miniaturize:` / `zoom:` / `toggleFullScreen:`，逐档读回 mode 与外观）<br>14. 在 WASM 页面壳下按同口径重跑四组（纯执行，无预期结果）<br>15. 记录 WASM 腿四组实测（无 OS 窗口语义，mode 是否停在 `Normal`、位置尺寸是否未动）<br>16. 汇总各腿记录，与 `specification/06-app-platform.md` §2.4「几何态恢复」的申报逐条核对，并将 mode 读数与「缩放上报」「几何恢复」两条独立偏差分开记录（Linux 位置恢复在 Wayland 上仍不可设，见第 9 条） |
+| 预期结果 | 2. Win32 腿 `Normal`：mode 读数为 `Normal`；主窗位置与尺寸回到首趟落盘值（物理像素口径，Win32 的 `set_size` / `set_position` 为真实现，该档应逐位恢复）；`err.txt` 无新增 `ERR` / `FTL`（Normal 档恢复不产生日志）<br>3. Win32 腿 `Maximized`：mode 读数回到 `Maximized`，窗口以最大化外观呈现；`err.txt` 无新增行（该档只追几何态，不产生日志）<br>4. Win32 腿 `FullScreen`：经 `Win32Host::set_fullscreen` 真实 borderless 全屏落地（monitor 枚举 + 还原几何 + `WM_SIZE` 定档上报），mode 读数回到 `FullScreen`、无 WARN；此为真实实现，不再记「未实现」式降级（对照 2026-11-01 全屏落地）<br>5. Win32 腿 `Minimized`：mode 读数为 `Normal` 且窗口可见（非最小化外观）；`err.txt` 恰新增 1 行 `INF`（tag `"app"`），消息形如 `stored window mode is Minimized; restoring as Normal (key=<k>)`<br>7. X11 腿四组齐全：`Normal` 档的位置与尺寸应为**真实现**（`XResizeWindow` / `XMoveWindow` + `position()` 读回），位置与尺寸回到首趟落盘值（WM 装饰/重力可能带来固定像素偏移，按容差判读，不得因偏移记缺陷）；`Maximized` / `FullScreen` 两档 mode 读数应各自回到那一档；`Minimized` 一档同 Win32 口径（变 `Normal` + INFO）。mode 读数与位置尺寸读数**不得混为一谈**<br>9. Wayland 腿四组齐全：`Normal` 档的尺寸恢复经 `xdg_toplevel` 的 min/max 约束**提议**，最终由合成器 configure 决定——应记录尺寸是否按目标值落地（合成器可拒绝，属协议语义，不得记缺陷）；位置在协议层不可设，`set_position` 为显式 no-op，位置读数保持 `(0,0)` 属申报内降级；`Maximized` / `FullScreen` 应经 `xdg_toplevel` 最大化 / 全屏态真实生效<br>11. GLFW 腿四组齐全；`FullScreen` 一档同 Win32 口径（WRN 留痕 + mode 不声称到位）；其余三档 mode 读数各自回到那一档<br>13. macOS 腿四组齐全：`Normal` 档的位置与尺寸按落盘值恢复（`set_frame` 为真实现，Retina 下按 `backingScaleFactor` 折算，容差判读）；`Maximized` / `FullScreen` / `Minimized` 三档 mode 读数各自回到那一档并以原生外观佐证（zoom / 系统全屏 / 迷你化按钮）；`Minimized` 一档按政策恢复 `Normal` + INFO（口径同 Win32）<br>15. WASM 腿四组齐全；浏览器无 OS 窗口几何语义 ⇒ mode 停在 `Normal`、位置尺寸不动，属申报内平台范围，不得记为缺陷<br>16. 各腿记录与规格申报逐条一致；凡申报为降级的项（Win32 / GLFW 的 FullScreen、WASM 无 OS 语义、Wayland 位置不可设）在实测中确有对应表现；mode 读数与「缩放上报」「几何恢复」是两个独立偏差，须分开记录，不得互相解释 |
 
 **本例编号的取定**：现最高为 019（关闭请求闸门用例）；017 / 018 为早期预留后未落用的断档序号——按 §1.4「序号不复用、新用例取下一个可用序号」不作断档回填，本例取 020。
 
-**本例与既有读数的分工**：mode 恢复腿的消费点与两条既有偏差互相独立——①「Linux 三后端缩放变化上报未实现」（改系统缩放或跨屏后 `scale_factor` 不自动更新，影响的是 `Normal` 档的物理 ↔ 逻辑折算，见 §2.7 与 TC-WINDOW-013）；② X11 / Wayland 的 `set_size` / `set_position` 未实现（位置与尺寸恢复在 Linux 上是 no-op）。三者不得混为一个读数：mode 不对就说 mode，尺寸不对先分辨是哪条偏差。
+**本例与既有读数的分工**：mode 恢复腿的消费点与另外两条偏差互相独立——①「缩放上报」（Linux 三后端均已接线；改系统缩放或跨屏后 `scale_factor` 是否跟随，影响的是 `Normal` 档的物理 ↔ 逻辑折算，见 §2.7 与 TC-WINDOW-013）；②「几何恢复」（X11 的位置/尺寸已真实下发；Wayland 尺寸为合成器可拒绝的提议、位置协议层不可设）。三者不得混为一个读数：mode 不对就说 mode，尺寸不对先分辨是哪条偏差。
 
 **本例载体为真机探针（非 demo）**：既有 demo 不声明 `persist_id`、不挂几何存储，承载不了恢复腿；构建口径同 §1.2 的各后端探针段（后端开关 + `AURORA_BUILD_VERIFY_TOOLS`），每腿以「首趟落盘、次趟恢复」两趟运行。落盘只走正常关闭路径（`reap_closed` 收集步对 `should_close()==true` 的宿主执行并打一次性闩），故步骤里的关闭一律要求放行关闭，不用 `quit()` 代替。
 
@@ -475,6 +518,75 @@ X11 CSD 探针段），故 TC-WINDOW-014 覆盖 X11 的自绘装饰自动判据�
 **本例编号的取定**：现最高为 020（几何态恢复用例）；017 / 018 为早期预留后未落用的断档序号——按 §1.4「序号不复用、新用例取下一个可用序号」不作断档回填，本例取 021。
 
 **本例为何须真机**：无头底座读不到 OS 前台态，无法回答「框架判定与 OS 判定是否一致」。记账范围、兜底口径与回收清号本身由单测覆盖（`tests/unit/utest_application.cpp` 与 `tests/integration/itest_active_window.cpp`），本例只验二者在真实窗口环境下的关系——这是唯一一项无头面读不到、须真机读数一次的判据。
+
+### 2.12 程序化窗控四槽（Win32 / D3D11 真机走查）
+
+#### TC-WINDOW-022 Win32 / D3D11 程序化窗控四槽真机走查
+
+| 项目 | 内容 |
+|:---|:---|
+| 用例编号 | TC-WINDOW-022 |
+| 测试目的 | 验证 Win32 / D3D11 家族的四枚程序化窗控公共入口（minimize / toggle_maximize / set_window_mode / set_fullscreen）在真实窗口上落到 OS（探针自动段以 `IsIconic` / `IsZoomed` / `GetWindowRect` 独立取证），并以人工目视核对任务栏最小化/还原动画与 Borderless 自绘标题栏场景的按钮行为 |
+| 前置条件 | 仓库根目录；窗控真机探针已构建（本机默认 `build/` 追加 `-DAURORA_BUILD_VERIFY_TOOLS=ON` 重 configure 后 `cmake --build build --target aurora_verify_win32_window_mode`，后端开关 `AURORA_BACKEND_WIN32` 或 `AURORA_BACKEND_D3D11` 须有一者已开）；活动桌面会话（锁屏时窗口收不到 OS 消息）；真实指针输入通道（人工段） |
+| 依赖用例 | 无 |
+| 操作步骤 | 1. 运行 `aurora_verify_win32_window_mode` 探针，等待自动段跑完三档装饰（default / borderless / frameless），收集逐条 PASS / FAIL 行与退出码（纯执行，无预期结果）<br>2. 核对退出码与逐条判据行<br>3. 启动任一 Win32 家族 demo（如 `demo_multi_window`），点击自绘标题栏的最小化钮或调用 `Window::minimize()`，观察任务栏与还原动画（人工段）<br>4. 在 `demo_csd_gallery` 的 `Borderless` / `Frameless` 档预览窗上点击自绘标题栏的最小化 / 最大化钮（人工段）<br>5. 汇总自动段三档结果与人工段观感，与 `specification/06-app-platform.md` §5 能力位置位矩阵核对 |
+| 预期结果 | 2. 退出码为 0；三档装饰下判据行全 PASS——`minimize()` 后 `IsIconic` 为真且应用级快照/回调恰一次报 `Minimized`；`toggle_maximize()` 在 `Normal` 上转 `IsZoomed`、再调矩形逐值回位（±1px）且报 `Normal`；`set_window_mode(Maximized)` 连调两次不翻转；`set_fullscreen(true)` 覆盖所在显示器整屏（±1px）、无 WARN，`set_fullscreen(false)` 还原进入前矩形、无 WARN<br>3. 最小化后任务栏留痕、还原动画正常（公共入口与用户点系统钮同走 `SC_*` 一条路径）<br>4. `Borderless` / `Frameless` 自绘标题栏钮驱动的窗控行为与系统钮一致（此前该场景四槽静默 no-op，已由 Win32 窗控四槽接线与全屏落地修复）<br>5. 自动段三档结果与矩阵一致（`runtime_window_mode` 为 true、`runtime_fullscreen` 为 true）；人工段观感如实记录，动画瑕疵属 OS 合成器范畴不得记为接线缺陷 |
+
+**本例编号的取定**：现最高为 021（活动窗口查询用例），本例取 022。
+
+**本例为何须真机**：无头 CI 建不了真实 HWND 与消息泵，`SC_*` → `WM_SIZE` → 上报链的整条接线只有真机上可证——单测（`tests/unit/utest_window_runtime_control.cpp`）只覆盖能力位申报与 `Window` / `WindowChrome` 两条透传链，探针自动段是唯一接线证据。人工段补两项机器判不了的事实：任务栏动画观感、自绘标题栏场景的按钮触达。
+
+**X11 / Glfw 程序化窗控三腿的文档状态**：X11 与 Glfw 的 `set_fullscreen` / `set_window_mode(FullScreen)` 已接线（X11 发 `_NET_WM_STATE_FULLSCREEN` 原子、WM 接管几何还原；Glfw 经 borderless 铺满所在显示器、存/还原几何与装饰态、不改视频模式）；本批再补 `minimize()`（`X11` 转 `set_window_mode(Minimized)` → `XIconifyWindow` 收走窗口；`Glfw` 转发 `glfwIconifyWindow`）与 `toggle_maximize()`（`X11` 按 `Impl::mode` 快照走 EWMH `_NET_WM_STATE_MAXIMIZED_*` 原子、与 CSD 钮同源；`Glfw` 按 `Impl::maximized` 走 `glfwMaximizeWindow` / `glfwRestoreWindow` 请求语义、回调定档上报）——至此三枚公共切换腿全部接通，能力位 `runtime_fullscreen` 与 `runtime_window_mode` 均由 false 翻 true（见 `specification/06-app-platform.md` §5 矩阵，与 Win32 / D3D11 / Wayland / MacOS 同列；Wasm / Headless 仍 false）。独立真机探针 `aurora_verify_x11_window_mode` / `aurora_verify_glfw_window_mode` 已在全屏判据外追加 `toggle_maximize()`（`_NET_WM_STATE_MAXIMIZED_*` / `IsZoomed` 取证）与 `minimize()`（`IsUnmapped` / `IsIconic` 取证）两条判据，口径同本例 Win32 探针（OS 实值取证 + 能力矩阵核对）。
+
+
+### 2.13 macOS 无障碍投影（协议面读回 + 已授权客户端 + 真人读屏）
+
+#### TC-WINDOW-023 AppKit 无障碍投影的三级读回
+
+| 项目 | 内容 |
+|:---|:---|
+| 用例编号 | TC-WINDOW-023 |
+| 测试目的 | 验证 `MacOSAxBridge` 的语义投影在真实 macOS 上被三级读者各按自己的路径读到：AppKit 协议面（与 VoiceOver 同径）、已授权的 `AXUIElement` 客户端、真人使用的读屏 |
+| 前置条件 | 仓库根目录；macOS 真机（本项目实测环境为 macOS 26.7.2、SIP 开启）；AX 探针已按 §1.2 口径构建（须 `AURORA_BACKEND_MACOS=ON` + `AURORA_ENABLE_DEBUG=ON` + `AURORA_BUILD_VERIFY_TOOLS=ON`）；活动窗口会话（无窗口会话时探针以退出码 2 报环境不可用）；步骤 7 至 10 另需系统设置 → 隐私与安全性 → 辅助功能 中对本二进制（或承载终端）的授权与可用的读屏音频输出 |
+| 依赖用例 | 无 |
+| 操作步骤 | 1. 以 §1.2 口径 configure 并构建 `aurora_verify_macos_ax`（纯执行，无预期结果）<br>2. 不带参数运行该探针一次，读取退出码、逐条判定行与投影树清单<br>3. 核对五类控件的投影是否逐类命中（按钮 / 勾选框 / 滑杆 / 静态文本 / 文本输入）及其名称<br>4. 核对每个投影元素的屏幕矩形，并在按钮中心做 `accessibilityHitTest:`<br>5. 对勾选框调用 `accessibilityPerformPress`，再重新投影读值<br>6. 读取 AX 客户端加强腿那一行的结局（`PASS` 或 `SKIP` 及其原因）<br>7. 在辅助功能中为本二进制授权后重跑步骤 2 至 6（纯执行，无预期结果）<br>8. 在同一构建目录跑 `./build/aurora_test_runner --run=etest_a11y_semantics --verbose`<br>9. 开启 VoiceOver（Cmd+F5），在探针窗口内逐元素浏览并记录读出的角色与名称<br>10. 用 VoiceOver 在按钮与勾选框上执行动作，记录界面状态是否随之改变<br>11. 核对探针输出全走 stdout，并检查 `err.txt`（stderr）的新增行 |
+| 预期结果 | 2. 退出码 0，末行为 `summary: <pass>/<checks> checks passed` 且两数相等，判定行无 `FAIL`；投影树在首次查询前为空、查询后成树（桥的惰性激活）<br>3. 五类控件逐一命中且角色归并正确；勾选框的名称取自兄弟标签（名称回退链）<br>4. 屏幕矩形逐元素非空；`accessibilityHitTest:` 返回的元素即该按钮（角色与名称一致）<br>5. `accessibilityPerformPress` 被接受，重新投影后该勾选框的值翻转（动作真的回灌到框架）<br>6. 未授权时该行为 `SKIP` 且原因点名「客户端未获辅助功能授权」——未授权**不得**冒充通过，协议面判据即本例默认证据<br>8. `semantic_snapshot_matches_widgets` 在 `macos` 后端通过；`platform_bridge_projects_semantics` 未授权时按策略 skip 且 skip 原因点名 `aurora_verify_macos_ax`，授权后走通道断言并通过<br>9. VoiceOver 能逐元素读出角色与非空名称，五类控件可区分<br>10. 动作触发后界面状态改变（勾选翻转、按钮回调生效）——真人读屏读得出且动得了<br>11. stdout 含全部判定行与 `summary` 末行；stderr 至多 1 行既有的应用根解挂提示（`layout parent detached while the child widget is still alive`，同 TC-WINDOW-016 备注，属申报内现象不记缺陷），**不得**出现 `ERR` / `FTL` |
+
+**本例编号的取定**：现最高为 022（Win32 / D3D11 程序化窗控四槽用例）；017 / 018 为早期预留后未落用的断档序号——按 §1.4「序号不复用、新用例取下一个可用序号」不作断档回填，本例取 023。
+
+**本例为何分三级**：单测与内核快照只能证「桥算得出正确语义」，「系统读得到」须真机。三级可信强度递增但可得性递减：协议面（步骤 2 至 6）在任何有窗口的 macOS 会话可自动执行，故是默认证据；`AXUIElement` 客户端（步骤 7 至 8）与真人读屏（步骤 9 至 10）都受 TCC 授权约束——本机实测未授权时跨进程查询恒返 `-25211`、同进程查询虽成功但属性退化（逐元素角色均为 `AXApplication`、名称为进程名），故二者只能在授权后执行并按 SKIP 记账，不得降级为「查询成功即通过」。口径见 `specification/08-tooling.md` §8.2。
+
+### 2.14 macOS OS 输入注入（同进程队列注入 + 已授权 CGEvent）
+
+#### TC-WINDOW-024 AppKit 事件队列注入的整链读回与 CGEvent 加强腿
+
+| 项目 | 内容 |
+|:---|:---|
+| 用例编号 | TC-WINDOW-024 |
+| 测试目的 | 验证 macOS 的 OS 级输入注入通道能把事件送达框架派发链并让控件真的改状态：默认证据取**同进程 AppKit 事件队列**注入（`[NSApp postEvent:]` → `nextEventMatchingMask:` → `sendEvent:` → 内容视图 `mouseDown:` / `keyDown:` → `MacOSSurface` 翻译 → 命中测试与手势 → 控件状态 + 帧像素），加强腿取**已授权的 `CGEvent` 全局注入**（真实 OS 输入流） |
+| 前置条件 | 仓库根目录；macOS 真机（本项目实测环境为 macOS 26.7.2、SIP 开启）；OS 输入探针已按 §1.2 的 macOS 探针口径构建（须 `AURORA_BACKEND_MACOS=ON` + `AURORA_ENABLE_DEBUG=ON` + `AURORA_BUILD_VERIFY_TOOLS=ON`）；已登录的图形会话（无 WindowServer 时探针以退出码 2 报环境不可用）；步骤 9 至 10 另需系统设置 → 隐私与安全性 → 辅助功能 中对本二进制（或承载终端）的授权，且 etest 腿须置环境变量 `AURORA_E2E_OS_INPUT=1` |
+| 依赖用例 | 无 |
+| 操作步骤 | 1. 以 §1.2 口径 configure 并构建 `aurora_verify_macos_os_input`（纯执行，无预期结果）<br>2. 不带参数运行该探针一次，读取退出码、逐条判定行与末行 `summary`<br>3. 读取两条目标矩形判定行，确认勾选框与文本框的屏幕矩形取自 AppKit 协议面且非空<br>4. 读取 priming 点击那一行：探针在向无 widget 的角落投一次点击后，该 Checkbox 是否仍未选中<br>5. 读取指针段三行：首次点击前该 Checkbox 的语义状态、点击后其状态、以及该控件语义盒内的像素是否相对点击前变化<br>6. 读取第二次点击后的状态行（同点往返）<br>7. 读取键盘段两行：点击文本框取焦后投递合成 `keyDown`，再读 `on_changed` 捕获到的实值<br>8. 读取 `CGEvent` 加强腿那一行的结局（`PASS` 两行，或自我申报 + 静默复核两行加一条 `SKIP`），并记下随行的 `state app_active=… window_key=… visible=…` 一行<br>9. 在辅助功能中为本二进制授权后重跑步骤 2 至 8，读取加强腿是否转为真注入（纯执行，无预期结果）<br>10. 在同一构建目录跑 `AURORA_E2E_OS_INPUT=1 ./build/aurora_test_runner --run=etest_os_input --verbose`，读取四个用例各自的结局与 skip 原因<br>11. 核对探针输出全走 stdout，并检查 `err.txt`（stderr）的新增行 |
+| 预期结果 | 2. 退出码 0，末行为 `summary: <pass>/<checks> checks passed` 且两数相等，判定行无 `FAIL`；fixture 建窗用 `WindowVisibility::Normal`——OS 输入不投递给隐藏窗口，该档是本层硬前提<br>3. 两条矩形行给出非空 `{{x, y}, {w, h}}`（几何取自协议面 `accessibilityFrame`，与读屏同一份；框架侧 `Surface::position()` 给的是**含标题带的窗口框**原点，无头面读不到客户区屏幕原点，故坐标只能由此取得）<br>4. `focus primer leaves the checkbox untouched` 通过。该铺垫是**硬前提而非优化**：`NSView` 默认 `acceptsFirstMouse:` 为 NO，窗口未取得激活态时 AppKit 把落在本进程的第一次 `mouseDown:` 用作「点击获焦」而不转发给视图——实测无铺垫时同一份判据十轮里两三次首点丢失（失败集合恒为「首点未翻 + 次点翻到了 + 终态非未选中」＝少一次转发，不是管线断裂），加铺垫后连跑十轮同数全绿；若该行读不到「未选中」即说明铺垫点落在了 widget 上，须查 fixture 而非改判据<br>5. 点击前未选中 → 点击后 `click toggles checkbox on` 与 `pixels change inside the checkbox box` 双双通过：状态与像素两个面同时改，缺一即说明派发落空或坐标错<br>6. `second click toggles checkbox back off` 通过——同一点往返两次，排除单向巧合<br>7. `character reaches the text input` 通过且明细为 `typed="a"`（判据取控件实值而非日志行数）<br>8. 未授权时须同时出现三件事：`cg channel self-reports unavailable without the grant`（拒绝码为 `GeneralNotSupported`）、`untrusted CGEventPostToPid delivers nothing at all`（裸投递不报错但状态纹丝不动）、末条 `SKIP` 点名未获辅助功能授权——「静默无效」的形态被固定为判据，未授权**不得**冒充通过；已授权时该三条转为 `cg_click accepted` + `cg_click toggles checkbox through the real input stream` 且无 `SKIP` 行。随行的 `state` 行本机实测恒为 `app_active=0 window_key=0 visible=1`（经命令行启动的二进制不是前台应用），而两条腿照常判绿——**key 态与前台态都不是本腿的前提**（队列路径按事件自带的 `windowNumber:` 派发），故该行只供判读、不立判据<br>10. `sendinput_click_toggles_checkbox` 与 `postmessage_reaches_window_procedure` 与 `xtest_server_input_reaches_window` 三条按平台缺通道 skip 且原因点名 macOS 对应腿；`cgevent_input_reaches_window` 未授权时带原因 skip 且点名默认证据探针 `aurora_verify_macos_os_input`，授权后走通道断言并通过（macOS 腿只跑键盘通道：客户区屏幕原点不可得，指针全局坐标无法折算）<br>11. stdout 含全部判定行与 `summary` 末行；stderr 至多 1 行既有的应用根解挂提示（`layout parent detached while the child widget is still alive`，同 TC-WINDOW-016 备注，属申报内现象不记缺陷），**不得**出现 `ERR` / `FTL` |
+
+**本例编号的取定**：现最高为 023（macOS 无障碍投影用例）；017 / 018 为早期预留后未落用的断档序号——按 §1.4「序号不复用、新用例取下一个可用序号」不作断档回填，本例取 024。
+
+### 2.15 macOS 装饰档位映射（`Borderless` 与 `Frameless` 拆档真机判据）
+
+#### TC-WINDOW-025 macOS 装饰档位映射：`Borderless` 保住原生边缘缩放、`Frameless` 不保住
+
+| 项目 | 内容 |
+|:---|:---|
+| 用例编号 | TC-WINDOW-025 |
+| 测试目的 | 验证 macOS 把 `DecorationPolicy` 五档真正按契约落到 AppKit 掩码上：`Borderless` 的契约是「无标题栏但**保留**可拖拽缩放边框」，故该档建出的窗口必须同时满足「看不到标题栏与原生窗钮」与「边缘拖拽确实改尺、且新尺寸经框架读回」；`Frameless` 的契约是「完全无装饰」，故同一拖拽必须**不改尺**——两档不得再塌成同一份实现，也不得把 `Frameless` 顺手放宽成可缩放 |
+| 前置条件 | 仓库根目录；macOS 真机（本项目实测环境为 macOS 26.7.2、SIP 开启、单块 1920x1080 显示器）；已按 §1.2 的 macOS 探针口径 configure 并构建 `aurora_verify_macos_surface`（须 `AURORA_BACKEND_MACOS=ON` + `AURORA_ENABLE_DEBUG=ON` + `AURORA_BUILD_VERIFY_TOOLS=ON`）；已登录的图形会话（无 WindowServer 时探针以退出码 2 报环境不可用）；步骤 9 需真人操作鼠标 |
+| 依赖用例 | 无 |
+| 操作步骤 | 1. 以 §1.2 口径 configure 并构建 `aurora_verify_macos_surface`（纯执行，无预期结果）<br>2. 不带参数运行该探针一次，读取退出码、逐条判定行与末行 `summary`<br>3. 读取 `Borderless` 段的三条能力行：是否保留原生缩放能力、内容矩形是否铺满窗口框（附两侧的 `宽x高` 明细）、三枚标准窗钮是否已隐藏<br>4. 读取随行的 `drag geometry:` 观测行，记下窗口框尺寸与原点、起笔的屏幕坐标、换算到窗口自身坐标系的落点，以及 `visible=` / `key=` / `primed=` 三枚状态位<br>5. 读取 `Borderless` 段的两条拖拽行：右下角拖拽是否真的改了窗口尺寸（附改尺前后的明细）、`Surface::size()` 是否跟着改<br>6. 读取固定尺寸那一条：`resizable = false` 的 `Borderless` 窗口是否仍无缩放能力<br>7. 读取 `Frameless` 段三行：是否创建成功、是否**无**缩放能力、同一拖拽后尺寸是否保持不变<br>8. 在同一构建目录连跑该探针多轮（本例取证取六轮），比对各轮的 `summary` 是否同数<br>9. 由真人用鼠标在该 `Borderless` 窗口的右下边缘拖一次，读取窗口是否改尺、内容是否随动<br>10. 核对探针输出全走 stdout，并检查 `err.txt`（stderr）的新增行 |
+| 预期结果 | 2. 退出码 0，末行为 `summary: <pass>/<checks> checks passed` 且两数相等，判定行无 `FAIL`<br>3. 三条全过：`borderless keeps the native resize capability`（`isResizable` 为真）；`borderless content rect fills the frame` 明细两侧同数（实测 `300x200 vs 300x200`，顶边内缩 0——`FullSizeContentView` 下内容区与窗口框重合，自绘装饰不再叠加一份原生标题带偏移）；`borderless hides the close / miniaturize / zoom button` 三行——`titleVisibility` 与标题带透明只藏「栏」，窗钮必须逐枚隐藏，否则「无标题栏」档同时出现原生红黄绿与自绘装饰<br>4. 观测行的 `local=` 落点须落在该窗口自身坐标系的下缘右角（实测 `298,3`，即宽 −2、下缘上方 3pt），`visible=1`、`primed=1`；**`key=` 与 `primed=` 都不构成判据**——本腿的稳定前提是「窗口在序 + 事件队列已泵空 + 起笔前先向窗框几何中心补投一次按下—抬起作 priming」（载体在投递前先 `makeKeyAndOrderFront:` 并泵 60 轮，再做单轮 priming）。后台图形会话里 `isKeyWindow` 恒为 0（改尺照常发生），而同一台机器上改尺成功的行既读到过 `key=0` 也读到过 `key=1`，两读皆绿，故不得把焦点读数写进判据<br>5. 两条同过：`borderless corner drag really resizes the window` 明细须显示**双轴**都按拖拽位移改尺（实测 `300x200 -> 396x296`，12 段 ×8pt 即在两轴上各 +96），`Surface::size() follows the native resize` 明细与其同数——证到框架的尺寸读回跟着原生改尺走，而不是只改了原生一侧<br>6. `borderless with resizable=false stays non-resizable` 通过：缩放能力的唯一来源是 `WindowStyleOptions::resizable`，`Borderless` 档不得绕过它<br>7. `frameless keeps no resize capability` 与 `frameless corner drag changes nothing` 双双通过（明细两侧同数）——契约要求的「完全无装饰、无缩放边框」必须实测成立，否则本例的拆档就是把 `Frameless` 放宽了<br>8. 各轮 `summary` 同数（实测单轮 priming 后连跑六轮、格式化后复跑一轮同为 `82/82`），无某轮才出现的偶发 `FAIL`——本腿确有偶发形态（见执行记录：未加 priming 时三连跑两轮 `300x200 -> 300x200`），故只跑一轮不足以下结论。**总数会随该探针新增判据而变，本例只要求「同一构建口径下各轮同数」**：装饰档位段之外又补进四条 MediaQuery 腿（屏幕尺寸 / 非窗口尺寸 / 朝向 / `size` 跟随表面，口径见 `specification/08-tooling.md` §7.5）后，`AURORA_ENABLE_DEBUG=ON` 口径的总数实测为 `86/86`；`AURORA_ENABLE_DEBUG=AUTO` 口径因截图段被跳过而少 6 条，实测 `80/80`——两口径各自的判据内容不同，不得跨口径比数<br>9. 真人拖拽时该窗随鼠标改尺、内容区同步重绘且无黑边或撕裂；若自动腿全绿而真人拖不动，说明改尺只来自投递侧，须回查掩码映射而不是改判据<br>10. stdout 含全部判定行、观测行与 `summary` 末行；stderr **不得**出现 `ERR` / `FTL` |
+
+**本例编号的取定**：现最高为 024（macOS OS 级输入注入用例），本例取 025；序号不复用、不回填断档（§1.4）。
+
+**本例为何不给 `begin_window_resize` 立判据**：macOS 不设该覆写。Win32 的 `WM_NCLBUTTONDOWN + HT*` 与 Wayland 的 `xdg_toplevel.resize` 是「自绘边框的按下必须由 App 转交 OS 接管整段拖拽」的桥；AppKit 的 `NSWindow` 窗框视图本来就在做同一件事——本例步骤 5 证的正是这条原生通道被打开。补一层覆写等于给同一次拖拽写两份实现、两个结局。另需记下：`WindowChrome::begin_resize` / `Surface::begin_window_resize` 在**控件层无任何调用方**（`TitleBar` 只消费 `begin_move`，控件层无边缘命中测试），X11 连 `begin_window_move` 也未覆写——那是跨后端的 CSD 缩放整链缺口，与 macOS 无关，本例不代为判定。口径见 `specification/07-environment-modifier.md` §4.1。
 
 ## 3 执行记录表
 
@@ -499,3 +611,7 @@ X11 CSD 探针段），故 TC-WINDOW-014 覆盖 X11 的自绘装饰自动判据�
 | TC-WINDOW-019 | | | | | | | |
 | TC-WINDOW-020 | | | | | | | |
 | TC-WINDOW-021 | | | | | | | |
+| TC-WINDOW-022 | 2026-10-31 | WorkBuddy | PASS | | 步骤 2：退出码 0，三档装饰（default / borderless / frameless）各 17 条判据全 PASS（共 51 行 `[PASS]`、0 行 `[FAIL]`）——`minimize()` 后 `IsIconic` 为真、应用级快照与回调恰一次报 `Minimized`；`toggle_maximize()` 转 `IsZoomed`、再调矩形逐值回位（±1px）且报 `Normal`；`set_window_mode(Maximized)` 连调两次不翻转（期间上报恒 `Maximized`）；`set_fullscreen(true)` 矩形逐值不动且恰 1 条 `WRN`，`set_fullscreen(false)` 无 `WRN`。步骤 5：能力位 `runtime_window_mode=true` / `runtime_fullscreen=false` 与 `specification/06-app-platform.md` §5 置位矩阵逐位相符；stderr 恒 0 字节（输出全走 stdout） | | Borderless / Frameless 缺口暴露档的窗控接线已由自动段同档判据覆盖（探针按三档装饰逐档建窗重跑）。取证中两处转红后修复复绿：①初版判据把 WARN 计数片段写成 `WARN`，本库日志级别前缀实为 `WRN`（与 `win32_file_dialog_live_probe` 同款）；②能力位判据缺 `aurora/window/platform.h` 包含致编译错。构建口径为独立目录 `build-verify-win32`（§1.2 Win32 CSD 探针段口径，本机 WIN32/DEBUG 两开关已满足）。判据经四处变异逐一转红后恢复复绿（删 `minimize` / `set_window_mode` / `set_fullscreen` 覆写分别打红判据 1/3/4 项、对 X11 误翻 `runtime_window_mode` 打红能力矩阵单测，对照项 `toggle_maximize` 保持绿），非结构性假绿。步骤 3-4 人工目视段（任务栏动画观感、CSD 画廊按钮触达）待真机会话补记 |
+| TC-WINDOW-023 | 2026-11-01 | Qoder Agent | SKIP | | 步骤 2 至 6 与 11 全部满足（探针 `summary: 18/18 checks passed`、退出码 0：首次查询前 `bridge absent`、查询后投影 12 元素、五类控件逐类命中且勾选框与滑杆取兄弟标签名、逐元素屏幕矩形非空、按钮中心 `accessibilityHitTest:` 回指 `Confirm order`、`accessibilityPerformPress` 接受后值重投影翻为 `0`、AX 客户端腿记 `SKIP` 并点名未授权、stderr 仅 1 行既有解挂提示）。步骤 8 同口径实测：`--run=etest_a11y_semantics` 的 `semantic_snapshot_matches_widgets/macos` 通过，`platform_bridge_projects_semantics/macos` 按策略 skip 且原因点名 `aurora_verify_macos_ax`。步骤 7 与 9 至 10 未执行 | | 按 §1.7 记 `SKIP` 而非 `PASS`：真人读屏段的前置无法满足——本机 SIP 开启，辅助功能授权只能在系统设置里由人点选授予、无法脚本授予，且实测无音频输出设备（`aurora_verify_coreaudio_audio` 在本机以退出码 2 报 `no CoreAudio output device`），无法确认朗读结果。协议面判据（步骤 2 至 6）已构成该投影的默认证据并随 `e2e-probe.yml` 的 `probe-macos` 作业进 CI，授权后须在本机补做步骤 7 至 10 再改判 |
+| TC-WINDOW-024 | 2026-11-02 | Qoder Agent | PASS | | 步骤 2 至 8 与 11 全部满足（探针 `summary: 20/20 checks passed`、退出码 0，且**连跑十轮同为 20/20**）：步骤 3 两条矩形行 `{{800, 765}, {20, 20}}`（勾选框）与 `{{800, 785}, {320, 50}}`（文本框）均非空；步骤 4 `focus primer leaves the checkbox untouched` 通过；步骤 5 由 `checkbox starts unchecked` → `click toggles checkbox on`，投递点为窗口基坐标 `{10, 140}`（协议面屏幕矩形经 `convertRectFromScreen:` 折算中心），`pixels change inside the checkbox box` 同过；步骤 6 `second click toggles checkbox back off`（往返）；步骤 7 `character reaches the text input` 明细 `typed="a"`；步骤 8 未授权三件事齐备——`cg channel self-reports unavailable without the grant`（拒绝码 `GeneralNotSupported`）、`untrusted CGEventPostToPid delivers nothing at all`（裸投递不报错但状态不变）、`SKIP` 行点名未获辅助功能授权，且 `state app_active=0 window_key=0 visible=1` 随行打印；步骤 11 stdout 含全部判定行与 `summary` 末行，stderr 恰 1 行既有解挂提示（`layout parent detached while the child widget is still alive: Column`），无 `ERR` / `FTL`。步骤 10 同构建目录实测：置 `AURORA_E2E_OS_INPUT=1` 后四条结局为前三条按平台缺通道 skip 且原因点名 macOS 对应腿，`cgevent_input_reaches_window` 带原因 skip 且点名默认证据探针，退出码 0、stderr 空。步骤 9 未执行 | | 记 `PASS` 的依据是全部非空预期结果均满足（预期 8 按未授权分支逐条核过）；**已授权的 `CGEvent` 全局注入分支迄今在任何机器上都未执行过**——本机 SIP 开启，辅助功能授权只能在系统设置里由人点选授予、无法脚本授予（`tccutil` 只能重置），故该分支与真实 HID 流（真人的手）仍属未取证面，授权后须补做步骤 9 与步骤 10 的通道断言。取证过程中把一处**判据缺陷**修在了载体里：无 priming 点击时同一份判据十轮里两三次首点丢失（`NSView` 默认 `acceptsFirstMouse:` 为 NO，未激活窗口的首个 `mouseDown:` 被 AppKit 用作「点击获焦」不转发给视图），补铺垫并把它自身列为判据后才稳定；曾据此怀疑「窗口须为 key」是前提，实测该前提不成立（十轮全绿期间 `window_key` 恒为 0），已把两条口径一并回写 `specification/08-tooling.md` §8.2。同进程队列注入这一默认证据已随 `e2e-probe.yml` 的 `probe-macos` 作业进 CI |
+| TC-WINDOW-025 | 2026-11-05 | Qoder Agent | PASS | | 步骤 2 至 8 与 10 全部满足（探针 `summary: 82/82 checks passed`、退出码 0，单轮 priming 后**连跑六轮同为 82/82**，格式化后复跑一轮同数）：步骤 3 三条为 `borderless keeps the native resize capability`、`borderless content rect fills the frame` 明细 `300x200 vs 300x200`、`borderless hides the close / miniaturize / zoom button` 三行全过；步骤 4 观测行 `drag geometry: frame=300x200@810,659 screen_corner=(1107,661) local=(298,3) visible=1 key=0 primed=1 mouse_loc=41.8503,1039.54`（`mouse_loc` 是真实指针的停放位，本探针未移动它，证 priming 只投事件不改硬件光标）；步骤 5 两行为 `borderless corner drag really resizes the window` 明细 `300x200 -> 396x296`（双轴各 +96，与 12 段 ×8pt 的位移逐字一致）与 `Surface::size() follows the native resize` 明细同数；步骤 6 `borderless with resizable=false stays non-resizable` 通过；步骤 7 `frameless keeps no resize capability` 与 `frameless corner drag changes nothing`（明细 `300x200 -> 300x200`，其观测行 `key=0 primed=1`）双双通过；步骤 10 stdout 含全部判定行与观测行，stderr 空。步骤 9（真人鼠标）未执行 | | 记 `PASS` 的依据是全部非空预期结果均满足；**真人鼠标流未取证**（自动腿证的是投递事件驱动的改尺），须在可人工操作的时段补做步骤 9。本例的取证经历两次口径纠正，如实留下：其一，首版（2026-11-03）把「改尺成功那一次 `isKeyWindow` 仍为 0」写成观测结论，后续轮次同一条行读到过 `key=1` 且同样改尺，焦点读数与成败无稳定相关，故预期 4 改为「两枚状态位都只作观测」；其二，2026-11-05 在合并上游后的复跑中出现**偶发转红**（同一份二进制三连跑两轮 `300x200 -> 300x200`），首版「连跑五轮同为 82/82」的稳定性记录是在该偶发形态上取到的、不具代表性，已按实测改写；加单轮中性点 priming 后连跑六轮 + 复跑一轮无转红，机制仍标「未取证」（见预期 4）。另记一条同批实测：裸 `NSWindow`（无框架内容视图）在同一队列腿上可被同样拖拽改尺，本例的阳性结果不依赖框架侧任何额外接线，证的是掩码映射本身。同日本批复跑（`AURORA_ENABLE_DEBUG=ON` 口径、同份产物连跑四轮）末行为 `summary: 86/86 checks passed`、各轮同数、退出码 0、stderr 0 字节；总数由 82 增至 86 来自该探针新补进的四条 MediaQuery 腿，逐字实测：`MediaQuery screen_size == display bounds / scale` 明细 `1920x1080 vs 1920x1080`、`MediaQuery screen_size is not the window size` 明细 `1920x1080 vs window 420x300`、`MediaQuery orientation follows the screen` 明细 `Landscape vs Landscape`、`MediaQuery size follows the surface` 明细 `420x300`；装饰档位段八条判据与首轮逐字一致。另以 `AURORA_ENABLE_DEBUG=AUTO` 口径（截图段跳过、少 6 条）实测 `80/80`，`NOTE` 行 `MediaQuery platform/device not wired on macOS: device=0 platform=0 reduced_motion=false` 只作观测、不立判据——`platform` / `device` / `prefer_reduced_motion` 三栏涉跨后端一致性与后端矩阵口径，按 `AGENTS.md` 规则 14 先立变更提案再落码（口径见 `specification/07-environment-modifier.md` §3.1）。补记本轮要把两件事分开：本例的稳定性判据是**同口径各轮同数**，不是某个固定总数，总数会随该探针新增判据而变（首轮 82、本轮 86） |

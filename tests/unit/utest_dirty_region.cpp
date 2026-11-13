@@ -26,7 +26,7 @@ class MaxRectsGuard : public ::aurora::testing::Fixture {
 };
 
 AURORA_TEST_F(MaxRectsGuard, starts_empty) {
-    DirtyRegionTracker tracker;
+    DirtyRegionTracker const tracker;
     AURORA_TEST_CHECK_TRUE(tracker.is_empty());
     AURORA_TEST_CHECK_FALSE(tracker.is_full());
     AURORA_TEST_CHECK_EQ(tracker.rects().size(), 0U);

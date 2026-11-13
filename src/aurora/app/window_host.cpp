@@ -4,6 +4,7 @@
 
 #include "aurora/app/display.h"
 #include "aurora/app/scroll_storage.h"
+#include "aurora/perf/frame_monitor.h"
 #include "aurora/window/frame_pacing.h"
 #include "aurora/window/platform.h"
 
@@ -65,6 +66,7 @@ auto WindowHost::teardown() -> void {
     key_pre_ = nullptr;
     state_sink_ = nullptr;
     mode_sink_ = nullptr;
+    os_scheme_sink_ = nullptr;
     mouse_.set_cursor_handler({});
     // 焦点控件持有的 shared_ptr 不释放前，本宿主已关但树仍未销毁，此时 Tab/键入仍可命中旧树。
     focus_.clear();
@@ -99,7 +101,7 @@ auto WindowHost::attach_surface() -> void {
     // 文本录入焦点」，基类 composition_caret_bounds 的 focus_bounds_ 兜底会让按钮也返回非零盒）；
     // 非文本焦点返回零盒 = 「无有效定位」，Win32/X11 侧行为退化为系统默认位置，不变。
     sf.set_composition_caret_provider([this]() -> Rect {
-        Widget *focused = focus_.focused();
+        Widget *const focused = focus_.focused();
         if (focused == nullptr || focused->accessibility_role() != AccessibilityRole::TextInput) {
             return Rect{};
         }
@@ -144,10 +146,16 @@ auto WindowHost::on_scale_changed() -> void {
 
 auto WindowHost::on_os_color_scheme(ColorScheme s) -> void {
     if (window_ != nullptr) {
-        // OS 档位快照推入 Window（未显式 set_theme 时参与默认根主题解析）；主题面取色全变，
-        // 整帧标脏重排重绘。应用显式 set_theme 后本推送不参与解析，重绘一次无副作用。
+        // OS 档位快照推入 Window（未显式 set_theme 时参与默认根主题解析）。整帧标脏与整子树缓存
+        // 失效都在 `Window::set_os_color_scheme` 内部成对完成——本层不再补 `force_full_redraw`，
+        // 否则同档重推（attach 时常见）会绕过 setter 的同值短路，白重绘一帧。
+        // 应用显式 set_theme 后本推送不参与解析，setter 的换档动作无副作用。
         window_->set_os_color_scheme(s);
-        window_->force_full_redraw();
+    }
+    // 框架那一半完成后才转发应用级上报表：顺序保证「应用看到变化时，本窗根主题已同值」。
+    // 原样透传 OS 原值（含 Unspecified）——「系统不表态回哪一档」是应用策略，不在本层回落。
+    if (os_scheme_sink_ != nullptr) {
+        os_scheme_sink_(s);
     }
 }
 
@@ -246,6 +254,9 @@ auto WindowHost::render_frame(double dt) -> Result<bool> {
     } else {
         active_stats_->record(dt);
     }
+    // 帧统计定型后投递帧读数。门面在无订阅者时立即返回，不挂采集、不分配、不读时钟；
+    // idle 帧同样投递并带标记，由下游按标记过滤，帧语义与上屏结果不受影响。
+    aurora::detail::publish_frame_sample(dt, window_->is_idle_frame());
     return r;
 }
 

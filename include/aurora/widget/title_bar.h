@@ -11,6 +11,7 @@
 #include "aurora/core/image.h"
 #include "aurora/environment/build_context.h"
 #include "aurora/render/font_engine.h"
+#include "aurora/theming/theme_scope.h"  // inherit_theme：关闭钮符号与弹窗投影取主题角色
 #include "aurora/widget/descriptor.h"
 #include "aurora/widget/widget.h"
 #include "aurora/window/title_bar_geometry.h"
@@ -99,7 +100,7 @@ class TitleBar : public Widget {
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
     /// @brief 本控件无绑定的响应式信号，空实现（不参与信号订阅收集）。
-    auto collect_signals(std::vector<SignalViewBase *> & /*out*/) -> void override {}
+    auto collect_signals(StateSink & /*out*/) -> void override {}
 
     /// @brief 设置应用图标（左上角槽位；空指针不占位）。
     /// @param icon 图标位图（共享所有权；nullptr = 不渲染图标槽）
@@ -352,6 +353,7 @@ class TitleBar : public Widget {
         const bool active = st == nullptr || *st == WindowState::Visible;
         const Color bg = active ? style_.bg_active : style_.bg_inactive;
         const Color fg = active ? style_.fg_active : style_.fg_inactive;
+        const Color shadow = inherit_theme(ctx).roles.shadow.with_alpha(48);
         const float h = style_.height;
 
         p.fill_rect(Rect{.origin = bounds.origin, .size = Size{.width = bounds.size.width, .height = h}}, bg);
@@ -413,13 +415,14 @@ class TitleBar : public Widget {
                 glyph_box(p, geom_.maximize, bounds.origin, fg);
             }
             if (geom_.close.size.width > 0.0F) {
-                glyph_cross(p, geom_.close, bounds.origin, Color{255, 255, 255, 235});
+                // 关闭钮符号恒为白色（叠在关闭钮特征红上）：取主题 on_error 保持配对。
+                glyph_cross(p, geom_.close, bounds.origin, inherit_theme(ctx).roles.on_error.with_alpha(235));
             }
         }
 
         // Snap 弹窗（覆盖绘制于栏下方；展开态由 Move/Press 维护）。
         if (snap_open_) {
-            paint_snap_flyout(p, bounds, bg, fg);
+            paint_snap_flyout(p, bounds, bg, fg, shadow);
         }
     }
 
@@ -568,11 +571,12 @@ class TitleBar : public Widget {
         }
     }
 
-    auto paint_snap_flyout(Painter &p, const Rect &bounds, const Color &bg, const Color &fg) const -> void {
+    auto paint_snap_flyout(Painter &p, const Rect &bounds, const Color &bg, const Color &fg, const Color &shadow) const
+        -> void {
         const Rect panel{
             .origin = Point{.x = bounds.origin.x + flyout_rect_.origin.x, .y = bounds.origin.y + flyout_rect_.origin.y},
             .size = flyout_rect_.size};
-        p.draw_shadow(panel, 0.0F, 2.0F, 8.0F, Color{0, 0, 0, 48});
+        p.draw_shadow(panel, 0.0F, 2.0F, 8.0F, shadow);
         p.fill_rect(panel, bg);
         Font tf;
         tf.size_pt = 12.0F;

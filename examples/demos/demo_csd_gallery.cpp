@@ -94,10 +94,10 @@ namespace {
 
 /// @brief 主题预设序号 → 枚举 + 名称（ClientSide 预览窗循环切换用）。
 ///
-/// 六档全覆盖（三套视觉语言 × 明暗两档）：漏掉 Mac 两档会让 `set_title_bar_style` 的
-/// 红绿灯分支在本 demo 里永远走不到，回归时只能靠单测兜底。
+/// 八档全覆盖（四套视觉语言 × 明暗两档）：漏掉 Mac 两档会让 `set_title_bar_style` 的红绿灯分支
+/// 在本 demo 里永远走不到，漏掉 Breeze 两档同理——回归时只能靠单测兜底。
 [[nodiscard]] auto theme_preset(int idx) -> au::CsdPreset {
-    switch (idx % 6) {
+    switch (idx % 8) {
         case 0:
             return au::CsdPreset::AdwaitaDark;
         case 1:
@@ -108,13 +108,17 @@ namespace {
             return au::CsdPreset::WindowsLight;
         case 4:
             return au::CsdPreset::MacDark;
-        default:
+        case 5:
             return au::CsdPreset::MacLight;
+        case 6:
+            return au::CsdPreset::BreezeDark;
+        default:
+            return au::CsdPreset::BreezeLight;
     }
 }
 
 [[nodiscard]] auto theme_name(int idx) -> std::string_view {
-    switch (idx % 6) {
+    switch (idx % 8) {
         case 0:
             return "AdwaitaDark";
         case 1:
@@ -125,8 +129,12 @@ namespace {
             return "WindowsLight";
         case 4:
             return "MacDark";
-        default:
+        case 5:
             return "MacLight";
+        case 6:
+            return "BreezeDark";
+        default:
+            return "BreezeLight";
     }
 }
 
@@ -185,7 +193,7 @@ auto open_preview(au::Application &app, au::DecorationPolicy p, const std::share
     kids.emplace_back(gap(10));
     kids.emplace_back(au::Text{std::string(policy_description(policy))});
     kids.emplace_back(gap(10));
-    kids.emplace_back(au::Text{au::TextProps{.content = au::Reactive{preview_info}}});
+    kids.emplace_back(au::Text{au::TextProps().set_content(*preview_info)});
     kids.emplace_back(gap(10));
 
     if (policy == au::DecorationPolicy::ClientSide) {
@@ -194,9 +202,9 @@ auto open_preview(au::Application &app, au::DecorationPolicy p, const std::share
         auto shadow_on = std::make_shared<bool>(true);
         auto icon_on = std::make_shared<bool>(false);
 
-        au::Button theme_btn{au::ButtonProps{.label = "Cycle title-bar theme (host self-draw)"}};
+        au::Button theme_btn{au::ButtonProps().set_label("Cycle title-bar theme (host self-draw)")};
         theme_btn.on_click = [self_id, &app, theme_idx, note]() -> void {
-            *theme_idx = (*theme_idx + 1) % 6;
+            *theme_idx = (*theme_idx + 1) % 8;
             const std::string label{theme_name(*theme_idx)};
             if (auto *w = resolve_preview(app, self_id)) {
                 w->set_title_bar_style(au::TitleBarStyle::from_preset(theme_preset(*theme_idx)));
@@ -207,7 +215,7 @@ auto open_preview(au::Application &app, au::DecorationPolicy p, const std::share
         kids.emplace_back(std::move(theme_btn));
         kids.emplace_back(gap(6));
 
-        au::Button shadow_btn{au::ButtonProps{.label = "Toggle window frame shadow"}};
+        au::Button shadow_btn{au::ButtonProps().set_label("Toggle window frame shadow")};
         shadow_btn.on_click = [self_id, &app, shadow_on, note]() -> void {
             *shadow_on = !*shadow_on;
             if (const auto *w = resolve_preview(app, self_id)) {
@@ -218,7 +226,7 @@ auto open_preview(au::Application &app, au::DecorationPolicy p, const std::share
         kids.emplace_back(std::move(shadow_btn));
         kids.emplace_back(gap(6));
 
-        au::Button icon_btn{au::ButtonProps{.label = "Toggle title-bar icon"}};
+        au::Button icon_btn{au::ButtonProps().set_label("Toggle title-bar icon")};
         icon_btn.on_click = [self_id, &app, icon_on, note]() -> void {
             *icon_on = !*icon_on;
             if (const auto *w = resolve_preview(app, self_id)) {
@@ -228,7 +236,7 @@ auto open_preview(au::Application &app, au::DecorationPolicy p, const std::share
         };
         kids.emplace_back(std::move(icon_btn));
         kids.emplace_back(gap(10));
-        kids.emplace_back(au::Text{au::TextProps{.content = au::Reactive{note}}});
+        kids.emplace_back(au::Text{au::TextProps().set_content(*note)});
     } else if (policy == au::DecorationPolicy::Borderless || policy == au::DecorationPolicy::Frameless) {
         // 控件级 TitleBar widget：应用自绘标题栏，经 WindowChrome 驱动窗口状态
         // （headless 下 chrome 缺失，交互安全 no-op）。
@@ -248,14 +256,14 @@ auto open_preview(au::Application &app, au::DecorationPolicy p, const std::share
     }
 
     kids.emplace_back(gap(14));
-    au::Button close_btn{au::ButtonProps{.label = "Close this preview"}};
+    au::Button close_btn{au::ButtonProps().set_label("Close this preview")};
     close_btn.on_click = [self_id, &app, note]() -> void {
         app.close_window(*self_id);
         note->set(au::LocalizedString{"preview closed"});
     };
     kids.emplace_back(std::move(close_btn));
 
-    return au::Column{au::ColumnProps{.children = std::move(kids)}};
+    return au::Column(std::move(kids));
 }
 
 /// @brief 控制窗 UI：五档策略按钮 + 实时 content_inset 读数 + 退出。
@@ -264,7 +272,7 @@ auto open_preview(au::Application &app, au::DecorationPolicy p, const std::share
                                  const std::shared_ptr<au::State<au::LocalizedString>> &note,
                                  au::DecorationPolicy &preview_policy) -> au::Node {
     const auto add_policy = [&](au::DecorationPolicy p, std::vector<au::Node> &kids) -> void {
-        au::Button b{au::ButtonProps{.label = std::string(policy_label(p)) + " preview"}};
+        au::Button b{au::ButtonProps().set_label(std::string(policy_label(p)) + " preview")};
         b.on_click = [&app, preview_id, preview_info, note, &preview_policy, p]() -> void {
             open_preview(app, p, preview_id, preview_info, note, preview_policy);
         };
@@ -286,14 +294,14 @@ auto open_preview(au::Application &app, au::DecorationPolicy p, const std::share
     add_policy(au::DecorationPolicy::Borderless, kids);
     add_policy(au::DecorationPolicy::Frameless, kids);
     kids.emplace_back(gap(8));
-    kids.emplace_back(au::Text{au::TextProps{.content = au::Reactive{preview_info}}});
+    kids.emplace_back(au::Text{au::TextProps().set_content(*preview_info)});
     kids.emplace_back(gap(8));
 
-    au::Button quit_btn{au::ButtonProps{.label = "Quit"}};
+    au::Button quit_btn{au::ButtonProps().set_label("Quit")};
     quit_btn.on_click = [&app]() -> void { app.quit(); };
     kids.emplace_back(std::move(quit_btn));
 
-    return au::Column{au::ColumnProps{.children = std::move(kids)}};
+    return au::Column(std::move(kids));
 }
 
 }  // namespace

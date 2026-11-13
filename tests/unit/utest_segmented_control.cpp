@@ -1,15 +1,21 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/widget/segmented_control.h
 /// 测试说明: 覆盖 SegmentedControl——段列表与选中索引、set_selected、Press 命中分段触发 on_change
-/// （含右键不响应、越界点击不切换）、禁用态忽略点击、布局尺寸、自描述、序列化往返
+/// （含右键不响应、越界点击不切换）、禁用态忽略点击、布局尺寸、自描述、序列化往返；另有字号
+/// 未表态时取主题字阶正文档（含命中区与量宽同源）、显式表态钉住与「只写意图」序列化的成对断言
 
+#include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "aurora/environment/build_context.h"
+#include "aurora/environment/environment.h"
 #include "aurora/event/event.h"
 #include "aurora/layout/layout_engine.h"
+#include "aurora/render/font_engine.h"
 #include "aurora/render/painter.h"
+#include "aurora/theming/theme.h"
 #include "aurora/widget/segmented_control.h"
 #include "framework/aurora_test.h"
 #include "framework/json_access.h"
@@ -22,6 +28,17 @@ namespace {
 
 auto bounded(float w, float h) -> Constraints {
     return Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = w, .height = h}};
+}
+
+/// @brief 造一个注入了指定主题的构建上下文（根级环境，无父指针）。
+/// @param t 要注入的主题（按值拷进 holder 内的 Environment）。
+/// @return holder + ctx：`ctx.env` 指向 holder 内的 Environment，二者须在同作用域内使用。
+auto themed_ctx(const Theme &t) -> std::pair<std::shared_ptr<Environment>, BuildContext> {
+    auto env = std::make_shared<Environment>();
+    env->set_local(t);
+    BuildContext ctx;
+    ctx.env = env.get();
+    return {std::move(env), ctx};
 }
 
 }  // namespace
@@ -160,28 +177,94 @@ AURORA_TEST_CASE(paint_covers_theme_clip_and_disabled_branches) {
     SegmentedControl sc({"A", "B", "C"}, 1);
     sc.set_active_color(Color{10, 20, 30, 255});
     LayoutEngine::layout(sc, bounded(400.0F, 100.0F));
-    Rect bounds{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = sc.size()};
+    Rect const bounds{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = sc.size()};
     sc.paint(painter, bounds, BuildContext{});
 
     // 圆角路径：push/pop clip + draw_rounded_border。
     SegmentedControl rounded({"X", "Y"});
     rounded.set_corner_radius(8.0F);
     LayoutEngine::layout(rounded, bounded(400.0F, 100.0F));
-    Rect rb{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = rounded.size()};
+    Rect const rb{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = rounded.size()};
     rounded.paint(painter, rb, BuildContext{});
 
     // 禁用态灰化分支。
     SegmentedControl dis({"P", "Q"});
     dis.set_enabled(false);
     LayoutEngine::layout(dis, bounded(400.0F, 100.0F));
-    Rect db{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = dis.size()};
+    Rect const db{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = dis.size()};
     dis.paint(painter, db, BuildContext{});
 
     // 默认主题：active_color 空 → inherit_theme(ctx).primary。
     SegmentedControl def({"M", "N"});
     LayoutEngine::layout(def, bounded(400.0F, 100.0F));
-    Rect fb{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = def.size()};
+    Rect const fb{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = def.size()};
     def.paint(painter, fb, BuildContext{});
+}
+
+AURORA_TEST_CASE(font_size_follows_type_scale_when_unset) {
+    Theme tuned;
+    tuned.type_scale.body_medium.size_pt = 24.0F;
+    const auto [env, ctx] = themed_ctx(tuned);
+    (void)env;
+
+    SegmentedControl sc({"Alpha", "WWWWWWWWWW"});
+
+    // ① 未表态 ⇒ 取作用域主题的字阶正文档（进程级 light 档 = Material 正文基准 14pt）。
+    AURORA_TEST_CHECK_NEAR(sc.effective_font_size(BuildContext{}), 14.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(sc.effective_font_size(ctx), 24.0F, 1e-4F);
+
+    // ② 回落点进了度量路径：字阶调大 ⇒ 分段条实测变宽。
+    // 两个独立实例各排一次——同实例连排会命中布局缓存、整段跳过 `on_layout`（见 `Widget::layout`）。
+    SegmentedControl scaled({"Alpha", "WWWWWWWWWW"});
+    SegmentedControl bare({"Alpha", "WWWWWWWWWW"});
+    LayoutEngine::layout(scaled, bounded(900.0F, 200.0F), ctx);
+    LayoutEngine::layout(bare, bounded(900.0F, 200.0F));
+    AURORA_TEST_CHECK_GT(scaled.size().width, bare.size().width);
+
+    // ③ 命中判定与量宽同源：取点落在「14pt 首段之外、24pt 首段之内」。
+    // 第二段取宽文本，保证该点在 14pt 档稳落在第二段跨度内 ⇒ 同一点两档命中不同段才说明命中区随字阶走
+    // （贴着 60dp 下限或跨度边界取点，会因末点开区间而误判成「未命中」）。
+    const float w14 = render::FontEngine::measure_width("Alpha", Font{.size_pt = 14.0F}) + 24.0F;
+    const float w24 = render::FontEngine::measure_width("Alpha", Font{.size_pt = 24.0F}) + 24.0F;
+    const float second14 = render::FontEngine::measure_width("WWWWWWWWWW", Font{.size_pt = 14.0F}) + 24.0F;
+    const float probe_x = w14 + ((w24 - w14) * 0.5F);
+    AURORA_TEST_REQUIRE_GT(w24, w14);
+    AURORA_TEST_REQUIRE_LT(probe_x, w14 + second14);
+
+    MouseEvent press;
+    press.action = MouseAction::Press;
+    press.button = MouseButton::Left;
+    press.local_position = Point{.x = probe_x, .y = 10.0F};
+    scaled.set_selected(1);
+    scaled.on_pointer_event(press);
+    AURORA_TEST_CHECK_EQ(scaled.selected(), 0);  // 24pt 档：该点仍在首段内 → 切回首段
+
+    MouseEvent same;
+    same.action = MouseAction::Press;
+    same.button = MouseButton::Left;
+    same.local_position = Point{.x = probe_x, .y = 10.0F};
+    bare.on_pointer_event(same);
+    AURORA_TEST_CHECK_EQ(bare.selected(), 1);  // 14pt 档：同一点已过首段 → 命中第二段
+
+    // ④ 显式表态钉住：两档作用域都读显式值，主题覆盖不了它。
+    sc.set_font_size(11.0F);
+    AURORA_TEST_CHECK_NEAR(sc.effective_font_size(ctx), 11.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(sc.effective_font_size(BuildContext{}), 11.0F, 1e-4F);
+
+    // ⑤ 只写意图 + 回填降级：表态过才落键；非法值不落键且退出表态（回落点交回主题）。
+    Json stated = Json::object();
+    sc.serialize_props(stated);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(stated, "font_size"), 11.0F, 1e-4F);
+    Json bare_props = Json::object();
+    SegmentedControl(std::vector<std::string>{"A"}).serialize_props(bare_props);
+    AURORA_TEST_CHECK_FALSE(bare_props.contains("font_size"));
+    Json junk = Json::object();
+    junk.set("font_size", Json{"not-a-number"});
+    sc.deserialize_props(junk);
+    AURORA_TEST_CHECK_NEAR(sc.effective_font_size(BuildContext{}), 14.0F, 1e-4F);
+    Json cleared = Json::object();
+    sc.serialize_props(cleared);
+    AURORA_TEST_CHECK_FALSE(cleared.contains("font_size"));  // 对照：非法值确实清了表态
 }
 
 }  // namespace aurora::test_cases::utest_segmented_control

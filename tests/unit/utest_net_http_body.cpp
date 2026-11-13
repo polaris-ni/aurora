@@ -106,7 +106,7 @@ class ScriptedSource final : public BodySource {
 /// @return 体形态计划。
 [[nodiscard]] auto planned(const Request &request) -> aurora::net::detail::RequestBodyPlan {
     const auto plan = plan_request_body(request);
-    AURORA_TEST_REQUIRE_MSG(bool(plan), plan ? std::string{} : plan.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(plan), plan ? std::string{} : plan.error().message);
     return plan.value();
 }
 
@@ -115,7 +115,7 @@ class ScriptedSource final : public BodySource {
 /// @return 失败码。
 [[nodiscard]] auto planned_error(const Request &request) -> aurora::ErrorCode {
     const auto plan = plan_request_body(request);
-    AURORA_TEST_REQUIRE_MSG(!bool(plan), plan ? std::string{"expected a refusal"} : std::string{});
+    AURORA_TEST_REQUIRE_MSG(!static_cast<bool>(plan), plan ? std::string{"expected a refusal"} : std::string{});
     return plan.error().code_enum;
 }
 
@@ -127,7 +127,7 @@ class ScriptedSource final : public BodySource {
     std::size_t segments = 0;
     while (true) {
         auto segment = pump.next_segment();
-        AURORA_TEST_REQUIRE_MSG(bool(segment), segment ? std::string{} : segment.error().message);
+        AURORA_TEST_REQUIRE_MSG(static_cast<bool>(segment), segment ? std::string{} : segment.error().message);
         if (segment.value().empty()) {
             return segments;
         }
@@ -292,7 +292,7 @@ AURORA_TEST_CASE(a_memory_body_pumps_in_slices_that_reassemble_the_original) {
     AURORA_TEST_CHECK_EQ(pump.payload_bytes(), static_cast<std::uint64_t>(text.size()));
     // 交完之后每问一次都是空段（幂等），发起侧可以循环到 `done()` 为止。
     const auto extra = pump.next_segment();
-    AURORA_TEST_REQUIRE_TRUE(bool(extra));
+    AURORA_TEST_REQUIRE_TRUE(static_cast<bool>(extra));
     AURORA_TEST_CHECK_TRUE(extra.value().empty());
 }
 
@@ -342,7 +342,7 @@ AURORA_TEST_CASE(a_source_failure_is_handed_up_verbatim) {
     const auto failed_request = Request::post("https://example.com/stream").body(first_failure);
     RequestBodyPump pump{failed_request, planned(failed_request)};
     const auto failed = pump.next_segment();
-    AURORA_TEST_REQUIRE_TRUE(!bool(failed));
+    AURORA_TEST_REQUIRE_TRUE(!static_cast<bool>(failed));
     AURORA_TEST_CHECK_EQ(failed.error().code_enum, aurora::ErrorCode::IOFileNotFound);
     AURORA_TEST_CHECK_EQ(failed.error().message, std::string{"scripted read failed"});
     AURORA_TEST_CHECK_TRUE(!pump.done());  // 失败不是「交完了」：发起侧据此中止本次交换而非收尾
@@ -352,10 +352,10 @@ AURORA_TEST_CASE(a_source_failure_is_handed_up_verbatim) {
     const auto midway = Request::post("https://example.com/stream").body(halfway_source);
     RequestBodyPump second{midway, planned(midway)};
     const auto first = second.next_segment();
-    AURORA_TEST_REQUIRE_TRUE(bool(first));
+    AURORA_TEST_REQUIRE_TRUE(static_cast<bool>(first));
     AURORA_TEST_CHECK_EQ(second.payload_bytes(), std::uint64_t{2});
     const auto again = second.next_segment();
-    AURORA_TEST_REQUIRE_TRUE(!bool(again));
+    AURORA_TEST_REQUIRE_TRUE(!static_cast<bool>(again));
     AURORA_TEST_CHECK_EQ(again.error().code_enum, aurora::ErrorCode::IOFileNotFound);
     AURORA_TEST_CHECK_EQ(second.payload_bytes(), std::uint64_t{2});
 }
@@ -366,7 +366,7 @@ AURORA_TEST_CASE(a_request_without_a_body_pumps_nothing) {
     AURORA_TEST_CHECK_TRUE(!pump.has_body());
     AURORA_TEST_CHECK_TRUE(pump.done());
     const auto segment = pump.next_segment();
-    AURORA_TEST_REQUIRE_TRUE(bool(segment));
+    AURORA_TEST_REQUIRE_TRUE(static_cast<bool>(segment));
     AURORA_TEST_CHECK_TRUE(segment.value().empty());
     AURORA_TEST_CHECK_EQ(pump.payload_bytes(), std::uint64_t{0});
 

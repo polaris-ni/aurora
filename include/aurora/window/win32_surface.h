@@ -122,6 +122,34 @@ class Win32Surface final : public Surface {
         }
     }
 
+    /// @brief 程序化最小化（Win32：经宿主 `SC_MINIMIZE`，结果由 `WM_SIZE` 上报，与系统菜单同路径）。
+    auto minimize() -> void override { win_->set_window_mode(WindowMode::Minimized); }
+
+    /// @brief 程序化切换最大化（Win32：以 OS 实值 `IsZoomed` 判档后下发目标态）。
+    ///
+    /// 不读宿主缓存 `mode`：缓存由 `WM_SIZE` 回报刷新，请求与回报之间隔着消息窗口期，
+    /// 判档用 OS 实值才与用户连点标题栏钮的行为一致。
+    auto toggle_maximize() -> void override {
+        const bool zoomed = IsZoomed(static_cast<HWND>(win_->hwnd())) != FALSE;
+        win_->set_window_mode(zoomed ? WindowMode::Normal : WindowMode::Maximized);
+    }
+
+    /// @brief 程序化设定几何态（Win32：原样转发宿主 `SC_*` 目标态语义，不做翻转）。
+    ///
+    /// 几何恢复腿（按落盘 `WindowGeometry::mode` 直设）与 `Maximized → FullScreen` 这类
+    /// 直设都靠本槽；`FullScreen` 分支经宿主 `Win32Host::set_fullscreen` 走真实 borderless 全屏（能力位
+    /// `runtime_fullscreen` 已翻 true）。
+    /// @param m 目标几何态。
+    auto set_window_mode(WindowMode m) -> void override { win_->set_window_mode(m); }
+
+    /// @brief 程序化设置全屏：转发共享宿主 `Win32Host::set_fullscreen`，走真实 borderless 全屏（能力位
+    /// `runtime_fullscreen` 已翻 true）。
+    ///
+    /// 进入/退出 borderless 全屏：转发到共享宿主 `Win32Host::set_fullscreen`（monitor 枚举 /
+    /// 还原几何 / 定档由宿主统一处理），`runtime_fullscreen` 已翻 true。
+    /// @param on true 进入全屏，false 还原到进入前几何。
+    auto set_fullscreen(bool on) -> void override { win_->set_fullscreen(on); }
+
     /// @brief 增量上屏脏区（设备坐标）：非空时 present() 仅 blit 脏矩形并界，而非整窗——
     /// 大窗口下整窗 SetDIBitsToDevice 是拖选帧的绝对大头（5760×3132px 实测 ~130ms，
     /// 占帧成本 93%）。脏区一次性消费（present 后清空），未设置则全量 blit（首帧/尺寸变化/
@@ -243,9 +271,21 @@ class Win32Surface final : public Surface {
     /// @brief 程序化移动窗口（转发共享宿主）。
     /// @param p 目标左上角屏幕坐标（物理像素）。
     auto set_position(Point p) -> void override { win_->set_position(p); }
-    /// @brief 程序化设置外框尺寸（转发共享宿主）。
-    /// @param s 目标外框尺寸（物理像素）。
+    /// @brief 程序化设置窗口尺寸（转发共享宿主；逻辑 dp，语义为请求的客户区尺寸）。
+    /// @param s 目标客户区尺寸（逻辑 dp，外框由宿主按装饰/菜单补偿自行算出）。
     auto set_size(Size s) -> void override { win_->set_size(s); }
+    /// @brief 运行期显隐（转发共享宿主）：`ShowWindow` 的 `SW_SHOWNA` / `SW_HIDE` 档。
+    /// @param on true 显示（不抢焦点）、false 隐藏。
+    auto set_visible(bool on) -> void override { win_->set_visible(on); }
+    /// @brief 当前是否在屏上（转发共享宿主，读 `IsWindowVisible` 实值）。
+    /// @return 在屏上为 true。
+    [[nodiscard]] auto is_visible() const -> bool override { return win_->is_visible(); }
+    /// @brief 运行期置顶（转发共享宿主）：`SetWindowPos(HWND_TOPMOST / HWND_NOTOPMOST)`，不移动不激活。
+    /// @param on true 置顶、false 取消置顶。
+    auto set_always_on_top(bool on) -> void override { win_->set_always_on_top(on); }
+    /// @brief 当前是否置顶（转发共享宿主，读 `GWL_EXSTYLE` 的 `WS_EX_TOPMOST` 实值）。
+    /// @return 置顶为 true。
+    [[nodiscard]] auto is_always_on_top() const -> bool override { return win_->is_always_on_top(); }
     /// @brief DPI 缩放变化回调（转发共享宿主）。
     /// @param h 缩放变化回调，参数为变化后的缩放因子。
     auto set_scale_change_handler(ScaleChangeHandler h) -> void override {

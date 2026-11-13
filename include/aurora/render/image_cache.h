@@ -36,7 +36,7 @@ class ImageCache {
     /// @return 成功返回 `Image` 拷贝；解码失败返回 Error（不进入缓存）。
     [[nodiscard]] auto get(const std::string &path) -> Result<Image> {
         {
-            std::scoped_lock lock(mutex_);
+            std::scoped_lock const lock(mutex_);
             const auto it = index_.find(path);
             if (it != index_.end()) {
                 // LRU 提升：移动到链表头
@@ -59,7 +59,7 @@ class ImageCache {
     /// @param img 待缓存的 `Image`（按值传入，由缓存接管所有权）。
     auto put(const std::string &path, Image img) -> void {
         const std::size_t bytes = image_bytes(img);
-        std::scoped_lock lock(mutex_);
+        std::scoped_lock const lock(mutex_);
         // 覆盖旧条目
         const auto it = index_.find(path);
         if (it != index_.end()) {
@@ -81,14 +81,14 @@ class ImageCache {
     /// @param path 待查询的缓存键。
     /// @return true = 已缓存该路径的图像；false = 未命中。
     [[nodiscard]] auto contains(const std::string &path) -> bool {
-        std::scoped_lock lock(mutex_);
+        std::scoped_lock const lock(mutex_);
         return index_.contains(path);
     }
 
     /// @brief 移除指定条目。
     /// @param path 待移除的缓存键；不存在时为 no-op。
     auto remove(const std::string &path) -> void {
-        std::scoped_lock lock(mutex_);
+        std::scoped_lock const lock(mutex_);
         const auto it = index_.find(path);
         if (it != index_.end()) {
             bytes_ -= image_bytes(it->second->image);
@@ -99,7 +99,7 @@ class ImageCache {
 
     /// @brief 清空缓存。
     auto clear() -> void {
-        std::scoped_lock lock(mutex_);
+        std::scoped_lock const lock(mutex_);
         lru_.clear();
         index_.clear();
         bytes_ = 0;
@@ -108,7 +108,7 @@ class ImageCache {
     /// @brief 设置内存上限（字节；立即按新上限淘汰）。
     /// @param max_bytes 新的字节上限；设置后立即触发 LRU 淘汰直到占用 <= 上限。
     auto set_max_bytes(std::size_t max_bytes) -> void {
-        std::scoped_lock lock(mutex_);
+        std::scoped_lock const lock(mutex_);
         max_bytes_ = max_bytes;
         evict_if_needed();
     }
@@ -120,14 +120,14 @@ class ImageCache {
     /// @brief 当前缓存占用字节数。
     /// @return 所有已缓存 `Image.pixels` 字节总和（不含容器开销）。
     [[nodiscard]] auto current_bytes() -> std::size_t {
-        std::scoped_lock lock(mutex_);
+        std::scoped_lock const lock(mutex_);
         return bytes_;
     }
 
     /// @brief 当前缓存条目数。
     /// @return 已缓存路径数（LRU 链表长度）。
     [[nodiscard]] auto count() -> std::size_t {
-        std::scoped_lock lock(mutex_);
+        std::scoped_lock const lock(mutex_);
         return index_.size();
     }
 

@@ -5,18 +5,25 @@
 /// 消费事件；松手裁决两分支（低于阈值 spring 回位保留在树 / 高于阈值飞出触发默认摘除——
 /// 容器 children 收缩、持有计数归位）；自定义 on_dismissed 回调覆盖默认摘除；
 /// 自描述元数据（type_name / describe / 默认行程）。
+/// 另含 DragToDismiss 收口到公共弹簧后的控件侧回归：全局时间缩放 1.0 → 2.0 时 spring 段到位
+/// 帧数减半（弹簧为指数衰减，故取上下界）而终值不变；0.0 档冻结时时间轴不推进、
+/// 按帧重绘请求数为 0、在途标志保留，解冻后自驱续跑到同一终值。
+/// 主轴贯通回归：构造轴决定行程标定的尺寸（竖向取高、横向取宽）、跟手取哪个坐标分量、绘制平移落在
+/// 哪条轴（由记录绘制盒的子控件断言），另一轴向的分量一律不参与。
 
 #include <chrono>
 #include <memory>
 #include <utility>
 #include <vector>
 
+#include "aurora/animation/animator.h"
 #include "aurora/core/accessibility.h"
 #include "aurora/event/dispatcher.h"
 #include "aurora/event/event.h"
 #include "aurora/widget/dismissible.h"
 #include "aurora/widget/text.h"
 #include "framework/aurora_test.h"
+#include "support/animation_fixture.h"
 
 namespace aurora::test_cases::utest_dismissible {
 
@@ -53,6 +60,28 @@ auto fixed_box() -> Node {
     t->height(aurora::px(50.0F));
     return Node{t};
 }
+
+/// 记录自身被绘制时收到的盒：位移落在 x 还是 y 只能由子侧的绘制盒判定（父侧 paint 平移不动布局盒）。
+class ProbeBox final : public Text {
+  public:
+    /// @brief 构造 100x50 的探针盒（尺寸与 `fixed_box()` 同，保证行程标定可精确预期）。
+    ProbeBox() : Text(".") {
+        width(aurora::px(100.0F));
+        height(aurora::px(50.0F));
+    }
+
+    Rect seen{};  ///< 最近一次 on_paint 收到的绘制盒（初始为原点零盒 = 从未绘制）
+
+  protected:
+    /// @brief 记下盒后照常绘制（不改绘制内容，只取几何）。
+    /// @param p 绘制器。
+    /// @param bounds 本次绘制盒。
+    /// @param ctx 构建上下文。
+    auto on_paint(aurora::Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
+        seen = bounds;
+        Text::on_paint(p, bounds, ctx);
+    }
+};
 
 /// 双列定宽测试容器：每个子项约束固定 100x50，横排累加（布局完全确定，便于命中与行程校准）。
 class TestRow final : public aurora::Container {
@@ -98,6 +127,30 @@ class TouchableDismiss final : public Dismissible {
     auto feed_touch(TouchEvent &e) -> void { on_pointer_event(e); }
 };
 
+/// 鼠标路径跟手到 `target` 后松手（须已布局：行程取布局校准后的 travel_distance）。
+/// 末帧刻意反向 0.5dp，使交接速度与裁决方向相反而被 `on_release` 丢弃 —— 两侧（不同时间
+/// 缩放、冻结前后）从此走**同一条零速弹簧轨迹**，帧数差才只归因于 dt 漏斗而非速度交接。
+auto drag_and_release(Dismissible &dis, EventDispatcher &dispatcher, double target) -> void {
+    const double travel = dis.travel_distance;
+    auto mouse_at = [&](MouseAction action, double along) -> MouseEvent {
+        return make_mouse(action, Point{.x = static_cast<float>(10.0 + (travel * along)), .y = 10.0F});
+    };
+    MouseEvent press = mouse_at(MouseAction::Press, 0.0);
+    (void)dispatcher.dispatch_mouse(dis, press);
+    MouseEvent overshoot = mouse_at(MouseAction::Move, target + 0.005);
+    (void)dispatcher.dispatch_mouse(dis, overshoot);
+    MouseEvent settle = mouse_at(MouseAction::Move, target);
+    (void)dispatcher.dispatch_mouse(dis, settle);
+    MouseEvent release = mouse_at(MouseAction::Release, target);
+    (void)dispatcher.dispatch_mouse(dis, release);
+}
+
+/// 根位 Dismissible（无 Container 祖先）+ 定长约束：行程恒为 100，飞出终态原地保留便于读终值。
+auto make_laid_out_root(Dismissible &dis) -> void {
+    dis.layout(Constraints{.min = Size{}, .max = Size{.width = 100.0F, .height = 50.0F}}, BuildContext{});
+    AURORA_TEST_REQUIRE_NEAR(dis.travel_distance, 100.0, 1e-9);
+}
+
 }  // namespace
 
 // ---- 自描述元数据 ----
@@ -118,7 +171,7 @@ AURORA_TEST_CASE(descriptor_and_default_travel) {
 // ---- DragToDismiss：reduce_motion 短路 ----
 
 AURORA_TEST_CASE(dtd_reduce_motion_short_circuits_to_endpoint) {
-    ReduceMotionGuard guard;  // 进程级开启，析构还原
+    ReduceMotionGuard const guard;  // 进程级开启，析构还原
 
     // 飞出方向：拖 0.7 松手 → 单帧 tick 直接落 1 并触发 dismissed（不经过 spring 多帧）。
     DragToDismiss dtd(DragAxis::Horizontal, 100.0, SpringDescription{});
@@ -304,10 +357,59 @@ AURORA_TEST_CASE(dismissible_paint_progress_zero_and_in_flight) {
     AURORA_TEST_CHECK_NEAR(dis->progress(), 0.5, 1e-9);
     dis->paint(painter, Rect{.origin = Point{}, .size = dis->size()}, ctx);
 
-    // 垂直轴构造：同一绘制路径的轴分支（shift 只作用于 y）。
+    // 垂直轴构造的静止态绘制：仅覆盖「progress 为 0 时走无位移分支」；轴方向的断言见下一条用例。
     Dismissible vertical{fixed_box(), DragAxis::Vertical};
     vertical.layout(Constraints{.min = Size{}, .max = Size{.width = 400.0F, .height = 100.0F}}, ctx);
     vertical.paint(painter, Rect{.origin = Point{}, .size = vertical.size()}, ctx);
+}
+
+// @brief 主轴贯通：竖向构造的行程标定、跟手取分量、绘制平移三条路径都按构造轴走（缺陷回归）。
+//        此前 `Dismissible` 复制了一份轴字段却从未赋值，竖向请求表现为「拖得动、裁决对，但位移画在
+//        水平轴、行程按宽度折算」，故这里逐条钉住轴向：行程取高、横向拖不给进度、位移只落 y。
+AURORA_TEST_CASE(dismissible_axis_routes_travel_progress_and_paint_offset) {
+    Painter painter;
+    constexpr BuildContext ctx;
+
+    // ---- 竖向：行程按高度标定，位移只落 y ----
+    const auto v_probe = std::make_shared<ProbeBox>();
+    Dismissible vertical{Node{v_probe}, DragAxis::Vertical};
+    const Rect v_box{.origin = Point{.x = 4.0F, .y = 6.0F}, .size = Size{.width = 100.0F, .height = 50.0F}};
+    vertical.layout(Constraints{.min = Size{}, .max = Size{.width = 100.0F, .height = 50.0F}}, ctx);
+    AURORA_TEST_CHECK_NEAR(vertical.travel_distance, 50.0, 1e-9);  // 主轴向 = 高，不是宽 100
+
+    EventDispatcher dispatcher;
+    // 纯横向拖动：识别器已起拖（50dp > slop），但主轴取 y 分量 → 进度恒 0。
+    MouseEvent vh_press = make_mouse(MouseAction::Press, Point{.x = 10.0F, .y = 10.0F});
+    (void)dispatcher.dispatch_mouse(vertical, vh_press);
+    MouseEvent vh_move = make_mouse(MouseAction::Move, Point{.x = 60.0F, .y = 10.0F});
+    (void)dispatcher.dispatch_mouse(vertical, vh_move);
+    AURORA_TEST_CHECK_NEAR(vertical.progress(), 0.0, 1e-9);
+
+    // 纵向拖 25dp → progress = 25 / 50 = 0.5，绘制盒下移 25、x 保持不变。
+    MouseEvent v_press = make_mouse(MouseAction::Press, Point{.x = 10.0F, .y = 10.0F});
+    (void)dispatcher.dispatch_mouse(vertical, v_press);
+    MouseEvent v_move = make_mouse(MouseAction::Move, Point{.x = 10.0F, .y = 35.0F});
+    (void)dispatcher.dispatch_mouse(vertical, v_move);
+    AURORA_TEST_CHECK_NEAR(vertical.progress(), 0.5, 1e-9);
+    vertical.paint(painter, v_box, ctx);
+    AURORA_TEST_CHECK_NEAR(v_probe->seen.origin.x, v_box.origin.x, 1e-6);
+    AURORA_TEST_CHECK_NEAR(v_probe->seen.origin.y, v_box.origin.y + 25.0F, 1e-6);
+
+    // ---- 横向：行程按宽度标定，位移只落 x ----
+    const auto h_probe = std::make_shared<ProbeBox>();
+    Dismissible horizontal{Node{h_probe}, DragAxis::Horizontal};
+    const Rect h_box{.origin = Point{.x = 4.0F, .y = 6.0F}, .size = Size{.width = 100.0F, .height = 50.0F}};
+    horizontal.layout(Constraints{.min = Size{}, .max = Size{.width = 100.0F, .height = 50.0F}}, ctx);
+    AURORA_TEST_CHECK_NEAR(horizontal.travel_distance, 100.0, 1e-9);  // 主轴向 = 宽
+
+    MouseEvent h_press = make_mouse(MouseAction::Press, Point{.x = 10.0F, .y = 10.0F});
+    (void)dispatcher.dispatch_mouse(horizontal, h_press);
+    MouseEvent h_move = make_mouse(MouseAction::Move, Point{.x = 60.0F, .y = 10.0F});
+    (void)dispatcher.dispatch_mouse(horizontal, h_move);
+    AURORA_TEST_CHECK_NEAR(horizontal.progress(), 0.5, 1e-9);  // 50 / 100
+    horizontal.paint(painter, h_box, ctx);
+    AURORA_TEST_CHECK_NEAR(h_probe->seen.origin.x, h_box.origin.x + 50.0F, 1e-6);
+    AURORA_TEST_CHECK_NEAR(h_probe->seen.origin.y, h_box.origin.y, 1e-6);
 }
 
 // ---- 触摸路径 + 无 Container 祖先的静默摘除 ----
@@ -360,6 +462,96 @@ AURORA_TEST_CASE(dismissible_without_container_ancestor_keeps_terminal_state) {
     }
     AURORA_TEST_CHECK_FALSE(root.is_animating());
     AURORA_TEST_CHECK_NEAR(root.progress(), 1.0, 1e-3);  // 终态保持，无祖先可摘除
+}
+
+// ---- 判据 10 / 判据 11：DragToDismiss 收口到公共弹簧后的控件侧回归 ----
+
+// @brief 判据 10（Dismissible 行）：全局时间缩放 1.0 → 2.0 时 spring 段到位帧数减半，终值不变。
+AURORA_TEST_CASE(dismissible_spring_frames_halve_when_time_scale_doubles) {
+    // 事件序列与时间戳序列两侧完全同形，只换 Animator 的倍率：帧数差只能来自单一 dt 漏斗。
+    auto settle_frames = [](double time_scale) -> std::pair<int, double> {
+        aurora::Animator animator;
+        animator.set_time_scale(time_scale);
+        const aurora::testing::ScopedCurrentAnimator scope{animator};
+
+        Dismissible root{fixed_box()};
+        make_laid_out_root(root);
+
+        EventDispatcher dispatcher;
+        drag_and_release(root, dispatcher, 0.7);  // ≥ 阈值 → 飞出方向
+        AURORA_TEST_REQUIRE_TRUE(root.is_animating());
+
+        int frames = 0;
+        while (root.is_animating() && frames < 600) {
+            root.tick(t_ms(static_cast<long long>(++frames) * 16));  // 首帧 dt 取 1/60，其后每帧 16ms
+        }
+        AURORA_TEST_REQUIRE_LT(frames, 600);  // 触顶即没自驱到定格，减半比较无从谈起
+        AURORA_TEST_REQUIRE_FALSE(root.is_animating());
+        return {frames, root.progress()};
+    };
+
+    const auto slow = settle_frames(1.0);
+    const auto fast = settle_frames(2.0);
+
+    // 终值与倍率无关：定格写的是 animate_to 的 target 本身，不是某一帧的采样值。
+    AURORA_TEST_CHECK_NEAR(slow.second, 1.0, 1e-12);
+    AURORA_TEST_CHECK_NEAR(fast.second, 1.0, 1e-12);
+    AURORA_TEST_CHECK_GT(slow.first, 1);  // 确为多帧收敛（单帧落点是 reduce_motion 的档）
+    AURORA_TEST_CHECK_LT(fast.first, slow.first);  // 倍率加倍 → 到位更快
+
+    // 弹簧是指数衰减，「动画时间轴加倍 ⇒ 帧数精确减半」不成立：到位帧数是收敛时刻 T 的阶梯函数
+    // n(s) = min{n : s·t(n) ≥ T}，故 2·n(2) 与 n(1) 只差一个取整误差（≤2 帧）——断言上下界而非等式。
+    const int doubled = 2 * fast.first;
+    AURORA_TEST_CHECK_LE(doubled, slow.first + 3);
+    AURORA_TEST_CHECK_GE(doubled, slow.first - 3);
+}
+
+// @brief 判据 11（控件自驱侧）：缩放 0.0 冻结段不推进、按帧重绘请求数为 0，解冻后续跑到同一终值。
+AURORA_TEST_CASE(dismissible_freeze_holds_spring_and_thaw_resumes_to_same_endpoint) {
+    aurora::Animator animator;
+    animator.set_time_scale(1.0);
+    const aurora::testing::ScopedCurrentAnimator scope{animator};
+
+    Dismissible root{fixed_box()};
+    make_laid_out_root(root);
+
+    // 重绘请求计数：mark_needs_paint → request_frame 落在本控件私有回调上（不经渲染器接线）。
+    int repaints = 0;
+    root.on_dirty = [&repaints](bool /*layout*/) -> void { ++repaints; };
+
+    EventDispatcher dispatcher;
+    drag_and_release(root, dispatcher, 0.7);
+    AURORA_TEST_REQUIRE_TRUE(root.is_animating());
+
+    int frame = 0;
+    root.tick(t_ms(static_cast<long long>(++frame) * 16));  // 未冻结的一帧
+    AURORA_TEST_CHECK_GT(repaints, 0);  // 计数器自检：非冻结帧必须标脏
+    AURORA_TEST_CHECK_GT(root.progress(), 0.7);  // 且确实在推进
+
+    // 冻结段：12 帧既不动时间轴，也不「停着不动却满帧唤醒」。
+    const double frozen_progress = root.progress();
+    animator.set_time_scale(0.0);
+    repaints = 0;
+    for (int i = 0; i < 12; ++i) {
+        root.tick(t_ms(static_cast<long long>(++frame) * 16));
+    }
+    AURORA_TEST_CHECK_EQ(repaints, 0);
+    AURORA_TEST_CHECK_NEAR(root.progress(), frozen_progress, 0.0);  // 逐比特不动：冻结段零写入
+    AURORA_TEST_CHECK_TRUE(root.is_animating());  // 在途标志保留，冻结不等于中止
+    AURORA_TEST_CHECK_FALSE(animator.take_rearm_request());  // 冻结方向不置重挂位（只解冻才置）
+
+    // 解冻续跑：由冻结前的进度自行走到同一终值，不丢进度也不重头再拖。
+    animator.set_time_scale(1.0);
+    AURORA_TEST_CHECK_TRUE(animator.take_rearm_request());  // 帧循环不深睡的凭据（应用侧在此送一帧）
+    repaints = 0;
+    while (root.is_animating() && frame < 600) {
+        root.tick(t_ms(static_cast<long long>(++frame) * 16));
+    }
+    AURORA_TEST_REQUIRE_LT(frame, 600);
+    AURORA_TEST_CHECK_FALSE(root.is_animating());
+    AURORA_TEST_CHECK_NEAR(root.progress(), 1.0, 1e-12);
+    AURORA_TEST_CHECK_GT(repaints, 0);  // 解冻后恢复正常标脏
+    root.on_dirty = nullptr;
 }
 
 }  // namespace aurora::test_cases::utest_dismissible

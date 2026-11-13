@@ -105,7 +105,7 @@ class Hero : public SingleChild {
     }
 
     /// @brief Hero 自身无响应式信号，不上报任何订阅（空实现）。
-    void collect_signals(std::vector<SignalViewBase *> & /*out*/) override {}
+    void collect_signals(StateSink & /*out*/) override {}
 
   protected:
     auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {

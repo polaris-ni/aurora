@@ -73,7 +73,7 @@ auto main() -> int {
     // ② 点击计数：DOM pointer 事件 → on_click → State → 下一帧重绘。
     auto clicks = std::make_shared<au::State<au::LocalizedString>>(au::LocalizedString{"clicks = 0"});
     auto click_count = std::make_shared<int>(0);
-    au::Button b_plus{au::ButtonProps{.label = au::LocalizedString{"+1"}}};
+    au::Button b_plus{au::ButtonProps().set_label(au::LocalizedString{"+1"})};
     b_plus.on_click = [clicks, click_count]() -> void {
         ++*click_count;
         clicks->set(au::LocalizedString{"clicks = " + std::to_string(*click_count)});
@@ -94,9 +94,9 @@ auto main() -> int {
 
     au::Node root = au::Column{
         au::Text{au::LocalizedString{"Aurora WASM rAF live probe"}},
-        au::Text{au::TextProps{.content = au::Reactive{frames}}},
-        au::Row{std::move(b_plus), au::Text{au::TextProps{.content = au::Reactive{clicks}}}},
-        au::Text{au::TextProps{.content = au::Reactive{async_status}}},
+        au::Text{au::TextProps().set_content(*frames)},
+        au::Row{std::move(b_plus), au::Text{au::TextProps().set_content(*clicks)}},
+        au::Text{au::TextProps().set_content(*async_status)},
     };
 
     // WASM 下 run() 注册 rAF 即返回（实例由 App::launch 页面生命周期堆持）；main 返回后

@@ -1,7 +1,7 @@
 #pragma once
 
 /// @brief 事件驱动的多句柄就绪等待。
-/// @file net/poll.h
+/// @file poll.h
 ///
 /// `wait_ready()` 是网络栈所有事件驱动形态共用的「等待基元」：自带 poll 线程引擎、并入宿主
 /// 等待集的通用事件源注册口（`app::EventSourceRegistry`）、以及第三方非阻塞会话（libssh2、DBus
@@ -26,7 +26,6 @@
 ///       精度承诺），除此之外不改任何句柄状态
 
 #include <chrono>
-#include <cstdint>
 #include <vector>
 
 #include "aurora/core/result.h"

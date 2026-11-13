@@ -95,6 +95,18 @@ if (AURORA_BUILD_TESTS)
                         COMMAND ${PYTHON3_EXE} "${_check_dir}/check_i18n_gen_golden.py" "${CMAKE_BINARY_DIR}"
                         WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
             endif ()
+            # 色角色对比度三档门禁（specification/07-environment-modifier.md §5.1）：比值一律取自真实
+            # 构建产物 gen_contrast_tools——它调库内唯一的 aurora::contrast_ratio，经 Theme::from_style
+            # 与 with_accessibility 逐档实测（五个风格值 × 明暗 × 对比度两档 = 二十列），门禁判「登记表 ↔
+            # 产物 ↔ 文档」三方对号：表声明的枚数与实际行数与产物读数、列面是否穷举 enum class ThemeStyle
+            # × 明暗 × 对比度两档、色角色令牌表的 40 枚是否枚枚被工具读出且枚枚被审（期望集取自头内
+            # AURORA_TOKENS 而非产物读数）、档位下限是否仍是 WCAG 的 4.5 / 3.0 两条 SC、
+            # 逐格比值是否达标、豁免是否双向仍然成立（≥ 登记下限且仍 < 档位下限）、理由是否逐条非空 ASCII、
+            # §5.1 是否与表等集、派生列是否既不享豁免又只在原生未达标时才动手。
+            # 同 check_gen_api_merge 前提：交叉构建下生成器不是原生 exe，判据交给原生 job（本块不注册）。
+            add_test(NAME check_theme_contrast
+                    COMMAND ${PYTHON3_EXE} "${_check_dir}/check_theme_contrast.py" "${CMAKE_BINARY_DIR}"
+                    WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
         endif ()
         # codespec 文档内部一致性守护（断链 / 失效锚点 / 章节号 / 反引号路径 / 特性表落点）。
         add_test(NAME check_codespec_xref
@@ -161,6 +173,51 @@ if (AURORA_BUILD_TESTS)
         add_test(NAME check_nolint_layout
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_nolint_layout.py"
                 WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
+        # 属性权威表覆盖门禁（单一声明口径的机械判据）：已迁移的 XxxProps 须「一字段一行一键」三方计数
+        # 相等、回落点与必填二选一、读面每行恰一件（形状由回落点是否随作用域变决定）、写件逐行转调对号，
+        # 且公共面不得出现表外名字（句柄读件 / 合成读件 / 组合便利写件 / 具名撤表态件）。未迁移的公有字段
+        # 聚合体按现状放行——迁移期两种形态并存，判据不得反过来咬未迁的控件。
+        add_test(NAME check_props_table_coverage
+                COMMAND ${PYTHON3_EXE} "${_check_dir}/check_props_table_coverage.py"
+                WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
+        # 控件接线门禁：属性基类必须是**最后一个公有基类**（基类子对象先于兄弟成员移动，次序颠倒
+        # 会让整体移动失联），且每枚非转调构造的尾部恰有一次 `bind(*this)`——这是单一声明口径下
+        # 唯一保留的手写仪式，漏写不报错（控件照样能画，只是写入不落标脏），故必须机械钉住。
+        add_test(NAME check_widget_bind_pattern
+                COMMAND ${PYTHON3_EXE} "${_check_dir}/check_widget_bind_pattern.py"
+                WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
+        # 可空态不外泄门禁：已迁移属性面的公共签名只许裸 T 与裸句柄——`std::optional` 留在私有
+        # 存储（未表态由 `present(row)` 回答）、句柄只作换源写件的实参、`PropRow` 只作 `*_row()`
+        # 的返回值。判定面收窄到已迁移的属性类而非全公共头：库内有 164 处合法的非属性可空签名
+        # （如基线查询返回 `std::optional<float>`），全量扫会逼无关接口一起改。
+        add_test(NAME check_no_optional_in_public_signature
+                COMMAND ${PYTHON3_EXE} "${_check_dir}/check_no_optional_in_public_signature.py"
+                WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
+        # 令牌登记表一致门禁：五组「成员指针 -> 短名」对照表（`AURORA_TOKENS`）必须与该组结构体的
+        # 实际字段一一对应、短名由「theme.h 里声明的前缀 + 字段名」拼出、`value_type` 与字段真实
+        # 类型同号、登记序与声明序同序，且登了表的组不得漏出 `theme_token_groups()`。这是 schema 里
+        # `theme.<短名>` 反查的唯一来源：表漂了不报错，只会让默认值指向一枚不存在的令牌。
+        add_test(NAME check_theme_token_registry
+                COMMAND ${PYTHON3_EXE} "${_check_dir}/check_theme_token_registry.py"
+                WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
+        # 令牌显示串归零门禁：控件侧手抄的 `"theme.x"` 字面量（裸串 / 转义串 / raw-string 三种拼法
+        # 分开计数）必须归零——发射通道齐了（`.fallback<>` / `.shows_token<>` / `theme_token_expr<>`），
+        # 手抄即漂移面：同一档被抄成两种拼法，schema 里就是两种 `default_expr`，令牌改名时还编译不红。
+        # 豁免只有三档且全是结构性或就地标记：登记表数组内、`theme_token_groups()` 体内、
+        # `THEME-LITERAL: <理由>`（名案用例文件按名豁免，但仍只许裸串拼法）。
+        add_test(NAME check_no_theme_display_literals
+                COMMAND ${PYTHON3_EXE} "${_check_dir}/check_no_theme_display_literals.py"
+                WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
+        # 主题硬编码色清偿门禁（验收判据「主题债务清零」）：控件层（include/aurora/widget /
+        # src/aurora/widget）与 CSD 预设表（include/aurora/window/title_bar_style.h）里的
+        # `Color{...}` / `Color(...)` 数字构造式必须归零，只许 `tools/include/theme_literal_exemptions.h`
+        # 逐条登记（文件 + 精确次数 + 理由）；同一枚脚本还判两处文档与表的一致性：
+        # ① `theme_tokens.groups[].consumed` 与 07-environment-modifier.md §5.1「属性行未消费组」等集；
+        # ② `theme_tokens.exemptions.files` 与登记表逐条相等（schema 过期即红）。控件层 `shaded(...)`
+        # 乘算魔数一并判零——交互态改由绘制路径叠加 `roles.hover` / `roles.pressed` 承担。
+        add_test(NAME check_no_theme_color_literals
+                COMMAND ${PYTHON3_EXE} "${_check_dir}/check_no_theme_color_literals.py"
+                WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
         # 伞头（include/aurora/aurora.h）完整性门禁。两层检查：① 文件健康——include 被行尾
         # 注释吞并 / 一行多指令 / 重复 / 路径缺失 / 编码损坏（私用区字符）/ 行结束符混用；
         # ② 覆盖契约——直连集合不得相对基线缩减，且每个 public 头必须「直连 ∨ 从直连集合可达
@@ -185,6 +242,35 @@ if (AURORA_BUILD_TESTS)
         # 一旦不再命中任何诊断即由 LIT-2 判红灯。门禁自身输出全 ASCII（非 ASCII 转义成 \uXXXX）。
         add_test(NAME check_no_cjk_literals
                 COMMAND ${PYTHON3_EXE} "${_check_dir}/check_no_cjk_literals.py"
+                WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
+        # 幽灵门禁守护：文档声明为现役的 CTest 名必须在本次构建里真实注册。以显式审定的
+        # declared_gates.txt 为基准（不扫文档裸名：全量审计 21 个未注册名里 20 个是示例 /
+        # 历史 / 规划 / 误抓），declared_gates_exemptions.txt 逐条写明豁免理由；清单为空、
+        # 解析不到任何注册名、声明名未注册、名字同时进清单与豁免表一律硬失败。
+        # 注册真值取本构建目录的 CTestTestfile.cmake，故需把构建目录作位置参数传入。
+        add_test(NAME check_declared_gates
+                COMMAND ${PYTHON3_EXE} "${_check_dir}/check_declared_gates.py" "${CMAKE_BINARY_DIR}"
+                WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
+        # 版本台账守护：third_party/ 全是整树 vendored、无包管理清单，包管理器与
+        # dependabot 的 C++ ecosystem 都看不到它们，版本只能靠机器可读清单表达。
+        # 以 codespec/third_party_versions.json 为唯一真值源，逐条按声明的正则从
+        # vendored 源码解析版本并比对；清单为空、缺字段、正则 0 命中、版本漂移、
+        # 覆盖不全（新增库漏登）、libjpeg-turbo 的 CMake 镜像不一致一律硬失败。
+        add_test(NAME check_third_party_versions
+                COMMAND ${PYTHON3_EXE} "${_check_dir}/check_third_party_versions.py" --root "${AURORA_SOURCE_DIR}"
+                WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
+        # workflow YAML 守护：ci.yml 只在注释里写「env 折叠标量内禁 # 注释行」这条纪律，
+        # 无任何强制（release.yml 的 run: | 里 # 是合法 shell 注释，不能一刀切）。此门禁把
+        # 危险组合钉死：只查 env: 下折叠标量的 # 行，另做不依赖 PyYAML 的结构自检（顶层键、
+        # tab 缩进、重复键、零命中守卫）；PyYAML 可用时追加 safe_load 解析。
+        add_test(NAME check_workflow_yaml
+                COMMAND ${PYTHON3_EXE} "${_check_dir}/check_workflow_yaml.py" --root "${AURORA_SOURCE_DIR}"
+                WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
+        # 统计比较载体的注入变异自证：同码 A/A 恒定通过、确定性退化转红、重复不足判噪声不足、
+        # 跳过 / 跨桶 / 基线篡改与缺失判数据缺失、显式种子可复现。属普通 CTest 用例，
+        # 不进 declared_gates.txt 现役一票否决门禁声明集合。
+        add_test(NAME bench_compare_selftest
+                COMMAND ${PYTHON3_EXE} "${_check_dir}/bench_compare.py" selftest
                 WORKING_DIRECTORY "${AURORA_SOURCE_DIR}")
     endif ()
 
@@ -347,27 +433,38 @@ if (AURORA_BUILD_TESTS)
             # 而非断言失败）。NODERAWFS 让 node 直接透传宿主文件系统，与原生跑法语义一致。
             # 仅测试 runner 需要：库与其它 wasm 产物保持默认（浏览器中无宿主 FS 可透传）。
             #
-            # ALLOW_MEMORY_GROWTH：NODERAWFS 产物的堆**默认不可增长**（实测：带
-            #   -sNODERAWFS=1 -O3 -fexceptions 时分配 200MB 即 Aborted(OOM)，而不带
-            #   NODERAWFS 的同源程序可增长）。测试 runner 需要它——itest_play_repository
-            #   的程序化合成 catalog（192 项 × 图标/截图/横幅位图）远超初始堆。
-            #
             # --post-js wasm_noderawfs_cwd.js：NODERAWFS 在 Windows 宿主下 FS.cwd() 返回
             #   `D:\...`（盘符 + 反斜杠），musl getcwd 判 ENOENT → fs::current_path() /
             #   fs::absolute(相对路径) 全线失效（详见该文件头部注释）。Linux/macOS 宿主本
             #   就是 POSIX 形态，shim 为恒等变换。
+            #
+            # 堆增长按 -pthread 分叉：NODERAWFS 产物的堆默认不可增长（实测：带
+            #   -sNODERAWFS=1 -O3 -fexceptions 时超过初始堆即 Aborted(OOM)，而不带 NODERAWFS
+            #   的同源程序可增长），单线程腿保持 ALLOW_MEMORY_GROWTH=1 以容纳峰值用例。
+            #   -pthread 腿改为链接期定容：共享内存在线程运行期增长会触发上游引擎缺陷——
+            #   V8 Liftoff 缓存的内存边界在 memory.grow 后不刷新，另一线程的原子访问即 trap
+            #   "memory access out of bounds"（Chrome 157 才修，Node 各 release 线均无修复）。
+            #   全量 ctest 实测堆峰值约 84MiB，定容 256MiB 留 3 倍余量，运行期不再发生增长；
+            #   若峰值估计不足，emscripten 直接 OOM 报错而非带着失效边界继续跑，失败形态可诊断。
+            #   单线程腿无共享内存、浏览器产物不走 NODERAWFS，均不受该缺陷影响。
             target_link_options(${tgt} PRIVATE
                     -sNODERAWFS=1
-                    -sALLOW_MEMORY_GROWTH=1
                     # STACK_SIZE：Emscripten 3.1.27+ 默认栈仅 64KB，而 JSON 解析器是递归下降
                     # （sax.cpp emit_value → emit_object/emit_array → emit_value(depth+1)），
                     # max_depth 默认 512 且深度检查在递归入口——会先扎满 512 层才折返；每层帧携带
                     # Result<bool>（variant 里的 Error 含 7 个 std::string，单帧 200+ 字节），
                     # 512 层双帧 ≈ 200KB+，远超 64KB ⇒ wasm 下表现为 RuntimeError: memory access
                     # out of bounds（栈溢出的 wasm 形态）。native 栈 8MB 无感，仅 wasm 需要显式放大；
-                    # 4MB = 实测需求（200KB+）的 8 倍余量，ALLOW_MEMORY_GROWTH 下初始内存足够容纳。
+                    # 4MB = 实测需求（200KB+）的 8 倍余量，定容后的初始内存足够容纳。
                     -sSTACK_SIZE=4194304
                     "--post-js=${AURORA_SOURCE_DIR}/tests/support/wasm_noderawfs_cwd.js")
+            if (AURORA_ENABLE_WASM_PTHREADS)
+                target_link_options(${tgt} PRIVATE
+                        -sALLOW_MEMORY_GROWTH=0
+                        -sINITIAL_MEMORY=268435456)
+            else ()
+                target_link_options(${tgt} PRIVATE -sALLOW_MEMORY_GROWTH=1)
+            endif ()
         endif ()
     endfunction()
 

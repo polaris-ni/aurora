@@ -126,9 +126,13 @@ using aurora::test::scripts::write_then_hold;
 }
 
 /// @brief 取协程结果的内存活 Response 的 Result 层（协程本身不抛，外层恒成功）。
+///
+/// 先 REQUIRE「协程已收尾」再读：`CoroTask::result()` 在未收尾时读的是空结果槽（帧外内存），
+/// 直接读会段错误而不是报出一条失败判据（口径同 `pump_send` 的注释）。
 [[nodiscard]] auto inner(CoroTask<Result<Response>> &task) -> Result<Response> {
+    AURORA_TEST_REQUIRE_MSG(task.is_done(), "coro task not finished when result was read");
     const auto outer = task.result();
-    AURORA_TEST_REQUIRE_MSG(bool(outer), outer ? std::string{} : outer.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(outer), outer ? std::string{} : outer.error().message);
     return outer.value();
 }
 
@@ -150,6 +154,10 @@ template <std::size_t N>
 const unsigned char AURORA_GZIP_HELLO[] = {31, 139, 8,  0,   0,  0,  0, 0, 2,   255, 203, 72,  205, 201, 201, 87,
                                            72, 44,  45, 202, 47, 74, 4, 0, 214, 230, 105, 148, 12,  0,   0,   0};
 #ifdef AURORA_ENABLE_COMPRESSION
+// 高压缩比载荷：gzip 包装的 100 枚 'a'，线上 24 字节、解压产物 100 字节。用来把「跟随来的解压上限」
+// 与线上字节闸分开——取 50 字节上限时线上过得去、产物过不去。
+const unsigned char AURORA_GZIP_EXPANDS[] = {31,  139, 8, 0, 0,   0,   0,   0,   2,   255, 75, 76,
+                                             164, 61,  0, 0, 100, 122, 112, 175, 100, 0,   0,  0};
 const unsigned char AURORA_RAW_HELLO[] = {203, 72, 205, 201, 201, 87, 72, 44, 45, 202, 47, 74, 4, 0};
 const unsigned char AURORA_GZIP_THEN_ZLIB[] = {120, 156, 147, 239, 230, 96,  0,   1,  166, 255, 167, 61,  206,
                                                158, 60,  25,  238, 161, 163, 123, 74, 223, 139, 133, 225, 218,
@@ -189,7 +197,7 @@ const unsigned char AURORA_GZIP_THEN_ZLIB[] = {120, 156, 147, 239, 230, 96,  0, 
 /// 故这里把请求头部块留一份。脚本线程写、用例线程读，用互斥量交接（用例在 send 结束后才取，天然错开，
 /// 锁只为把这件事写成可见的同步而不是默认成立）。
 /// @param recorded 交接缓冲（脚本线程追加）。
-/// @param mutex_for_recorded 交接缓冲的锁。
+/// @param guard 交接缓冲的锁。
 /// @param payload 读满一个头部块后写出的应答字节。
 /// @return 对端脚本。
 [[nodiscard]] auto record_then_reply(std::string &recorded, std::mutex &guard, std::string payload) -> PeerScript {
@@ -882,10 +890,10 @@ AURORA_TEST_CASE(send_materializes_content_length) {
     AURORA_TEST_CHECK(aurora::test::net::drive_until("send done", [&task] { return task.is_done(); }).satisfied);
 
     const auto response = inner(task);
-    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(response), response ? std::string{} : response.error().message);
     AURORA_TEST_CHECK_EQ(response.value().status(), std::uint16_t{200});
     const auto text = response.value().text();
-    AURORA_TEST_REQUIRE(bool(text));
+    AURORA_TEST_REQUIRE(static_cast<bool>(text));
     AURORA_TEST_CHECK_EQ(text.value(), "hello");
 }
 
@@ -904,9 +912,9 @@ AURORA_TEST_CASE(send_materializes_chunked_body) {
     AURORA_TEST_CHECK(aurora::test::net::drive_until("send done", [&task] { return task.is_done(); }).satisfied);
 
     const auto response = inner(task);
-    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(response), response ? std::string{} : response.error().message);
     const auto text = response.value().text();
-    AURORA_TEST_REQUIRE(bool(text));
+    AURORA_TEST_REQUIRE(static_cast<bool>(text));
     AURORA_TEST_CHECK_EQ(text.value(), "hello world");
 }
 
@@ -928,10 +936,10 @@ AURORA_TEST_CASE(send_follows_redirect_across_peers) {
     AURORA_TEST_CHECK(aurora::test::net::drive_until("send done", [&task] { return task.is_done(); }).satisfied);
 
     const auto response = inner(task);
-    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(response), response ? std::string{} : response.error().message);
     AURORA_TEST_CHECK_EQ(response.value().status(), std::uint16_t{200});
     const auto text = response.value().text();
-    AURORA_TEST_REQUIRE(bool(text));
+    AURORA_TEST_REQUIRE(static_cast<bool>(text));
     AURORA_TEST_CHECK_EQ(text.value(), "Z");
     AURORA_TEST_CHECK_EQ(origin.accepts(), 1);
     AURORA_TEST_CHECK_EQ(target.accepts(), 1);
@@ -952,7 +960,7 @@ AURORA_TEST_CASE(send_stops_at_redirect_limit) {
     AURORA_TEST_CHECK(aurora::test::net::drive_until("send done", [&task] { return task.is_done(); }).satisfied);
 
     const auto response = inner(task);
-    AURORA_TEST_REQUIRE_FALSE(bool(response));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(response));
     AURORA_TEST_CHECK_EQ(response.error().code_enum, aurora::ErrorCode::HttpRedirectLimit);
     // 初始一跳 + 两跳跟随 = 三次连接，其后因超限而止。
     AURORA_TEST_CHECK_EQ(peer.accepts(), 3);
@@ -975,14 +983,20 @@ AURORA_TEST_CASE(send_times_out_whole_request) {
     // 先泵到连接与写出落地（对端已 accept、读请求挂起）。
     AURORA_TEST_CHECK(
         aurora::test::net::drive_until("peer accepted", [&peer] { return peer.accepts() > 0; }).satisfied);
-    // 推进脚本化时钟到整请求时限：到期取消令牌，挂起的读以 net-cancelled 收尾，收尾据 timed_out 改道。
-    engine.advance(std::chrono::milliseconds{50});
+    // 一步推进再泵宿主：connect 的完成经进程级唯一队列要泵才执行，其后的写出、读阶段
+    // 看门狗都在那之后才登记——一次把时钟推满时限会把登记晚于到期的看门狗漏掉（口径同 `pump_until`）。
+    // 预算给到时限的两倍：看门狗在步进循环内登记时，时钟已烧进若干步。
+    // 到期取消令牌，挂起的读以 net-cancelled 收尾，收尾据 timed_out 改道。
+    for (std::int64_t spent = 0; spent < 100 && !task.is_done(); spent += 10) {
+        (void)engine.advance(std::chrono::milliseconds{10});
+        aurora::test::net::pump_idle(std::chrono::milliseconds{5});
+    }
     AURORA_TEST_CHECK(aurora::test::net::drive_until(
                           "send done", [&task] { return task.is_done(); }, std::chrono::milliseconds{500})
                           .satisfied);
 
     const auto response = inner(task);
-    AURORA_TEST_REQUIRE_FALSE(bool(response));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(response));
     AURORA_TEST_CHECK_EQ(response.error().code_enum, aurora::ErrorCode::HttpTimeout);
 }
 
@@ -1003,13 +1017,19 @@ AURORA_TEST_CASE(send_times_out_read_idle) {
         Request::get(loopback_url(peer.port())).timeouts(Timeouts{.read_idle = std::chrono::milliseconds{50}}));
     AURORA_TEST_CHECK(
         aurora::test::net::drive_until("peer accepted", [&peer] { return peer.accepts() > 0; }).satisfied);
-    engine.advance(std::chrono::milliseconds{50});
+    // 一步推进再泵宿主（机理同 `send_times_out_whole_request`）：read_idle 看门狗在 connect 完成
+    // 回主线程、请求写出之后才登记——它登记时虚拟时钟可能已烧进若干步，故预算给到时限的两倍，
+    // 保证「登记永远晚于第一拍」也必然被推到到期。
+    for (std::int64_t spent = 0; spent < 100 && !task.is_done(); spent += 10) {
+        (void)engine.advance(std::chrono::milliseconds{10});
+        aurora::test::net::pump_idle(std::chrono::milliseconds{5});
+    }
     AURORA_TEST_CHECK(aurora::test::net::drive_until(
                           "send done", [&task] { return task.is_done(); }, std::chrono::milliseconds{500})
                           .satisfied);
 
     const auto response = inner(task);
-    AURORA_TEST_REQUIRE_FALSE(bool(response));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(response));
     AURORA_TEST_CHECK_EQ(response.error().code_enum, aurora::ErrorCode::HttpTimeout);
 }
 
@@ -1034,7 +1054,7 @@ AURORA_TEST_CASE(send_times_out_connect) {
                           .satisfied);
 
     const auto response = inner(task);
-    AURORA_TEST_REQUIRE_FALSE(bool(response));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(response));
     AURORA_TEST_CHECK_EQ(response.error().code_enum, aurora::ErrorCode::HttpTimeout);
 }
 
@@ -1056,7 +1076,7 @@ AURORA_TEST_CASE(send_with_a_cancelled_token_issues_no_connection) {
                           .satisfied);
 
     const auto response = inner(task);
-    AURORA_TEST_REQUIRE_FALSE(bool(response));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(response));
     AURORA_TEST_CHECK_EQ(response.error().code_enum, ErrorCode::NetCancelled);
     aurora::test::net::pump_idle(std::chrono::milliseconds{50});  // 再给一段窗口：期间什么都不该发生
     AURORA_TEST_CHECK_EQ(peer.accepts(), 0);
@@ -1088,7 +1108,7 @@ AURORA_TEST_CASE(cancelling_mid_exchange_ends_it_with_net_cancelled) {
                           .satisfied);
 
     const auto response = inner(task);
-    AURORA_TEST_REQUIRE_FALSE(bool(response));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(response));
     AURORA_TEST_CHECK_EQ(response.error().code_enum, ErrorCode::NetCancelled);
 }
 
@@ -1111,9 +1131,9 @@ AURORA_TEST_CASE(open_stream_with_a_cancelled_token_never_reaches_the_sink) {
                           .satisfied);
 
     const auto outer = task.result();
-    AURORA_TEST_REQUIRE(bool(outer));
+    AURORA_TEST_REQUIRE(static_cast<bool>(outer));
     const Result<StreamOutcome> &outcome = outer.value();
-    AURORA_TEST_REQUIRE_FALSE(bool(outcome));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(outcome));
     AURORA_TEST_CHECK_EQ(outcome.error().code_enum, ErrorCode::NetCancelled);
     // 三个入口一次都没被调用：取消的那次交换连头部都不该交给宿主。
     AURORA_TEST_CHECK_EQ(sink.heads, 0);
@@ -1136,7 +1156,7 @@ AURORA_TEST_CASE(a_cancelled_token_beats_a_fresh_cache_hit) {
     const auto url = loopback_url(peer.port());
 
     const auto warm = send_and_drive(client, Request::get(url));  // 先把表填上一份新鲜副本
-    AURORA_TEST_REQUIRE(bool(warm));
+    AURORA_TEST_REQUIRE(static_cast<bool>(warm));
 
     // 这条判据钉住的是起手那一道闸：表里明明有一份新鲜副本，已取消的令牌也不把它当成一次交付交出。
     Cancellation token;
@@ -1147,7 +1167,7 @@ AURORA_TEST_CASE(a_cancelled_token_beats_a_fresh_cache_hit) {
                           .satisfied);
 
     const auto response = inner(task);
-    AURORA_TEST_REQUIRE_FALSE(bool(response));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(response));
     AURORA_TEST_CHECK_EQ(response.error().code_enum, ErrorCode::NetCancelled);
     AURORA_TEST_CHECK_EQ(peer.accepts(), 1);  // 只有热身那一次
 }
@@ -1193,9 +1213,9 @@ AURORA_TEST_CASE(send_decompresses_a_gzip_body) {
     AURORA_TEST_CHECK(aurora::test::net::drive_until("send done", [&task] { return task.is_done(); }).satisfied);
 
     const auto response = inner(task);
-    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(response), response ? std::string{} : response.error().message);
     const auto text = response.value().text();
-    AURORA_TEST_REQUIRE_MSG(bool(text), text ? std::string{} : text.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(text), text ? std::string{} : text.error().message);
     AURORA_TEST_CHECK_EQ(text.value(), "hello aurora");
     // 头部按对端原样保留：体已是还原后的字节，但「对端声明了什么」仍是可审计的事实。
     AURORA_TEST_CHECK_EQ(response.value().header("Content-Encoding").value_or(""), "gzip");
@@ -1216,9 +1236,9 @@ AURORA_TEST_CASE(send_falls_back_to_a_raw_deflate_stream) {
     AURORA_TEST_CHECK(aurora::test::net::drive_until("send done", [&task] { return task.is_done(); }).satisfied);
 
     const auto response = inner(task);
-    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(response), response ? std::string{} : response.error().message);
     const auto text = response.value().text();
-    AURORA_TEST_REQUIRE_MSG(bool(text), text ? std::string{} : text.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(text), text ? std::string{} : text.error().message);
     AURORA_TEST_CHECK_EQ(text.value(), "hello aurora");
 }
 
@@ -1238,9 +1258,9 @@ AURORA_TEST_CASE(send_undoes_a_multi_stage_chain_in_reverse) {
     AURORA_TEST_CHECK(aurora::test::net::drive_until("send done", [&task] { return task.is_done(); }).satisfied);
 
     const auto response = inner(task);
-    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(response), response ? std::string{} : response.error().message);
     const auto text = response.value().text();
-    AURORA_TEST_REQUIRE_MSG(bool(text), text ? std::string{} : text.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(text), text ? std::string{} : text.error().message);
     AURORA_TEST_CHECK_EQ(text.value(), "hello aurora");
 }
 
@@ -1260,7 +1280,7 @@ AURORA_TEST_CASE(send_enforces_the_decompressed_ceiling) {
     AURORA_TEST_CHECK(
         aurora::test::net::drive_until("limited done", [&limited] { return limited.is_done(); }).satisfied);
     const auto refused = inner(limited);
-    AURORA_TEST_REQUIRE_FALSE(bool(refused));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(refused));
     AURORA_TEST_CHECK_EQ(refused.error().code_enum, aurora::ErrorCode::HttpBodyTooLarge);
     // detail 点名越的是哪一枚旋钮：指错地方，调用方就会去调不管用的那一枚。
     AURORA_TEST_CHECK(refused.error().message.find("max_decompressed_bytes") != std::string::npos);
@@ -1273,11 +1293,33 @@ AURORA_TEST_CASE(send_enforces_the_decompressed_ceiling) {
     AURORA_TEST_CHECK(
         aurora::test::net::drive_until("allowed done", [&allowed] { return allowed.is_done(); }).satisfied);
     const auto delivered = inner(allowed);
-    AURORA_TEST_REQUIRE_MSG(bool(delivered), delivered ? std::string{} : delivered.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(delivered), delivered ? std::string{} : delivered.error().message);
     const auto text = delivered.value().text();
-    AURORA_TEST_REQUIRE(bool(text));
+    AURORA_TEST_REQUIRE(static_cast<bool>(text));
     AURORA_TEST_CHECK_EQ(text.value(), "hello aurora");
     AURORA_TEST_CHECK_EQ(peer.accepts(), 2);
+}
+
+// 两路径对照之一：只设 `max_body_bytes`、不设 `max_decompressed_bytes` 时，物化入口按公共契约跟随。
+// 载荷刻意选「线上 24 < 50、解压产物 100 > 50」，排除线上字节闸，只让跟随来的解压上限生效。
+AURORA_TEST_CASE(send_follows_materialized_body_ceiling_for_decompression) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+    const auto wire = length_framed("Content-Encoding: gzip\r\n", bytes(AURORA_GZIP_EXPANDS));
+    ScriptedPeer peer(reply_after_reading(1, wire));
+    AURORA_TEST_REQUIRE(peer.valid());
+    const aurora::test::net::HostDriven host;
+
+    Client client;
+    allow_test_cleartext(client);
+    client.max_body_bytes(std::optional<std::uint64_t>{std::uint64_t{50}});
+    auto task = client.send(Request::get(loopback_url(peer.port())));
+    AURORA_TEST_CHECK(aurora::test::net::drive_until("followed done", [&task] { return task.is_done(); }).satisfied);
+    const auto refused = inner(task);
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(refused));
+    AURORA_TEST_CHECK_EQ(refused.error().code_enum, aurora::ErrorCode::HttpBodyTooLarge);
+    AURORA_TEST_CHECK(refused.error().message.find("max_decompressed_bytes") != std::string::npos);
 }
 
 AURORA_TEST_CASE(send_advertises_the_supported_codings_by_default) {
@@ -1342,7 +1384,7 @@ AURORA_TEST_CASE(build_advertises_and_decodes_only_when_compression_is_compiled_
     AURORA_TEST_CHECK_EQ(count_occurrences(request_text, "accept-encoding:"), std::size_t{1});
     AURORA_TEST_CHECK(request_text.find("accept-encoding: gzip, deflate\r\n") != std::string::npos);
     const auto response = inner(task);
-    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(response), response ? std::string{} : response.error().message);
     const auto &plain = response.value().body();
     AURORA_TEST_CHECK_EQ(std::string(plain.begin(), plain.end()), "hello aurora");
 }
@@ -1372,6 +1414,13 @@ AURORA_TEST_CASE(send_undoes_a_multi_stage_chain_in_reverse) {
 }
 
 AURORA_TEST_CASE(send_enforces_the_decompressed_ceiling) {
+#ifdef AURORA_PLATFORM_WASM
+    AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
+#endif
+    AURORA_TEST_SKIP("AURORA_ENABLE_COMPRESSION is not enabled (build with -DAURORA_ENABLE_COMPRESSION=ON)");
+}
+
+AURORA_TEST_CASE(send_follows_materialized_body_ceiling_for_decompression) {
 #ifdef AURORA_PLATFORM_WASM
     AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
 #endif
@@ -1412,7 +1461,7 @@ AURORA_TEST_CASE(build_advertises_and_decodes_only_when_compression_is_compiled_
     const auto request_text = lowered(recorded_request(recorded, guard));
     AURORA_TEST_CHECK_EQ(count_occurrences(request_text, "accept-encoding:"), std::size_t{0});
     const auto response = inner(task);
-    AURORA_TEST_REQUIRE_FALSE(bool(response));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(response));
     AURORA_TEST_CHECK_EQ(response.error().code_enum, aurora::ErrorCode::HttpContentEncodingUnsupported);
 }
 
@@ -1432,7 +1481,7 @@ AURORA_TEST_CASE(send_refuses_a_coding_outside_the_advertised_set) {
     AURORA_TEST_CHECK(aurora::test::net::drive_until("send done", [&task] { return task.is_done(); }).satisfied);
 
     const auto response = inner(task);
-    AURORA_TEST_REQUIRE_FALSE(bool(response));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(response));
     AURORA_TEST_CHECK_EQ(response.error().code_enum, aurora::ErrorCode::HttpContentEncodingUnsupported);
     AURORA_TEST_CHECK(response.error().message.find("br") != std::string::npos);
 }
@@ -1452,7 +1501,7 @@ AURORA_TEST_CASE(send_refuses_a_body_that_fails_its_declared_coding) {
     AURORA_TEST_CHECK(aurora::test::net::drive_until("send done", [&task] { return task.is_done(); }).satisfied);
 
     const auto response = inner(task);
-    AURORA_TEST_REQUIRE_FALSE(bool(response));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(response));
 #ifdef AURORA_ENABLE_COMPRESSION
     // 有解码器：分帧干净而字节不合流，成因是流损坏。
     AURORA_TEST_CHECK_EQ(response.error().code_enum, aurora::ErrorCode::HttpBodyCorrupt);
@@ -1478,7 +1527,7 @@ AURORA_TEST_CASE(send_skips_coding_validation_for_a_head_response) {
     AURORA_TEST_CHECK(aurora::test::net::drive_until("send done", [&task] { return task.is_done(); }).satisfied);
 
     const auto response = inner(task);
-    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(response), response ? std::string{} : response.error().message);
     AURORA_TEST_CHECK_EQ(response.value().body().size(), std::size_t{0});
 }
 
@@ -1505,7 +1554,7 @@ AURORA_TEST_CASE(progress_reports_upload_bytes_and_always_ends_with_a_settled_va
     request.header("Accept-Encoding", "identity");  // 显式设定即锁定头部字节，缺省宣告不再注入
     request.body(std::vector<char>{payload_body.begin(), payload_body.end()});
     const auto rendered = request.render_head();
-    AURORA_TEST_REQUIRE(bool(rendered));
+    AURORA_TEST_REQUIRE(static_cast<bool>(rendered));
 
     std::vector<Progress> seen;  // 回调在续体线程（宿主驱动即用例线程）上被调用，无需加锁
     request.on_progress([&seen](const Progress &progress) -> void { seen.push_back(progress); });
@@ -1515,7 +1564,7 @@ AURORA_TEST_CASE(progress_reports_upload_bytes_and_always_ends_with_a_settled_va
                           "send done", [&task] { return task.is_done(); }, std::chrono::milliseconds{4000})
                           .satisfied);
     const auto response = inner(task);
-    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(response), response ? std::string{} : response.error().message);
 
     const auto uploads = phases_of(seen, ProgressPhase::Upload);
     AURORA_TEST_REQUIRE_GT(uploads.size(), std::size_t{1});
@@ -1571,7 +1620,7 @@ AURORA_TEST_CASE(a_frame_gate_holds_progress_to_one_emission_per_frame_plus_the_
                           "send done", [&task] { return task.is_done(); }, std::chrono::milliseconds{4000})
                           .satisfied);
     const auto response = inner(task);
-    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(response), response ? std::string{} : response.error().message);
 
     const auto uploads = phases_of(seen, ProgressPhase::Upload);
     AURORA_TEST_REQUIRE_EQ(uploads.size(), std::size_t{2});  // 首发 + 末值，中间三块并进了末值
@@ -1584,7 +1633,7 @@ AURORA_TEST_CASE(a_frame_gate_holds_progress_to_one_emission_per_frame_plus_the_
     AURORA_TEST_CHECK_EQ(client.progress_frame_source()(), std::uint64_t{2});
     // 线上字节仍与一次写完同型（分块只改本库内部的完成次数）。
     const auto rendered = request.render_head();
-    AURORA_TEST_REQUIRE(bool(rendered));
+    AURORA_TEST_REQUIRE(static_cast<bool>(rendered));
     const auto received = recorded_request(recorded, guard);
     AURORA_TEST_CHECK_EQ(received.size(), rendered.value().size() + payload_body.size());
 }
@@ -1611,7 +1660,7 @@ AURORA_TEST_CASE(an_unarmed_request_delivers_the_same_wire_bytes_as_an_armed_one
     request.header("Accept-Encoding", "identity");
     request.body(std::vector<char>{payload_body.begin(), payload_body.end()});
     const auto rendered = request.render_head();
-    AURORA_TEST_REQUIRE(bool(rendered));
+    AURORA_TEST_REQUIRE(static_cast<bool>(rendered));
     AURORA_TEST_CHECK_FALSE(static_cast<bool>(request.on_progress()));  // 未挂回调：闸整个不工作
 
     auto task = client.send(request);
@@ -1619,7 +1668,7 @@ AURORA_TEST_CASE(an_unarmed_request_delivers_the_same_wire_bytes_as_an_armed_one
                           "send done", [&task] { return task.is_done(); }, std::chrono::milliseconds{4000})
                           .satisfied);
     const auto response = inner(task);
-    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(response), response ? std::string{} : response.error().message);
 
     const auto received = recorded_request(recorded, guard);
     const std::string expected = rendered.value() + payload_body;
@@ -1645,7 +1694,7 @@ AURORA_TEST_CASE(a_get_without_a_request_body_reports_no_upload_progress) {
     auto task = client.send(std::move(request));
     AURORA_TEST_CHECK(aurora::test::net::drive_until("send done", [&task] { return task.is_done(); }).satisfied);
     const auto response = inner(task);
-    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(response), response ? std::string{} : response.error().message);
 
     AURORA_TEST_CHECK_EQ(phases_of(seen, ProgressPhase::Upload).size(), std::size_t{0});
     const auto downloads = phases_of(seen, ProgressPhase::Download);
@@ -1673,7 +1722,7 @@ AURORA_TEST_CASE(a_chunked_body_reports_download_progress_without_a_known_total)
     auto task = client.send(std::move(request));
     AURORA_TEST_CHECK(aurora::test::net::drive_until("send done", [&task] { return task.is_done(); }).satisfied);
     const auto response = inner(task);
-    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(response), response ? std::string{} : response.error().message);
 
     const auto downloads = phases_of(seen, ProgressPhase::Download);
     AURORA_TEST_REQUIRE(!downloads.empty());
@@ -1715,7 +1764,7 @@ AURORA_TEST_CASE(send_replays_a_transient_status_until_the_peer_agrees) {
     AURORA_TEST_REQUIRE(pump_send(engine, task));
 
     const auto response = inner(task);
-    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(response), response ? std::string{} : response.error().message);
     AURORA_TEST_CHECK_EQ(response.value().status(), std::uint16_t{200});
     // 只打了两次：第二次成功就不再往下打，`attempts` 是上限而不是次数。
     AURORA_TEST_CHECK_EQ(peer.accepts(), 2);
@@ -1739,7 +1788,7 @@ AURORA_TEST_CASE(send_hands_over_the_last_response_when_retries_are_exhausted) {
 
     // 非 2xx 是成功的 Result：耗尽时交出的是**服务器最后说的那一句**，本件不折成「重试失败」这种新码。
     const auto response = inner(task);
-    AURORA_TEST_REQUIRE(bool(response));
+    AURORA_TEST_REQUIRE(static_cast<bool>(response));
     AURORA_TEST_CHECK_EQ(response.value().status(), std::uint16_t{503});
     AURORA_TEST_CHECK_EQ(response.value().body().size(), std::size_t{4});
     AURORA_TEST_CHECK_EQ(peer.accepts(), 2);
@@ -1772,7 +1821,7 @@ AURORA_TEST_CASE(send_waits_the_retry_after_the_peer_asked_for) {
     AURORA_TEST_REQUIRE(pump_send(engine, task));
 
     const auto response = inner(task);
-    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(response), response ? std::string{} : response.error().message);
     AURORA_TEST_CHECK_EQ(response.value().status(), std::uint16_t{200});
 }
 
@@ -1802,7 +1851,7 @@ AURORA_TEST_CASE(send_clamps_a_retry_after_to_the_backoff_ceiling) {
     AURORA_TEST_REQUIRE(pump_send(engine, task));
 
     const auto response = inner(task);
-    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(response), response ? std::string{} : response.error().message);
     AURORA_TEST_CHECK_EQ(response.value().status(), std::uint16_t{200});
 }
 
@@ -1824,7 +1873,7 @@ AURORA_TEST_CASE(send_never_replays_a_non_idempotent_method) {
     AURORA_TEST_REQUIRE(pump_send(engine, task));
 
     const auto response = inner(task);
-    AURORA_TEST_REQUIRE(bool(response));
+    AURORA_TEST_REQUIRE(static_cast<bool>(response));
     AURORA_TEST_CHECK_EQ(response.value().status(), std::uint16_t{503});
     AURORA_TEST_CHECK_EQ(peer.accepts(), 1);
 }
@@ -1844,7 +1893,7 @@ AURORA_TEST_CASE(send_replays_nothing_while_the_policy_is_off) {
     AURORA_TEST_CHECK(aurora::test::net::drive_until("send done", [&task] { return task.is_done(); }).satisfied);
 
     const auto response = inner(task);
-    AURORA_TEST_REQUIRE(bool(response));
+    AURORA_TEST_REQUIRE(static_cast<bool>(response));
     AURORA_TEST_CHECK_EQ(response.value().status(), std::uint16_t{503});
     AURORA_TEST_CHECK_EQ(peer.accepts(), 1);
 }
@@ -1867,7 +1916,7 @@ AURORA_TEST_CASE(send_refuses_to_replay_a_protocol_error) {
     AURORA_TEST_REQUIRE(pump_send(engine, task));
 
     const auto response = inner(task);
-    AURORA_TEST_REQUIRE_FALSE(bool(response));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(response));
     AURORA_TEST_CHECK_EQ(response.error().code_enum, aurora::ErrorCode::HttpProtocolError);
     AURORA_TEST_CHECK_EQ(peer.accepts(), 1);
 }
@@ -1898,7 +1947,7 @@ AURORA_TEST_CASE(send_refuses_to_replay_a_failure_the_table_marks_non_retryable)
     AURORA_TEST_REQUIRE(pump_send(engine, task));
 
     const auto response = inner(task);
-    AURORA_TEST_REQUIRE_FALSE(bool(response));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(response));
     AURORA_TEST_CHECK_EQ(error_class_of(response.error().code_enum), HttpErrorClass::Unreachable);
     AURORA_TEST_CHECK_FALSE(response.error().retryable);
     AURORA_TEST_CHECK_EQ(peer.accepts(), 1);
@@ -1923,7 +1972,7 @@ AURORA_TEST_CASE(send_gives_the_total_window_a_fresh_clock_per_attempt) {
     AURORA_TEST_REQUIRE(pump_send(engine, task));
 
     const auto response = inner(task);
-    AURORA_TEST_REQUIRE_FALSE(bool(response));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(response));
     AURORA_TEST_CHECK_EQ(response.error().code_enum, aurora::ErrorCode::HttpTimeout);
     AURORA_TEST_CHECK(names_in(response.error().message, "total"));
     // 三扇墙 + 两段退避 = 170 ms 虚拟时间；若时限是全序列共用的，这里只会烧掉一扇（≈60 ms）。
@@ -1950,7 +1999,7 @@ AURORA_TEST_CASE(send_stops_the_retry_sequence_at_the_budget) {
     AURORA_TEST_REQUIRE(pump_send(engine, task));
 
     const auto response = inner(task);
-    AURORA_TEST_REQUIRE_FALSE(bool(response));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(response));
     // 被墙掐掉的尝试以 `net-cancelled` 形态抵达：那既不是对端说的也不是本库上限，改报 `http-timeout` 并点名 budget。
     AURORA_TEST_CHECK_EQ(response.error().code_enum, aurora::ErrorCode::HttpTimeout);
     AURORA_TEST_CHECK(names_in(response.error().message, "budget"));
@@ -1975,7 +2024,7 @@ AURORA_TEST_CASE(send_refuses_an_out_of_range_policy_before_any_connection) {
     AURORA_TEST_CHECK(aurora::test::net::drive_until("send done", [&task] { return task.is_done(); }).satisfied);
 
     const auto response = inner(task);
-    AURORA_TEST_REQUIRE_FALSE(bool(response));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(response));
     AURORA_TEST_CHECK_EQ(response.error().code_enum, aurora::ErrorCode::HttpRequestInvalid);
     AURORA_TEST_CHECK(names_in(response.error().message, "base"));
     AURORA_TEST_CHECK_EQ(peer.accepts(), 0);
@@ -1995,13 +2044,13 @@ AURORA_TEST_CASE(a_fresh_cache_hit_never_reaches_the_peer) {
     const auto url = loopback_url(peer.port());
 
     const auto first = send_and_drive(client, Request::get(url));
-    AURORA_TEST_REQUIRE(bool(first));
+    AURORA_TEST_REQUIRE(static_cast<bool>(first));
     AURORA_TEST_CHECK_FALSE(first.value().from_cache());  // 第一次确实是从对端取回的
     AURORA_TEST_CHECK_EQ(peer.accepts(), 1);
 
     // 开关兑现的就是这一条：命中新鲜副本时一条连接都不发起，载荷与头部都出自表里那一份。
     const auto second = send_and_drive(client, Request::get(url));
-    AURORA_TEST_REQUIRE(bool(second));
+    AURORA_TEST_REQUIRE(static_cast<bool>(second));
     AURORA_TEST_CHECK(second.value().from_cache());
     AURORA_TEST_CHECK_EQ(second.value().status(), std::uint16_t{200});
     AURORA_TEST_CHECK_EQ(as_body_text(second.value()), std::string{"first"});
@@ -2027,10 +2076,10 @@ AURORA_TEST_CASE(a_stale_entry_asks_before_it_delivers) {
     allow_test_cleartext(client);
     client.cache(CacheOptions{.enabled = true});
     const auto url = loopback_url(peer.port());
-    AURORA_TEST_REQUIRE(bool(send_and_drive(client, Request::get(url))));
+    AURORA_TEST_REQUIRE(static_cast<bool>(send_and_drive(client, Request::get(url))));
 
     const auto second = send_and_drive(client, Request::get(url));
-    AURORA_TEST_REQUIRE(bool(second));
+    AURORA_TEST_REQUIRE(static_cast<bool>(second));
     // 304 不是调用方该看见的结局：并回已存的头部块与体，交出的仍是那份 200。
     AURORA_TEST_CHECK_EQ(second.value().status(), std::uint16_t{200});
     AURORA_TEST_CHECK_EQ(as_body_text(second.value()), std::string{"stored"});
@@ -2044,7 +2093,7 @@ AURORA_TEST_CASE(a_stale_entry_asks_before_it_delivers) {
     AURORA_TEST_CHECK_NE(sent.find("If-None-Match: \"v1\""), std::string::npos);
     // 刚验证过的那份重新获得新鲜度：第三次不必再触网。
     const auto third = send_and_drive(client, Request::get(url));
-    AURORA_TEST_REQUIRE(bool(third));
+    AURORA_TEST_REQUIRE(static_cast<bool>(third));
     AURORA_TEST_CHECK(third.value().from_cache());
     AURORA_TEST_CHECK_EQ(peer.accepts(), 2);
 }
@@ -2063,9 +2112,9 @@ AURORA_TEST_CASE(the_peer_can_forbid_the_table) {
     allow_test_cleartext(client);
     client.cache(CacheOptions{.enabled = true});
     const auto url = loopback_url(peer.port());
-    AURORA_TEST_REQUIRE(bool(send_and_drive(client, Request::get(url))));
+    AURORA_TEST_REQUIRE(static_cast<bool>(send_and_drive(client, Request::get(url))));
     const auto second = send_and_drive(client, Request::get(url));
-    AURORA_TEST_REQUIRE(bool(second));
+    AURORA_TEST_REQUIRE(static_cast<bool>(second));
     AURORA_TEST_CHECK_FALSE(second.value().from_cache());
     AURORA_TEST_CHECK_EQ(peer.accepts(), 2);
 }
@@ -2085,18 +2134,18 @@ AURORA_TEST_CASE(a_request_may_bypass_the_table) {
     allow_test_cleartext(client);
     client.cache(CacheOptions{.enabled = true});
     const auto url = loopback_url(peer.port());
-    AURORA_TEST_REQUIRE(bool(send_and_drive(client, Request::get(url))));
+    AURORA_TEST_REQUIRE(static_cast<bool>(send_and_drive(client, Request::get(url))));
 
     // `Request::no_cache()` 取的是「这次要此刻的真相」：既不查表，这次的结果也不写进表。
     const auto bypass = send_and_drive(client, Request::get(url).no_cache(true));
-    AURORA_TEST_REQUIRE(bool(bypass));
+    AURORA_TEST_REQUIRE(static_cast<bool>(bypass));
     AURORA_TEST_CHECK_EQ(peer.accepts(), 2);
     AURORA_TEST_CHECK_FALSE(bypass.value().from_cache());
     AURORA_TEST_CHECK_EQ(as_body_text(bypass.value()), std::string{"two"});
 
     // 第三次读回的是**第一次**那份：绕过只读不写，那条硬约定才立得住（若这次交出 `two`，就是写侧漏了闸）。
     const auto after = send_and_drive(client, Request::get(url));
-    AURORA_TEST_REQUIRE(bool(after));
+    AURORA_TEST_REQUIRE(static_cast<bool>(after));
     AURORA_TEST_CHECK(after.value().from_cache());
     AURORA_TEST_CHECK_EQ(as_body_text(after.value()), std::string{"one"});
     AURORA_TEST_CHECK_EQ(peer.accepts(), 2);
@@ -2113,9 +2162,9 @@ AURORA_TEST_CASE(the_table_is_off_until_it_is_turned_on) {
     Client client;  // 缺省即关：同一 URL 两次请求照旧两次触网，`from_cache()` 恒假
     allow_test_cleartext(client);
     const auto url = loopback_url(peer.port());
-    AURORA_TEST_REQUIRE(bool(send_and_drive(client, Request::get(url))));
+    AURORA_TEST_REQUIRE(static_cast<bool>(send_and_drive(client, Request::get(url))));
     const auto second = send_and_drive(client, Request::get(url));
-    AURORA_TEST_REQUIRE(bool(second));
+    AURORA_TEST_REQUIRE(static_cast<bool>(second));
     AURORA_TEST_CHECK_FALSE(second.value().from_cache());
     AURORA_TEST_CHECK_EQ(peer.accepts(), 2);
 }
@@ -2132,9 +2181,9 @@ AURORA_TEST_CASE(a_write_response_is_never_stored) {
     allow_test_cleartext(client);
     client.cache(CacheOptions{.enabled = true});
     const auto url = loopback_url(peer.port());
-    AURORA_TEST_REQUIRE(bool(send_and_drive(client, Request::post(url))));
+    AURORA_TEST_REQUIRE(static_cast<bool>(send_and_drive(client, Request::post(url))));
     const auto second = send_and_drive(client, Request::post(url));
-    AURORA_TEST_REQUIRE(bool(second));
+    AURORA_TEST_REQUIRE(static_cast<bool>(second));
     // 提交类方法的应答描述的是「这次改动的结果」，留在表里等于把一次写的后效反复交付。
     AURORA_TEST_CHECK_FALSE(second.value().from_cache());
     AURORA_TEST_CHECK_EQ(peer.accepts(), 2);
@@ -2160,21 +2209,22 @@ AURORA_TEST_CASE(vary_makes_the_second_request_a_different_request) {
     const auto url = loopback_url(peer.port());
 
     // 同一枚 `Accept` 的第二次请求命中：`Vary` 点名的头同名同值才算同一个请求。
-    AURORA_TEST_REQUIRE(bool(send_and_drive(client, Request::get(url).header("Accept", "application/json"))));
+    AURORA_TEST_REQUIRE(
+        static_cast<bool>(send_and_drive(client, Request::get(url).header("Accept", "application/json"))));
     const auto same = send_and_drive(client, Request::get(url).header("Accept", "application/json"));
-    AURORA_TEST_REQUIRE(bool(same));
+    AURORA_TEST_REQUIRE(static_cast<bool>(same));
     AURORA_TEST_CHECK(same.value().from_cache());
     AURORA_TEST_CHECK_EQ(as_body_text(same.value()), std::string{"json"});
     AURORA_TEST_CHECK_EQ(peer.accepts(), 1);
 
     // 换了 `Accept` 就是另一种请求：它必须回到对端，且不能挤掉表里那份 JSON。
     const auto other = send_and_drive(client, Request::get(url).header("Accept", "application/xml"));
-    AURORA_TEST_REQUIRE(bool(other));
+    AURORA_TEST_REQUIRE(static_cast<bool>(other));
     AURORA_TEST_CHECK_FALSE(other.value().from_cache());
     AURORA_TEST_CHECK_EQ(as_body_text(other.value()), std::string{"xml"});
     AURORA_TEST_CHECK_EQ(peer.accepts(), 2);
     const auto again = send_and_drive(client, Request::get(url).header("Accept", "application/json"));
-    AURORA_TEST_REQUIRE(bool(again));
+    AURORA_TEST_REQUIRE(static_cast<bool>(again));
     AURORA_TEST_CHECK(again.value().from_cache());
     AURORA_TEST_CHECK_EQ(as_body_text(again.value()), std::string{"json"});
     AURORA_TEST_CHECK_EQ(peer.accepts(), 2);
@@ -2371,7 +2421,7 @@ AURORA_TEST_CASE(expect_continue_sends_the_body_after_the_peer_opens_the_gate) {
     AURORA_TEST_CHECK(aurora::test::net::drive_until("send done", [&task] { return task.is_done(); }).satisfied);
 
     const auto response = inner(task);
-    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(response), response ? std::string{} : response.error().message);
     // 信息应答不是调用方该看见的结局：交出的仍是那份 200，`100` 连状态码都没露出来。
     AURORA_TEST_CHECK_EQ(response.value().status(), std::uint16_t{200});
     AURORA_TEST_CHECK_EQ(as_body_text(response.value()), std::string{"ok"});
@@ -2401,7 +2451,7 @@ AURORA_TEST_CASE(expect_continue_holds_the_body_back_when_the_peer_answers_with_
     AURORA_TEST_CHECK(aurora::test::net::drive_until("send done", [&task] { return task.is_done(); }).satisfied);
 
     const auto response = inner(task);
-    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(response), response ? std::string{} : response.error().message);
     AURORA_TEST_CHECK_EQ(response.value().status(), std::uint16_t{417});
 
     AURORA_TEST_REQUIRE(await_recorded(recorded, guard));
@@ -2430,7 +2480,7 @@ AURORA_TEST_CASE(expect_continue_sends_the_body_when_the_peer_stays_silent) {
     AURORA_TEST_CHECK(aurora::test::net::drive_until("send done", [&task] { return task.is_done(); }).satisfied);
 
     const auto response = inner(task);
-    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(response), response ? std::string{} : response.error().message);
     AURORA_TEST_CHECK_EQ(response.value().status(), std::uint16_t{200});
     AURORA_TEST_CHECK_NE(recorded_request(recorded, guard).find("abcde"), std::string::npos);
 }
@@ -2452,7 +2502,7 @@ AURORA_TEST_CASE(a_streaming_body_with_an_unknown_total_goes_out_as_chunk_frames
     AURORA_TEST_CHECK(aurora::test::net::drive_until("send done", [&task] { return task.is_done(); }).satisfied);
 
     const auto response = inner(task);
-    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(response), response ? std::string{} : response.error().message);
     AURORA_TEST_CHECK_EQ(response.value().status(), std::uint16_t{200});
 
     const auto sent = lowered(recorded_request(recorded, guard));
@@ -2481,7 +2531,7 @@ AURORA_TEST_CASE(a_streaming_body_that_knows_its_total_goes_out_with_a_length) {
     AURORA_TEST_CHECK(aurora::test::net::drive_until("send done", [&task] { return task.is_done(); }).satisfied);
 
     const auto response = inner(task);
-    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(response), response ? std::string{} : response.error().message);
 
     const auto sent = lowered(recorded_request(recorded, guard));
     AURORA_TEST_CHECK_NE(sent.find("content-length: 8"), std::string::npos);
@@ -2518,7 +2568,7 @@ AURORA_TEST_CASE(a_streaming_body_that_cannot_rewind_closes_the_retry_loop) {
     AURORA_TEST_REQUIRE(pump_send(engine, task));
 
     const auto response = inner(task);
-    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(response), response ? std::string{} : response.error().message);
     // 尝试耗尽交出的仍是最后那份 503，而不是新造的「不可重放」错误：调用方要的是对端说的那句话。
     AURORA_TEST_CHECK_EQ(response.value().status(), std::uint16_t{503});
     AURORA_TEST_CHECK_EQ(peer.accepts(), 1);
@@ -2551,7 +2601,7 @@ AURORA_TEST_CASE(a_rewindable_streaming_body_stays_in_the_retry_loop) {
     AURORA_TEST_REQUIRE(pump_send(engine, task));
 
     const auto response = inner(task);
-    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(response), response ? std::string{} : response.error().message);
     AURORA_TEST_CHECK_EQ(response.value().status(), std::uint16_t{200});
     AURORA_TEST_CHECK_EQ(peer.accepts(), 2);
     // 两次尝试线上都是完整的五个字节：回退确实发生了，不是把上一次的半截接着往下发。
@@ -2619,7 +2669,7 @@ AURORA_TEST_CASE(a_body_preserving_redirect_refuses_a_source_that_cannot_rewind)
     AURORA_TEST_CHECK(aurora::test::net::drive_until("send done", [&task] { return task.is_done(); }).satisfied);
 
     const auto response = inner(task);
-    AURORA_TEST_REQUIRE_FALSE(bool(response));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(response));
     AURORA_TEST_CHECK_EQ(response.error().code_enum, aurora::ErrorCode::HttpBodyNotReplayable);
     // 拒在发起之前：下一跳一条连接都没来，体也不会以半截的形态出现在线上。
     AURORA_TEST_CHECK_EQ(origin.accepts(), 1);
@@ -2648,12 +2698,12 @@ AURORA_TEST_CASE(a_range_request_neither_reads_nor_writes_the_table) {
     const auto url = loopback_url(peer.port());
 
     const auto first = send_and_drive(client, Request::get(url));
-    AURORA_TEST_REQUIRE(bool(first));
+    AURORA_TEST_REQUIRE(static_cast<bool>(first));
     AURORA_TEST_CHECK_FALSE(first.value().from_cache());
 
     // 表按「方法 + URL」建键：同一 URL 的整份副本拿来充一段范围是错的答复，故带 `range()` 的请求一律触网。
     const auto second = send_and_drive(client, Request::get(url).range(ByteRange::between(0, 3)));
-    AURORA_TEST_REQUIRE(bool(second));
+    AURORA_TEST_REQUIRE(static_cast<bool>(second));
     AURORA_TEST_CHECK_FALSE(second.value().from_cache());
     AURORA_TEST_CHECK_EQ(second.value().status(), std::uint16_t{206});
     AURORA_TEST_CHECK_NE(lowered(recorded_request(partial, guard)).find("range: bytes=0-3"), std::string::npos);
@@ -2661,7 +2711,7 @@ AURORA_TEST_CASE(a_range_request_neither_reads_nor_writes_the_table) {
 
     // 那份 206 不许进表：第三次整份取回拿到的仍是第一次存的整份，而不是半截。
     const auto third = send_and_drive(client, Request::get(url));
-    AURORA_TEST_REQUIRE(bool(third));
+    AURORA_TEST_REQUIRE(static_cast<bool>(third));
     AURORA_TEST_CHECK(third.value().from_cache());
     AURORA_TEST_CHECK_EQ(as_body_text(third.value()), std::string{"full"});
     AURORA_TEST_CHECK_EQ(peer.accepts(), 2);
@@ -2690,13 +2740,13 @@ AURORA_TEST_CASE(a_partial_answer_never_enters_the_table) {
     // 这一条把范围写成裸头而不是 `range()` 旋钮：缓存不认识裸头，于是照常建键、照常收尾进表——拦住那份
     // 206 的只剩「状态码可不可存」这一条，也就是 `settle_cache` 承诺的另一道闸（表此刻还是空的，起手问不到东西）。
     const auto first = send_and_drive(client, Request::get(url).set_header("Range", "bytes=0-3"));
-    AURORA_TEST_REQUIRE(bool(first));
+    AURORA_TEST_REQUIRE(static_cast<bool>(first));
     AURORA_TEST_CHECK_EQ(first.value().status(), std::uint16_t{206});
     AURORA_TEST_CHECK_NE(lowered(recorded_request(partial, guard)).find("range: bytes=0-3"), std::string::npos);
 
     // 半截没进表：整份取回仍得触网，拿到的仍是整份，而不是被那条 206 冒充的副本。
     const auto second = send_and_drive(client, Request::get(url));
-    AURORA_TEST_REQUIRE(bool(second));
+    AURORA_TEST_REQUIRE(static_cast<bool>(second));
     AURORA_TEST_CHECK_FALSE(second.value().from_cache());
     AURORA_TEST_CHECK_EQ(as_body_text(second.value()), std::string{"full"});
     AURORA_TEST_CHECK_EQ(peer.accepts(), 2);
@@ -2726,7 +2776,7 @@ AURORA_TEST_CASE(a_multipart_form_goes_out_as_one_streaming_body) {
     AURORA_TEST_CHECK(aurora::test::net::drive_until("send done", [&task] { return task.is_done(); }).satisfied);
 
     const auto response = inner(task);
-    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(response), response ? std::string{} : response.error().message);
     AURORA_TEST_CHECK_EQ(response.value().status(), std::uint16_t{200});
 
     const auto sent = recorded_request(recorded, guard);
@@ -2765,7 +2815,7 @@ AURORA_TEST_CASE(send_answers_a_source_challenge_and_replays_the_attempt) {
     client.authenticator(std::make_shared<BasicAuthenticator>("Aladdin", "open sesame"));
 
     const auto response = send_and_drive(client, Request::get(loopback_url(peer.port())));
-    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(response), response ? std::string{} : response.error().message);
     AURORA_TEST_CHECK_EQ(response.value().status(), std::uint16_t{200});
     AURORA_TEST_CHECK_EQ(peer.accepts(), 2);
     AURORA_TEST_REQUIRE(aurora::test::net::drive_until("both requests filed", [&filed, &guard] {
@@ -2801,7 +2851,7 @@ AURORA_TEST_CASE(a_credential_replay_does_not_consume_a_retry_attempt) {
                                     .jitter = 0.0});
 
     const auto response = send_and_drive(client, Request::get(loopback_url(peer.port())));
-    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(response), response ? std::string{} : response.error().message);
     // 注入凭据的重跑不占 `attempts` 名额：占掉的话这次尝试在 503 处就耗尽配额、交出的是那一份 503 而不是
     // 200（那条裁决的理由见 `net/http_auth.h`：把「没带凭据」算成一次失败，开了重试的调用方永远学不会带凭据）。
     AURORA_TEST_CHECK_EQ(response.value().status(), std::uint16_t{200});
@@ -2833,7 +2883,7 @@ AURORA_TEST_CASE(a_second_challenge_is_handed_over_without_a_second_injection) {
     client.authenticator(std::make_shared<BasicAuthenticator>("lyn", "wrong password"));
 
     const auto response = send_and_drive(client, Request::get(loopback_url(peer.port())));
-    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(response), response ? std::string{} : response.error().message);
     AURORA_TEST_CHECK_EQ(response.value().status(), std::uint16_t{401});
     AURORA_TEST_CHECK_EQ(as_body_text(response.value()), std::string{"two"});
     // 一次交换至多注入一次：带着新凭据重跑后又吃一次 401，说明这份凭据不对，本环不再问第二遍（挑战-重发的
@@ -2857,7 +2907,7 @@ AURORA_TEST_CASE(a_declined_challenge_delivers_the_peers_own_401) {
     client.authenticator(std::make_shared<BearerAuthenticator>("tok"));
 
     const auto response = send_and_drive(client, Request::get(loopback_url(peer.port())));
-    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(response), response ? std::string{} : response.error().message);
     // 空答复就是「放弃」，唯一动作是原样交出对端说的那份 401——既不折成错误，也不再打一次。
     AURORA_TEST_CHECK_EQ(response.value().status(), std::uint16_t{401});
     AURORA_TEST_CHECK_EQ(as_body_text(response.value()), std::string{"gone"});
@@ -2880,7 +2930,7 @@ AURORA_TEST_CASE(a_provider_failure_ends_the_exchange) {
 
     const auto response = send_and_drive(client, Request::get(loopback_url(peer.port())));
     // 提供方自己的失败就是本次交换的结局：拿一份没到手的凭据去重发，只是把一次明确的失败拖成一次含糊的 401。
-    AURORA_TEST_REQUIRE(bool(!response));
+    AURORA_TEST_REQUIRE(static_cast<bool>(!response));
     AURORA_TEST_CHECK_EQ(response.error().code, std::string{"http-timeout"});
     AURORA_TEST_CHECK_NE(response.error().message.find("token endpoint"), std::string::npos);
     AURORA_TEST_CHECK_EQ(peer.accepts(), 1);
@@ -2901,7 +2951,7 @@ AURORA_TEST_CASE(a_credential_with_a_control_byte_is_refused_before_the_wire) {
     client.authenticator(std::make_shared<InjectingProvider>());
 
     const auto response = send_and_drive(client, Request::get(loopback_url(peer.port())));
-    AURORA_TEST_REQUIRE(bool(!response));
+    AURORA_TEST_REQUIRE(static_cast<bool>(!response));
     AURORA_TEST_CHECK_EQ(response.error().code, std::string{"http-request-invalid"});
     // 当场拒掉，而不是等下一跳的 `render_head()` 才发现：第二条连接一次都不该发起。
     AURORA_TEST_CHECK_EQ(peer.accepts(), 1);
@@ -2938,7 +2988,7 @@ AURORA_TEST_CASE(a_cross_origin_redirect_strips_the_credential_fields) {
 
     // 换 origin（方案 / 主机 / 有效端口任一不同）：两枚凭据字段剥掉不带，其余字段照常跟着走。
     const auto crossed = send_and_drive(client, declared);
-    AURORA_TEST_REQUIRE_MSG(bool(crossed), crossed ? std::string{} : crossed.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(crossed), crossed ? std::string{} : crossed.error().message);
     AURORA_TEST_CHECK_EQ(crossed.value().status(), std::uint16_t{200});
     AURORA_TEST_REQUIRE(aurora::test::net::drive_until("the other origin filed it", [&second_filed, &second_guard] {
                             return filed_count(second_filed, second_guard) == 1;
@@ -2950,7 +3000,7 @@ AURORA_TEST_CASE(a_cross_origin_redirect_strips_the_credential_fields) {
 
     // 同 origin 的跳原样带走：上一台给的口令不该跟着 302 送到另一台机器，但同一台的另一条路径没有理由收不到。
     const auto within = send_and_drive(client, declared);
-    AURORA_TEST_REQUIRE_MSG(bool(within), within ? std::string{} : within.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(within), within ? std::string{} : within.error().message);
     AURORA_TEST_CHECK_EQ(within.value().status(), std::uint16_t{200});
     AURORA_TEST_REQUIRE(
         aurora::test::net::drive_until("the same origin filed the second hop", [&first_filed, &first_guard] {
@@ -2983,17 +3033,17 @@ AURORA_TEST_CASE(two_credentials_never_read_each_others_cache_entry) {
 
     // 同一份凭据读得到自己的副本：那是缓存该做的事。
     const auto stored = send_and_drive(client, first);
-    AURORA_TEST_REQUIRE(bool(stored));
+    AURORA_TEST_REQUIRE(static_cast<bool>(stored));
     AURORA_TEST_CHECK_FALSE(stored.value().from_cache());
     const auto hit = send_and_drive(client, same);
-    AURORA_TEST_REQUIRE(bool(hit));
+    AURORA_TEST_REQUIRE(static_cast<bool>(hit));
     AURORA_TEST_CHECK(hit.value().from_cache());
     AURORA_TEST_CHECK_EQ(peer.accepts(), 1);
 
     // 换一份凭据就是另一个请求，**不依赖应答的 `Vary`**：应答没说它随凭据而变，缓存也得替凭据建键——
     // 否则第二个调用方会读到第一份凭据换来的载荷，而那在对端眼里是一次越权。
     const auto foreign = send_and_drive(client, other);
-    AURORA_TEST_REQUIRE(bool(foreign));
+    AURORA_TEST_REQUIRE(static_cast<bool>(foreign));
     AURORA_TEST_CHECK_FALSE(foreign.value().from_cache());
     AURORA_TEST_CHECK_EQ(peer.accepts(), 2);
 }
@@ -3015,17 +3065,17 @@ AURORA_TEST_CASE(a_bare_copy_is_not_readable_by_a_credentialed_request) {
     // 纪律条）。上一枚用例证的是「凭据进键」，这一枚证的是「空值也进键」——只在有凭据时才建维的实现读不出
     // 这两者的区别，却会把一份对端可能压根没打算给凭据持有者看的副本投给带凭据的请求。
     const auto stored = send_and_drive(client, Request::get(url));
-    AURORA_TEST_REQUIRE(bool(stored));
+    AURORA_TEST_REQUIRE(static_cast<bool>(stored));
     AURORA_TEST_CHECK_FALSE(stored.value().from_cache());
     const auto again = send_and_drive(client, Request::get(url));
-    AURORA_TEST_REQUIRE(bool(again));
+    AURORA_TEST_REQUIRE(static_cast<bool>(again));
     AURORA_TEST_CHECK(again.value().from_cache());
     AURORA_TEST_CHECK_EQ(peer.accepts(), 1);
 
     auto guarded = Request::get(url);
     guarded.header("Authorization", "Basic one==");
     const auto credential = send_and_drive(client, std::move(guarded));
-    AURORA_TEST_REQUIRE(bool(credential));
+    AURORA_TEST_REQUIRE(static_cast<bool>(credential));
     AURORA_TEST_CHECK_FALSE(credential.value().from_cache());
     AURORA_TEST_CHECK_EQ(peer.accepts(), 2);
 }
@@ -3046,10 +3096,10 @@ AURORA_TEST_CASE(a_stamped_identifier_does_not_disturb_the_table) {
     // 标识在查表之前落上、且每次现取一枚新值：若它进了缓存键，第二次就永远不命中。表键只认 `Vary` 点名的
     // 字段（`utest_net_http_cache` 的口径），本用例把这条边界钉在发起侧：换了 id 仍是同一个请求。
     const auto first = send_and_drive(client, Request::get(url));
-    AURORA_TEST_REQUIRE(bool(first));
+    AURORA_TEST_REQUIRE(static_cast<bool>(first));
     AURORA_TEST_CHECK_FALSE(first.value().from_cache());
     const auto second = send_and_drive(client, Request::get(url));
-    AURORA_TEST_REQUIRE(bool(second));
+    AURORA_TEST_REQUIRE(static_cast<bool>(second));
     AURORA_TEST_CHECK(second.value().from_cache());
     AURORA_TEST_CHECK_EQ(peer.accepts(), 1);
 }
@@ -3070,7 +3120,7 @@ AURORA_TEST_CASE(send_records_a_full_stage_timeline) {
 
     const auto response =
         send_and_drive(client, Request::get(loopback_url(peer.port(), "/pkg/run?a=1")).request_id("rid-stage"));
-    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(response), response ? std::string{} : response.error().message);
 
     const auto snapshot = aurora::net::http::activity_snapshot();
     AURORA_TEST_REQUIRE(snapshot.available);
@@ -3130,7 +3180,7 @@ AURORA_TEST_CASE(a_redirect_hop_has_no_body_done) {
 
     const auto response =
         send_and_drive(client, Request::get(loopback_url(origin.port(), "/start")).request_id("rid-hop"));
-    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(response), response ? std::string{} : response.error().message);
     AURORA_TEST_CHECK_EQ(response.value().status(), std::uint16_t{200});
 
     // 每一跳各占一条记录，按 `exchange_id` 升序；中间跳的体是被主动放弃的，故没有 `BodyDone`。
@@ -3173,10 +3223,10 @@ AURORA_TEST_CASE(a_reused_connection_starts_at_connection_acquired) {
 
     const auto first =
         send_and_drive(client, Request::get(loopback_url(peer.port(), "/first")).request_id("rid-pool-0"));
-    AURORA_TEST_REQUIRE(bool(first));
+    AURORA_TEST_REQUIRE(static_cast<bool>(first));
     const auto second =
         send_and_drive(client, Request::get(loopback_url(peer.port(), "/next")).request_id("rid-pool-1"));
-    AURORA_TEST_REQUIRE(bool(second));
+    AURORA_TEST_REQUIRE(static_cast<bool>(second));
     AURORA_TEST_CHECK_EQ(peer.accepts(), 1);  // 第二次坐上了同一条连接
 
     const auto fresh = aurora::testing::require_value(aurora::net::http::timeline_of("rid-pool-0"));
@@ -3209,7 +3259,7 @@ AURORA_TEST_CASE(a_mid_body_failure_keeps_the_answered_status) {
     allow_test_cleartext(client);
 
     const auto response = send_and_drive(client, Request::get(loopback_url(peer.port())).request_id("rid-body-fail"));
-    AURORA_TEST_REQUIRE_FALSE(bool(response));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(response));
 
     const auto snapshot = aurora::net::http::activity_snapshot();
     AURORA_TEST_REQUIRE_EQ(snapshot.entries.size(), std::size_t{1});
@@ -3239,7 +3289,7 @@ AURORA_TEST_CASE(a_pre_stamp_rejection_leaves_no_record) {
     // 越界的重试策略在打标之前就被拒：这次交换从未被记账。
     const auto invalid =
         send_and_drive(client, Request::get("http://127.0.0.1:1/").retry_policy(RetryPolicy{.jitter = 2.0}));
-    AURORA_TEST_REQUIRE_FALSE(bool(invalid));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(invalid));
     AURORA_TEST_CHECK_EQ(invalid.error().code_enum, ErrorCode::HttpRequestInvalid);
 
     // 起手即已取消同理：取消先于打标，连一条零 mark 的记录都不该有。
@@ -3250,7 +3300,7 @@ AURORA_TEST_CASE(a_pre_stamp_rejection_leaves_no_record) {
                           "send done", [&task] { return task.is_done(); }, std::chrono::milliseconds{500})
                           .satisfied);
     const auto cancelled = inner(task);
-    AURORA_TEST_REQUIRE_FALSE(bool(cancelled));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(cancelled));
     AURORA_TEST_CHECK_EQ(cancelled.error().code_enum, ErrorCode::NetCancelled);
 
     AURORA_TEST_CHECK(aurora::net::http::activity_snapshot().entries.empty());
@@ -3269,7 +3319,7 @@ AURORA_TEST_CASE(a_policy_rejection_is_recorded_without_stages) {
     client.policy(NetPolicy{});  // 显式空策略：回环不在明文放行名单里
 
     const auto response = send_and_drive(client, Request::get("http://127.0.0.1:1/blocked").request_id("rid-policy"));
-    AURORA_TEST_REQUIRE_FALSE(bool(response));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(response));
     AURORA_TEST_CHECK_EQ(response.error().code_enum, ErrorCode::NetPolicyViolated);
 
     // 打标之后的本地拒绝：有一条记录，但它连一个阶段都没开始。
@@ -3305,9 +3355,9 @@ AURORA_TEST_CASE(a_fresh_cache_hit_is_recorded_without_stages) {
     const auto url = loopback_url(peer.port(), "/cached");
 
     const auto stored = send_and_drive(client, Request::get(url).request_id("rid-cache"));
-    AURORA_TEST_REQUIRE(bool(stored));
+    AURORA_TEST_REQUIRE(static_cast<bool>(stored));
     const auto hit = send_and_drive(client, Request::get(url).request_id("rid-cache"));
-    AURORA_TEST_REQUIRE(bool(hit));
+    AURORA_TEST_REQUIRE(static_cast<bool>(hit));
     AURORA_TEST_CHECK(hit.value().from_cache());
     AURORA_TEST_CHECK_EQ(peer.accepts(), 1);  // 第二次一条连接都没发起
 
@@ -3347,9 +3397,9 @@ AURORA_TEST_CASE(a_sink_stop_leaves_the_timeline_without_body_done) {
     auto task = client.open_stream(Request::get(loopback_url(peer.port())).request_id("rid-sink"), sink);
     AURORA_TEST_CHECK(aurora::test::net::drive_until("open_stream done", [&task] { return task.is_done(); }).satisfied);
     const auto outer = task.result();
-    AURORA_TEST_REQUIRE(bool(outer));
+    AURORA_TEST_REQUIRE(static_cast<bool>(outer));
     const auto &outcome = outer.value();
-    AURORA_TEST_REQUIRE_MSG(bool(outcome), outcome ? std::string{} : outcome.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(outcome), outcome ? std::string{} : outcome.error().message);
     AURORA_TEST_CHECK(outcome.value().stopped_by_sink);
     AURORA_TEST_CHECK_EQ(sink.segments, 1);  // 第一段体即收摊
 
@@ -3390,7 +3440,7 @@ AURORA_TEST_CASE(a_cancelled_exchange_ends_as_net_cancelled_not_abandoned) {
                           "send done", [&task] { return task.is_done(); }, std::chrono::milliseconds{3000})
                           .satisfied);
     const auto response = inner(task);
-    AURORA_TEST_REQUIRE_FALSE(bool(response));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(response));
     AURORA_TEST_CHECK_EQ(response.error().code_enum, ErrorCode::NetCancelled);
 
     // 取消是交换的**结局**而不是「没发生」：一条记录、已收摊、错误码就是取消，且不由析构补记 abandoned。
@@ -3439,7 +3489,7 @@ AURORA_TEST_CASE(a_physical_sequence_expands_by_hop_and_pass) {
     AURORA_TEST_REQUIRE(pump_send(engine, task));
 
     const auto response = inner(task);
-    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(response), response ? std::string{} : response.error().message);
     AURORA_TEST_CHECK_EQ(response.value().status(), std::uint16_t{200});
     AURORA_TEST_CHECK_EQ(origin.accepts(), 3);
     AURORA_TEST_CHECK_EQ(target.accepts(), 1);
@@ -3484,7 +3534,7 @@ AURORA_TEST_CASE(a_silenced_request_id_still_reaches_the_snapshot) {
 
     // 空串 = 明确声明本次不带链路标识：交换照记，但无处可查。
     const auto response = send_and_drive(client, Request::get(loopback_url(peer.port())).request_id(""));
-    AURORA_TEST_REQUIRE(bool(response));
+    AURORA_TEST_REQUIRE(static_cast<bool>(response));
     const auto snapshot = aurora::net::http::activity_snapshot();
     AURORA_TEST_REQUIRE_EQ(snapshot.entries.size(), std::size_t{1});
     AURORA_TEST_CHECK(snapshot.entries.front().request_id.empty());

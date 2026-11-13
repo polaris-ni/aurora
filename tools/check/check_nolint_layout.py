@@ -25,7 +25,7 @@
 #   4) [blocking] 指令的 `(check 列表)` 跨物理行书写 → clang-tidy 解析成**空列表**，于是
 #      区间/该行豁免从「只列出表中检查」静默放大为「豁免全部检查」。实测：同一张表跨行写时连未列出的
 #      readability-identifier-naming 也失踪，单行写才只豁免列出的几项；本仓曾因此让 4 个
-#      大区间（painter.cpp / painter_simd.inl / system_tray_win32.cpp / win32_ua.cpp，最大
+#      大区间（painter.cpp / painter_simd.inl / system_tray.cpp / win32_ua.cpp，最大
 #      跨 2000 行）覆盖的 TU 呈「零告警假象」，改对名单后浮出 795 条存量。
 #      修法不许动 .clang-format：CommentPragmas 与 ReflowComments 两条路都实测过，都会把
 #      无关文件的注释缩进改掉（分别 5 与 15 个文件非合规），故改为「名单单行 + 通配压缩到

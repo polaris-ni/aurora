@@ -13,23 +13,29 @@ aurora/animation/spring.h
 aurora/animation/timeline.h
 aurora/app/application.h
 aurora/app/display.h
+aurora/app/document_output.h
 aurora/app/event_source_registry.h
+aurora/app/file_association.h
 aurora/app/file_dialog.h
 aurora/app/generate_ui.h
 aurora/app/hot_reload.h
 aurora/app/menu.h
 aurora/app/mime_types.h
+aurora/app/native_menu_bar.h
 aurora/app/notification.h
 aurora/app/os_hotkey.h
 aurora/app/perf_overlay.h
 aurora/app/recent_documents.h
+aurora/app/run_at_login.h
 aurora/app/scene.h
 aurora/app/scheduler.h
 aurora/app/scroll_storage.h
 aurora/app/shortcuts.h
+aurora/app/single_instance.h
 aurora/app/system_tray.h
 aurora/app/test_controller.h
 aurora/app/ui_prompt.h
+aurora/app/url_scheme.h
 aurora/app/validate.h
 aurora/app/validate_ui.h
 aurora/app/window_geometry.h
@@ -53,6 +59,7 @@ aurora/core/headers.h
 aurora/core/image.h
 aurora/core/literals.h
 aurora/core/log.h
+aurora/core/main_queue.h
 aurora/core/platform.h
 aurora/core/result.h
 aurora/core/strict_mode.h
@@ -83,6 +90,8 @@ aurora/i18n/localized_string.h
 aurora/i18n/message_catalog.h
 aurora/i18n/message_id.h
 aurora/i18n/plural.h
+aurora/icon/icon.h
+aurora/icon/icon_svg.h
 aurora/imperative.h
 aurora/layout/flex.h
 aurora/layout/flex_layouter.h
@@ -104,6 +113,7 @@ aurora/net/address.h
 aurora/net/blocking.h
 aurora/net/cancellation.h
 aurora/net/capabilities.h
+aurora/net/connectivity.h
 aurora/net/datagram.h
 aurora/net/engine.h
 aurora/net/framer.h
@@ -118,8 +128,8 @@ aurora/net/http_session.h
 aurora/net/http_sse.h
 aurora/net/http_stream.h
 aurora/net/observability.h
-aurora/net/poll.h
 aurora/net/policy.h
+aurora/net/poll.h
 aurora/net/proxy.h
 aurora/net/random.h
 aurora/net/resolver.h
@@ -128,6 +138,7 @@ aurora/net/tls_backend.h
 aurora/net/transport.h
 aurora/net/websocket.h
 aurora/perf/counters.h
+aurora/perf/frame_monitor.h
 aurora/perf/perf_log.h
 aurora/perf/perf_session.h
 aurora/perf/profiler.h
@@ -143,28 +154,30 @@ aurora/render/painter.h
 aurora/render/png.h
 aurora/render/snapshot_diff.h
 aurora/state/async.h
-aurora/state/binding.h
 aurora/state/computed.h
 aurora/state/coroutine.h
 aurora/state/effect.h
-aurora/state/immutable.h
-aurora/state/reactive.h
+aurora/state/read_only_state.h
 aurora/state/resource.h
-aurora/state/signal_view.h
 aurora/state/state.h
 aurora/state/state_graph.h
-aurora/state/store.h
 aurora/state/subscription.h
 aurora/state/undo_stack.h
 aurora/storage/storage.h
 aurora/theming/color_roles.h
 aurora/theming/color_scheme.h
+aurora/theming/control_metrics.h
 aurora/theming/csd_roles.h
 aurora/theming/csd_style_bridge.h
+aurora/theming/layout_conventions.h
+aurora/theming/motion_scale.h
+aurora/theming/shape_scale.h
+aurora/theming/spacing_scale.h
 aurora/theming/theme.h
 aurora/theming/theme_extension.h
 aurora/theming/theme_query.h
 aurora/theming/theme_scope.h
+aurora/theming/theme_style.h
 aurora/theming/type_scale.h
 aurora/todo.h
 aurora/ui/factories.h
@@ -192,6 +205,7 @@ aurora/widget/expansion_panel.h
 aurora/widget/form.h
 aurora/widget/grid.h
 aurora/widget/grid_view.h
+aurora/widget/icon_widget.h
 aurora/widget/image_widget.h
 aurora/widget/inspect.h
 aurora/widget/inspector_panel.h
@@ -206,6 +220,7 @@ aurora/widget/pie_chart.h
 aurora/widget/placeholder.h
 aurora/widget/popup.h
 aurora/widget/progress.h
+aurora/widget/props.h
 aurora/widget/provider.h
 aurora/widget/pull_to_refresh.h
 aurora/widget/radio_spin.h
@@ -237,9 +252,6 @@ aurora/widget/title_bar.h
 aurora/widget/toast.h
 aurora/widget/toolbar.h
 aurora/widget/widget.h
-aurora/icon/icon.h
-aurora/icon/icon_svg.h
-aurora/widget/icon_widget.h
 aurora/window/cursor_map.h
 aurora/window/frame_pacing.h
 aurora/window/platform.h
@@ -254,6 +266,8 @@ aurora/window/*_surface.h -> 平台窗口后端，经 native_surfaces.h 按平�
 aurora/window/win32_host.h -> Win32 共享窗口宿主，平台后端内部设施
 aurora/window/wasm_aria.h -> Wasm ARIA 桥，平台后端内部设施
 aurora/render/detail/* -> 渲染内部实现细节（SIMD 表 / GPU 层缓存 / 计时）
+aurora/theming/detail/* -> 主题内部登记表（对比度档位 / 逐对归档 / 预设豁免），库内派生实现、gen_contrast 工具与单测共读，消费者不经伞头取用
+aurora/widget/detail/* -> 库内滚动条几何与交互内核，四个滚动容器共读，消费者不经伞头取用
 aurora/render/rhi/* -> RHI 后端内部契约（软件 / GL / wgpu）
 aurora/render/bidi.h -> 段落基准方向推断，渲染内部机制
 aurora/render/bitmap_font.h -> 内置位图字体，软件栅格后端内部资产

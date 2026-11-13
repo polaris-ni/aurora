@@ -864,7 +864,6 @@ class Checker:
             raise RuntimeError(f"unable to read {path}: {exc}") from exc
         src = Source(rel, text)
         public_api = rel.startswith("include/")
-        before = len(self.findings)
         self.check_markers(src)
         self.check_blocks(src, public_api)
         self.check_body_notes(src)
@@ -1219,7 +1218,7 @@ class Checker:
                     self.add("DOC-R5", src.rel, run[1], "missing @tparam: " + ", ".join(missing))
             # 枚举体内每个枚举项须有一行说明
             if ENUM_RE.match(stripped):
-                self.check_enum_items(src, idx, end)
+                self.check_enum_items(src, idx)
             # 常量宏（无参 #define）须有一行说明
             mm = MACRO_RE.match(stripped)
             if mm and "(" not in mm.group(1) and not mm.group(1).endswith("_H"):
@@ -1228,7 +1227,7 @@ class Checker:
                              "public constant macro missing a one-line note "
                              "(///< trailing note or adjacent /// block)")
 
-    def check_enum_items(self, src: Source, decl_idx: int, decl_end: int) -> None:
+    def check_enum_items(self, src: Source, decl_idx: int) -> None:
         """枚举体内每个具名枚举项须有 ///< 尾注或紧邻 /// 块。"""
         depth, j = 0, decl_idx
         body_lines: list[int] = []

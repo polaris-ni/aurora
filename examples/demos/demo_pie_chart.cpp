@@ -7,41 +7,37 @@
 auto main() -> int {
     const auto last_tap = std::make_shared<au::State<au::LocalizedString>>(au::LocalizedString{"(no tap yet)"});
 
-    au::PieChart donut{au::PieChartProps{
-        .sections =
-            {
-                au::PieSection{.name = "mobile", .value = 45.0},
-                au::PieSection{.name = "desktop", .value = 30.0},
-                au::PieSection{.name = "tablet", .value = 15.0},
-                au::PieSection{.name = "other", .value = 10.0},
-            },
-        .center_space_ratio = 0.45F,
-        .start_angle = -90.0F,
-        .show_percentage_labels = true,
-        .legend = au::ChartLegendSpec{.visible = true, .position = au::LegendPosition::Right},
-    }};
-    donut.modifier.set(au::Modifier{}.height(260.0F));
+    // 已迁形态：链式装入，一行一次整值表态；数组实参内部仍是聚合写法。
+    au::PieChart donut{au::PieChartProps()
+                           .set_sections({
+                               au::PieSection{.name = "mobile", .value = 45.0},
+                               au::PieSection{.name = "desktop", .value = 30.0},
+                               au::PieSection{.name = "tablet", .value = 15.0},
+                               au::PieSection{.name = "other", .value = 10.0},
+                           })
+                           .set_center_space_ratio(0.45F)
+                           .set_start_angle(-90.0F)
+                           .set_show_percentage_labels(true)
+                           .set_legend(au::ChartLegendSpec{.visible = true, .position = au::LegendPosition::Right})};
+    donut.set_modifier(au::Modifier{}.height(260.0F));
     donut.on_section_tapped = [last_tap](int section_idx) -> void {
         last_tap->set(au::LocalizedString{"tapped section " + std::to_string(section_idx)});
     };
 
     // 实心饼图（无内孔、无百分比标签）
-    au::PieChart pie{au::PieChartProps{
-        .sections =
-            {
-                au::PieSection{.name = "A", .value = 3.0},
-                au::PieSection{.name = "B", .value = 2.0},
-                au::PieSection{.name = "C", .value = 1.0},
-            },
-    }};
-    pie.modifier.set(au::Modifier{}.height(220.0F));
+    au::PieChart pie{au::PieChartProps().set_sections({
+        au::PieSection{.name = "A", .value = 3.0},
+        au::PieSection{.name = "B", .value = 2.0},
+        au::PieSection{.name = "C", .value = 1.0},
+    })};
+    pie.set_modifier(au::Modifier{}.height(220.0F));
 
     au::Node root = au::Column{
         GradientTitle{"PieChart widget"},
         gap(12),
         std::move(donut),
         gap(8),
-        au::Text{au::TextProps{.content = au::Reactive{last_tap}}},
+        au::Text{au::TextProps().set_content(*last_tap)},
         gap(16),
         std::move(pie),
     };

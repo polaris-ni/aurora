@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "aurora/core/log.h"
+#include "aurora/core/main_queue.h"
 #include "aurora/core/platform.h"
 #include "aurora/debug/debug_backend.h"
 #include "aurora/debug/debug_paint.h"
@@ -29,6 +30,7 @@
 #include "aurora/environment/build_context.h"
 #include "aurora/inspector/inspector_api.h"
 #include "aurora/net/blocking.h"
+#include "aurora/net/connectivity.h"
 #include "aurora/net/http_observability.h"
 #include "aurora/net/observability.h"
 #include "aurora/state/async.h"
@@ -150,12 +152,36 @@ auto redact_widget_record(const net::ExportPolicy &policy, const Json &record) -
     return out;
 }
 
+/// @brief 链路态的 JSON 形态：三态与采集腿令牌，外加代际、陈旧位、持续时长与上次失败。
+///
+/// **正常形状与 Release 早退形状由同一构造器产出**：否则 `AURORA_ENABLE_DEBUG=OFF` 下 AI
+/// 排障的第一问（「这九条红是不是一场链路故障」）恰好读不到，而链路态的公共面按
+/// `BUILD_OPTIONS.md` §1.2 恰恰不随 DEBUG 裁切。
+/// @return `connectivity` 对象；字段集合固定，缺失项写 null。
+auto connectivity_json() -> Json {
+    const auto fact = net::ConnectivityMonitor::instance().snapshot();
+    Json out = Json::object();
+    out.set("state", Json{std::string{net::network_state_text(fact.state)}});
+    out.set("source", Json{std::string{net::connectivity_source_text(fact.source)}});
+    out.set("generation", Json{static_cast<std::int64_t>(fact.generation)});
+    out.set("stale", Json{fact.stale});
+    const auto elapsed = std::chrono::steady_clock::now() - fact.since;
+    out.set("since_ms",
+            Json{static_cast<std::int64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count())});
+    // `last_failure` 是冻结错误码 slug，**不含主机名与 URL**；缺席写 null 而非空串。
+    out.set("last_failure", fact.last_failure.has_value() ? Json{*fact.last_failure} : Json{});
+    return out;
+}
+
 /// @brief Release 构建下 network 端点的确定形态：与既有调试门面的 unavailable 形状一致。
-/// @return `{available:false, reason:"AURORA_ENABLE_DEBUG not enabled"}`。
+///
+/// 保留 `available:false` 与 `reason`，同时带上 `connectivity`（与正常形状同一构造器产出）。
+/// @return `{available:false, reason:"AURORA_ENABLE_DEBUG not enabled", connectivity:{...}}`。
 auto network_unavailable_json() -> Json {
     Json out = Json::object();
     out.set("available", Json{false});
     out.set("reason", "AURORA_ENABLE_DEBUG not enabled");
+    out.set("connectivity", connectivity_json());
     return out;
 }
 
@@ -293,7 +319,8 @@ struct InspectorServer::Impl {
     /// 访问，只有与遍历同线程持锁才成立；而 `root_getter()` 自身要复制根 `shared_ptr`，
     /// 同样必须在主线程调用。
     ///
-    /// 无事件循环（测试/无头）时经 `marshal_get` 的回退在当前线程直执行，语义不变。
+    /// 无事件循环（测试/无头）时 `marshal_opt` 经 `try_post` 拒入队、记 ERROR 回空，端点在契约边界
+    /// 回 503（不再跨线程直读树）。根为空时统一回 500，`fn` 只在根有效时被调用。
     /// 根为空时统一回 500，`fn` 只在根有效时被调用。
     auto on_tree(const std::function<std::string(Node &)> &fn) -> std::string;
 
@@ -353,6 +380,14 @@ struct InspectorServer::Impl {
                               const std::string &body) -> std::string;
     static auto json_response(int status_code, const std::string &status_text, const Json &j) -> std::string;
     static auto error_response(int status_code, const std::string &message) -> std::string;
+
+    /// @brief JSON 型调试读取的统一降级：无在岗循环 ⇒ 503（端点名入错误体，便于调用方对照）。
+    /// @tparam F 主线程读取闭包类型。
+    /// @param endpoint 端点名（降级错误文案用）。
+    /// @param fn 将在主线程执行的读取闭包。
+    /// @return 200 JSON 响应，或 503 错误响应。
+    template <typename F>
+    static auto marshal_json(const char *endpoint, const F &fn) -> std::string;
 
     // URL 路径分段
     static auto split_path(const std::string &path) -> std::vector<std::string>;
@@ -490,41 +525,52 @@ auto InspectorServer::Impl::is_loopback_host(const std::string &host) -> bool {
 // ---------------------------------------------------------------------------
 // 主线程 marshal
 // ---------------------------------------------------------------------------
-// 把调试读取（Surface / 树 / 全局状态）派发到主线程执行后回收结果。若进程级 main_poster
-// 已安装（运行中的 Application），则经 poster 入队并阻塞等待主线程执行；否则（测试 / 无头 /
-// 无事件循环）直接在当前线程执行——与 au::post_to_main 的回退语义一致，保证 Surface 的
-// main-thread-only 约束不被违反，且无事件循环时仍可同步测试。
+// 把调试读取（Surface / 树 / 全局状态）派发到主线程执行后回收结果。有值班循环（运行中的
+// Application）时经进程级唯一队列 `MainQueue::try_post` 入队、阻塞等待主线程排空执行；
+// 无值班（无头 / 单测未领租约 / 循环已打烊）时不再把「主线程限定」的读取塞到本 worker 线程
+// 就地执行（那正是与本机制同源的跨线程读树缺陷），记 ERROR 后回**空**——调用方据此在契约
+// 边界诚实降级为 HTTP 503（提案判据 3：迟到请求在边界处回错误，不带走宿主进程、也不伪装成功）。
 template <typename T>
-static auto marshal_get(std::function<T()> fn) -> T {
-    std::function<void(std::function<void()>)> poster;
-    {
-        std::scoped_lock lock(aurora::detail::main_poster_mutex());
-        poster = aurora::detail::main_poster();
-    }
-    if (!poster) {
-        return fn();
-    }
+[[nodiscard]] static auto marshal_opt(const std::function<T()> &fn) -> std::optional<T> {
     std::promise<T> p;
     auto f = p.get_future();
-    poster([&]() -> auto {
+    const bool queued = aurora::MainQueue::try_post([&p, &fn]() -> void {
         try {
             p.set_value(fn());
         } catch (...) {
             p.set_exception(std::current_exception());
         }
     });
+    if (!queued) {
+        AURORA_LOG_ERROR("inspector", "marshal: no on-duty main loop; caller must answer 503 (no off-thread read)");
+        return std::nullopt;
+    }
     return f.get();
 }
 
+// JSON 型调试读取的统一降级（声明见 Impl 内，定义排在 `marshal_opt` 与响应构造之后）。
+template <typename F>
+auto InspectorServer::Impl::marshal_json(const char *endpoint, const F &fn) -> std::string {
+    const auto got = marshal_opt<Json>([&fn]() -> Json { return fn(); });
+    if (!got.has_value()) {
+        return error_response(503, std::string{"No main loop on duty: "} + endpoint);
+    }
+    return json_response(200, "OK", *got);
+}
+
 auto InspectorServer::Impl::on_tree(const std::function<std::string(Node &)> &fn) -> std::string {
-    return marshal_get<std::string>([&]() -> std::string {
-        std::scoped_lock lock(tree_mutex);
+    auto body = marshal_opt<std::string>([&]() -> std::string {
+        std::scoped_lock const lock(tree_mutex);
         Node root = root_getter();
         if (!root) {
             return error_response(500, "Widget tree root is null");
         }
         return fn(root);
     });
+    if (!body.has_value()) {
+        return error_response(503, "No main loop on duty: tree endpoints require a running Application");
+    }
+    return std::move(*body);
 }
 
 // 从 path（可能含 ? 查询串）提取路由段（'?' 之前部分）。
@@ -749,8 +795,9 @@ auto InspectorServer::Impl::routes() -> std::span<const RouteEntry> {
 }
 
 // ---- 调试端点（封装 aurora::debug 被动门面，不重复实现逻辑）----
-// 所有 Surface / 树 / 全局状态读取经主线程 marshal（marshal_get），与 Surface 的
-// main-thread-only 约束一致；无事件循环时回退为直接执行（测试 / 无头）。
+// 所有 Surface / 树 / 全局状态读取经主线程 marshal（marshal_opt / marshal_json），与 Surface 的
+// main-thread-only 约束一致；无在岗循环时 `try_post` 拒入队、记 ERROR，端点在边界回 503 错误
+// （不跨线程直读，也不将「读不到」伪装成成功载荷）。
 
 // GET /api/debug/state — Surface 运行时状态
 // 路由表共用非 const 成员指针类型（同表还容纳会改状态的端点），不逐端点分型。
@@ -764,8 +811,7 @@ auto InspectorServer::Impl::handle_debug_state(const RouteCall & /*call*/) -> st
         return error_response(500, "Surface is null");
     }
     try {
-        auto j = marshal_get<Json>([&]() -> Json { return aurora::debug::surface_state(*s); });
-        return json_response(200, "OK", j);
+        return marshal_json("/api/debug/state", [&]() -> Json { return aurora::debug::surface_state(*s); });
     } catch (const std::exception &e) {
         return error_response(500, std::string("surface_state failed: ") + e.what());
     }
@@ -785,7 +831,7 @@ auto InspectorServer::Impl::handle_debug_snapshot(const RouteCall &call) -> std:
     const auto capture_src =
         src == "win" ? aurora::debug::CaptureSource::OnScreenWindow : aurora::debug::CaptureSource::Framebuffer;
     try {
-        auto png = marshal_get<std::vector<std::uint8_t>>([&]() -> std::vector<std::uint8_t> {
+        auto png = marshal_opt<std::vector<std::uint8_t>>([&]() -> std::vector<std::uint8_t> {
             // 临时文件名须不可预测（固定名可被本地进程抢先创建/替换——符号链接攻击面），
             // 且每次请求唯一（避免并发/连续请求相互覆盖）。steady_clock 计数 + 进程内自增序号。
             static std::atomic<unsigned> seq{0};
@@ -817,11 +863,14 @@ auto InspectorServer::Impl::handle_debug_snapshot(const RouteCall &call) -> std:
             std::filesystem::remove(tmp, ec);
             return bytes;
         });
-        if (png.empty()) {
+        if (!png.has_value()) {
+            return error_response(503, "No main loop on duty: /api/debug/snapshot");
+        }
+        if (png->empty()) {
             return error_response(500, "snapshot produced empty PNG");
         }
         // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
-        std::string body_bytes(reinterpret_cast<const char *>(png.data()), png.size());
+        std::string const body_bytes(reinterpret_cast<const char *>(png->data()), png->size());
         return make_response(200, "OK", "image/png", body_bytes);
     } catch (const std::exception &e) {
         return error_response(500, std::string("snapshot failed: ") + e.what());
@@ -831,8 +880,7 @@ auto InspectorServer::Impl::handle_debug_snapshot(const RouteCall &call) -> std:
 // GET /api/debug/perf — 性能快照（聚合 FrameStats + PerfLog）
 auto InspectorServer::Impl::handle_debug_perf(const RouteCall & /*call*/) -> std::string {
     try {
-        auto j = marshal_get<Json>([]() -> Json { return aurora::debug::perf_snapshot(); });
-        return json_response(200, "OK", j);
+        return marshal_json("/api/debug/perf", []() -> Json { return aurora::debug::perf_snapshot(); });
     } catch (const std::exception &e) {
         return error_response(500, std::string("perf_snapshot failed: ") + e.what());
     }
@@ -841,8 +889,7 @@ auto InspectorServer::Impl::handle_debug_perf(const RouteCall & /*call*/) -> std
 // GET /api/debug/timeline — 帧相位时间线
 auto InspectorServer::Impl::handle_debug_timeline(const RouteCall & /*call*/) -> std::string {
     try {
-        auto j = marshal_get<Json>([]() -> Json { return aurora::debug::frame_phase_timeline(); });
-        return json_response(200, "OK", j);
+        return marshal_json("/api/debug/timeline", []() -> Json { return aurora::debug::frame_phase_timeline(); });
     } catch (const std::exception &e) {
         return error_response(500, std::string("frame_phase_timeline failed: ") + e.what());
     }
@@ -851,8 +898,7 @@ auto InspectorServer::Impl::handle_debug_timeline(const RouteCall & /*call*/) ->
 // GET /api/debug/diagnostics — 诊断只读快照
 auto InspectorServer::Impl::handle_debug_diagnostics(const RouteCall & /*call*/) -> std::string {
     try {
-        auto j = marshal_get<Json>([]() -> Json { return aurora::debug::diagnostics(); });
-        return json_response(200, "OK", j);
+        return marshal_json("/api/debug/diagnostics", []() -> Json { return aurora::debug::diagnostics(); });
     } catch (const std::exception &e) {
         return error_response(500, std::string("diagnostics failed: ") + e.what());
     }
@@ -861,8 +907,7 @@ auto InspectorServer::Impl::handle_debug_diagnostics(const RouteCall & /*call*/)
 // GET /api/debug/why — why_trace（重排 / 重绘因果链）
 auto InspectorServer::Impl::handle_debug_why(const RouteCall & /*call*/) -> std::string {
     try {
-        auto j = marshal_get<Json>([]() -> Json { return aurora::debug::why_trace(); });
-        return json_response(200, "OK", j);
+        return marshal_json("/api/debug/why", []() -> Json { return aurora::debug::why_trace(); });
     } catch (const std::exception &e) {
         return error_response(500, std::string("why_trace failed: ") + e.what());
     }
@@ -1041,6 +1086,7 @@ auto InspectorServer::Impl::handle_network(const RouteCall &call) -> std::string
     out.set("dropped", snapshot.dropped);
     out.set("truncated", snapshot.truncated);
     out.set("entries", std::move(entries));
+    out.set("connectivity", connectivity_json());
     return json_response(200, "OK", out);
 }
 
@@ -1098,9 +1144,9 @@ auto InspectorServer::Impl::handle_tree(const RouteCall &call) -> std::string {
         }
         bool found = false;
         try {
-            auto tree = marshal_get<Json>([&]() -> Json {
-                std::scoped_lock lock(tree_mutex);
-                Node root = window_tree_getter(wid);
+            auto tree = marshal_opt<Json>([&]() -> Json {
+                std::scoped_lock const lock(tree_mutex);
+                Node const root = window_tree_getter(wid);
                 if (!root) {
                     return Json{};  // 标记窗口不存在
                 }
@@ -1111,10 +1157,13 @@ auto InspectorServer::Impl::handle_tree(const RouteCall &call) -> std::string {
                 }
                 return document;
             });
+            if (!tree.has_value()) {
+                return error_response(503, "No main loop on duty: /api/tree?window= requires a running Application");
+            }
             if (!found) {
                 return error_response(404, "Window " + win_param + " not found");
             }
-            return json_response(200, "OK", tree);
+            return json_response(200, "OK", *tree);
         } catch (const std::exception &e) {
             return error_response(500, std::string("window tree failed: ") + e.what());
         }
@@ -1204,8 +1253,8 @@ auto InspectorServer::Impl::handle_widget(const RouteCall &call) -> std::string 
 // 以及调用方自行合成的连续拖拽。
 //
 // 派发必须落在主线程：`Inspector::simulate_*` 为 main-thread only，且会写控件状态与
-// 派发期的焦点槽。故与调试端点同走 `marshal_get`（无事件循环时直接执行，测试 / 无头
-// 下仍可同步验证）。
+// 派发期的焦点槽。故与调试端点同走 `marshal_opt`（无在岗循环时 `try_post` 拒入队、端点回 503，
+// 真实用法下 inspector 只在有运行循环时在架）。
 //
 // 语义为「目标式」：以 `path` 命中的控件为派发根与坐标原点、指针取该控件中心，因此
 // 不依赖其在树中的绝对位置。目标不可命中时回 400（与失败属性回写同一约定），且失败的
@@ -1280,8 +1329,8 @@ auto InspectorServer::Impl::handle_input(const RouteCall &call) -> std::string {
     }
 
     try {
-        const Json outcome = marshal_get<Json>([&]() -> Json {
-            std::scoped_lock lock(tree_mutex);
+        const auto outcome = marshal_opt<Json>([&]() -> Json {
+            std::scoped_lock const lock(tree_mutex);
             Node root = root_getter();
             if (!root) {
                 Json o = Json::object();
@@ -1335,9 +1384,12 @@ auto InspectorServer::Impl::handle_input(const RouteCall &call) -> std::string {
             o.set("error", "");
             return o;
         });
-        if (!outcome.as_or<bool>("ok", false)) {
-            return error_response(outcome.as_or<int>("status", 500),
-                                  outcome.as_or<std::string>("error", "simulate failed"));
+        if (!outcome.has_value()) {
+            return error_response(503, "No main loop on duty: /api/input requires a running Application");
+        }
+        if (!outcome->as_or<bool>("ok", false)) {
+            return error_response(outcome->as_or<int>("status", 500),
+                                  outcome->as_or<std::string>("error", "simulate failed"));
         }
         Json ok = Json::object();
         ok.set("status", "ok");
@@ -1370,9 +1422,9 @@ auto InspectorServer::Impl::handle_find(const RouteCall &call) -> std::string {
         return error_response(400, "At least one of 'key', 'type', 'text' is required");
     }
     try {
-        const Json outcome = marshal_get<Json>([&]() -> Json {
-            std::scoped_lock lock(tree_mutex);
-            Node root = root_getter();
+        const auto outcome = marshal_opt<Json>([&]() -> Json {
+            std::scoped_lock const lock(tree_mutex);
+            Node const root = root_getter();
             if (!root) {
                 Json o = Json::object();
                 o.set("error", "Widget tree root is null");
@@ -1428,12 +1480,15 @@ auto InspectorServer::Impl::handle_find(const RouteCall &call) -> std::string {
             }
             return matches;
         });
-        if (!outcome.is_array()) {
-            return error_response(500, outcome.as_or<std::string>("error", "find failed"));
+        if (!outcome.has_value()) {
+            return error_response(503, "No main loop on duty: /api/find requires a running Application");
+        }
+        if (!outcome->is_array()) {
+            return error_response(500, outcome->as_or<std::string>("error", "find failed"));
         }
         Json ok = Json::object();
-        ok.set("matches", outcome);
-        ok.set("count", outcome.size());
+        ok.set("matches", *outcome);
+        ok.set("count", outcome->size());
         return json_response(200, "OK", ok);
     } catch (const std::exception &e) {
         return error_response(500, std::string("find failed: ") + e.what());

@@ -85,7 +85,7 @@ AURORA_TEST_CASE(level_threshold_filters_below) {
 }
 
 AURORA_TEST_CASE(set_enabled_false_silences_diagnostics) {
-    CapturedLogger capture;
+    CapturedLogger const capture;
     aurora::Logger::instance().set_enabled(false);
     AURORA_LOG_FATAL("utest", "should be dropped");  // 禁用后所有诊断日志静默丢弃
     AURORA_TEST_CHECK(capture.lines.empty());
@@ -122,7 +122,7 @@ AURORA_TEST_CASE(log_concat_folds_mixed_types) {
 
 AURORA_TEST_CASE(sink_restore_and_recapture_works) {
     {
-        CapturedLogger capture;
+        CapturedLogger const capture;
         AURORA_LOG_INFO("utest", "first");
         AURORA_TEST_CHECK_EQ(capture.lines.size(), std::size_t{1});
     }  // 析构：恢复级别/开关/默认 sink

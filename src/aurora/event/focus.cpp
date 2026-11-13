@@ -31,7 +31,7 @@ struct FallbackRegistry {
     FocusManager unowned_root;
 
     [[nodiscard]] auto resolve(Widget &root) -> FocusManager * {
-        std::weak_ptr<Widget> guard = root.weak_from_this();
+        std::weak_ptr<Widget> const guard = root.weak_from_this();
         if (guard.lock() == nullptr) {
             unowned_root.set_root(&root);
             return &unowned_root;
@@ -272,7 +272,7 @@ auto FocusManager::collect_focusable(const Widget &root) -> std::vector<Widget *
 }
 
 auto FocusManager::collect_focusable_impl(const Widget &w, std::vector<Widget *> &out) -> void {
-    if (!w.show.get()) {
+    if (!w.show()) {
         return;  // 不可见控件不参与焦点序
     }
     if (w.focusable() && w.wants_focus()) {

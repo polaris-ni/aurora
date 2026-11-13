@@ -20,6 +20,7 @@
 // clang-format on
 
 #include "aurora/core/diagnostics.h"
+#include "aurora/core/main_queue.h"
 #include "aurora/core/version.h"
 #include "aurora/event/dispatcher.h"
 #include "aurora/state/async.h"
@@ -250,7 +251,7 @@ template <typename R>
 
 /// @brief 当前线程是否已初始化 COM 公寓：未初始化时 UIA 回调线程不确定。
 [[nodiscard]] auto ensure_sta_apartment() -> bool {
-    HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    HRESULT const hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     if (hr == S_OK || hr == S_FALSE) {
         // S_FALSE：本线程此前已 CoInitialize（Aurora 主线程常见）——无需配对 CoUninitialize。
         return true;
@@ -593,8 +594,7 @@ class UiaTextRangeProvider : public ITextRangeProvider {
     HRESULT STDMETHODCALLTYPE ScrollIntoView(UiaBool align_to_top) override;
     HRESULT STDMETHODCALLTYPE GetChildren(SAFEARRAY **ret) override;
 
-    [[nodiscard]] auto start() const -> std::size_t { return start_; }
-    [[nodiscard]] auto end() const -> std::size_t { return end_; }
+    [[maybe_unused, nodiscard]] auto end() const -> std::size_t { return end_; }
 
   protected:
     virtual ~UiaTextRangeProvider() = default;
@@ -1611,7 +1611,12 @@ auto UiaTextProvider::GetSelection(SAFEARRAY **ret) -> HRESULT {
     }
     auto *range = static_cast<ITextRangeProvider *>(new UiaTextRangeProvider(bridge_, id_, span->first, span->second));
     LONG index = 0;
-    SafeArrayPutElement(arr, &index, static_cast<void *>(range));
+    const HRESULT hr = SafeArrayPutElement(arr, &index, static_cast<void *>(range));
+    if (FAILED(hr)) {
+        range->Release();  // 数组没接管，这次 new 出来的引用得自己收
+        SafeArrayDestroy(arr);
+        return hr;
+    }
     *ret = arr;
     return S_OK;
 }
@@ -1636,7 +1641,12 @@ auto UiaTextProvider::GetVisibleRanges(SAFEARRAY **ret) -> HRESULT {
         return E_OUTOFMEMORY;
     }
     LONG index = 0;
-    SafeArrayPutElement(arr, &index, static_cast<void *>(range));  // 数组接管该引用
+    const HRESULT put_hr = SafeArrayPutElement(arr, &index, static_cast<void *>(range));  // 成功后数组接管该引用
+    if (FAILED(put_hr)) {
+        range->Release();
+        SafeArrayDestroy(arr);
+        return put_hr;
+    }
     *ret = arr;
     return S_OK;
 }
@@ -1744,21 +1754,14 @@ auto Win32UiaBridge::wait_on_main(std::function<void()> work, const std::shared_
     if (on_owner_thread()) {
         return run_guarded(work);
     }
-    std::function<void(std::function<void()>)> poster;
-    {
-        std::scoped_lock lock(detail::main_poster_mutex());
-        poster = detail::main_poster();
-    }
-    // 就地路径②：进程级回投器未安装（无头 / 单测 / 事件循环未起）——与 `post_to_main` 的
-    // 无 poster 语义一致（裁定③）。
-    if (!poster) {
-        return run_guarded(work);
-    }
     auto done = std::make_shared<std::promise<bool>>();
     auto ready = done->get_future();
     auto alive = alive_;
     const auto owner = owner_thread_;  // 按值捕获可拷贝的线程 id（`std::thread` 本体不可拷贝）
-    poster([work = std::move(work), done, abandoned, alive, owner]() -> void {
+    // 边界降级（旧「就地路径②」的正名）：无值班 = 无头/单测/事件循环已打烊——RPC 线程绝不可
+    // 就地碰主人线程的树，`try_post` 返回 false 即在此诚实回败，调用方统一映射为
+    // `UIA_E_ELEMENTNOTAVAILABLE`。外部无障碍客户端的迟到请求不带走宿主进程（不硬失败）。
+    const bool queued = MainQueue::try_post([work = std::move(work), done, abandoned, alive, owner]() -> void {
         bool ran = false;
         // 队列项执行前的三道闸，任一不过即不碰树（详见头文件文档）。判主线程放在最前：
         // 它是唯一与 `this` 无关的判据（只比已按值捕获的 thread id）。
@@ -1775,6 +1778,9 @@ auto Win32UiaBridge::wait_on_main(std::function<void()> work, const std::shared_
                               "Win32UiaBridge::wait_on_main", "a11y-task-drained-twice");
         }
     });
+    if (!queued) {
+        return false;
+    }
     if (ready.wait_for(std::chrono::milliseconds(timeout_ms)) != std::future_status::ready) {
         return false;  // 主线程未在预算内排空：调用方降级，晚到的项被放弃闸拦住
     }
@@ -1887,7 +1893,7 @@ auto Win32UiaBridge::hit_test_id(Point local_dip) -> std::uint64_t {
             if (root_ == nullptr) {
                 return 0;
             }
-            Widget *hit = EventDispatcher::hit_test(*root_, local_dip);
+            Widget *const hit = EventDispatcher::hit_test(*root_, local_dip);
             return (hit != nullptr) ? hit->runtime_id() : 0;
         },
         AURORA_UI_READ_TIMEOUT_MS);

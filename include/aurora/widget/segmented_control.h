@@ -11,7 +11,9 @@
 #include "aurora/core/types.h"
 #include "aurora/render/font_engine.h"
 #include "aurora/render/painter.h"
+#include "aurora/theming/theme.h"
 #include "aurora/theming/theme_scope.h"
+#include "aurora/theming/type_scale.h"  // 未显式设字号时取字阶正文档；非正字号的兜底也来自它的声明默认值
 #include "aurora/widget/widget.h"
 
 namespace aurora {
@@ -71,7 +73,7 @@ class SegmentedControl : public LeafWidget {
         mark_needs_paint();
         return *this;
     }
-    /// @brief 设置未选中段文本色（链式）。
+    /// @brief 设置未选中段文本色（链式）。不调用则跟随主题 `Theme::on_surface`。
     /// @param c 文本颜色。
     /// @return *this（链式调用）。
     auto set_text_color(Color c) -> SegmentedControl & {
@@ -79,7 +81,7 @@ class SegmentedControl : public LeafWidget {
         mark_needs_paint();
         return *this;
     }
-    /// @brief 设置选中段文本色（链式）。
+    /// @brief 设置选中段文本色（链式）。不调用则跟随主题 `Theme::on_primary`。
     /// @param c 选中文本颜色。
     /// @return *this（链式调用）。
     auto set_selected_text_color(Color c) -> SegmentedControl & {
@@ -87,7 +89,7 @@ class SegmentedControl : public LeafWidget {
         mark_needs_paint();
         return *this;
     }
-    /// @brief 设置外框边框色（链式）。
+    /// @brief 设置外框边框色（链式）。不调用则跟随主题 `Theme::outline_variant`。
     /// @param c 边框颜色。
     /// @return *this（链式调用）。
     auto set_border_color(Color c) -> SegmentedControl & {
@@ -96,12 +98,21 @@ class SegmentedControl : public LeafWidget {
         return *this;
     }
     /// @brief 设置字号 pt（链式）。
-    /// @param s 字号（pt）；非正数回退为 14。
+    /// @param s 字号（pt）；> 0 才记为显式表态，<= 0 视作清除表态、回落主题字阶（不另立常量）。
     /// @return *this（链式调用）。
     auto set_font_size(float s) -> SegmentedControl & {
-        font_size_ = s > 0.0F ? s : 14.0F;
+        font_size_ = s > 0.0F ? std::optional<float>{s} : std::nullopt;
         mark_needs_layout();
         return *this;
+    }
+
+    /// @brief 解析生效字号：未显式设字号时经 ctx 取主题字阶**正文档**（风格档基准与无障碍字号缩放
+    ///        都只在这一处生效，控件侧不再乘第二次）。
+    /// @param ctx 构建上下文：供主题取字阶；无注入时 `inherit_theme` 回落 light。
+    /// @return 生效字号（pt）。主题正文档被写成非正数时兜底取 `TypeScale{}` 的声明默认值。
+    [[nodiscard]] auto effective_font_size(const BuildContext &ctx) const -> float {
+        const float pt = font_size_.value_or(inherit_theme(ctx).type_scale.body_medium.size_pt);
+        return pt > 0.0F ? pt : TypeScale{}.body_medium.size_pt;
     }
     /// @brief 设置外框圆角半径 dp（链式；0 = 直角）。
     /// @param r 圆角半径（dp）；负数取 0。
@@ -140,33 +151,33 @@ class SegmentedControl : public LeafWidget {
                      .min_value = "0"},
                     {.name = "active_color",
                      .type = "Color",
-                     .default_value = "theme.primary",
+                     .default_value = theme_token_expr<&ColorRoles::primary>(),
                      .required = false,
                      .note = "Selected segment fill color (defaults to theme primary)",
                      .json_type = "array"},
                     {.name = "text_color",
                      .type = "Color",
-                     .default_value = "Color::black()",
+                     .default_value = theme_token_expr<&ColorRoles::on_surface>(),
                      .required = false,
-                     .note = "Unselected segment text color",
+                     .note = "Unselected segment text color (defaults to theme on_surface)",
                      .json_type = "array"},
                     {.name = "selected_text_color",
                      .type = "Color",
-                     .default_value = "Color::white()",
+                     .default_value = theme_token_expr<&ColorRoles::on_primary>(),
                      .required = false,
-                     .note = "Selected segment text color",
+                     .note = "Selected segment text color (defaults to theme on_primary)",
                      .json_type = "array"},
                     {.name = "border_color",
                      .type = "Color",
-                     .default_value = "{200,200,200,255}",
+                     .default_value = theme_token_expr<&ColorRoles::outline_variant>(),
                      .required = false,
-                     .note = "Outer frame border color",
+                     .note = "Outer frame border color (defaults to theme outline_variant)",
                      .json_type = "array"},
                     {.name = "font_size",
                      .type = "float",
-                     .default_value = "14.0",
+                     .default_value = "type_scale.body_medium",
                      .required = false,
-                     .note = "Font size (pt)",
+                     .note = "Font size (pt; follows the theme body type scale when unset)",
                      .json_type = "number",
                      .enum_values = {},
                      .min_value = "0"},
@@ -214,7 +225,7 @@ class SegmentedControl : public LeafWidget {
 
     /// @brief 收集信号视图；本控件无外露信号（on_change 为回调）。
     /// @param out 输出容器（未使用）。
-    auto collect_signals([[maybe_unused]] std::vector<SignalViewBase *> &out) -> void override {}
+    auto collect_signals([[maybe_unused]] StateSink &out) -> void override {}
 
     /// @brief 左键按下时按各段实测宽度定位命中段：切换选中并触发 on_change；禁用态吞掉事件不切换。
     /// @param e 鼠标事件（读取局部坐标与动作，回写 is_handled）。
@@ -224,7 +235,7 @@ class SegmentedControl : public LeafWidget {
             return;
         }
         if (e.action == MouseAction::Press && e.button == MouseButton::Left) {
-            const Font f{.size_pt = font_size_};
+            const Font f{.size_pt = layout_font_size_};  // 本路径没有 BuildContext：用布局/绘制期解好的字号，与量宽同源
             float x = 0.0F;
             for (size_t i = 0; i < segments_.size(); ++i) {
                 const float sw = render::FontEngine::measure_width(segments_[i], f) + 24.0F;
@@ -257,10 +268,20 @@ class SegmentedControl : public LeafWidget {
         if (active_color_.has_value()) {
             props.set("active_color", color_to_json(*active_color_));  // 未设置不输出：保留「跟随主题」语义
         }
-        props.set("text_color", color_to_json(text_color_));
-        props.set("selected_text_color", color_to_json(selected_text_color_));
-        props.set("border_color", color_to_json(border_color_));
-        props.set("font_size", font_size_);
+        if (text_color_.has_value()) {
+            props.set("text_color", color_to_json(*text_color_));  // 未设置不输出：保留「跟随主题」语义
+        }
+        if (selected_text_color_.has_value()) {
+            props.set("selected_text_color",
+                      color_to_json(*selected_text_color_));  // 未设置不输出：保留「跟随主题」语义
+        }
+        if (border_color_.has_value()) {
+            props.set("border_color", color_to_json(*border_color_));  // 未设置不输出：保留「跟随主题」语义
+        }
+        // 字号「只写意图」：缺键 ≡ 未表态 ≡ 取主题字阶正文档（旧 JSON 里显式的 14.0 仍逐字复原）
+        if (font_size_.has_value()) {
+            props.set("font_size", *font_size_);
+        }
         props.set("corner_radius", corner_radius_);
         props.set("enabled", Json{enabled_});
     }
@@ -294,7 +315,8 @@ class SegmentedControl : public LeafWidget {
             border_color_ = json_to_color(*props.at("border_color"));
         }
         if (props.contains("font_size")) {
-            font_size_ = props.at("font_size")->as_or<float>(0.0F);
+            const auto s = props.at("font_size")->as_or<float>(0.0F);
+            font_size_ = s > 0.0F ? std::optional<float>{s} : std::nullopt;  // 非法值 ⇒ 退出表态，回落主题字阶
         }
         if (props.contains("corner_radius")) {
             corner_radius_ = props.at("corner_radius")->as_or<float>(0.0F);
@@ -305,8 +327,10 @@ class SegmentedControl : public LeafWidget {
     }
 
   protected:
-    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
-        const Font f{.size_pt = font_size_};
+    auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
+        layout_font_size_ =
+            effective_font_size(ctx);  // 命中路径没有 BuildContext，按这份缓存取值（见 layout_font_size_）
+        const Font f{.size_pt = layout_font_size_};
         const float seg_h = render::FontEngine::measure_height(f) + 12.0F;
         float total_w = 0.0F;
         for (const auto &s : segments_) {
@@ -320,17 +344,20 @@ class SegmentedControl : public LeafWidget {
     /// @param bounds 本控件的全局矩形。
     /// @param ctx 构建上下文（用于解析主题色）。
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
-        const Font f{.size_pt = font_size_};
-        // 状态色解析：显式设置优先，否则跟随主题 primary；禁用态统一灰化。
+        // 每帧必过的主写入点：`on_layout` 在布局缓存命中时整段被跳过，不可作为唯一写入点。
+        layout_font_size_ = effective_font_size(ctx);
+        const Font f{.size_pt = layout_font_size_};
+        // 状态色解析：显式设置优先，否则跟随主题角色；禁用态统一灰化。
         Color accent = active_color_.value_or(inherit_theme(ctx).roles.primary);
-        Color text = text_color_;
-        Color sel_text = selected_text_color_;
-        Color border = border_color_;
+        Color text = text_color_.value_or(inherit_theme(ctx).roles.on_surface);
+        Color sel_text = selected_text_color_.value_or(inherit_theme(ctx).roles.on_primary);
+        Color border = border_color_.value_or(inherit_theme(ctx).roles.outline_variant);
         if (!enabled_) {
-            accent = Color{176, 176, 180, 255};
-            text = Color{168, 168, 172, 255};
-            sel_text = Color{240, 240, 242, 255};
-            border = Color{215, 215, 219, 255};
+            const auto &roles = inherit_theme(ctx).roles;
+            accent = roles.outline;
+            text = roles.outline;
+            sel_text = roles.surface_container_lowest;
+            border = roles.outline_variant;
         }
         // 外框（圆角裁剪保证选中段填充不溢出圆角）
         if (corner_radius_ > 0.0F) {
@@ -382,12 +409,14 @@ class SegmentedControl : public LeafWidget {
     /// @brief 选中变化回调（可空；调用时传入新序号）。
     std::function<void(int)> on_change_;
     std::optional<Color> active_color_;  ///< 选中段填充色；空 = 跟随主题 primary
-    Color text_color_ = Color::black();  ///< 未选中段文本色
-    Color selected_text_color_ = Color::white();  ///< 选中段文本色
-    Color border_color_ = Color{200, 200, 200, 255};  ///< 外框边框色
-    float font_size_ = 14.0F;  ///< 字号 pt
+    std::optional<Color> text_color_;  ///< 未选中段文本色；空 = 跟随主题 on_surface
+    std::optional<Color> selected_text_color_;  ///< 选中段文本色；空 = 跟随主题 on_primary
+    std::optional<Color> border_color_;  ///< 外框边框色；空 = 跟随主题 outline_variant
+    std::optional<float> font_size_;  ///< 字号 pt；空 = 跟随主题字阶正文档 `type_scale.body_medium`
     float corner_radius_ = 6.0F;  ///< 外框圆角半径 dp；0 = 直角
     bool enabled_ = true;  ///< 禁用态灰化并忽略点击
+    float layout_font_size_ =
+        TypeScale{}.body_medium.size_pt;  ///< 布局/绘制期解出的字号（pt）：供无 ctx 的命中路径复用
     // NOLINTEND(*-non-private-member-variables-in-classes)
 };
 

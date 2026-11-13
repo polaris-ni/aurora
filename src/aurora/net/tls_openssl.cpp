@@ -22,9 +22,12 @@
 // 校验器接受一枚可增删的 `X509_STORE`，「追加可信根」这件事在这里做得到，于是没有理由在本层重写
 // 一份链引擎——链构建与名字核对是最容易两条腿分叉的地方。追加是**合并**而非替换：
 // `SSL_CTX_set_default_verify_paths` 先把系统缺省根装进 ctx 自己的 store，PEM 再逐张加进同一枚
-// store；因此对接公网端点的证书照旧可信。主机名走 `SSL_set1_host`（校验器内的 RFC 6125 通路：
-// SAN 的 dNSName 优先、有 SAN 就不再回看 CN、通配只认最左标签且不跨点），与 Schannel 腿手写的
-// `name_matches` 是同一套规则。
+// store；因此对接公网端点的证书照旧可信。主机名校验**手写**而非交给 `SSL_set1_host`：OpenSSL 内建通路
+// 在「SAN 存在但无 dNSName」时会回落 CN，与 CHG-068 的语义（有 SAN 即只认 dNSName、否则拒）冲突，故本层
+// 仿 Schannel 腿（见 `certificate_dns_names` / `dns_name_matches` / `verify_hostname`）自取 SAN 的 dNSName：
+// SAN 扩展存在即只比对 dNSName（含通配，仅最左标签且不跨点），无匹配即拒、绝不回看 CN；只有 SAN 扩展完全
+// 不存在才回落 CN。与 Schannel 腿相同的是「名字判定留在各自那一侧、不另写一条公共匹配规则」这条取舍，
+// 不是「两套实现逐值同色」：CN-only 证书上平台策略与手写回落可以不同，实际分叉由跨后端对账用例逐格记录。
 //
 // 危险开关（`allow_insecure_certificate`）在本层的落点是 `SSL_VERIFY_NONE`——链、有效期、主机名
 // 一次全跳过；那条 warning 诊断由 `net/tls.cpp` 在发起处统一打（两腿同一条，本层重复打就是把同
@@ -56,6 +59,7 @@
 #include <openssl/pkcs12.h>
 #include <openssl/ssl.h>
 #include <openssl/x509.h>
+#include <openssl/x509v3.h>  // GENERAL_NAME / GEN_DNS / sk_GENERAL_NAME_* / X509_get_ext_d2i / NID_subject_alt_name
 
 #include <algorithm>
 #include <array>
@@ -203,7 +207,7 @@ auto spki_digest(const X509 *certificate) -> std::string {
     if (certificate == nullptr) {
         return {};
     }
-    auto *public_key = ::X509_get_X509_PUBKEY(certificate);  // 不额外加引用：随证书本体存活
+    const auto *public_key = ::X509_get_X509_PUBKEY(certificate);  // 不额外加引用：随证书本体存活
     if (public_key == nullptr) {
         return {};
     }
@@ -272,6 +276,103 @@ auto to_lower_ascii(std::string_view text) -> std::string {
         }
     }
     return result;
+}
+
+/// 一条证书名与目标主机的匹配（RFC 6125 的收紧形态，与 Schannel 腿 `name_matches` 逐值同色）。
+///
+/// 通配符只允许作为最左标签整体出现，且不跨点：`*.example.com` 不匹配 `a.b.example.com`——
+/// 多级通配会让一张泛证书覆盖整个后缀树，那是发证方的权限而不是连接方的期待。大小写无关：
+/// 调用方负责把两边规整到小写（本层 `host_` 在 create 里已 `to_lower_ascii`，证书名在此处规整）。
+auto dns_name_matches(std::string_view pattern, std::string_view host) -> bool {
+    if (pattern.empty() || host.empty()) {
+        return false;
+    }
+    if (pattern.front() != '*') {
+        return pattern == host;
+    }
+    const auto suffix = pattern.substr(1);
+    if (suffix.size() < 2 || suffix.front() != '.' || suffix.find('*') != std::string_view::npos) {
+        return false;
+    }
+    const auto dot = host.find('.');
+    if (dot == std::string_view::npos || dot == 0) {
+        return false;  // 没有可替换的非空最左标签
+    }
+    return host.substr(dot) == suffix;
+}
+
+/// 证书里可核对的 dNSName 集合（SAN 形态），并以出参回报 SAN 扩展是否真的存在。
+///
+/// 「扩展不存在」与「扩展存在但里面没有 dNSName」是两件事：只有前者允许回落到 CN，后者已经
+/// 明确给出了可核对名字的清单（只是清单里不含 DNS 名），再拿 CN 兜底等于替证书补一条它没授权的名字。
+/// 扩展存在却解码失败也按「存在」计：解码不了时宁可拒绝，不能静默放宽成 CN 回落。
+auto certificate_dns_names(const X509 *cert, bool &san_present) -> std::vector<std::string> {
+    san_present = false;
+    auto names = std::vector<std::string>{};
+    // `X509_get_ext_d2i` 返回非 const `void *`，NID_subject_alt_name 指向 subjectAltName 扩展；
+    // 因此 `raw` 声明为非 const，后续 `static_cast` 到栈类型与 `sk_GENERAL_NAME_free` 都无需 const_cast。
+    auto *raw = ::X509_get_ext_d2i(cert, NID_subject_alt_name, nullptr, nullptr);
+    if (raw == nullptr) {
+        return names;  // 扩展不存在
+    }
+    san_present = true;
+    auto *stack = static_cast<STACK_OF(GENERAL_NAME) *>(raw);
+    const int count = sk_GENERAL_NAME_num(stack);
+    for (int index = 0; index < count; ++index) {
+        const GENERAL_NAME *entry = sk_GENERAL_NAME_value(stack, index);
+        if (entry == nullptr || entry->type != GEN_DNS) {
+            continue;
+        }
+        // GENERAL_NAME 是「选择子 + 匿名 union」结构，按 type 取 dNSName 是唯一读法（同 Schannel 腿）。
+        // NOLINTBEGIN(cppcoreguidelines-pro-type-union-access)
+        const auto *name = entry->d.dNSName;
+        // NOLINTEND(cppcoreguidelines-pro-type-union-access)
+        const int length = ::ASN1_STRING_length(name);
+        if (name == nullptr || length <= 0) {
+            continue;
+        }
+        // dNSName 按 IA5String 解释，按字节取文本；指针域差异用 reinterpret 桥（同 `name_text`）。
+        const auto *bytes = ::ASN1_STRING_get0_data(name);
+        names.push_back(
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+            to_lower_ascii({reinterpret_cast<const char *>(bytes), static_cast<std::size_t>(length)}));
+    }
+    sk_GENERAL_NAME_free(stack);  // X509_get_ext_d2i 分配的栈须显式释放
+    return names;
+}
+
+/// 证书主体 CN（缺 SAN 时的传统核对对象）；同名多条目取最后一个（与 Schannel 腿同口径）。
+auto certificate_common_name(const X509 *cert) -> std::string {
+    if (cert == nullptr) {
+        return {};
+    }
+    const X509_NAME *name = ::X509_get_subject_name(cert);
+    if (name == nullptr) {
+        return {};
+    }
+    int last = -1;
+    for (;;) {
+        const int index = ::X509_NAME_get_index_by_NID(name, NID_commonName, last);
+        if (index < 0) {
+            break;
+        }
+        last = index;
+    }
+    if (last < 0) {
+        return {};
+    }
+    const X509_NAME_ENTRY *entry = ::X509_NAME_get_entry(name, last);
+    if (entry == nullptr) {
+        return {};
+    }
+    const ASN1_STRING *value = ::X509_NAME_ENTRY_get_data(entry);
+    const int length = ::ASN1_STRING_length(value);
+    if (value == nullptr || length <= 0) {
+        return {};
+    }
+    const auto *bytes = ::ASN1_STRING_get0_data(value);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+    return to_lower_ascii({reinterpret_cast<const char *>(bytes), static_cast<std::size_t>(length)});
 }
 
 /// ALPN 宣告（wire 形态：整表由 `SSL_CTX_set_alpn_protos` 的长度参数表达，逐条 `u8 长度 + 标识`）。
@@ -512,6 +613,10 @@ class OpenSslBackend final : public TlsBackend {
     /// 校验器结论 → 本层的拒绝理由（危险开关下恒为未置值）。
     [[nodiscard]] auto verification_verdict() const -> std::optional<Error>;
 
+    /// 主机名核对（手写 SAN/CN 判定，不交 OpenSSL 内建 `SSL_set1_host`）：SAN 扩展存在即只比对
+    /// dNSName，无匹配即拒、不回看 CN；SAN 完全不存在才回落 CN。危险开关下恒为未置值。
+    [[nodiscard]] auto verify_hostname() const -> std::optional<Error>;
+
     /// 入向 BIO 写不进去（唯一成因是内存耗尽）之后的失败：让每次推进都立刻给出结论。
     [[nodiscard]] auto poisoned() const -> std::optional<Error> {
         if (!input_rejected_) {
@@ -670,15 +775,10 @@ auto OpenSslBackend::create(const TlsContext &context, std::string_view server_n
     if (!backend->host_.empty()) {
         // SNI：公共面把 `server_name` 同时用作 SNI 与主机名校验目标（见 `net/tls.h`），两者因此
         // 必须来自同一枚字符串，不然「校验过了」与「问的机器」就是两件事。宏内部复制正文，
-        // 故这里传入的缓冲不需要活过本次调用。
+        // 故这里传入的缓冲不需要活过本次调用。主机名核对不在此处登记：OpenSSL 内建 `SSL_set1_host`
+        // 在「SAN 存在但无 dNSName」时会回落 CN，违背 CHG-068 的语义，故交由 `verify_hostname` 手写判定
+        // （与链校验同归于 `net-tls-cert-rejected`，见 `verification_verdict`）。
         (void)::SSL_set_tlsext_host_name(ssl, backend->host_.c_str());
-        // 主机名核对：登记进校验器的 `X509_VERIFY_PARAM`，与链校验同一条通路出结论（因此同归于
-        // `net-tls-cert-rejected`）。危险开关下不登记——那一档的语义就是「本连接不做名字核对」。
-        if (!backend->insecure_ && ::SSL_set1_host(ssl, backend->host_.c_str()) != 1) {
-            return tls_error(
-                ErrorCode::GeneralInvalidArgument,
-                "the peer host name could not be registered for certificate verification: " + openssl_reason());
-        }
     }
     return Result<std::unique_ptr<OpenSslBackend>>{std::move(backend)};
 }
@@ -743,18 +843,47 @@ auto OpenSslBackend::verification_verdict() const -> std::optional<Error> {
     if (insecure_) {
         return std::nullopt;  // 危险开关：链、有效期、主机名的结论一概不取，诊断已在发起处留痕
     }
-    // 校验器的结论是一条 `X509_V_ERR_*`：链建不起来、根不受信、名字不符、有效期已过——公共面把它们
+    // 校验器的结论是一条 `X509_V_ERR_*`：链建不起来、根不受信、有效期已过——公共面把它们
     // 全归成一枚 `net-tls-cert-rejected`（「校验不过即断连」不区分是哪一项），但在 `detail` 里把
     // 校验器给的原文与目标主机名一起带出去：主机名不符时调用方要的是那个名字，而 OpenSSL 自己的
     // reason 串只有 "hostname mismatch"。
     const auto verdict = ::SSL_get_verify_result(ssl_);
     if (verdict == X509_V_OK) {
-        return std::nullopt;
+        // 链通过：再核对主机名（手写 SAN/CN 判定，不交 OpenSSL 内建 `SSL_set1_host`）。
+        return verify_hostname();
     }
     const auto *text = ::X509_verify_cert_error_string(verdict);
     auto detail = std::string{"peer certificate is not accepted for host '"} + host_ + "': ";
     detail += text != nullptr ? text : "unspecified verification error";
     return tls_error(ErrorCode::NetTlsCertRejected, std::move(detail));
+}
+
+auto OpenSslBackend::verify_hostname() const -> std::optional<Error> {
+    if (host_.empty()) {
+        return std::nullopt;  // 无目标名不核对（与 create 里不登记 SNI 同口径）
+    }
+    const auto *cert = ::SSL_get0_peer_certificate(ssl_);
+    if (cert == nullptr) {
+        return std::nullopt;  // 无对端证书：交给 handshake 的「无证书」分支
+    }
+    bool san_present = false;
+    const auto dns_names = certificate_dns_names(cert, san_present);
+    if (san_present) {
+        // SAN 扩展存在：只看 dNSName。任一匹配即放行；全不匹配（含「有 SAN 但无 dNSName」）即拒，
+        // 不回看 CN——那是替证书补一条它没授权的名字。
+        for (const auto &candidate : dns_names) {
+            if (dns_name_matches(candidate, host_)) {
+                return std::nullopt;
+            }
+        }
+        return tls_error(ErrorCode::NetTlsCertRejected, "peer certificate SAN does not match host '" + host_ + "'");
+    }
+    // SAN 扩展不存在：回落 CN（传统形态）。CN 为空或不符即拒。
+    const auto cn = certificate_common_name(cert);
+    if (!cn.empty() && dns_name_matches(cn, host_)) {
+        return std::nullopt;
+    }
+    return tls_error(ErrorCode::NetTlsCertRejected, "peer certificate common name does not match host '" + host_ + "'");
 }
 
 auto OpenSslBackend::stall_reason(int ret, std::string_view phase) -> std::optional<Error> {

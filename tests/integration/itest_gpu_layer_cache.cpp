@@ -124,7 +124,7 @@ auto count_kind(const DisplayList &dl, CmdKind kind) -> int {
 AURORA_TEST_CASE(gpu_layer_first_paint_records_layer_commands) {
     CountingBox::m_paint_count = 0;
     const auto cb = std::make_shared<CountingBox>();
-    cb->modifier.set(au::Modifier{}.cache_layer());
+    cb->set_modifier(au::Modifier{}.cache_layer());
 
     // 首帧（缓存冷）：BeginLayer + 子树（on_paint 一次）+ EndLayer + DrawLayer。
     const auto dl = record_tree(cb, 200, 200);
@@ -144,7 +144,7 @@ AURORA_TEST_CASE(gpu_layer_first_paint_records_layer_commands) {
 AURORA_TEST_CASE(gpu_layer_clean_paint_records_draw_layer_only) {
     CountingBox::m_paint_count = 0;
     const auto cb = std::make_shared<CountingBox>();
-    cb->modifier.set(au::Modifier{}.cache_layer());
+    cb->set_modifier(au::Modifier{}.cache_layer());
 
     (void)record_tree(cb, 200, 200);
     // 干净帧：仅一条 DrawLayer（子树零重绘、零像素搬运——GPU 常驻层纹理直接合成）。
@@ -157,7 +157,7 @@ AURORA_TEST_CASE(gpu_layer_clean_paint_records_draw_layer_only) {
 AURORA_TEST_CASE(gpu_layer_invalidate_rerecords_and_replay_matches_direct) {
     CountingBox::m_paint_count = 0;
     const auto cb = std::make_shared<CountingBox>();
-    cb->modifier.set(au::Modifier{}.cache_layer());
+    cb->set_modifier(au::Modifier{}.cache_layer());
 
     (void)record_tree(cb, 200, 200);
     (void)record_tree(cb, 200, 200);
@@ -175,7 +175,7 @@ AURORA_TEST_CASE(gpu_layer_invalidate_rerecords_and_replay_matches_direct) {
     AURORA_TEST_CHECK_MSG(replayed.get_pixel(50, 10).r == 255, "replayed layer shows red");
 
     const auto cb2 = std::make_shared<CountingBox>();
-    cb2->modifier.set(au::Modifier{}.cache_layer());
+    cb2->set_modifier(au::Modifier{}.cache_layer());
     auto root2 = make_root(cb2, 200, 200);
     constexpr BuildContext ctx;
     Painter direct;
@@ -188,7 +188,7 @@ AURORA_TEST_CASE(gpu_layer_invalidate_rerecords_and_replay_matches_direct) {
 AURORA_TEST_CASE(gpu_layer_epoch_bump_invalidates_cache) {
     CountingBox::m_paint_count = 0;
     const auto cb = std::make_shared<CountingBox>();
-    cb->modifier.set(au::Modifier{}.cache_layer());
+    cb->set_modifier(au::Modifier{}.cache_layer());
 
     (void)record_tree(cb, 200, 200);
     // 消费端层存储整体丢弃（epoch 推进）：控件下帧整体重录 BeginLayer（单帧自愈）。
@@ -201,7 +201,7 @@ AURORA_TEST_CASE(gpu_layer_epoch_bump_invalidates_cache) {
 AURORA_TEST_CASE(gpu_layer_draw_miss_bumps_epoch_self_heal) {
     CountingBox::m_paint_count = 0;
     const auto cb = std::make_shared<CountingBox>();
-    cb->modifier.set(au::Modifier{}.cache_layer());
+    cb->set_modifier(au::Modifier{}.cache_layer());
 
     // 冷帧建层 + 干净帧 DrawLayer-only DL，喂给冷软件存储：未命中 → bump epoch（自愈信号）。
     (void)record_tree(cb, 200, 200);
@@ -221,7 +221,7 @@ AURORA_TEST_CASE(gpu_layer_draw_miss_bumps_epoch_self_heal) {
 AURORA_TEST_CASE(gpu_layer_size_change_rerecords) {
     CountingBox::m_paint_count = 0;
     const auto cb = std::make_shared<CountingBox>();
-    cb->modifier.set(au::Modifier{}.cache_layer());
+    cb->set_modifier(au::Modifier{}.cache_layer());
 
     (void)record_tree(cb, 200, 200);
     // 尺寸变化：层尺寸键失配 → 重录（布局缓存契约同辙：须先 mark_needs_layout）。

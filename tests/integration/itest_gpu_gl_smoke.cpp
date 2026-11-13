@@ -39,7 +39,7 @@ static auto present_two_frames_gpu() -> int {
         return 0;  // 无显示环境 / GL 上下文不可用：环境性失败，容忍
     }
 
-    session.mount(au::Text{au::TextProps{.content = au::LocalizedString{"Aa Bb 01"}}});
+    session.mount(au::Text{au::TextProps().set_content(au::LocalizedString{"Aa Bb 01"})});
     const auto r1 = session.present();
     AURORA_TEST_CHECK(static_cast<bool>(r1));
     AURORA_TEST_CHECK_EQ(session.frame_count(), 1);

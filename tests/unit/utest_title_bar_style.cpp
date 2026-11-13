@@ -1,6 +1,6 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/window/title_bar_style.h
-/// 测试说明: 覆盖 TitleBarStyle 默认值（=AdwaitaDark 预设）、六套视觉预设的数值出处与不变量、
+/// 测试说明: 覆盖 TitleBarStyle 默认值（=AdwaitaDark 预设）、八套视觉预设的数值出处与不变量、
 /// 显示开关不变量、TitleBarButtonLayout 枚举互异性与指定初始化聚合语义
 
 #include "aurora/window/title_bar_style.h"
@@ -125,6 +125,44 @@ AURORA_TEST_CASE(mac_light_preset_values) {
     AURORA_TEST_CHECK_EQ(s.center_title, dark.center_title);
 }
 
+AURORA_TEST_CASE(breeze_presets_take_kde_colors_and_no_close_red) {
+    // KDE/breeze 仓库 colors/Breeze{Light,Dark}.colors 的 [Colors:Window] 四支：亮档
+    // BackgroundNormal 239,240,241 / BackgroundAlternate 227,229,231 / ForegroundNormal 35,38,41
+    // / ForegroundInactive 112,125,138；暗档 32,35,38 / 41,44,48 / 252,252,252 / 161,169,177。
+    constexpr TitleBarStyle light = TitleBarStyle::from_preset(CsdPreset::BreezeLight);
+    constexpr TitleBarStyle dark = TitleBarStyle::from_preset(CsdPreset::BreezeDark);
+    AURORA_TEST_CHECK_EQ(light.bg_active, Color{0xEF, 0xF0, 0xF1});
+    AURORA_TEST_CHECK_EQ(light.bg_inactive, Color{0xE3, 0xE5, 0xE7});
+    AURORA_TEST_CHECK_EQ(light.fg_active, Color{0x23, 0x26, 0x29});
+    AURORA_TEST_CHECK_EQ(light.fg_inactive, Color{0x70, 0x7D, 0x8A});
+    AURORA_TEST_CHECK_EQ(dark.bg_active, Color{0x20, 0x23, 0x26});
+    AURORA_TEST_CHECK_EQ(dark.bg_inactive, Color{0x29, 0x2C, 0x30});
+    AURORA_TEST_CHECK_EQ(dark.fg_active, Color{0xFC, 0xFC, 0xFC});
+    AURORA_TEST_CHECK_EQ(dark.fg_inactive, Color{0xA1, 0xA9, 0xB1});
+    // Breeze 无红色关闭档：两支 close 底色全透明（绘制层据此不画红底，关闭钮悬停走强调色圆底）。
+    AURORA_TEST_CHECK_EQ(light.close_hover, Color::transparent());
+    AURORA_TEST_CHECK_EQ(light.close_pressed, Color::transparent());
+    AURORA_TEST_CHECK_EQ(dark.close_hover, Color::transparent());
+    // 悬停 / 按压罩取强调色 DecorationHover/Focus（#3DAEE9），alpha 沿用 Adwaita 档的 15% / 30%。
+    AURORA_TEST_CHECK_EQ(light.hover_tint, Color{0x3D, 0xAE, 0xE9, 38});
+    AURORA_TEST_CHECK_EQ(light.pressed_tint, Color{0x3D, 0xAE, 0xE9, 77});
+    AURORA_TEST_CHECK_EQ(dark.hover_tint, light.hover_tint);
+    // 常态无圆底、底缘无 Adwaita 那条 inset shade 线；标题 Noto Sans 10pt / Regular。
+    AURORA_TEST_CHECK_EQ(light.button_tint, Color::transparent());
+    AURORA_TEST_CHECK_EQ(light.separator, Color::transparent());
+    AURORA_TEST_CHECK_NEAR(light.metrics.title_font_size_pt, 10.0F, 1e-4F);
+    AURORA_TEST_CHECK_EQ(light.metrics.title_font_weight, 400);
+    // 几何不钉（KWin 侧栏高运行时推导）：两支与 Adwaita 档的 metrics 逐值相同。
+    constexpr TitleBarStyle adwaita = TitleBarStyle::from_preset(CsdPreset::AdwaitaDark);
+    AURORA_TEST_CHECK_NEAR(light.height, adwaita.height, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(light.metrics.button_size, adwaita.metrics.button_size, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(light.metrics.button_gap, adwaita.metrics.button_gap, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(light.metrics.button_margin, adwaita.metrics.button_margin, 1e-4F);
+    // 按钮语言即 Adwaita（右缘方形盒、close→max→min），绘制层无第四分支。
+    AURORA_TEST_CHECK_EQ(light.button_layout, TitleBarButtonLayout::Adwaita);
+    AURORA_TEST_CHECK_TRUE(light.center_title);
+}
+
 AURORA_TEST_CASE(presets_keep_all_show_flags_enabled) {
     // 三个预设都不得关闭任何按钮/标题开关：几何层的显隐由 show_* 与 resizable 决定，
     // 预设只管颜色与布局语言。
@@ -200,46 +238,65 @@ AURORA_TEST_CASE(from_preset_adwaita_dark_equals_default_construction) {
     AURORA_TEST_CHECK_EQ(preset.center_title, def.center_title);
 }
 
-AURORA_TEST_CASE(six_presets_table) {
-    // 六套预设逐格锁值：明暗成对（背景明暗反转）、语言分派正确、按压强于悬停、显隐全开。
+AURORA_TEST_CASE(eight_presets_table) {
+    // 八套预设逐格锁值：明暗成对（背景明暗反转）、语言分派正确、按压强于悬停、显隐全开。
     struct Row {
-        CsdPreset preset;
-        TitleBarButtonLayout layout;
-        bool dark;  // true = 暗色档（白前景 / 亮背景偏暗）
-        float height;  // 该档栏高基准（Windows 档按真机 DWM 实测 32dp，其余沿用 36dp）
-        const char *name;  // 失败时定位用（测试输出须 ASCII）
+        CsdPreset preset = CsdPreset::AdwaitaDark;
+        TitleBarButtonLayout layout = TitleBarButtonLayout::Adwaita;
+        bool dark = false;  // true = 暗色档（白前景 / 亮背景偏暗）
+        float height = 0.0F;  // 该档栏高基准（Windows 档按真机 DWM 实测 32dp，其余沿用 36dp）
+        Color fg_active;  // 激活前景（逐档钉死；Breeze 暗档取官方 252,252,252 而非纯白）
+        const char *name = "";  // 失败时定位用（测试输出须 ASCII）
     };
     const Row rows[] = {
         {.preset = CsdPreset::AdwaitaLight,
          .layout = TitleBarButtonLayout::Adwaita,
          .dark = false,
          .height = 36.0F,
+         .fg_active = Color{0x33, 0x33, 0x34},
          .name = "adwaita-light"},
         {.preset = CsdPreset::AdwaitaDark,
          .layout = TitleBarButtonLayout::Adwaita,
          .dark = true,
          .height = 36.0F,
+         .fg_active = Color{255, 255, 255},
          .name = "adwaita-dark"},
         {.preset = CsdPreset::WindowsLight,
          .layout = TitleBarButtonLayout::Windows,
          .dark = false,
          .height = 32.0F,
+         .fg_active = Color{0, 0, 0},
          .name = "windows-light"},
         {.preset = CsdPreset::WindowsDark,
          .layout = TitleBarButtonLayout::Windows,
          .dark = true,
          .height = 32.0F,
+         .fg_active = Color{255, 255, 255},
          .name = "windows-dark"},
         {.preset = CsdPreset::MacLight,
          .layout = TitleBarButtonLayout::Mac,
          .dark = false,
          .height = 28.0F,
+         .fg_active = Color{0, 0, 0},
          .name = "mac-light"},
         {.preset = CsdPreset::MacDark,
          .layout = TitleBarButtonLayout::Mac,
          .dark = true,
          .height = 28.0F,
+         .fg_active = Color{255, 255, 255},
          .name = "mac-dark"},
+        {.preset = CsdPreset::BreezeLight,
+         .layout = TitleBarButtonLayout::Adwaita,
+         .dark = false,
+         .height = 36.0F,
+         .fg_active = Color{0x23, 0x26, 0x29},
+         .name = "breeze-light"},
+        {.preset = CsdPreset::BreezeDark,
+         .layout = TitleBarButtonLayout::Adwaita,
+         .dark = true,
+         .height = 36.0F,
+         .fg_active = Color{0xFC, 0xFC, 0xFC},
+         .name = "breeze-dark"},
     };
     for (const Row &r : rows) {
         const TitleBarStyle s = TitleBarStyle::from_preset(r.preset);
@@ -252,9 +309,11 @@ AURORA_TEST_CASE(six_presets_table) {
         // 明暗档位：暗色档背景暗于亮色档背景（逐通道单调），前景黑白相应反转。
         AURORA_TEST_CHECK_TRUE(s.bg_active.r >= (r.dark ? 0x20U : 0xE0U));
         AURORA_TEST_CHECK_TRUE(s.bg_active.r <= (r.dark ? 0x40U : 0xFFU));
-        // 明暗档位：暗色档前景纯白；亮色档前景近黑（AdwaitaLight 取真机灰 0x333334 而非纯黑）。
+        // 明暗档位：暗色档前景为白系（Breeze 取官方 `#FCFCFC`，其余纯白）；亮色档前景近黑
+        // （AdwaitaLight 取真机灰 0x333334、BreezeLight 取 0x232629 而非纯黑）。
+        AURORA_TEST_CHECK_EQ(s.fg_active, r.fg_active);
         if (r.dark) {
-            AURORA_TEST_CHECK_EQ(s.fg_active, Color{255, 255, 255});
+            AURORA_TEST_CHECK_TRUE(s.fg_active.r >= 0xFCU);
         } else {
             AURORA_TEST_CHECK_TRUE(s.fg_active.r <= 0x40U);
             AURORA_TEST_CHECK_TRUE(s.fg_active.g <= 0x40U);

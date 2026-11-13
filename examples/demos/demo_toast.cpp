@@ -5,8 +5,8 @@
 // try/catch 包装
 // NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
-    au::Button notify_btn{au::ButtonProps{.label = "Show notification"}};
-    au::Button clear_btn{au::ButtonProps{.label = "Clear"}};
+    au::Button notify_btn{au::ButtonProps().set_label("Show notification")};
+    au::Button clear_btn{au::ButtonProps().set_label("Clear")};
 
     auto content = au::Column{
         GradientTitle{"Toast / SnackBar notification"},

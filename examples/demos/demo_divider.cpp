@@ -9,13 +9,13 @@ auto main() -> int {
         GradientTitle{"Divider widget"},
         gap(12),
         au::Text{au::LocalizedString{"List item A"}},
-        au::Divider{au::DividerProps{.indent = 16.0F, .end_indent = 16.0F}},
+        au::Divider{au::DividerProps().set_indent(16.0F).set_end_indent(16.0F)},
         au::Text{au::LocalizedString{"List item B (with left/right indent)"}},
         gap(12),
         au::Text{au::LocalizedString{"Two columns with a vertical divider in the middle:"}},
         au::Row{
             au::Text{au::LocalizedString{"Left column content"}},
-            au::Divider{au::DividerProps{.orientation = au::Orientation::Vertical, .thickness = 2.0F}},
+            au::Divider{au::DividerProps().set_orientation(au::Orientation::Vertical).set_thickness(2.0F)},
             au::Text{au::LocalizedString{"Right column content"}},
         },
     };

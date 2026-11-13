@@ -24,7 +24,6 @@
 // 尚未存在，3.6 也未发布），不存在更直接的官方入口。
 //
 // 门控与 `glfw_surface.cpp` 同款：`AURORA_BACKEND_GLFW`。
-#include "aurora/core/platform.h"
 
 #ifdef AURORA_BACKEND_GLFW
 

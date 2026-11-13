@@ -60,7 +60,7 @@ AURORA_TEST_CASE(aggregate_header_exposes_surface_contract) {
 
 #ifdef AURORA_BACKEND_HEADLESS
     // 聚合头注释契约：Headless 零三方依赖、默认可用。
-    HeadlessSurface surface;
+    HeadlessSurface const surface;
     AURORA_TEST_CHECK_EQ(surface.frame_count(), 0);
     AURORA_TEST_CHECK_NEAR(surface.size().width, 0.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(surface.size().height, 0.0F, 1e-4F);

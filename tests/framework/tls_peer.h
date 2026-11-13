@@ -72,6 +72,18 @@ enum class Lifetime : std::uint8_t {
     Expired,  ///< 有效期整体落在过去
 };
 
+/// @brief 自签证书里「可核对名字」的形态。
+///
+/// 缺省 `SanAndCn` 让既有全部用例零改动；另两枚用于把跨后端的名字判定分叉真正造出来：
+/// `CnOnly` 是 SAN 扩展完全不存在的传统证书，`SanWithoutDns` 是 SAN 扩展存在但其中只有
+/// 一条 IP 地址、一个 dNSName 都没有的现代证书。两者都不能靠改目标主机名伪造出来。
+/// 底型与 `Lifetime` 一致。
+enum class NameShape : std::uint8_t {
+    SanAndCn,  ///< 同名 CN + SAN dNSName（缺省）
+    CnOnly,  ///< 只有 CN，完全没有 SAN 扩展
+    SanWithoutDns,  ///< 有 SAN 扩展，但里面没有 dNSName
+};
+
 /// @brief 平台无关进程设施的内部件（spawn / 等待 / 强杀），只服务本头自身的对外类型。
 namespace detail {
 
@@ -424,24 +436,43 @@ inline auto openssl_available() -> bool {
     return PRESENT;
 }
 
-/// @brief 签一张自签服务端证书（SAN 含给定名字）。
+/// @brief 签一张自签服务端证书（名字形态由 `shape` 决定）。
 /// @param certificate 证书落点。
 /// @param private_key 私钥落点。
-/// @param common_name 主体名与 SAN 的名字。
+/// @param common_name 主体 CN 的名字；`SanAndCn` 形态下也是 SAN 的 dNSName。
 /// @param lifetime 有效期形态；`Expired` 把整段有效期回填到过去。
+/// @param shape 证书里可核对名字的形态；缺省同名 CN + SAN，另两枚造出 CN-only 与 SAN 无 dNSName。
 /// @return 结局。
 inline auto openssl_issue(const std::filesystem::path &certificate, const std::filesystem::path &private_key,
-                          std::string_view common_name, Lifetime lifetime = Lifetime::Valid) -> IssueResult {
-    auto argv = std::vector<std::string>{
-        "openssl", "req", "-x509", "-newkey", "rsa:2048", "-keyout", private_key.string(), "-out", certificate.string(),
-        "-days", "30", "-nodes", "-subj", "/CN=" + std::string{common_name}, "-addext",
-        "subjectAltName=DNS:" + std::string{common_name},
-        // 一张被当作「信任根」追加的自签证书，本就该是一张合法 CA（CA:TRUE）+ 服务器证书
-        // （serverAuth）。缺这两项时 OpenSSL / mbedTLS 仍宽松放行，但 SecureTransport 的
-        // `SecPolicyCreateSSL` 会按 TLS 策略拒绝它（"certificate is not permitted for this
-        // usage"），于是 `appended_trust_root_*` / `pin_mismatch_*` / `client_identity_*` 在 macOS 腿
-        // 上无故失败。补全后所有后端行为一致。
-        "-addext", "extendedKeyUsage=serverAuth", "-addext", "basicConstraints=CA:TRUE"};
+                          std::string_view common_name, Lifetime lifetime = Lifetime::Valid,
+                          NameShape shape = NameShape::SanAndCn) -> IssueResult {
+    auto argv = std::vector<std::string>{"openssl",
+                                         "req",
+                                         "-x509",
+                                         "-newkey",
+                                         "rsa:2048",
+                                         "-keyout",
+                                         private_key.string(),
+                                         "-out",
+                                         certificate.string(),
+                                         "-days",
+                                         "30",
+                                         "-nodes",
+                                         "-subj",
+                                         "/CN=" + std::string{common_name}};
+    // SAN 扩展的有无是跨后端名字判定分叉的开关，必须能单独控制：不给 `-addext subjectAltName`
+    // 才是真正的 CN-only 证书，而 SAN 里只放 IP / URI 才造得出「扩展存在但无 dNSName」。
+    if (shape == NameShape::SanAndCn) {
+        argv.insert(argv.end(), {"-addext", "subjectAltName=DNS:" + std::string{common_name}});
+    } else if (shape == NameShape::SanWithoutDns) {
+        argv.insert(argv.end(), {"-addext", "subjectAltName=IP:127.0.0.1"});
+    }
+    // 一张被当作「信任根」追加的自签证书，本就该是一张合法 CA（CA:TRUE）+ 服务器证书
+    // （serverAuth）。缺这两项时 OpenSSL / mbedTLS 仍宽松放行，但 SecureTransport 的
+    // `SecPolicyCreateSSL` 会按 TLS 策略拒绝它（"certificate is not permitted for this
+    // usage"），于是 `appended_trust_root_*` / `pin_mismatch_*` / `client_identity_*` 在 macOS 腿
+    // 上无故失败。补全后所有后端行为一致。
+    argv.insert(argv.end(), {"-addext", "extendedKeyUsage=serverAuth", "-addext", "basicConstraints=CA:TRUE"});
     if (lifetime == Lifetime::Expired) {
         // `-not_after` 覆盖 `-days`，两枚时刻一起回填才能让「现在」落到区间之外。
         argv.insert(argv.end(), {"-not_before", "20200101000000Z", "-not_after", "20200102000000Z"});
@@ -515,11 +546,12 @@ class Assets {
     ~Assets() = default;
 
     /// @brief 现签一份资产。
-    /// @param common_name 证书的主体名与 SAN（本设施只用于回环对端，缺省 `localhost`）。
+    /// @param common_name 证书的主体名（本设施只用于回环对端，缺省 `localhost`）。
     /// @param with_identity 是否连带生成 mTLS 客户端身份（PKCS#12 与 PEM 两种入参形态同源）。
     /// @param lifetime 有效期形态；`Expired` 用于「Validity 已过期一定被拒」那条判据。
+    /// @param shape 证书名字形态；缺省同名 CN + SAN，另两枚用于跨后端名字判定对账。
     explicit Assets(std::string_view common_name = "localhost", bool with_identity = false,
-                    Lifetime lifetime = Lifetime::Valid) {
+                    Lifetime lifetime = Lifetime::Valid, NameShape shape = NameShape::SanAndCn) {
         if (!detail::openssl_available()) {
             status_ = "openssl command line is not present on this host";
             return;
@@ -527,7 +559,7 @@ class Assets {
         const auto name = std::string{common_name};
         certificate_ = detail::next_path("server-cert", ".pem");
         private_key_ = detail::next_path("server-key", ".pem");
-        const auto issued = detail::openssl_issue(certificate_, private_key_, name, lifetime);
+        const auto issued = detail::openssl_issue(certificate_, private_key_, name, lifetime, shape);
         if (!issued.ok) {
             status_ = issued.message;
             return;

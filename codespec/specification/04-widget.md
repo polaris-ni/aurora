@@ -37,7 +37,7 @@
 |:---|:---|:---|
 | `type_name()` | `[[nodiscard]] virtual auto type_name() const -> const char *` —— 纯虚 | `widget.h` |
 | `describe()` | `[[nodiscard]] virtual auto describe() const -> WidgetDescriptor` | `widget.h` |
-| `collect_signals(out)` | `virtual auto collect_signals(std::vector<SignalViewBase*>&) -> void` | `widget.h` |
+| `collect_signals(out)` | `virtual auto collect_signals(StateSink&) -> void` | `widget.h` |
 | `child_nodes()` | `[[nodiscard]] virtual auto child_nodes() const -> const std::vector<Node>&` | `widget.h` |
 
 各具体控件另提供**静态** `describe_static()`（例如 `au::Button::describe_static()`，见 `button.h`），便于无需实例即可查询元数据。`describe_static()` 不是 `Widget` 的虚成员。
@@ -138,7 +138,7 @@ auto info = au::Button::describe_static();
 
 ### 2.3.1 挂载与卸载的对称契约
 
-`Widget::mount(ctx)` 负责注册响应式依赖（经 `track` 把 `collect_signals` 收来的信号连同 `modifier` / `show` 挂进 `effects_`）并递归下发子树，`Widget::unmount()` 是它的镜像：置 `mounted_ = false`、清空 `effects_`（真正退订）、复位手势 tick 位，并派发 `on_unmount(ctx)`。
+`Widget::mount(ctx)` 负责注册响应式依赖（经 `wire_signals` 把 `collect_signals` 收来的来源连同基类自身仍持有的 `modifier` / `show` 来源经 `StateSink::watch` 挂进 `signal_subscriptions_`，任一来源提交即按 `on_signal_dirty()` 标脏）并递归下发子树，`Widget::unmount()` 是它的镜像：置 `mounted_ = false`、清空订阅（真正退订）、复位手势 tick 位，并派发 `on_unmount(ctx)`。挂载后换源的入口（`set_xxx_source`）调 `resubscribe_signals()` 重建订阅；未挂载时为空操作，下次 `mount` 重新采集。
 
 **同一性判据是宿主身份，不是「是否已挂载」这一个布尔。** `BuildContext::host_id`（`std::uint64_t`，`build_context.h`）由 `Window` 构造期取进程内唯一值（`detail::next_host_id`）、在 `prepare_context` 每帧写入，并沿 `Provider` 子环境、转场层、容器逐层透传**不变**。判别式：
 
@@ -171,16 +171,16 @@ auto info = au::Button::describe_static();
 
 ### 2.5 双模 API 与 Props 约定
 
-**部分控件**（布局 / 文本 / 图片 / 滚动 / 导航 / 图表 / 下拉刷新类）采用**继承式双模 API**：`class Xxx : public XxxProps`，`XxxProps` 的字段即控件自身的公有字段，不再用私有 `m_*` 重复声明同一属性。采用此模式的控件（共 16 个）：`BarChart` / `BottomNavBar` / `Button` / `Column` / `Divider` / `Grid` / `ImageView` / `LazyRow` / `LineChart` / `PieChart` / `PullToRefresh` / `Row` / `ScatterChart` / `Scroll` / `Sparkline` / `Text`（见各自头声明）；例外——`Checkbox` / `Switch` / `Slider` / `ProgressIndicator` / `Dropdown` / `RadioGroup` / `SpinBox` / `SegmentedControl` / `Chip` / `TextInput` 等仍使用私有 `*_` 成员 + setter，未采用双模。
+**部分控件**（布局 / 文本 / 图片 / 滚动 / 导航 / 图表 / 下拉刷新 / 输入 / Web 嵌入类）采用**继承式双模 API**：`class Xxx : public XxxProps`，属性声明只有 `XxxProps` 这一处，控件不再用私有 `m_*` 重复声明同一属性；`XxxProps` 的字段收为私有，公共面只留读件与链式写件（见下句）。采用此模式的控件（共 18 个）：`BarChart` / `BottomNavBar` / `Button` / `Column` / `Divider` / `Grid` / `ImageView` / `LazyRow` / `LineChart` / `PieChart` / `PullToRefresh` / `Row` / `ScatterChart` / `Scroll` / `Sparkline` / `Text` / `TextInput` / `WebView`（真身 `au::webview::WebView`，见各自头声明）。**迁移已收口到「私有字段 + 权威表 + 链式写件」**：这 18 型对应的 `*Props` 类没有任何可直写的公有成员，属性只经 `set_<键>()` 装入，生效值只经读件读取（无参 `x()` 或带上下文 `x(const BuildContext &)`，逐行由其回落点决定，见 §4.1）；库内已不存在「有聚合却仍可指定初始化」的中间形态。例外——`Checkbox` / `Switch` / `Slider` / `ProgressIndicator` / `Dropdown` / `RadioGroup` / `SpinBox` / `SegmentedControl` / `Chip` 等仍使用私有 `*_` 成员 + setter，未采用双模。
 
 ```cpp
 // 形态一：*Props 具名聚合（推荐，可分块生成）
-auto btn = au::Button(au::ButtonProps{ .label = "OK" });
+auto btn = au::Button(au::ButtonProps().set_label("OK"));
 
 // 形态二：对已构造对象逐行赋值
 auto btn2 = au::Button();
-btn2.label = au::LocalizedString{ "OK" };
-btn2.on_click = fn;
+btn2.set_label(au::LocalizedString{ "OK" });
+btn2.set_on_click(fn);
 
 // 形态三：链式 setter（setter 返回引用）
 au::Text("Welcome").font_size(24).bold();
@@ -188,14 +188,32 @@ au::Text("Welcome").font_size(24).bold();
 
 **关键约束：**
 
-- **控件类不是聚合类型**，不能用 `au::Button{ .label = ... }` 这类指定初始化器构造控件（编译失败）。指定初始化器**仅适用于 `*Props` 聚合结构**（如 `au::ButtonProps{ .label = ... }`）与 `Theme` 等纯数据聚合，其中字段顺序无关，遗漏字段回退默认值。
-- 初始化列表形式 `au::Column{ au::Text("A"), au::Text("B") }` 可用——`Column` / `Row` 接受 `std::initializer_list<Node>`。
+- **控件类不是聚合类型**，不能用 `au::Button{ .label = ... }` 这类指定初始化器构造控件（编译失败）。指定初始化器**只适用于 `Theme` / `ChartSeries` 这类纯数据聚合**（库内已没有仍可直写字段的 `*Props`），其中字段顺序无关，遗漏字段回退默认值；已迁到链式形态的 `BarChart` / `BottomNavBar` / `Button` / `Column` / `Divider` / `Grid` / `ImageView` / `LazyRow` / `LineChart` / `PieChart` / `PullToRefresh` / `Row` / `ScatterChart` / `Scroll` / `Sparkline` / `Text` / `TextInput` / `WebView` 不在此列（`au::ButtonProps{ .label = ... }`、`au::SparklineProps{ .values = {...} }`、`au::LineChartProps{ .series = {...} }`、`au::ColumnProps{ .gap = ... }`、`au::GridProps{ .children = {...}, .columns = ... }`、`au::ImageViewProps{ .bitmap = ..., .source = ... }`、`au::PullToRefreshProps{ .child = ..., .threshold = ... }`、`au::ScrollProps{ .child = ..., .snap = ... }`、`au::TextProps{ .content = ... }`、`au::TextInputProps{ .placeholder = ... }`、`au::webview::WebViewProps{ .mode = ... }` 编译红，须写 `au::ButtonProps().set_label(...)`、`au::SparklineProps().set_values({...})`、`au::LineChartProps().set_series({...})`、`au::ColumnProps().set_gap(...)`、`au::Grid({ ... }, au::GridProps().set_columns(...))`、`au::ImageViewProps().set_source(...)`、`au::PullToRefresh(子节点, au::PullToRefreshProps().set_threshold(...))`、`au::ScrollProps().set_snap_paging(true)`、`au::TextProps().set_content(...)`、`au::TextInputProps().set_placeholder(...)`、`au::webview::WebViewProps().set_mode(au::webview::WebViewMode::Snapshot)`）。但**数组与结构体实参内部的指定初始化器仍可用**（`au::LineChartProps().set_series({{ .name = "A", .values = {1, 3, 2} }})`）——那是 `ChartSeries` 这类纯数据聚合的写法，链式形态只约束 `*Props` 本体的字段。
+- 初始化列表形式 `au::Column{ au::Text("A"), au::Text("B") }` 可用——`Column` / `Row` / `Grid` 接受 `std::initializer_list<Node>`；要同时给属性时写 `au::Column({ au::Text("A"), au::Text("B") }, au::ColumnProps().set_gap(8.0F))` 或 `au::Grid({ au::Text("A"), au::Text("B") }, au::GridProps().set_columns(2))`——子节点是构造首参、不入属性表（§3.3）。
 - 链式 setter 返回引用；作为子节点放入 `children` 时必须用 `std::move` 包裹（`Widget` 拷贝构造被删除，`Node` 仅移动派生对象）。
-- `Widget::defaults()` 不是虚成员；仅 `Button` 提供静态 `defaults()`（如 `au::Button::defaults() -> ButtonProps`，见 `button.h`），返回该控件的默认 `Props`；其余控件的默认属性来源待补。
+- `Widget::defaults()` 不是虚成员；已迁到链式形态的控件各提供一枚静态 `defaults()`（如 `au::Button::defaults() -> ButtonProps`、`au::Column::defaults() -> ColumnProps`，见各头声明），返回该控件的默认 `Props`（全部非必填行未表态，生效值即各行回落点）；其余控件的默认属性来源待补。
+- 别把控件的 `defaults()` 与 `Theme::defaults()` 混用：前者出**该控件的属性快照**（`ButtonProps`），后者出**本机风格档的整套标定主题**（`Theme`，只定风格轴、不定明暗档，见 [`07-environment-modifier.md`](07-environment-modifier.md) §5.1）。两族同名不同主，返回类型也不同。
 
 `Node(W&&)` 是非 explicit 转换构造函数，值类型控件可隐式转为 `Node`。仅在两分支类型不同的 `?:` 三元、或需要连续两次用户转换的场景才显式包 `Node{...}`。
 
 **二层属性划分**：固有属性（`XxxProps` 字段）描述控件身份并随控件序列化；`Modifier` 承载跨切面装饰。重叠能力以**固有属性优先**；绘制时 `Modifier` 在外、固有属性在内（详见 [`03-layout-render.md`](03-layout-render.md) §7.4）。
+
+### 2.5.1 响应式属性与句柄权限
+
+属性分两类句柄，类型即权限（详见 [`02-state.md`](02-state.md) §2）：
+
+| 属性角色 | 句柄类型 | 例子 |
+|:---|:---|:---|
+| 展示属性（控件只读、不代写上游） | `ReadOnlyState<T>` | `TextProps::content`、`Show` 的条件、`ProgressIndicator` 的进度 |
+| 可编辑模型（控件按交互写回） | `State<T>` | `Checkbox` / `Switch` / `Slider` 的值、`Repeater` / `ReorderableList` 的数据源 |
+
+两类句柄都**按值交接**：复制共享同一来源，控件与宿主持有同一份值；`State<T>` 单向隐式降级为 `ReadOnlyState<T>`，反向不成立。
+
+- **值 / 来源两种 setter**：`set_xxx(T)`（或 `set_xxx(State<T>)`）安装/写入值；`set_xxx_source(ReadOnlyState<T>)` 换源。换源一律**退订旧源、订阅新源**——即使新旧值相等也必须重订阅（旧订阅固定旧源，不重建就会「换源后不跟随」），随后标脏布局 / 绘制（如 `Widget::set_modifier_source` / `set_show_source`、`ProgressIndicator::set_value_source`）。
+- **来源行的字段形状推导来源性**：属性表里一行是来源行，当且仅当其字段是句柄——只读来源 `ReadOnlyState<T>` 或可写来源 `State<T>`（机制层 `PropIsHandle` 的两条特化，门禁按同一口径判定，行上不写 `.source(...)` 之类的旁注）。已迁到链式形态的 `*Props` 里**换源走同名重载**而非 `set_xxx_source` 具名件：`TextInputProps::set_value(const std::string &)` 写入**当前来源的现值**（不换源、不重绑、同值短路），`TextInputProps::set_value(State<std::string>)` 才是换源。可写来源行是库里第一枚**双向绑定**面：控件本体的逐字符编辑落进换入的那只 `State`，外部同一只句柄上的其它订阅照常收到每一轮；反序列化同样写穿当前源而非拆绑。必填行没有回落点，描述符里它的 `required` 因此是 `true`——`validate_ui_tree` 会要求 JSON 显式给出该键（`TextInput` 的 `value` 可为空串、`Text` 的 `content` 同理），而 `from_json` 对缺键仍保持现值。**来源性同样是机器可读事实**：描述符条目带布尔位 `source`，它由上述字段形状推导、发射面自行判定，行上不写也不允许写旁注；覆盖面严格等于「已上权威表的行」，今天全库 5 枚（`Button` 的 `label` / `color`、`Text` 的 `content` / `color`、`TextInput` 的 `value`）。仍在手写描述符上的换源写件（`BreakpointBuilder` / `LayoutBuilder` / `ProgressIndicator` / `Show` 的 `set_*_source`）**不带该位**——它们不是表行，形状推导没有对象；`Widget` 基类的修饰件与 `set_show` 转发、`Surface` 侧的 `set_extra_event_source` 同理，都不在属性面账内。读侧的签名规则连同这批名字口径一起登记进 `aurora_api.json` 顶层的 `accessor_rules` 非条目块，见 [`08-tooling.md`](08-tooling.md) §10.3。
+- **展示件不代写上游**：`ProgressIndicator` 绑定外部只读来源时，`set_value(v)` 不写上游，而是**换源到自有常量来源**再写值；要改进度请直接写原 `State<double>`。
+- **采集协议**：控件经 `collect_signals(StateSink&)` 把自身句柄 `out.push(member_)` 登记给框架。`StateSink` 按来源身份去重、只登记来源不附带属性名、不触发用户回调；`sources()` 给出已登记来源，`watch(fn)` 为每个来源各建一条固定来源订阅（回调内只登记该来源），并在建立后首跑一次。`Widget::mount` 用 `watch` 把采集结果挂进自身 `effects_`，`unmount` 整体退订——自定义控件**只需覆写 `collect_signals`**，不要自行 `subscribe`。
+- **序列化只还原值**：JSON 往返写回标量属性（经 `set_xxx` / `set_value`），句柄来源、回调与条目工厂不在序列化范围内，宿主须在 `from_json` 后重新接线（见 [`08-tooling.md`](08-tooling.md)）。
 
 ### 2.6 无障碍虚钩子
 
@@ -253,12 +271,14 @@ au::Text("Welcome").font_size(24).bold();
 
 | 控件 | 关键属性 |
 |:---|:---|
-| `Text` | `content`、`font_size`、`color`、`bold()`、`family()`（注：斜体未实现——仅经 `font_style` 设置且当前降级为 `Normal`，见 `text.h`）。支持指针拖选、键盘扩选与复制 |
-| `RichText` / `TextSpan` | 富文本片段组合。`RichText` 接收 `Reactive<std::vector<TextSpan>>` |
+| `Text` | `content`、`font_size`（未表态即取主题正文档 `type_scale.body_medium`，见 §4.1）、`color`、`bold()`、`family()`（注：斜体经 `font_style=Italic` 设置，由 FontEngine 施加合成斜体实现，见 `text.h`）。支持指针拖选、键盘扩选与复制 |
+| `RichText` / `TextSpan` | 富文本片段组合。片段来源是只读句柄 `ReadOnlyState<std::vector<TextSpan>>`（可由 `State<std::vector<TextSpan>>` 隐式降级或字面量自有来源承载） |
 | `RichTextEdit` | 富文本编辑器（`widget/rich_text_edit.h`）；序列化键 `text`（纯文本内容），回调 `on_text_input` |
-| `TextInput` | 仅 `value`（**`std::string`**，非 `Reactive`）、`placeholder`、`font_size` 进 `TextInputProps`（`text_input.h`）；`text_color` / `placeholder_color` / `background` / `focused_background` / `border_color` / `focused_border_color` / `border_width` / `selection_color` 等颜色类为**私有字段 + `set_*` 链式**（非 Props，见 `text_input.h` 附近）。回调 `on_changed`（每次编辑）/`on_submit`（Enter） |
+| `TextInput` | 全部 19 枚序列化键进 `TextInputProps` 权威表（`text_input.h`）：`value`（**必填可写来源行**，字段形状 `State<std::string>`）、`placeholder`、`font_size`、`corner_radius`、`padding`、`cursor_color`、`enabled`、`text_color`、`placeholder_color`、`background`、`focused_background`、`border_color`、`focused_border_color`、`border_width`、`selection_color`、`max_length`、`read_only`、`obscure_text`、`direction`。八枚色行与 `border_width` 未表态时回落主题令牌（`roles.on_surface` / `on_surface_variant` / `surface_container` / `surface_bright` / `outline` / `primary` 与 `controls.border_thickness`），`selection_color` 走派生档（`roles.primary` 加 90 透明度）。回调 `on_changed`（每次编辑）/`on_submit`（Enter） |
 
-`TextInput` 点击经 `FocusManager` 获焦；读当前文本用 `value()`（`text_input.h`），程序化改值用 `set_value()`；无 `.text()` 方法。
+`TextInput` 点击经 `FocusManager` 获焦；读当前文本用 `value()`（`text_input.h`），程序化改值用 `set_value()`（写穿当前来源，不换源）；换绑整只来源用同名的 `set_value(State<std::string>)` 重载——本库第一枚双向绑定面，见 §2.5.1；无 `.text()` 方法。
+
+窄盒 + 长文本：内容（选区 / 组合串 / 正文 / 光标）绘制时裁进自身盒，圆角盒按 `corner_radius` 走圆角裁剪；水平视口 `view_x_` 由 `ensure_caret_visible()` 随光标推进（键入、粘贴、删除、方向键、`Home` / `End`、点选与拖选、IME、无障碍选区与替换均收口于此），`Home` / `End` 各一次即把视口带回文本两端。绘制、指针命中、IME 候选窗与 `accessibility_char_bounds` 共用 `text_origin_offset`；RTL 未超宽仍右对齐，超宽由视口接管。
 
 ### 3.2 按钮与选择
 
@@ -299,12 +319,12 @@ au::Text("Welcome").font_size(24).bold();
 
 | 控件 | 关键属性 |
 |:---|:---|
-| `Row` / `Column` | `children`、`gap`、`flex`（含 `main_axis` / `cross_axis` / `main_axis_size`）。`cross_axis` 的 `Baseline` 取值仅对水平主轴（`Row`）有语义（`03-layout-render.md` §3.8）。`modifier` 属 `Widget` 基类，不在此列 |
+| `Row` / `Column` | 子节点是**构造首参**（`Row(std::vector<Node>, RowProps = {})`，或 `Row{ a, b }`），不入属性表；四枚属性键 `main_axis_alignment` / `cross_axis_alignment` / `main_axis_size` / `gap` 已迁到属性单一声明形态（§2.5）：字段私有，写入 `set_gap(8.0F)` 一类链式写件，取值走无参读件（四行回落点都是库内常量，故没有 `x(ctx)` 读件），撤表态走 `clear(ColumnProps::gap_row())`。反向排布是**控件级开关** `set_reverse(bool = true)` / `reverse()`（沿主轴镜像子项顺序与 `Start/End` 语义），既不是属性行也不序列化——与迁移前 `flex.direction` 的可达面一致。`cross_axis_alignment` 的 `Baseline` 取值仅对水平主轴（`Row`）有语义（`03-layout-render.md` §3.8）；`main_axis_alignment` 的 `SpaceBetween` 等分档仅当主轴有剩余空间时可见（`main_axis_size = Max` 或父约束更大）。`modifier` 属 `Widget` 基类，不在此列 |
 | `Stack` | 层叠，`children` 叠加 |
-| `Grid` | `columns`、`children` |
+| `Grid` | 子节点是**构造首参**（`Grid(std::vector<Node>, GridProps = {})`，或 `Grid{ a, b }`），不入属性表；两枚属性键 `columns` / `gap` 已迁到属性单一声明形态（§2.5）：字段私有，写入走 `set_columns(2)` / `set_gap(8.0F)` 链式写件，取值走无参读件（两行回落点都是库内常量，故没有 `x(ctx)` 读件），撤表态走 `clear(GridProps::columns_row())`。写件原样存值、不做钳制：`columns < 1` 在布局入口按 1 保底，`gap < 0` 由反序列化通道按描述不变量拒写；序列化只写已表态行 |
 | `Grid` 虚拟化版 `GridView` | `count`、`columns`、`cell_extent`、`cache_extent`、`scroll_offset`、`restore_key`、`snap_extent` / `snap_paging` / `snap_alignment`（吸附三属性，见下「滚动增强契约」）；辅助 API `set_scroll_offset` / `scroll_to` / `set_snap` / `offset_signal` / `is_gliding` / `visible_row_range` / `live_item_count` / `set_item_builder`（JSON 重建后挂单元格） |
-| `Scroll` | 可滚动容器，`child` 单子节点，`step` 滚动步长、`restore_key`、`snap_extent` / `snap_paging` / `snap_alignment`；运行时偏移经序列化键 `offset` 可读回；程序化跳转 `set_offset(offset) -> bool`（纯夹取）、`scroll_to(offset, animate = true) -> bool`；滚动驱动动画原语 `offset_signal()`；观测点 `is_gliding()`（`widget/scroll.h`） |
-| `PullToRefresh` | 下拉刷新容器（`widget/pull_to_refresh.h`）：`threshold`（触发距离 64dp）、`max_pull`（橡皮筋上限 128dp）；回调 `on_refresh`；API `finish_refresh()` / `state()` / `pull_distance()` / `progress()` |
+| `Scroll` | 可滚动容器（`widget/scroll.h`）：内容子节点是**构造首参**（`Scroll(Node, ScrollProps = {})`，或 `Scroll{ Column{...} }`），不入属性表；六枚属性键已迁到属性单一声明形态（§2.5）——`step`（每单位滚轮增量的滚动像素，默认 16）、`restore_key`（空 = 不参与位置保存）与吸附三件套 `snap_extent` / `snap_paging` / `snap_alignment` 的回落点都是库内常量、且只在滚轮夹取 / 偏移写回 / 收位裁决时读取，故全为零脏档行：取值走无参读件、写入 `set_step(24.0F)` 一类链式写件、撤表态走 `clear(ScrollProps::step_row())`；`overscan`（视口上下各留几屏缓冲，默认 1）决定离屏缓冲的逻辑高度，是本型唯一的**绘制档**行，写入即标绘制脏。运行时偏移经表外键 `offset` 恒输出、读写走 `set_offset()` / `offset_y()`；程序化跳转 `set_offset(offset) -> bool`（纯夹取）、`scroll_to(offset, animate = true) -> bool`；滚动驱动动画原语 `offset_signal()`；观测点 `is_gliding()` |
+| `PullToRefresh` | 下拉刷新容器（`widget/pull_to_refresh.h`）：子树是**构造首参**（`PullToRefresh(Node, PullToRefreshProps = {})`），不入属性表；五枚属性键已迁到属性单一声明形态（§2.5）——`threshold`（触发距离 64dp）与 `max_pull`（橡皮筋上限 128dp）回落点是库内常量，取无参读件、撤表态走 `clear(PullToRefreshProps::threshold_row())`；`indicator_color` / `band_color` / `refreshing_text_color` 三枚回落点是主题活令牌（`primary` / `surface` / `on_surface_variant`），取带上下文读件 `x(const BuildContext &)`、不表态即跟随主题。回调 `on_refresh`；API `finish_refresh()` / `state()` / `pull_distance()` / `progress()` |
 | `StickyHeader` | 吸顶头部包装（`widget/sticky_header.h`），单子节点、无自有属性；正常参与布局，滚动经过视口顶部时由宿主以覆盖层钉驻 |
 | `Spacer` / `Divider` | 弹性空间 / 分隔线 |
 | `Splitter` | 可拖拽分隔 |
@@ -328,23 +348,28 @@ au::Text("Welcome").font_size(24).bold();
 
 **运行期改条目数（`LazyList::set_count`）**：`LazyList` 的虚拟化窗口此前只能在构造或反序列化时定条目数，运行期变化只能重建整个列表或重挂 `ItemBuilder`。`set_count(int)` 补上这条入口，口径三条：负值按 0 处理（与带参构造、`deserialize_props` 同一口径，不分叉）；下标仍在新范围内的**存活条目不重建**（其展开态、输入内容、子控件身份原样保留），只有滚出窗口或越界的条目被回收、下次进入窗口时由 `ItemBuilder` 重建；条目数减少后当前偏移按新的 `max_scroll_offset()` 夹取（否则列表停在内容末尾之外的空白处）。焦点落在被回收条目上时随之失效（`FocusManager` 持弱引用）——宿主若需保留焦点应先把焦点移到仍在范围内的条目上。
 
+**运行期刷新条目内容（`LazyList::invalidate_items`）**：与上面那枚的分工是**动总数 vs 动内容**——`on_layout` 只对可见窗口内**缺失的下标**跑 `ItemBuilder`，已有实例一律复用，故换了数据（或换了 builder）后已在窗口里的行仍显示旧内容，`set_count` 刻意不承担刷新（它的价值正是范围内条目保值）。`invalidate_items()` 就是那句「数据变了，让存活实例重吃一遍当前 builder」的显式失效：置失效位并标布局/绘制脏，**下一帧** `on_layout` 在算可见窗口之前整表回收 `live_`、随后按当前窗口与当前 builder 重建。时机口径是硬约束：**调用栈内不销毁任何控件**——条目刷新常在数据回调里发生，而同一栈里可能正在向被回收的条目派发事件，当场回收正是本仓库既有那一族 use-after-free 的形状，故一律推迟到布局。`count` / 滚动偏移 / `restore_key` / 吸附配置全部原样（刷新的是内容不是位置），焦点处置与 `set_count` 的回收同口径。
+
 **滚动位置保存/恢复**：四个滚动控件（`Scroll` / `LazyList` / `LazyRow` / `GridView`）都有 `restore_key`（空 = 不参与）。控件在**首次可滚动布局**时按 `app::ScrollStorage` 恢复偏移（由 `deserialize_props` 显式给入的偏移优先），此后位置变化（滚轮 / 拖拽 / `set_scroll_offset`）即写回（仅内存，落盘由 App 决定）；恢复只生效一次，用户主动滚动不会再被回拉。契约与多窗口作用域隔离见 `06-app-platform.md` §9.3。
+
+**末尾锚定（`LazyList::scroll_to_end`）**：「行只增不减、视图跟尾」的日志 / 终端 / 监视卡形态需要一条「落到末尾」的入口，而**布局前它无法用 `scroll_to(max_scroll_offset())` 表达**——`max_scroll_offset()` 含视口高，首次布局前为 0，算出来的是整个内容高而非末尾（差一个视口高）。故 `scroll_to_end(bool animate = false)` 在尚未布局时把「末尾」记进既有的显式待定偏移单槽（与 `deserialize_props` 的 `scroll_offset` 同一枚槽、同一条应用路径、同一优先级：显式意图优先于 `restore_key` 恢复），由**首次可滚动布局**按当时的真实范围夹取落地；走同一条路径的收益是「与 `restore_key` 同时存在时谁赢」不需要重新定义，且意图**不落进序列化属性**（借 JSON 键表达运行期意图是要被替换的代偿形态）。已布局时等价于 `scroll_to(max_scroll_offset(), animate)`，夹取与 `reduce_motion` 分支全部沿用既有实现，不另造滑动时序。空表 / 零行高 / 零视口夹取结果为 0，不产生伪变化也不发通知。本方法是一次性意图，持续贴底（跟尾与冻结的判定）属显示状态机、不归控件。
 
 **滚动增强契约**（吸附 / 下拉刷新 / 吸顶 / 余量上冒 / 偏移信号）：
 
 - **吸附的单一实现**：`snap_extent`（吸附周期 dp，`<= 0` = 关闭）、`snap_paging`（以视口高为周期，此时 `snap_extent` 被忽略）、`snap_alignment`（`Start` / `Center` / `End`，条目对齐点相对视口顶部的取法）三属性由 `ScrollSnap` 承载，对齐点计算集中于 `ScrollViewport::snap_target`（`widget/scroll_viewport.h`），`Scroll` / `LazyList` / `GridView` 三个宿主共用（`LazyRow` 暂无吸附）；三键 `snap_extent` / `snap_paging` / `snap_alignment` 在三个宿主下一致往返，运行时偏移键仍各自沿用既有的 `offset`（`Scroll` / `LazyRow`）与 `scroll_offset`（`LazyList` / `GridView`）。收位周期内不做整除假设：末段不足一格时结果夹到 `max_scroll_offset`，故分页末尾停在最后一个**整页**对齐点。
-- **收位是短滑动，不是跳变**：滚轮 / 拖拽落点后由 `begin_snap_glide()` 启动 `ScrollGlide`（150ms easeOutCubic）逐帧推进，自驱动 `tick_gestures`（不占 `Animator`，同 `ReorderableList`）。`set_offset` / `set_scroll_offset` 这类**外部程序化跳转作废进行中的滑动**；滑动帧自身走私有 `apply_offset(offset, cancel_glide)` 且传 `cancel_glide = false`——否则收位只推进一帧即冻结在中途。`scroll_to(offset, animate)` 是公开的程序化滚动入口：`animate = false` 即时落位，`true` 时经同一条滑动时序（`reduce_motion` 下仍直落）。观测点 `is_gliding()`。
+- **收位是短滑动，不是跳变**：滚轮 / 拖拽落点后由 `begin_snap_glide()` 启动 `ScrollGlide`（150ms easeOutCubic）逐帧推进，自驱动 `tick_gestures`（不占 `Animator`，同 `ReorderableList`；步长在控件自己的 `tick_gestures` 入口经 `scaled_frame_dt` 折算一次，故应用内全局缩放与冻结同样覆盖它，见 [`05-event-navigation.md`](05-event-navigation.md) §6.2）。`set_offset` / `set_scroll_offset` 这类**外部程序化跳转作废进行中的滑动**；滑动帧自身走私有 `apply_offset(offset, cancel_glide)` 且传 `cancel_glide = false`——否则收位只推进一帧即冻结在中途。`scroll_to(offset, animate)` 是公开的程序化滚动入口：`animate = false` 即时落位，`true` 时经同一条滑动时序（`reduce_motion` 下仍直落）。观测点 `is_gliding()`。
 - **`reduce_motion` 短路**：`current_accessibility_settings().reduce_motion` 为真时，snap 收位与 `scroll_to(…, true)` 一律直落端点、不产生中间帧（状态与「走完」一致），对齐 `AnimationController::tick` / `Dismissible` / `ReorderableList` 的既有短路语义。
-- **`PullToRefresh` 的双输入通道**：仅当滚动子树**已在顶部**才积累下拉距离——顶部判定取最近可滚动后代的 `accessibility_scroll()` 区间（`position <= min + 0.5`；无可滚动后代视为在顶部，静态内容可整体下拉）。① `DragRecognizer` 判定主轴为垂直（`|dy| ≥ |dx|`）且正在向下拖时劫持手势，位移经**双曲橡皮筋**映射 `raw·max_pull/(raw+max_pull)`：起段近 1:1 跟手、渐近 `max_pull` 且恒不越界（拖满 `max_pull` 恰达半上限，与缺省 `threshold = max_pull/2` 对齐保证可触发）；② 嵌套滚动协调下，子级到顶后未消费的滚轮余量经 `ScrollEvent::remaining_y` 上冒给本容器（本容器在命中链上位于子滚动控件的更浅层，路由见 `05-event-navigation.md` §3.3），余量按 16dp / 增量单位折算后同样走橡皮筋（与 `ScrollProps::step` 缺省同值）；门控不通过（刷新中 / 子树不在顶部 / 增量方向相反）时**原样回传 `remaining_y`** 交还更浅层，而非静默吞掉。三态 `Idle` / `Pulling` / `Refreshing`：松手时 `pull >= threshold` 且已注册 `on_refresh` 才触发一次回调并回弹到驻留高度（约 `threshold/2`，spinner 持续旋转），否则直接回弹归零；数据加载完成后由宿主调 `finish_refresh()` 收拢——不回调解散回调则 spinner 常驻。指示器是**覆盖层**（顶部半透明带 + 弧线 spinner）——不动布局盒、不推挤内容（`05-event-navigation.md` §6.5「动画不改布局」），回弹走同一 `ScrollGlide`，`progress()`（`pull/threshold`，可 >1）供宿主联动。
+- **`PullToRefresh` 的双输入通道**：仅当滚动子树**已在顶部**才积累下拉距离——顶部判定取最近可滚动后代的 `accessibility_scroll()` 区间（`position <= min + 0.5`；无可滚动后代视为在顶部，静态内容可整体下拉）。① `DragRecognizer` 判定主轴为垂直（`|dy| ≥ |dx|`）且正在向下拖时劫持手势，位移经**双曲橡皮筋**映射 `raw·max_pull/(raw+max_pull)`：起段近 1:1 跟手、渐近 `max_pull` 且恒不越界（拖满 `max_pull` 恰达半上限，与缺省 `threshold = max_pull/2` 对齐保证可触发）；② 嵌套滚动协调下，子级到顶后未消费的滚轮余量经 `ScrollEvent::remaining_y` 上冒给本容器（本容器在命中链上位于子滚动控件的更浅层，路由见 `05-event-navigation.md` §3.3），余量按 16dp / 增量单位折算后同样走橡皮筋（与 `ScrollProps::step_default()` 缺省同值）；门控不通过（刷新中 / 子树不在顶部 / 增量方向相反）时**原样回传 `remaining_y`** 交还更浅层，而非静默吞掉。三态 `Idle` / `Pulling` / `Refreshing`：松手时 `pull >= threshold` 且已注册 `on_refresh` 才触发一次回调并回弹到驻留高度（约 `threshold/2`，spinner 持续旋转），否则直接回弹归零；数据加载完成后由宿主调 `finish_refresh()` 收拢——不回调解散回调则 spinner 常驻。指示器是**覆盖层**（顶部半透明带 + 弧线 spinner）——不动布局盒、不推挤内容（`05-event-navigation.md` §6.5「动画不改布局」），回弹走同一 `ScrollGlide`，`progress()`（`pull/threshold`，可 >1）供宿主联动。
 - **`StickyHeader` 是纯绘制层语义**：控件正常参与布局（占据自身高度、随内容滚动被录入内容缓冲），宿主在内容 blit 合成之后把「已滚过头顶」的头部按 pin 位重绘于视口顶部——内容缓冲不因此逐帧重录（否则滑窗模型破产）。宿主识别钩子是 `Widget::is_sticky_header()`（默认 `false`）。**顶出规则**同 CSS `position: sticky` / `RecyclerView`：下一条头部的视口顶部逼近时把本条向上顶出，最后一条钉到底。`Scroll` 经 `child_nodes()` 递归累加 y 收集多个头部（多段堆叠），`LazyList` 的 `child_nodes()` 为空、粘性项作为普通行实例化，故各条目自管其 sticky。
-- **偏移信号驱动滚动动画**：`offset_signal()` 懒创建 `State<float>` 并返回 `SignalView<float>` 引用，任何滚动通道（滚轮、拖拽、收位滑动帧、程序化跳转）落位即发布；镜像值比较而非 `State::get()` 回读（后者在 `Effect` 作用域会自订阅本控件而闭环）。宿主由此把偏移映射为视差、透明度、进度条——无需轮询，也无需子类化。
+- **偏移信号驱动滚动动画**：`offset_signal()` 懒创建 `State<float>` 并返回其只读句柄 `ReadOnlyState<float>`，任何滚动通道（滚轮、拖拽、收位滑动帧、程序化跳转）落位即发布；发布侧用镜像值比较而非 `State::get()` 回读（后者在 `effect` / `computed` 作用域会自订阅本控件而闭环）。宿主由此把偏移映射为视差、透明度、进度条——无需轮询，也无需子类化。
+- **偏移变更回调是命令式旁听口**（`LazyList::set_on_scroll_changed`）：偏移信号那半只对响应式树有效——`LazyList::collect_signals` 不向控件树暴露该来源，故不在 `effect` 作用域内的宿主想知道「用户滚到底了没有」只能逐帧轮询 `scroll_offset()` 与 `max_scroll_offset()` 自比。回调挂在**仅有的两条落位路径**（`apply_offset` / `apply_restored_offset`）末端，因此来源不限（滚轮、收位滑动每帧、`set_scroll_offset`、无障碍滚动、拖入滚边、待定偏移与按键恢复落地）都通知，去重则免费来自两条路径开头的「夹取后同值即返回」：同值重复设置、已到底再请求更大偏移都不产生回调。参数与回调内的 `scroll_offset()` 同源（通知排在偏移与脏标记都落定之后）；传空 `std::function` 即注销，回调是本控件成员故随控件销毁自然失效、无需注销句柄。与 `offset_signal()` 并存、同一次落位各驱动一次。
 
 ### 3.4 列表与虚拟化
 
 | 控件 | 关键属性 |
 |:---|:---|
-| `LazyList` | `count`、`item_extent`（固定行高，默认 48dp）、`scroll_offset`、`cache_extent`（可见区外预取缓冲）、`restore_key`、`snap_extent` / `snap_paging` / `snap_alignment`（`0` 表示无吸附）；辅助 API `set_scroll_offset` / `scroll_to_item` / `scroll_to` / `set_snap` / `offset_signal` / `is_gliding` / `visible_range` / `live_item_count` / `set_cache_extent` / `set_restore_key` / `set_item_builder`（JSON 重建后挂条目）；滚轮滚动经 `on_scroll` 覆写处理（`widget/lazy_list.h`） |
-| `LazyRow` | 主轴为水平；`item_count`、`item_extent`（子项固定宽度，默认 96）、`cache_extent`、`padding`、`restore_key`；辅助 API `scroll_offset` / `max_scroll_offset` / `set_scroll_offset`（仅标绘制脏——可见窗口在 `on_paint` 现算，与 `LazyList` 需标布局脏不同）/ `set_item_builder`（JSON 重建后挂条目）；`set_padding` 与 `set_on_item_click`（`on_item_click` 事件，参数为索引）属本控件（`widget/lazy_row.h`） |
+| `LazyList` | `count`、`item_extent`（固定行高，默认 48dp）、`scroll_offset`、`cache_extent`（可见区外预取缓冲）、`restore_key`、`snap_extent` / `snap_paging` / `snap_alignment`（`0` 表示无吸附）；辅助 API `set_scroll_offset` / `scroll_to_item` / `scroll_to` / `scroll_to_end`（末尾锚定，布局前即为意图，口径见 §3.3）/ `set_snap` / `offset_signal` / `set_on_scroll_changed`（偏移变更回调）/ `is_gliding` / `visible_range` / `live_item_count` / `set_cache_extent` / `set_restore_key` / `set_item_builder`（JSON 重建后挂条目）/ `invalidate_items`（刷新条目内容，下一帧生效）；滚轮滚动经 `on_scroll` 覆写处理（`widget/lazy_list.h`） |
+| `LazyRow` | 主轴为水平；五枚属性 `item_count`、`item_extent`（子项固定宽度，默认 96）、`cache_extent`、`restore_key`、`padding`（表尾追加，schema 顺序即此序）已迁到属性单一声明形态（§2.5）：字段私有，写入 `set_item_count(...)` 一类链式写件，取值走无参读件（五行回落点都是库内常量提供者，故本型没有 `x(ctx)` 读件），撤表态走 `clear(LazyRowProps::item_extent_row())`；序列化只写已表态行，而运行时偏移键 `offset` 是**表外键**、不属任何行、恒输出（与 §4.1 的「未表态不序列化」不同源，见 `widget/lazy_row.h`）；条目构建器 `item_builder` 同样出表，是控件面的公有槽位（回调是运行时对象、不入 JSON，同 `Button::on_click` 的处置）；辅助 API `scroll_offset` / `max_scroll_offset` / `set_scroll_offset`（仅标绘制脏——可见窗口在 `on_paint` 现算，与 `LazyList` 需标布局脏不同）/ `set_item_builder`（JSON 重建后挂条目）/ `set_on_item_click`（`on_item_click` 事件，参数为索引）属本控件，`set_item_count` 在控件面被同名覆写一次以追加「清空已建条目」（转调属性面写件，值只有一份存储，§2.5）（`widget/lazy_row.h`） |
 | `Repeater` | `items`（信号驱动），按模板渲染每个元素 |
 | `ListView` | `items`（行数据）、`multi_select`（多选模式）；回调 `on_select` / `on_remove`（`widget/data_widgets.h`） |
 | `DataTable` | `columns`（列描述）、`row_count`（只读）、`selected_row`（-1 = 无）、`sort_column`（-1 = 无）；回调 `on_sort` / `on_select` |
@@ -378,14 +403,14 @@ au::Text("Welcome").font_size(24).bold();
 
 | 控件 | 说明 |
 |:---|:---|
-| `ImageView` | `bitmap`、`source`（源文件路径，用于序列化/占位）。URL 源经注入的 `ImageFetcher`（`ImageFetcher` / `from_url` / `begin_load` / `ImageLoadState::Loading/Loaded/Failed` / `ImageCache`，见 `image_widget.h`）异步加载；未注入 fetcher 时降级为占位。**序列化类型名为 `Image`**。`width()` / `height()` 是 widget 级方法，不进 `Props` |
+| `ImageView` | 已解码位图作控件面公有槽位 `bitmap`（运行期载荷，不进属性表、不序列化；替换走 `set_bitmap(Image)`，布局档标脏），属性面已迁到属性单一声明形态（§2.5）：唯一表行 `source`（源文件路径，只服务序列化 / 占位，不参与布局与绘制，故不声明脏档），取值 `source()`、写入 `set_source(path)`、撤表态 `clear(ImageViewProps::source_row())`。`image_width` / `image_height` 是**派生只读键**——由位图尺寸现算、不可写入，故不进权威表，在 `describe_static` 里追加在表行之后（schema 的键与序不变），序列化照写、反序列化不回填。URL 源经注入的 `ImageFetcher`（`ImageFetcher` / `from_url` / `begin_load` / `ImageLoadState::Loading/Loaded/Failed` / `ImageCache`，见 `image_widget.h`）异步加载；未注入 fetcher 时降级为占位。**序列化类型名为 `Image`**。`width()` / `height()` 是 widget 级方法，不进 `Props` |
 | `Icon` | 图标控件（`widget/icon_widget.h`，第 75 个 widget）：按语义名（`icon` 键，经 `IconRegistry` 查表）或代码侧 `IconData` 字面直绘字形 / SVG。`size`（dp 正方形，基准档 `IconSize` 16/20/24/32）、`color`（空 = 跟随主题 `on_surface_variant`）、`semantic_label`（非空才进语义树，覆写 `accessibility_label()`；空 = 纯装饰）。**库不内置任何图标资产**：字体经 `FontEngine::register_font*` 由应用注册，语义名经 `IconRegistry` 由应用注册；未注册名字绘制侧跳过（不崩溃、不画占位），`validate_ui` 报 `icon-name-not-registered` |
 | `IconButton` | 图标按钮（第 76 个 widget）：方形点击区内绘制图标（图标盒 + 两侧 `padding`），`on_click` 回调经 `activate()` 在 Release 且未拖拽/未长按时同步派发；未设色时按启用 / 悬停 / 按下 / 禁用四态取主题角色（禁用降级、焦点态画焦点环）。`wants_click()` 仅在启用且有回调时为 true——禁用态吞掉点击不冒泡 |
 | `VideoPlayer` | 视频播放控件（`media/video_player.h`）；`fit`（`BoxFit` 枚举：Fill / Contain / Cover 等）、`show_controls`；回调 `on_tap` / `on_double_tap`；帧源经 `set_source` 注入 |
 | `VideoControls` | 视频播放控件叠层（`media/video_controls.h`），配 `VideoPlayer` 使用，单子容器 |
 | `Placeholder` | 通用降级占位盒（`widget/placeholder.h`），序列化键 `message` 说明文字（`au::Placeholder("…")` 或 `.set_message("…")` 构造，非聚合类型、无 initializer_list 构造） |
 | `Skeleton` | 骨架屏加载占位（shimmer 动画，`width` / `height` / `color` / `highlight` / `duration` 五属性全量序列化往返） |
-| `BottomNavBar` | `items`（每项含 icon 绘制器与 label）、`selected_index`、`bar_height`；回调 `on_select`；按项等分宽度布局（`selected_index` / `bar_height` 序列化往返，`items` 含绘制器故不入 JSON） |
+| `BottomNavBar` | 导航项 `items`（每项含 icon 绘制器与 label）与回调 `on_select` 是控件本体的槽位（不可序列化）；属性表七行——`selected_index` / `bar_height`（常量档，无参读件）与 `background_color` / `divider_color` / `selected_color` / `unselected_color` / `pill_color`（活令牌档，带上下文读件）；按项等分宽度布局（已表态的行才进序列化，`items` 含绘制器故不入 JSON） |
 | `TitleBar` | 自绘标题栏 / CSD |
 | `ToolBar` / `MenuBar` / `TabBar` | 工具栏 / 菜单条 / 标签页 |
 | `TabBody` | 标签内容体（`widget/recipes.h`，`detail` 命名空间）：按 `selected` 索引显示对应页，随状态刷新；与 `TabBar` 配套使用 |
@@ -394,13 +419,13 @@ au::Text("Welcome").font_size(24).bold();
 | `ProgressDialog` | 模态进度对话框（`widget/drawer.h`）；`message`、`progress`（0..1，-1 = 不确定态）、`open`、`cancellable`；回调 `on_cancel` |
 | `OverlayHost` | 浮层宿主（`widget/popup.h`）；`add_overlay(Node)` 追加浮层并返回**可移除序号**（`std::optional<std::size_t>`，宿主尚无基础内容时为 `std::nullopt`——此时新节点落在序号 0，而 0 恒被解释为**基础内容**、`remove_overlay` 拒收，返回它等于给调用方一个永远删不掉的下标），`remove_overlay(index)` 拒收 0 与越界序号；允许多子 |
 
-`MenuBar`（自绘，`widget/menu_bar.h`）的数据侧是**应用级单一真源**：菜单项结构 `MenuItem`（`app/menu.h`）与顶级菜单结构 `Menu`（`widget/menu_bar.h`）既被自绘 `MenuBar` 消费，也被 `Modifier` 层的上下文菜单与 `SystemTray` 共用；纯数据模型 `MenuModel` 与投影函数（`to_menu_model` / `to_menu_models` / `from_menu_model`）从**同一批结构**投影出「无行为、无渲染提示」的数据视图，供原生菜单桥消费（契约与投影方向见 [`06-app-platform.md`](06-app-platform.md) §8.4）。控件自身不参与投影：`MenuBar` 存的仍是 `std::vector<Menu>`，其构造、绘制与命中逻辑与投影无关；`Menu` / `MenuItem` 为原生桥而增的 `id` 字段不参与自绘任何分支。自绘与原生是同一份模型的**二显一存**，不另立平行菜单 API（命令行入口在 [`GUIDELINE.md`](GUIDELINE.md)）。
+`MenuBar`（自绘，`widget/menu_bar.h`）的数据侧是**应用级单一真源**：菜单项结构 `MenuItem`（`app/menu.h`）与顶级菜单结构 `Menu`（`widget/menu_bar.h`）既被自绘 `MenuBar` 消费，也被 `Modifier` 层的上下文菜单与 `SystemTray` 共用；纯数据模型 `MenuModel` 与投影函数（`to_menu_model` / `to_menu_models` / `from_menu_model`）从**同一批结构**投影出「无行为、无渲染提示」的数据视图，供原生菜单桥消费（契约与投影方向见 [`06-app-platform.md`](06-app-platform.md) §8.4）。控件自身不参与投影：`MenuBar` 存的仍是 `std::vector<Menu>`，其构造、绘制与命中逻辑与投影无关；`Menu` / `MenuItem` 为原生桥而增的 `id` 字段不参与自绘任何分支。自绘与原生是同一份模型的**二显一存**，不另立平行菜单 API（命令行入口在 [`GUIDELINE.md`](GUIDELINE.md)）。原生渲染路径的现状（契约见 [`06-app-platform.md`](06-app-platform.md) §8.4）：Win32（`HMENU` 桥）与 macOS（应用级 `NSMenu` 桥）均已落地，经 `app/native_menu_bar.h` 门面安装；Linux 无 OS 级菜单栏机制，能力位如实为 `false` 并**回落本自绘路径**——此时本控件即唯一渲染路径，行为不变；安装入口在桥缺位平台明确报错（`native-menu-unsupported`）而非静默。
 
 ### 3.7 平台与调试
 
 | 控件 / 设施 | 说明 |
 |:---|:---|
-| `WebView` | 系统原生 Web 嵌入控件（`webview/web_view.h`，`aurora::webview`）。props：`url` / `html` / `mode`（`WebViewMode` 枚举：Interactive / Snapshot）/ `javascript_enabled` / `zoom_factor`；回调 `on_navigation` / `on_title_changed` / `on_web_message` / `on_process_failed` 旁挂、**不进序列化面**。**降级而非中止**：引擎不可用时 `degraded()` 为真、呈现占位盒，能力经 `capabilities()` / `feature_flags().webview` 运行期查询（归因 slug 见 [`06-app-platform.md`](06-app-platform.md) §12.1）。**像素不经 `Painter` 合成**：交互模式由宿主 `NativeViewHost` 作原生子视图叠加显示、快照模式只作像素来源，契约同 §12.1 |
+| `WebView` | 系统原生 Web 嵌入控件（`webview/web_view.h`，`aurora::webview`）。属性表七行（权威表 + 链式写件，同 §2.5）：`url` / `html` / `base_uri` / `mode`（`WebViewMode` 枚举：Interactive / Snapshot）/ `zoom_factor` / `javascript_enabled` / `background`；回调 `on_navigation` / `on_title_changed` / `on_web_message` / `on_process_failed` 旁挂、**不进序列化面**。**降级而非中止**：引擎不可用时 `degraded()` 为真、呈现占位盒，能力经 `capabilities()` / `feature_flags().webview` 运行期查询（归因 slug 见 [`06-app-platform.md`](06-app-platform.md) §12.1）。**像素不经 `Painter` 合成**：交互模式由宿主 `NativeViewHost` 作原生子视图叠加显示、快照模式只作像素来源，契约同 §12.1 |
 | `InspectorPanel` | 左右分栏 Widget 树浏览器 + 属性编辑器（详见 [`08-tooling.md`](08-tooling.md)） |
 | `PerfOverlay` | 帧率 / 性能 HUD（`app/perf_overlay.h`）；`visible`、`show_counters`；每帧从 `FrameStats` 重读，故 `can_cache_display_list()` 为 `false`；读数陈旧（`FrameStats::is_stale()`）时第一行灰化并追加 `stale <空闲秒数>` |
 | `inspect.h` | 控件树检查函数集 |
@@ -412,22 +437,22 @@ au::Text("Welcome").font_size(24).bold();
 
 | 控件 | 说明 |
 |:---|:---|
-| `BarChart` | 柱状图（`widget/bar_chart.h`）。`series`（`ChartSeries{name, values, color?}` 数组，多系列分组并排）、`categories`（类目标签，缺省序号）、`stacked`、`bar_width_ratio`、`bar_corner_radius`、`show_crosshair`、`axis_x`（类目轴）/ `axis_y`（数值轴）、`legend`、`padding`；回调 `on_point_tapped(series_idx, point_idx)` |
-| `LineChart` | 折线图（`widget/line_chart.h`）。`series`（等距 x = 索引）、`show_dots`、`line_width`、`axis_x` / `axis_y`（双 `LinearScale`）、`legend`、`padding`；`show_crosshair` 控制十字准线；回调 `on_point_tapped(series_idx, point_idx)` |
-| `Sparkline` | 迷你走势图（`widget/sparkline.h`），最薄：**无轴 / 无网格 / 无图例 / 无交互**。`values`（单系列）、`color`（可选，缺省按色板取色）、`line_width`、`show_end_dot`、`dot_radius`、`padding` |
-| `PieChart` | 饼图 / 环形图（`widget/pie_chart.h`）。`sections`（`PieSection{name, value, color?}` 数组）、`center_space_ratio`（> 0 即环形）、`start_angle`（度，12 点起）、`show_percentage_labels`、`section_gap`、`legend`、`padding`；命中按极坐标（半径 + 角度）判扇区；回调 `on_section_tapped(section_idx)` |
-| `ScatterChart` | 散点图（`widget/scatter_chart.h`）。`series`（`ScatterSeries{name, points: [{x,y}], dot_radius, color?}`，显式 `ChartPoint`）、`axis_x` / `axis_y`（双 `LinearScale`）、`legend`、`padding`；命中按最近点欧氏距离（半径 = `dot_radius + 4dp`）；回调 `on_point_tapped(series_idx, point_idx)` |
+| `BarChart` | 柱状图（`widget/bar_chart.h`）。`series`（`ChartSeries{name, values, color?}` 数组，多系列分组并排）、`categories`（类目标签，缺省序号）、`stacked`、`bar_width_ratio`、`bar_corner_radius`、`show_crosshair`、`axis_x`（类目轴）/ `axis_y`（数值轴）、`legend`、`padding`；回调 `on_point_tapped(series_idx, point_idx)`。十枚属性已迁到属性单一声明形态（§2.5）：字段私有，写入 `set_series({...})` / `set_legend(ChartLegendSpec{...})` 一类链式写件，取值走无参读件（十行的回落点全是库内常量——轴与网格的配色取自继承主题、不属属性面，故本型没有 `x(ctx)` 读件），撤表态走 `clear(BarChartProps::stacked_row())`；`BarChart::set_series` 是控件侧的同名覆写（写入后重播 grow-in 入场动画），值仍由同一行给出；`stacked` 与 `bar_width_ratio` 除绘制外还进数值轴域与柱体几何（都在布局期算定），故两枚一并带布局档——迁移前那两枚手写 setter 只标绘制档，几何缓存要等下一次无关重排才追上；`axis_x` / `axis_y` / `legend` / `padding` 四枚迁移前只标布局，现按消费点补绘制档（前三枚在绘制趟被直接读，`padding` 只进布局期的几何，此档随 `LineChart` 同键口径） |
+| `LineChart` | 折线图（`widget/line_chart.h`）。`series`（等距 x = 索引）、`show_dots`、`line_width`、`axis_x` / `axis_y`（双 `LinearScale`）、`legend`、`padding`；`show_crosshair` 控制十字准线；回调 `on_point_tapped(series_idx, point_idx)`。十枚属性（另有 `categories` / `dot_radius`）已迁到属性单一声明形态（§2.5）：字段私有，写入 `set_series({...})` / `set_axis_x(ChartAxisSpec{...})` 一类链式写件，取值走无参读件（十行的回落点全是库内常量——轴与网格的配色取自继承主题、不属属性面，故本型没有 `x(ctx)` 读件），撤表态走 `clear(LineChartProps::legend_row())`；`LineChart::set_series` 是控件侧的同名覆写（写入后重播 grow-in 入场动画），值仍由同一行给出 |
+| `Sparkline` | 迷你走势图（`widget/sparkline.h`），最薄：**无轴 / 无网格 / 无图例 / 无交互**。六枚属性 `values`（单系列）/ `color`（缺省取内置色板首色）/ `line_width` / `show_end_dot` / `dot_radius` / `padding` 已迁到属性单一声明形态（§2.5）：字段私有，写入 `set_values({...})` 一类链式写件，取值走无参读件 `values()` / `color()` / …（六行的回落点都是库内常量提供者，故本型没有 `x(ctx)` 读件），撤表态走 `clear(SparklineProps::values_row())` |
+| `PieChart` | 饼图 / 环形图（`widget/pie_chart.h`）。`sections`（`PieSection{name, value, color?}` 数组）、`center_space_ratio`（> 0 即环形）、`start_angle`（度，12 点起）、`show_percentage_labels`、`section_gap`、`legend`、`padding`；命中按极坐标（半径 + 角度）判扇区；回调 `on_section_tapped(section_idx)`。七枚属性已迁到属性单一声明形态（§2.5）：字段私有，写入 `set_sections({...})` / `set_legend(ChartLegendSpec{...})` 一类链式写件，取值走无参读件（七行的回落点全是库内常量——扇区配色取自继承主题与色板、不属属性面，故本型没有 `x(ctx)` 读件），撤表态走 `clear(PieChartProps::legend_row())`；`PieChart::set_sections` 是控件侧的同名覆写（写入后重播 grow-in 入场动画），值仍由同一行给出；`section_gap` 迁移前**没有写件**（只能经字段直写或 JSON 抵达），本表按「每行恰一写件」补出写件并只标绘制档；`center_space_ratio` 与 `legend` 除绘制外还进布局期的几何（内半径在那趟算定、图例带同样在这扣减），而迁移前分别只标绘制 / 只标布局各半，单标一档会让另一趟停在旧值，故两枚一并带布局 + 绘制；`padding` 迁移前只标布局，现按图表族同键口径补绘制档 |
+| `ScatterChart` | 散点图（`widget/scatter_chart.h`）。`series`（`ScatterSeries{name, points: [{x,y}], dot_radius, color?}`，显式 `ChartPoint`）、`axis_x` / `axis_y`（双 `LinearScale`）、`legend`、`padding`；命中按最近点欧氏距离（半径 = `dot_radius + 4dp`）；回调 `on_point_tapped(series_idx, point_idx)`。六枚属性已迁到属性单一声明形态（§2.5）：字段私有，写入 `set_series({...})` / `set_axis_x(ChartAxisSpec{...})` 一类链式写件，取值走无参读件（六行的回落点全是库内常量——散点配色取自继承主题与色板、点半径住在 `ScatterSeries` 结构体里而非属性面，故本型没有 `x(ctx)` 读件），撤表态走 `clear(ScatterChartProps::legend_row())`；`ScatterChart::set_series` 是控件侧的同名覆写（写入后重播 grow-in 入场动画），值仍由同一行给出；`show_crosshair` 迁移前**没有写件**（只能经字段直写或 JSON 抵达），本表按「每行恰一写件」补出写件并只标绘制档；`axis_x` / `axis_y` / `legend` 迁移前只标布局，而三者的可见性、标签与名称同时被绘制趟直接读（刻度画不画、色块与文字），单标一档会让另一趟停在旧值，故三枚一并带布局 + 绘制；`padding` 迁移前只标布局，现按图表族同键口径补绘制档 |
 
 **公共数据层**（`widget/chart_common.h`，纯值、可无头单测）：`ChartPoint` / `ChartSeries` / `ScatterSeries` / `PieSection` / `ChartAxisSpec` / `LegendPosition` / `ChartLegendSpec` / `LinearScale` / `BandScale` / `chart_palette` / `resolve_series_color`。
 
 四条族级契约：
 
-1. **数据与视觉配置都是纯值属性**，整包进序列化面（`to_json` / `from_json` / `diff` / `apply_patch`）——AI 可经 schema + `from_json` 生成带真实数据的图表；交互回调（如 `on_point_tapped`）旁挂、**不进序列化面**。
+1. **数据与视觉配置都是纯值属性**，整包进序列化面（`to_json` / `from_json` / `diff` / `apply_patch`）——AI 可经 schema + `from_json` 生成带真实数据的图表；交互回调（如 `on_point_tapped`）旁挂、**不进序列化面**。五图都已迁到属性单一声明形态，口径统一为「只写必填行与已表态行」（§2.5 / §4.1），即未表态的属性键不落盘——迁移前按全量键输出的那图（`ScatterChart`）也改从本口径。
 2. **轴域与命中反查同源**：渲染、刻度生成、hover 命中都消费同一份 `LinearScale` / `BandScale`，不得各算一遍。
-3. **绘制不得越出控件 `bounds`**：控件自身的绘制越界不会被擦除（残影），脏区按 `Widget::dirty_bounds()`（= `paint_bounds_` ∪ 盒外装饰）标记。轴留白与图例带在控件内部以 `padding` 预留，悬浮值框按可用区夹取 / 翻转。唯一被认可的盒外绘制是基类统一焦点环，其外扩已由 `dirty_bounds()` 承担（见 [`05-event-navigation.md`](05-event-navigation.md) §4.4）。
+3. **绘制不得越出控件 `bounds`**：控件自身的绘制越界不会被擦除（残影），脏区按 `Widget::dirty_bounds()`（= `paint_bounds_` ∪ 盒外装饰）标记。轴留白与图例带在控件内部以 `padding` 预留，悬浮值框按可用区夹取 / 翻转。唯一被认可的盒外绘制是基类统一焦点环，其外扩已由 `dirty_bounds()` 承担（见 [`05-event-navigation.md`](05-event-navigation.md) §4.4）；滚动条画在滚动容器自身盒**内**（内容盒收缩预留带宽，条不越界），故不引入第二处盒外绘制。
 4. **取色与取 Locale 一律带回退**：系列色 = 显式 `color` > 主题图表色板 `ChartPalette`（经 `ThemeExtension<T>` 接入，应用可在根主题播种 `Theme::light().with_extension(ChartPalette::light())`）> 内置 8 色板（`chart_palette(index % 8)`，未注册 `ChartPalette` 时回落，观感同值）；网格 / 标签色取自 `inherit_theme(ctx)`；刻度文本经 `format_number(v, locale, digits)`，Locale 用 `ctx.environment<Locale>()` 取值、**未注入回退 `Locale{}`**（`render_to_png` 传 `constexpr BuildContext`，`env_of<Locale>` 会断言失败）。
 
-健壮性降级：空数据只画轴；`range == 0` 时域退化为 `[v, v+1]`（全 0 即 `[0,1]`）；NaN / ±inf 数据点跳过；点数超限时截断。反序列化对畸形数组元素逐项跳过并 `Diagnostics::degraded`，绝不抛异常。
+健壮性降级：空数据只画轴；`range == 0` 时域退化为 `[v, v+1]`（全 0 即 `[0,1]`）；NaN / ±inf 数据点跳过；点数超限时截断。反序列化对畸形数组元素逐项跳过并 `Diagnostics::degraded`，绝不抛异常；例外是已迁形态的数组值行——`Sparkline` 的 `values` 经 `PropCodec<std::vector<double>>` 的宽容通路（该 codec 未登记 `validate`），坏元素与非数组整值都只退回应得值、该行照常表态且**不上报**，与迁移前逐字相同；`LineChart` 与 `BarChart` 各自的五枚结构化行（`series` / `categories` / `axis_x` / `axis_y` / `legend`）同走这条通路，其四枚 codec（`std::vector<ChartSeries>` / `std::vector<std::string>` / `ChartAxisSpec` / `ChartLegendSpec`）也一律未登记 `validate`，畸形字段与缺字段逐项回退各字段默认、照常表态且不上报；`PieChart` 的两枚结构化行（`sections` / `legend`）同此，其中 `std::vector<PieSection>` 是本批新登记的 codec，同样只给类型名 / JSON 类型 / 双向转换而未登记 `validate`；`ScatterChart` 的四枚结构化行（`series` / `axis_x` / `axis_y` / `legend`）同此，其中 `std::vector<ScatterSeries>` 也是新登记的 codec，其 `points` 里的数组项长度不足 2 或首元素非数值时**整项丢弃**、非对象的系列元素整项跳过，同样照常表态且不上报——点坐标由系列转换器**内联**编解码（`[[x, y], ...]` 形态），故 `ChartPoint` 从不作为一行出现、本头也不为它单列一档。会上报的是登记了 `validate` 的行（`Sparkline` 与 `LineChart` 的 `line_width` / `dot_radius` 越界——负值不再被 `std::max` 静默烘成 `0.0`，而是不写入、该行退回未表态取回落点，颜色 / 留白 / 开关形态不符同此；`BarChart` 的 `bar_width_ratio` / `bar_corner_radius` 与 `PieChart` 的 `center_space_ratio` / `section_gap` 同此，且这四枚行迁移前在反序列化通路上是**夹取写入**（越界值被收进 `[0.05,1]`、`[0,0.95]` 与非负），本轮改为拒绝写入，而运行时写件仍按原样存入、几何计算里的夹取继续兜底；`padding` 与开关行在五型同此——迁移前各型都是 `json_to_edge_insets` 直接覆盖（非对象整值烘成四边全 0 且照常取值、负字段照收）与「形态不符静默跳过保留现值」，现分别经 `PropCodec<EdgeInsets>` 与 `bool` codec 的 `validate`，拒写、撤表态并进 `Diagnostics`。`PieChart` 比这多一处口径差：迁移前 `set_center_space_ratio` 在**写入时**就夹进 `[0,0.95]`（读件因此回不到越界原值），本轮改为照原样存入、由 `compute_geometry` 在使用点夹取，生效像素同值而读件口径与其余各行一致；`section_gap` 迁移前更是**没有写件**（只能经字段直写或 JSON 抵达），本轮按「每行恰一写件」补出；`ScatterChart` 没有带上下界的数值行，故它的两枚标量行只撞形态校验（`show_crosshair` 非 bool、`padding` 非对象 / 字段非数值 / 负值），而 `show_crosshair` 与 `PieChart` 的 `section_gap` 同属「迁移前没有写件」那一类，本轮同样补出。容器行的「同值写入短路」要求元素可判等，故 `ChartSeries` / `ChartAxisSpec` / `ChartLegendSpec` / `PieSection` 各带一枚 `= default` 的逐字段 `operator==`（`std::vector<T>::operator==` 声明了但无约束，`T` 不可判等时红在实例化那一点）；`ScatterChart` 的散点数组是**两层嵌套容器**，故判等必须成对补齐——`ScatterSeries::operator==` 逐成员时还要逐元素比较 `ChartPoint`，两枚 `= default` 缺任一枚都在实例化那一点失败。
 
 ---
 
@@ -437,11 +462,32 @@ au::Text("Welcome").font_size(24).bold();
 
 ### 4.1 主题回退
 
-强调色（`active_color` / `accent_color` / `focused_border_color` 等）一律为 `std::optional<Color>`。未显式设置时，绘制期经 `inherit_theme(ctx)` 解析对应角色（`ThemeScope` 换肤即生效），且**未设置不序列化**——保留「跟随主题」语义，`to_json` / `from_json` 往返不丢失意图。`Button` 遵同一契约（迁移批起）：`ButtonProps::color` 为 `Reactive<std::optional<Color>>`（保留响应式能力，空 = 跟随 `roles.primary`）、`on_color` 为 `std::optional<Color>`（空 = 跟随 `roles.on_primary`），解析点是接收 `BuildContext` 的 `resolve_background(ctx)` / `resolve_text_color(ctx)`；`describe_static` 的 `default_value` 元数据为 `"theme.primary"` / `"theme.on_primary"`（AI/codegen 面文档值，不参与运行时）。
+强调色（`active_color` / `accent_color` / `focused_border_color` 等）一律为 `std::optional<Color>`。未显式设置时，绘制期经 `inherit_theme(ctx)` 解析对应角色（`ThemeScope` 换肤即生效），且**未设置不序列化**——保留「跟随主题」语义，`to_json` / `from_json` 往返不丢失意图。`Button` / `Divider` 遵同一契约，但已迁到属性单一声明形态（§2.5），「未设」不再由公有 `std::optional` 字段外泄表达，而是写在该行的回落点上：`Button` 的 `color` 回落 `roles.primary`、`on_color` 回落 `roles.on_primary`，`Divider` 的 `color` 回落 `roles.outline_variant`；表态位是 `*Props` 的私有 `std::optional`，故活令牌档行的解析点就是同名读件 `x(const BuildContext &)`（`color(ctx)` / `on_color(ctx)` / `thickness(ctx)`），受保护的 `resolve_background(ctx)` / `resolve_text_color(ctx)` 仍在，但只负责按状态档挑色后调用同名读件，不再是默认值的落点。响应式来源行另有一只同名写件收 `ReadOnlyState<Color>`（`Button::set_color`），句柄自身可空即「未表态」，不再有 `ReadOnlyState<std::optional<Color>>` 那种双重空态；`describe_static` 的 `default_value` 令牌路径串（`"theme.primary"` / `"theme.on_primary"`）由行上的回落点派生，仍是 AI/codegen 面文档值、不参与运行时。
+
+**度量、形状与惯例同契约**——首批把颜色侧的两态语义推广到令牌层，逐控件落点清单如下：
+
+| 控件 / 面 | 属性（未显式设值时解算） | 令牌 | 解算点 |
+| :--- | :--- | :--- | :--- |
+| `Button` | `corner_radius` | `theme.shapes.small` | `corner_radius(ctx)`（读件即解析点；每帧由 `on_paint` 解算一次，再传给 `paint_background` / `paint_border`，避免背景与描边取到两个半径） |
+| `Button` | `padding` | `theme.spacing.large`（水平）与 `theme.spacing.small`（垂直） | `padding(ctx)`（布局与绘制同源） |
+| `Divider` | `thickness` | `theme.controls.separator_thickness` | `thickness(ctx)`（`color` 同形，回落 `roles.outline_variant`；控件侧的 `resolve_thickness` / `resolve_color` 随迁移退役） |
+| `Checkbox` | `size` | `theme.controls.indicator_size` | `resolve_size(ctx)` |
+| `Dialog` 工厂 | 动作按钮排布、标题对齐、行距 | `theme.conventions.dialog_button_order` / `dialog_title_alignment`、`theme.spacing.medium` / `large` | `detail::dialog_actions` / `dialog_title_text` / `dialog_stretches_children`；两个工厂的末位形参是 `const Theme & = Theme::defaults()` |
+| `Text` | `font_size` | `type_scale.body_medium`（字阶档，`theme_tokens` 表外的**非注册组**，故 `default_expr` 登记为 `type_scale.body_medium` 而非 `theme.*` 前缀） | `font_size(ctx)`（派生档回落点 `TextProps::font_size_default(self, ctx)`；主题被写成非正字号时兜底取 `TypeScale{}` 的声明默认值，不另立第二份 14pt 常量） |
+| 滚动容器（`Scroll` / `LazyList` / `GridView` / `LazyRow`） | 内容盒收缩带宽 | `theme.controls.scrollbar_thickness` | 布局期消费：`Classic` 档按 `thickness + 2×inset` 收缩内容盒、预留右侧 / 底侧带宽；`Overlay` 档不收缩，悬停 / 滚动后按同带宽浮层绘制（`widget/detail/scrollbar.h::reserve_band()` 两档共用） |
+| `Widget` | 焦点环环宽 / 环距 | `theme.controls.focus_ring_width` / `theme.controls.focus_ring_inset` | `paint_content` 取两值画环、`dirty_bounds()` 取两帧外扩并集（环宽由小变大不裁新环带、由大变小不留残影）；窗口脏区收集与 `Scroll` 离屏缓冲两读取方调同一入口、天然同源 |
+
+三行度量项与颜色面逐条同构：未表态即不序列化、`describe_static` 的 `default_value` 登记令牌路径串（`"theme.shapes.small"` / `"theme.spacing(large/small)"` / `"theme.controls.separator_thickness"` / `"theme.controls.indicator_size"`，均为 AI/codegen 面文档值，不参与运行时）——`Button` / `Divider` 迁移后这串由行上的回落点自动派生，不再手抄；`Checkbox` 仍是公有 `std::optional` 字段 + 手写 `default_value`。显式设值一律优先，两态语义见 §2.5。`Dialog` 那行的主题来自 `Theme::defaults()`（风格轴探测档），因此它是「惯例真实生效」的落点：`AcceptFirst` + `Leading` 档（Material / Windows / KDE）产出的节点树与接线前逐位同构，其余档位才多包一层右靠容器——右靠需要自由空间，故非默认档的动作行会被拉到 `Dialog` 给的内容盒宽（`Dialog::on_layout` 的 0.8× 上限），这是排布观感的取舍而非尺寸变化。
+
+**滚动条几何、模式与交互（新增，CHG-075）**：四容器（`Scroll` / `LazyList` / `GridView` / `LazyRow`）共享 `widget/detail/scrollbar.h` 的纯函数内核，几何与绘制逐位同构。滑块长度 `thumb = clamp(track × viewport/content, min(24, track), track)`（`track = viewport − 2×inset`；`min` 取 `min(24, track)` 是为防 `std::clamp` 的 `lo ≤ hi` 前提违例；`track ≤ 0` 即不溢出、不绘制）；拖拽映射 `Δoffset = Δpointer × max_offset/(track − thumb)`，`track == thumb` 的退化几何（内容填满视口，本不该出现条）短路不响应拖拽；轨道点击翻一页（`±(viewport − thumb)`）。模式走 `theme.conventions.scrollbar_mode`：`Classic` 收缩内容盒预留带宽、条恒绘；`Overlay` 浮层、内容盒不变、指针进入即显、滚轮 / 程序化滚动后保持 1 秒再隐（显隐瞬时、无淡入淡出，便于基线逐像素判定；保持窗口由 `needs_gesture_tick_` 驱动，`LazyRow` 补该入口）。命中优先级：拖拽 / 轨道翻页只在条带内交自身、不下降给内容子树；其余区域照常命中内容。条带绘制经 `roles.scrollbar_thumb`（非文本档，对 `surface` ≥ 3:1）与 `roles.scrollbar_track`（纯装饰、登记为不适用、不标识状态）；绘制经 `draw_rounded_border` / 半透明 `fill_rect`，不出现数字色构造式（`check_no_theme_color_literals` 判零）。
+
+**字号缩放的覆盖面（现状，如实登记）**：`AccessibilitySettings::font_scale` 只在唯一物化点折进令牌快照（口径见 [`07-environment-modifier.md`](07-environment-modifier.md) §5.1），控件侧不再有任何第二次末端乘法——原先那两处 `f.size_pt *= ...` 住在 `Text` 的绘制入口，是全库唯一的消费点。因此随缩放而动的是：`Text` 的 `font_size` 行（经字阶）、四枚读 `type_scale.body_medium` 的图表控件、八枚可配字号控件（`Button` / `TextInput` / `Chip` / `Dropdown` / `RadioGroup` / `SpinBox` / `SegmentedControl` / `TabBar`）的未表态 `font_size`、以及同倍增长的 `spacing` / `shapes` 两族。这八处此前是常量基线（`Button` / `TextInput` / `SegmentedControl` 各 14，`Chip` / `Dropdown` / `RadioGroup` / `SpinBox` / `TabBar` 各 13），现已全部改读 `type_scale.body_medium`：两枚表行控件（`Button` / `TextInput`）的派生档 provider 读 `inherit_theme(ctx).type_scale.body_medium.size_pt`、行带 `.shows("type_scale.body_medium")`、读件改带 `BuildContext`，六枚表外控件以 `std::optional<float>` 表态位承载（空即跟随字阶，`set_font_size()` 传非正值撤表态回落），未表态一律不写盘。逐档落点即 `body_medium` 的标定值（Material 14 / macOS 13 / Windows 10.5 / GNOME 11 / KDE 10）：三枚原 14 在 Material 档逐磅不变、五枚原 13 在 Material 档 +1pt（13→14）而在 macOS 档不变（13），其余档各随该档正文基准——故覆盖面相对接入前只增不减，观感变化集中在非 Material 档与 Material 档的那五枚。迁移未触发任何像素 golden 重拍：库内没有逐控件文本像素 golden，迁移后全量测试绿即其证（旧文「改的是全部相关像素 golden」是不成立的预判，就地纠正）。仍不随缩放而动的是控件内联的**装饰性字形字号**（如 `Chip` 角标计数 11pt、`SpinBox` 箭头字形 9pt，以及错误提示 / 菜单项 / Inspector 标签等固定字形）——它们是特定子元素的硬编码字形尺寸、不是可配 `font_size` 属性，属另一类面，不在本批八处之列、维持常量。显式设值一律压过主题，故缩放不二次作用于已 `set_font_size()` 的控件——这与「显式表态优先」是同一句话。
+
+尚未接线的令牌如实登记在此：`controls.min_touch_target` **不**绑 `Button::min_width` / `min_height`（改绑会把既有全部像素 golden 一起移动，属未经请求的视觉变更）。`controls.scrollbar_thickness` 与焦点环两枚（`focus_ring_width` / `focus_ring_inset`）已接线（见上表与「滚动条几何、模式与交互」段），落点见 [`07-environment-modifier.md`](07-environment-modifier.md) §5.1 的消费面段。
 
 ### 4.2 状态反馈与禁用态
 
-hover / 按下统一用 `Color::shaded(k)` 乘性调暗（hover ≈ ×0.90 / ×0.92，pressed ≈ ×0.78 / ×0.80），淡色底与选区用 `Color::with_alpha(a)`。按钮 / 输入 / 选择类控件（`Button` / `Checkbox` / `Switch` / `Slider` / `TextInput` / `Dropdown` / `RadioSpin` / `SegmentedControl`）提供 `set_enabled(bool)`：禁用态统一灰化绘制、**吞掉指针事件**（置 `e.handled = true` 不冒泡）且不改值。例外：`Chip` / `TabBar` / `ProgressIndicator` 无 `set_enabled` 方法，也无禁用态分支。
+hover / 按下统一是**半透明状态层叠加**：基色先按显式表态值或主题角色绘制，再由绘制路径以源覆盖混合叠一层 `roles.hover` / `roles.pressed`（`Button` 走 `resolve_state_overlay`，`Checkbox` / `Slider` / `Switch` 在各自绘制钩子内同形叠层，`Chip` 在 `paint_background` 末尾叠层）；层色可经 `set_hover_color()` / `set_pressed_color()` 显式指定（`Button`），未表态即取角色，因而暗档自动翻面。淡色底与选区仍用 `Color::with_alpha(a)`。旧写法「按状态对基色乘性压暗」的 `Color::shaded(0.92F)` / `shaded(0.80F)` 一类交互态魔数在控件层已归零（`check_no_theme_color_literals` 判零），基色本身不随状态改写。按钮 / 输入 / 选择类控件（`Button` / `Checkbox` / `Switch` / `Slider` / `TextInput` / `Dropdown` / `RadioSpin` / `SegmentedControl`）提供 `set_enabled(bool)`：禁用态统一按主题中性档灰化绘制、**吞掉指针事件**（置 `e.handled = true` 不冒泡）且不改值。例外：`Chip` / `TabBar` / `ProgressIndicator` 无 `set_enabled` 方法，也无禁用态分支。
 
 ### 4.3 继承友好：protected 绘制分阶段钩子
 
@@ -453,7 +499,7 @@ hover / 按下统一用 `Color::shaded(k)` 乘性调暗（hover ≈ ×0.90 / ×0
 
 | 控件 | 绘制钩子 |
 |:---|:---|
-| `Button` | `resolve_background` / `resolve_text_color` / `paint_background` / `paint_border` / `paint_label`（末者多收一个 `const std::string &display` 形参 = 本帧显示串） |
+| `Button` | `resolve_background` / `resolve_state_overlay` / `resolve_text_color` / `paint_background` / `paint_border` / `paint_label`（`resolve_state_overlay` 返回本帧要叠的半透明状态层，空即不叠；`paint_label` 多收一个 `const std::string &display` 形参 = 本帧显示串） |
 | `Switch` | `paint_track` / `paint_thumb` |
 | `Slider` | `paint_track` / `paint_active_track` / `paint_thumb`；几何 `track_rect` / `value_fraction` |
 | `ProgressIndicator` | `paint_track` / `paint_fill` |
@@ -489,16 +535,16 @@ Aurora 的「真值来源」仍是声明式 `Node` 树加 `XxxProps` 聚合属�
 | `ui::label(parent, text, TextProps = {})` | `Text`（`text` 覆盖 `props.content`） |
 | `ui::button(parent, text, ButtonProps = {}, on_click = {})` | `Button`（`text` 覆盖 `props.label`，`on_click` 可选） |
 | `ui::input(parent, value = "", TextInputProps = {})` | `TextInput`（`value` 为初始文本） |
-| `ui::checkbox(parent, checked, on_changed = {})` | `Checkbox`（双模：`Reactive<bool>` 或 `bool` 初值） |
-| `ui::slider(parent, value, on_changed = {})` | `Slider`（双模：`Reactive<double>` 或 `double` 初值） |
+| `ui::checkbox(parent, checked, on_changed = {})` | `Checkbox`（双模：`State<bool>` 模型或 `bool` 初值） |
+| `ui::slider(parent, value, on_changed = {})` | `Slider`（双模：`State<double>` 模型或 `double` 初值） |
 | `ui::vbox(parent, ColumnProps = {})` | `Column` |
 | `ui::hbox(parent, RowProps = {})` | `Row` |
 | `ui::stack(parent, align = Alignment::TopLeft)` | `Stack` |
 | `ui::grid(parent, GridProps = {})` | `Grid` |
-| `ui::scroll(parent, ScrollProps = {})` | `Scroll` |
+| `ui::scroll(parent, child, ScrollProps = {})` | `Scroll`（内容节点与属性块分参） |
 | `ui::lazy_list(parent, count, builder, item_extent = 48.0F)` | `LazyList` |
 | `ui::lazy_row(parent, count, builder, item_extent = 96.0F)` / `ui::lazy_row(parent, LazyRowProps)` | `LazyRow`（双重载） |
-| `ui::bottom_nav_bar(parent, BottomNavBarProps)` | `BottomNavBar` |
+| `ui::bottom_nav_bar(parent, items, BottomNavBarProps = {})` | `BottomNavBar`（导航项与其余属性分参） |
 
 ---
 
@@ -533,6 +579,8 @@ Aurora 的「真值来源」仍是声明式 `Node` 树加 `XxxProps` 聚合属�
 - `lock(out_keepalive)`：返回存活指针**并把强引用写入出参**，把控件生命周期延长至调用方作用域结束。
 
 凡要**解引用**命中链节点（调用 `on_pointer_event` / `focusable()` 等）都必须用 `lock()`：派发回调（用户 `on_click`）可能销毁控件自身所在子树（如点击按钮触发 `push_replacement` 重建页面），而回调返回后基类 `Widget::on_pointer_event` 仍要写 `pressed_` 等成员，用裸指针即 use-after-free。
+
+滚轮派发（`dispatch(Widget&, ScrollEvent&)`）、悬停 diff（`update_hover`）与悬停光标解析（`resolve_cursor`）三条链路径同样一律经 `lock()`：先按守卫判活、已回收节点整跳跳过，强引用持到该跳的通知 / 虚钩子调用结束。滚轮主路径不得读 `ptr` 绕过守卫；`get()` 只留在「是否同一控件」这类不解引用的比较里。
 
 **验收标准：** 控件继承深度 ≤ 2；`Widget` 上不存在任何几何字段；命中链的解引用路径全部经 `lock()` 持有强引用。
 

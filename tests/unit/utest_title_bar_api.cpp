@@ -84,9 +84,9 @@ AURORA_TEST_CASE(api_surface_setters_and_getters) {
     AURORA_TEST_CHECK_TRUE(bar->wants_click());
 
     // 无信号：collect_signals 空实现。
-    std::vector<SignalViewBase *> sigs;
+    StateSink sigs;
     bar->collect_signals(sigs);
-    AURORA_TEST_CHECK_EQ(sigs.size(), 0U);
+    AURORA_TEST_CHECK_EQ(sigs.sources().size(), 0U);
 }
 
 AURORA_TEST_CASE(serialize_and_deserialize_roundtrip) {
@@ -125,7 +125,7 @@ AURORA_TEST_CASE(control_button_press_without_chrome_is_safe) {
     // headless 下 WindowChrome 缺失：控制钮命中分支执行但不调 chrome（is_handled 即可）。
     auto bar = std::make_shared<TitleBar>();
     bar->set_window_controls(true);
-    BuildContext ctx;
+    BuildContext const ctx;
     bar->mount(ctx);
     LayoutEngine::layout(*bar, host_constraints());
 
@@ -191,11 +191,12 @@ AURORA_TEST_CASE(paint_covers_icon_title_subtitle_glyphs_and_snap) {
     bar->set_subtitle("Sub");
     bar->set_window_controls(true);
 
-    auto root = std::make_shared<Column>(ColumnProps{.children = {Node{bar}}, .gap = 0.0F});
+    auto root = std::make_shared<Column>(std::vector<Node>{Node{bar}}, ColumnProps().set_gap(0.0F));
     LayoutEngine::layout(*root, host_constraints());
 
     Painter painter;
-    Rect bounds{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = AURORA_HOST_W, .height = AURORA_HOST_H}};
+    Rect const bounds{.origin = Point{.x = 0.0F, .y = 0.0F},
+                      .size = Size{.width = AURORA_HOST_W, .height = AURORA_HOST_H}};
     bar->paint(painter, bounds, BuildContext{});  // 图标 + 标题 + 副标题 + 控制钮字形
 
     // 悬停最大化钮 ≥400ms → 真实路径展开 Snap 浮层。

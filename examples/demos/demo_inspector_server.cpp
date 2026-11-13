@@ -31,21 +31,20 @@ constexpr std::uint16_t AURORA_INSPECTOR_PORT = 6280;
 /// 索引 3 → 4 构成可远程观测的因果：`POST /api/input/click {"path":"3"}` 应使索引 4 的文本递增。
 auto build_form(const std::shared_ptr<au::State<int>> &count,
                 const std::shared_ptr<au::State<au::LocalizedString>> &label) -> au::Node {
-    au::Button submit{au::ButtonProps{.label = "Submit"}};
+    au::Button submit{au::ButtonProps().set_label("Submit")};
     submit.on_click = [count, label]() -> void {
         const int next = count->get() + 1;
         count->set(next);
         label->set(au::LocalizedString{"submit count = " + std::to_string(next)});
     };
 
-    return au::Node{au::Column{au::ColumnProps{
-        .children = {
-            au::Node{au::Text{"User info form"}},
-            au::Node{au::TextInput{au::TextInputProps{.value = "", .placeholder = "Enter name"}}},
-            au::Node{au::TextInput{au::TextInputProps{.value = "alice@example.com", .placeholder = "Enter email"}}},
-            au::Node{std::move(submit)},
-            au::Node{au::Text{au::TextProps{.content = au::Reactive{label}}}},
-        }}}};
+    return au::Node{au::Column({
+        au::Node{au::Text{"User info form"}},
+        au::Node{au::TextInput{au::TextInputProps().set_value("").set_placeholder("Enter name")}},
+        au::Node{au::TextInput{au::TextInputProps().set_value("alice@example.com").set_placeholder("Enter email")}},
+        au::Node{std::move(submit)},
+        au::Node{au::Text{au::TextProps().set_content(*label)}},
+    })};
 }
 
 }  // namespace

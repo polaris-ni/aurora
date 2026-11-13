@@ -1,9 +1,9 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/state/resource.h
 /// 测试说明: 三态资源绑定的四组契约——`Resource::from` 的 Loading/Ready/Failed 迁移与「一次落定
-/// 只通知一次」、`reload` 取消前序请求且前序迟到结果不覆盖新状态、宿主卸载后回调被丢弃（弱引用
-/// 不复活内核）、去抖窗口的多次调用合并、`StreamResource` 的追加/替换两策略与帧内合并批次字节，
-/// 以及选项默认值在声明处可见
+/// 只通知一次」、投影只读句柄保活未落定作业、`reload` 取消前序请求且前序迟到结果不覆盖新状态、
+/// 宿主卸载后回调被丢弃（弱引用不复活内核）、去抖窗口的多次调用合并、`StreamResource` 的追加/替换
+/// 两策略与帧内合并批次字节，以及选项默认值在声明处可见
 /// 覆盖说明: 用例统一给短超时——worker 池下的超时看守是一个睡满窗口的池任务，默认 30 s 会占住
 /// worker 线程并把同进程后续用例拖进排队；全部状态写入经用例自装的主线程投递器回到用例线程
 
@@ -18,6 +18,7 @@
 #include <optional>
 #include <string>
 #include <thread>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -27,6 +28,27 @@
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_state_resource {
+
+namespace {
+
+/// 能力负向探针：资源类型不得暴露通用写入入口（写入只经 `from`/`reload`/`push` 的领域语义）。
+template <typename R>
+concept HasSet = requires(R r) { r.set(int{}); };
+template <typename R>
+concept HasNotify = requires(R r) { r.notify(); };
+
+static_assert(!HasSet<Resource<int>>);
+static_assert(!HasNotify<Resource<int>>);
+static_assert(!HasSet<StreamResource<int>>);
+static_assert(!HasNotify<StreamResource<int>>);
+// 组合而非继承：资源不是只读句柄的派生，公共面不存在可写基类子对象。
+static_assert(!std::is_base_of_v<ReadOnlyState<ResourceSnapshot<int>>, Resource<int>>);
+static_assert(!std::is_base_of_v<ReadOnlyState<StreamSnapshot<int>>, StreamResource<int>>);
+// 只读视图经隐式转换给出（别名句柄保活控制核）。
+static_assert(std::is_convertible_v<Resource<int>, ReadOnlyState<ResourceSnapshot<int>>>);
+static_assert(std::is_convertible_v<StreamResource<int>, ReadOnlyState<StreamSnapshot<int>>>);
+
+}  // namespace
 
 namespace {
 
@@ -52,43 +74,35 @@ auto wait_until(Pred &&pred, std::chrono::milliseconds budget = std::chrono::mil
 /// 「已排进主线程但尚未执行」的投递现场，可以据此造出「迟到结果」与「宿主已亡」两种时序。
 class PosterQueue {
   public:
-    PosterQueue() {
-        Task<int>::set_main_poster([this](std::function<void()> fn) -> void {
-            std::scoped_lock<std::mutex> lock(mutex_);
-            queued_.push_back(std::move(fn));
-        });
-    }
-    /// @brief 禁拷贝：投递器是进程级单例，两份替身会互相顶替。
+    PosterQueue() : duty_(MainQueue::on_duty([]() -> void {})) {}
+    /// @brief 禁拷贝：值班租约是进程级独占凭证，两份会互相顶替。
     PosterQueue(const PosterQueue &) = delete;
     /// @brief 禁拷贝赋值：理由同拷贝构造。
     auto operator=(const PosterQueue &) -> PosterQueue & = delete;
-    /// @brief 禁移动：投递器捕获的是 `this`，搬走即悬垂。
+    /// @brief 禁移动：租约在手期间队列即在岗，搬走语义混乱。
     PosterQueue(PosterQueue &&) = delete;
     /// @brief 禁移动赋值：理由同移动构造。
     auto operator=(PosterQueue &&) -> PosterQueue & = delete;
-    ~PosterQueue() { Task<int>::set_main_poster(nullptr); }
-
-    /// @brief 排队项数。
-    /// @return 尚未执行的投递闭包数。
-    [[nodiscard]] auto size() -> std::size_t {
-        std::scoped_lock<std::mutex> lock(mutex_);
-        return queued_.size();
+    ~PosterQueue() {
+        if (duty_.has_value()) {
+            duty_->release();
+        }
     }
+
+    /// @brief 滞留项数（已入队未执行）。
+    /// @return 全局队列中尚未被 `drain` 取走的闭包数。
+    [[nodiscard]] auto size() -> std::size_t { return MainQueue::pending_count(); }
 
     /// @brief 排空当前队列（执行期间新入队的项在后续轮次继续执行，最多 8 轮防自旋）。
     /// @return 实际执行的闭包数。
     auto drain() -> std::size_t {
         std::size_t ran = 0;
         for (int round = 0; round < 8; ++round) {
-            std::vector<std::function<void()>> batch;
-            {
-                std::scoped_lock<std::mutex> lock(mutex_);
-                batch.swap(queued_);
-            }
+            auto batch = MainQueue::take_batch();
             if (batch.empty()) {
                 break;
             }
-            for (std::function<void()> &fn : batch) {
+            for (std::function<void()> const &fn : batch) {
                 fn();
                 ++ran;
             }
@@ -117,8 +131,7 @@ class PosterQueue {
     }
 
   private:
-    std::mutex mutex_;  ///< 保护 queued_
-    std::vector<std::function<void()>> queued_;  ///< 待执行的主线程闭包
+    std::optional<MainQueue::Lease> duty_;  ///< 在岗租约（空 wake）：令 `async()` 发起过闸、回投入全局队列待排空
 };
 
 /// @brief 用例选项：短超时（看守线程占用有界）+ 默认不去抖。
@@ -155,11 +168,10 @@ AURORA_TEST_CASE(from_job_reaches_ready_with_single_notification) {
                                    short_timeout_options());
 
     int runs = 0;
-    Effect watch([&runs, &res]() -> void {
+    const auto watch = effect([&runs, &res]() -> void {
         ++runs;
         (void)res.phase();  // 读取即登记依赖
     });
-    watch.run();
     AURORA_TEST_CHECK_EQ(runs, 1);  // 首跑只算一次登记
 
     AURORA_TEST_CHECK(res.phase() == ResourcePhase::Loading);
@@ -175,6 +187,32 @@ AURORA_TEST_CASE(from_job_reaches_ready_with_single_notification) {
     AURORA_TEST_CHECK_FALSE(res.error().has_value());
     // 一次落定 = 一次通知：阶段/值/错误在同一份快照里，不拆成三个信号各刷一轮。
     AURORA_TEST_CHECK_EQ(runs, 2);
+}
+
+AURORA_TEST_CASE(read_only_projection_keeps_job_alive_until_landing) {
+    AURORA_TEST_REQUIRE_THREADS();
+    PosterQueue pq;
+    std::atomic<bool> started{false};
+    std::promise<void> gate;
+    auto gate_future = gate.get_future().share();
+
+    // 临时资源句柄在本行末即析构；只剩投影出的只读句柄，作业仍须存活并落定。
+    ReadOnlyState<ResourceSnapshot<int>> handle =
+        Resource<int>::from(async([&started, gate_future]() -> int {
+                                started.store(true, std::memory_order_release);
+                                gate_future.wait();
+                                return 7;
+                            }),
+                            short_timeout_options());
+
+    AURORA_TEST_CHECK(handle.get().phase == ResourcePhase::Loading);
+    AURORA_TEST_CHECK_FALSE(handle.get().value.has_value());
+    AURORA_TEST_REQUIRE(wait_until([&started]() -> bool { return started.load(std::memory_order_acquire); }));
+    gate.set_value();
+    AURORA_TEST_REQUIRE(pq.pump_until([&handle]() -> bool { return handle.get().phase == ResourcePhase::Ready; }));
+    AURORA_TEST_REQUIRE(handle.get().value.has_value());
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): 上一行 REQUIRE 已断言持有值，其宏展开对路径分析不透明
+    AURORA_TEST_CHECK_EQ(*handle.get().value, 7);
 }
 
 AURORA_TEST_CASE(from_error_job_reaches_failed_and_clears_value) {
@@ -382,11 +420,10 @@ AURORA_TEST_CASE(stream_append_policy_merges_pushes_into_one_commit) {
     PosterQueue pq;
     auto stream = StreamResource<std::string>::open();
     int runs = 0;
-    Effect watch([&runs, &stream]() -> void {
+    const auto watch = effect([&runs, &stream]() -> void {
         ++runs;
         (void)stream.items();  // 读取即登记依赖
     });
-    watch.run();
     AURORA_TEST_CHECK_EQ(runs, 1);
     AURORA_TEST_CHECK(stream.phase() == ResourcePhase::Loading);
     AURORA_TEST_CHECK_EQ(stream.items().size(), std::size_t{0});
@@ -426,19 +463,22 @@ AURORA_TEST_CASE(stream_fail_is_terminal_and_keeps_committed_items) {
     pq.drain();
     AURORA_TEST_REQUIRE_EQ(stream.items().size(), std::size_t{1});
 
+    // 在途未提交批先入账：交付已抵达，入账只差一次合批投递——迟到终态不得把它凭空抹掉。
+    stream.push("in-flight", 5);
     stream.fail(make_error(ErrorCode::GeneralInvalidArgument, std::string{"stream broke"}));
     AURORA_TEST_CHECK(stream.phase() == ResourcePhase::Failed);
     const std::optional<Error> err = stream.error();
     AURORA_TEST_REQUIRE(err.has_value());
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access): 上一行 REQUIRE 已断言持有值，其宏展开对路径分析不透明
     AURORA_TEST_CHECK_STREQ(err->message, "stream broke");
-    AURORA_TEST_CHECK_EQ(stream.items().size(), std::size_t{1});  // 已提交数据不因失败丢弃
+    AURORA_TEST_CHECK_EQ(stream.items().size(), std::size_t{2});  // 已提交 + 在途那一条，都留着
 
     stream.push("dropped", 8);  // 终态之后的交付被丢弃
     pq.drain();
     AURORA_TEST_CHECK(stream.phase() == ResourcePhase::Failed);
-    AURORA_TEST_CHECK_EQ(stream.items().size(), std::size_t{1});
-    AURORA_TEST_CHECK_STREQ(stream.items().front(), "kept");
+    AURORA_TEST_CHECK_EQ(stream.items().size(), std::size_t{2});
+    AURORA_TEST_CHECK_STREQ(stream.items()[0], "kept");
+    AURORA_TEST_CHECK_STREQ(stream.items()[1], "in-flight");
 }
 
 }  // namespace aurora::test_cases::utest_state_resource

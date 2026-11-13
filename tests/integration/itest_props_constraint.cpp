@@ -112,9 +112,9 @@ AURORA_TEST_CASE(validate_or_default_falls_back_and_reports) {
 
 AURORA_TEST_CASE(column_gap_constraint_via_validate_props_hook) {
     Column col;
-    col.gap = -5.0F;
+    col.set_gap(-5.0F);
     AURORA_TEST_CHECK(!col.validate_props().ok());
-    col.gap = 4.0F;
+    col.set_gap(4.0F);
     AURORA_TEST_CHECK(col.validate_props().ok());
 }
 

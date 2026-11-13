@@ -8,7 +8,7 @@ auto main() -> int {
     std::vector<au::Node> cells;
     for (int i = 0; i < 9; ++i) {
         au::Text c{au::LocalizedString{"cell " + std::to_string(i)}};
-        c.modifier.set(au::Modifier{}.padding(14.0F).background(pal::AURORA_SURFACE).border(1.0F, pal::AURORA_BORDER));
+        c.set_modifier(au::Modifier{}.padding(14.0F).background(pal::AURORA_SURFACE).border(1.0F, pal::AURORA_BORDER));
         cells.emplace_back(std::move(c));
     }
 
@@ -16,7 +16,7 @@ auto main() -> int {
         GradientTitle{"Grid widget"},
         gap(12),
         au::Text{au::LocalizedString{"3-column grid"}},
-        au::Grid{au::GridProps{.children = std::move(cells), .columns = 3}},
+        au::Grid(std::move(cells), au::GridProps().set_columns(3)),
     };
     return run_demo(Card{std::move(root)}, "Grid · Aurora Demo", 520.0F, 420.0F);
 }

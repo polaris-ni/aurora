@@ -1,150 +1,75 @@
 #pragma once
 
-#include <concepts>
 #include <functional>
-#include <memory>
 #include <utility>
 
-#include "aurora/state/effect.h"
-#include "aurora/state/signal_view.h"
-#include "aurora/state/store.h"
-
+/// @brief Aurora 根命名空间：库的公共 API 均声明在其下。
 namespace aurora {
 
-/// @brief RAII 订阅句柄：析构时自动取消订阅，杜绝监听器泄漏。
+/// @brief 订阅或副作用的存活凭证：析构即取消，`reset()` 是唯一的显式取消动词。
 ///
-/// 包装由 `State`/`Reactive`/`Computed`/`Store` 的订阅返回的 `std::function<void()>`
-/// 取消句柄。AI 生成代码无需手动保存/调用取消句柄——把返回值留在作用域即可，
-/// 离开作用域自动取消，避免重复触发与内存泄漏（#9 调试闭环的基石）。
+/// `State<T>` / `ReadOnlyState<T>` 的 `subscribe(fn)` 与自由函数 `effect(fn)` 都返回本类型。
+/// 凭证持有运行记录及其读取的来源，因此：
+/// - 保留返回值 → 订阅继续生效；
+/// - 丢弃返回值 → 首值交付后不留后台订阅；
+/// - 析构或 `reset()` → 立即解除观察边，此后不再回调。
 ///
-/// @code
-/// auto sub = au::connect(counter, [](int v){ label->set_text(std::to_string(v)); });
-/// // sub 离开作用域 → 自动取消订阅
-/// @endcode
+/// 不可拷贝（同一订阅只会被取消一次），可移动（移交所有权）。需要多个持有者时
+/// 由调用方自行以 `std::shared_ptr<Subscription>` 等容器表达，不把双重所有权塞进凭证。
 ///
 /// @note Thread: main-thread only
-/// @note Side-effects: none（仅持有并调用取消句柄）
+/// @note Side-effects: none（析构/reset 时解除底层观察边）
 /// @note Rebuildable: no
 class Subscription {
   public:
-    /// @brief 默认构造：不持有任何取消句柄（`active() == false`），可稍后由移动赋值接管。
+    /// @brief 默认构造：不持有任何订阅（`active() == false`），可由移动赋值接管。
     Subscription() = default;
 
-    /// @brief 由取消句柄构造；空句柄表示"未订阅/已释放"。
-    /// @param cancel 取消句柄：析构或 `reset()`/`release()` 时被调用一次（转移所有权给本句柄）。
+    /// @brief 由取消回调构造：仅供订阅/副作用工厂内部创建。
+    /// @param cancel 取消回调：`reset()` 与析构时调用一次，须自行保证幂等。
     explicit Subscription(std::function<void()> cancel) : cancel_(std::move(cancel)) {}
 
-    /// @brief 析构：经 `reset()` 取消并释放所持订阅。
+    /// @brief 析构：取消并释放所持订阅。
     ///
-    /// 豁免 bugprone-exception-escape：`reset()` 会销毁并调用取消句柄（std::function），其析构与
-    /// operator() 皆无 noexcept 规格——即本检查记录在案的 std::function 假告警面。宿主回调实抛时，
-    /// 析构期无调用方可回报，就地吞掉只会静默丢错（CODING_STANDARDS.md §2 生命周期回调条目）。
+    /// 豁免 bugprone-exception-escape：`reset()` 调用的取消回调经 `std::function` 转发，
+    /// 其调用与销毁均无 noexcept 规格——属本仓库记录在案的系统性假告警面。
     /// NOLINTNEXTLINE(bugprone-exception-escape)
     ~Subscription() { reset(); }
 
-    /// @brief 禁拷贝：取消句柄是唯一所有权，复制会导致同一订阅被双取消。
     Subscription(const Subscription &) = delete;
-    /// @brief 禁拷贝赋值：理由同拷贝构造（防双取消）。
     auto operator=(const Subscription &) -> Subscription & = delete;
 
-    /// @brief 移动构造：接管 `o` 的取消句柄，`o` 转为非激活态（析构不再取消）。
-    /// @param o 源句柄；移动后其内部句柄被置空。
-    Subscription(Subscription &&o) noexcept : cancel_(std::move(o.cancel_)) { o.cancel_ = nullptr; }
-    /// @brief 移动赋值：先取消自身旧句柄，再接管 `o` 的句柄；自赋值安全跳过。
-    ///
-    /// 同族豁免 bugprone-exception-escape：移动赋值先 `reset()` 旧句柄，故继承析构处记录在案的
-    /// std::function 假告警面；`noexcept` 是既定契约（控件经 `Node{widget}` 搬移依赖移动不抛），
-    /// 不为迁就告警改签名。真抛出即 terminate，与析构期抛出同形，本库不为此新增吞错路径。
-    /// @param o 源句柄；赋值后 `o` 转为非激活态（析构不再取消）。
-    /// @return 引用 `*this`（链式赋值安全）。
+    /// @brief 移动构造：接管 `other` 的凭证，`other` 转为非激活态。
+    /// @param other 源凭证；移动后其析构不再取消本订阅。
+    Subscription(Subscription &&other) noexcept : cancel_(std::move(other.cancel_)) { other.cancel_ = nullptr; }
+
+    /// @brief 移动赋值：先取消自身旧订阅，再接管 `other` 的凭证；自赋值安全。
+    /// @param other 源凭证；赋值后其析构不再取消本订阅。
+    /// @return 引用 `*this`。
     /// NOLINTNEXTLINE(bugprone-exception-escape)
-    auto operator=(Subscription &&o) noexcept -> Subscription & {
-        if (this != &o) {
+    auto operator=(Subscription &&other) noexcept -> Subscription & {
+        if (this != &other) {
             reset();
-            cancel_ = std::move(o.cancel_);
-            o.cancel_ = nullptr;
+            cancel_ = std::move(other.cancel_);
+            other.cancel_ = nullptr;
         }
         return *this;
     }
 
-    /// @brief 是否持有有效（未取消）的订阅。
-    /// @return 持有未取消的句柄时为 true；默认构造/已 reset/release/移动走后为 false。
+    /// @brief 是否仍持有有效订阅。
+    /// @return 已建立且未取消时为 true；默认构造、已 reset 或已被移动后为 false。
     [[nodiscard]] auto active() const -> bool { return static_cast<bool>(cancel_); }
 
     /// @brief 立即取消订阅（幂等；重复调用安全）。
     auto reset() -> void {
-        const auto fn = std::exchange(
-            cancel_, nullptr);  // 显式置空：moved-from function 为空无标准保证（libc++ 可残留），防双取消破坏幂等
-        if (fn) {
-            fn();
+        const auto cancel = std::exchange(cancel_, nullptr);
+        if (cancel) {
+            cancel();
         }
     }
 
-    /// @brief 放弃所有权并返回底层取消句柄（调用后析构不再取消）。
-    /// @return 原取消句柄；本对象转为非激活态。
-    [[nodiscard]] auto release() -> std::function<void()> {
-        auto fn = std::move(cancel_);
-        cancel_ = nullptr;
-        return fn;
-    }
-
   private:
-    std::function<void()> cancel_;
+    std::function<void()> cancel_;  ///< 取消回调；空表示无订阅或已取消
 };
-
-/// @brief 把响应式信号接到回调，返回 RAII `Subscription`。
-///
-/// 每当 `src` 变化（set）即调用 `fn(最新值)`；首次调用会立即应用一次当前值。
-/// 信号源可为 `State<T>` / `Reactive<T>` / `Computed<T>`（均继承 `SignalView<T>`）。
-/// 返回的 `Subscription` 析构时自动取消订阅，且安全摘除底层 Effect（无悬垂指针）。
-///
-/// @code
-/// au::State<int> count{0};
-/// auto sub = au::connect(count, [](int v){ label->set_text(std::to_string(v)); });
-/// count.set(1); // → label 文本更新为 "1"
-/// @endcode
-///
-/// @tparam T 信号值类型。
-/// @tparam F 可调用 `(const T&) -> void`。
-/// @param src 信号源；非拥有引用，生命周期须覆盖至订阅取消为止。
-/// @param fn 回调；订阅时立即以当前值调用一次，此后每次变化再调用。
-/// @return RAII 订阅句柄；离开作用域（或显式析构）时自动取消订阅。
-/// @note Thread: main-thread only
-/// @note Rebuildable: no
-/// @note 命名警示：本函数原名 `bind`，因 `State` 基类链上的
-/// `std::enable_shared_from_this` 使 `std` 进入实参的 ADL 关联命名空间集，
-/// 无限定调用会被变参转发的 `std::bind` 吸走（编译通过但回调永不执行），
-/// 故改名 `connect` 以根除歧义（详见 CHANGELOG 1.0.0-alpha.1）。
-template <typename T, typename F>
-    requires std::invocable<F, const T &>
-auto connect(SignalView<T> &src, F &&fn) -> Subscription {
-    auto eff = std::make_shared<Effect>([&src, f = std::forward<F>(fn)]() -> auto { f(src.get()); });
-    eff->run();  // 首次应用当前值并登记依赖
-    // 取消句柄持有 eff 使其存活至 dispose；dispose 会从 src 观察者列表摘除本 Effect。
-    return Subscription([eff]() -> auto { eff->dispose(); });
-}
-
-/// @brief 把单向数据流 `Store` 接到回调，返回 RAII `Subscription`。
-///
-/// 每当 `store.dispatch(action)` 产生新状态即调用 `fn(新状态)`。底层复用
-/// `Store::subscribe` 的惰性取消句柄，析构自动取消。
-///
-/// 与 `connect(SignalView&, F)` 不同：**不**立即应用当前状态，仅对后续 dispatch 回调
-/// （如需首帧同步，请在 connect 后手动调用一次 `fn(store.get_state())`）。
-///
-/// @tparam S 状态类型。
-/// @tparam F 可调用 `(const S&) -> void`。
-/// @param store 目标 Store；非拥有引用，生命周期须覆盖至订阅取消为止。
-/// @param fn 回调，仅在后续 dispatch 产生新状态时调用。
-/// @return RAII 订阅句柄；离开作用域（或显式析构）时自动取消订阅。
-///
-/// @note Thread: main-thread only
-/// @note Rebuildable: no
-template <typename S, typename F>
-    requires std::invocable<F, const S &>
-auto connect(Store<S> &store, F &&fn) -> Subscription {
-    auto cancel = store.subscribe([f = std::forward<F>(fn)](const S &next, const S &) -> auto { f(next); });
-    return Subscription(std::move(cancel));
-}
 
 }  // namespace aurora

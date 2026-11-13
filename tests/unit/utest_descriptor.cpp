@@ -3,15 +3,19 @@
 /// 测试说明: descriptor.cpp 提供两个序列化函数：descriptor_to_json(PropDescriptor) 与
 /// descriptor_to_json(WidgetDescriptor)。两者均按「字段非空才输出」的契约生成 JSON；构造全字段填满
 /// 的描述符可覆盖所有分支（含 enum/min/max/pattern/constraint/requires_props/conflicts_with 与
-/// allowed_child_types/invariants），构造极简描述符可覆盖「跳过可选字段」的分支。
+/// allowed_child_types/invariants/payload），构造极简描述符可覆盖「跳过可选字段」的分支。
+/// 载荷组（payload_type / payload_channel）另经 `Provider<T>` 系的 describe_static 取真值验证：已登记的
+/// 三型（Theme / Locale / MediaQuery）各发自己的类型名，未登记的 T 发空串即整组不发。
 /// descriptor.h 另提供 LocalizedString ↔ props JSON 双形态通道（string 字面 / `$msg` 完整），
 /// 一并在此验证保真往返与旧字面形态的读侧兼容。
-/// 判据：全字段描述符的 JSON 含全部非空键；极简描述符的 JSON 不含可选键；`$msg` 往返逐字段还原。
+/// 判据：全字段描述符的 JSON 含全部非空键；极简描述符的 JSON 不含可选键；Provider 载荷类型名与
+/// provider_type_name 同源且不进属性表；`$msg` 往返逐字段还原。
 
 #include <string>
 
 #include "aurora/i18n/builtin_messages.gen.h"
 #include "aurora/widget/descriptor.h"
+#include "aurora/widget/provider.h"
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_descriptor {
@@ -62,6 +66,9 @@ AURORA_TEST_CASE(prop_descriptor_minimal_skips_optional_keys) {
     AURORA_TEST_CHECK_FALSE(j.contains("minimum"));
     AURORA_TEST_CHECK_FALSE(j.contains("pattern"));
     AURORA_TEST_CHECK_FALSE(j.contains("requires_props"));
+    // `source` 位与 `required` 同口径：描述符层两枚恒发（false 也在），稀疏裁键发生在组件 schema 发射侧。
+    AURORA_TEST_CHECK_TRUE(j.contains("source"));
+    AURORA_TEST_CHECK_FALSE(j.at("source")->as_or<bool>(true));
 }
 
 AURORA_TEST_CASE(widget_descriptor_full_and_minimal) {
@@ -75,6 +82,8 @@ AURORA_TEST_CASE(widget_descriptor_full_and_minimal) {
     full.examples.emplace_back(R"(au::ExpansionPanel("x", au::Text("y")))");
     full.allowed_child_types = {"Text", "Image"};
     full.invariants = {"header non-empty"};
+    full.payload_type = "Theme";
+    full.payload_channel = "first constructor argument";
 
     const Json j = aurora::descriptor_to_json(full);
     AURORA_TEST_CHECK_EQ(j.at("name")->as_or<std::string>(""), "ExpansionPanel");
@@ -85,6 +94,12 @@ AURORA_TEST_CASE(widget_descriptor_full_and_minimal) {
     AURORA_TEST_CHECK_TRUE(j.contains("examples"));
     AURORA_TEST_CHECK_TRUE(j.contains("allowed_child_types"));
     AURORA_TEST_CHECK_TRUE(j.contains("invariants"));
+    const auto *payload = j.at("payload");
+    AURORA_TEST_CHECK(payload != nullptr);
+    if (payload != nullptr) {
+        AURORA_TEST_CHECK_EQ(payload->at("type")->as_or<std::string>(""), "Theme");
+        AURORA_TEST_CHECK_EQ(payload->at("channel")->as_or<std::string>(""), "first constructor argument");
+    }
 
     // 极简：仅必填字段，扩展字段不输出。
     WidgetDescriptor minimal;
@@ -93,6 +108,24 @@ AURORA_TEST_CASE(widget_descriptor_full_and_minimal) {
     AURORA_TEST_CHECK_EQ(jm.at("name")->as_or<std::string>(""), "Leaf");
     AURORA_TEST_CHECK_FALSE(jm.contains("allowed_child_types"));
     AURORA_TEST_CHECK_FALSE(jm.contains("invariants"));
+    AURORA_TEST_CHECK_FALSE(jm.contains("payload"));
+}
+
+AURORA_TEST_CASE(registered_providers_declare_their_injected_payload) {
+    // 载荷格与 provider_type_name 同源：已登记三型各发自己的注入值类型名。
+    AURORA_TEST_CHECK_EQ(Provider<Theme>::describe_static().payload_type, std::string{"Theme"});
+    AURORA_TEST_CHECK_EQ(Provider<Locale>::describe_static().payload_type, std::string{"Locale"});
+    AURORA_TEST_CHECK_EQ(Provider<MediaQuery>::describe_static().payload_type, std::string{"MediaQuery"});
+    AURORA_TEST_CHECK(!Provider<Theme>::describe_static().payload_channel.empty());
+
+    // 未登记的 T 发空串 ⇒ 载荷组整组不发（宁可少发一格，也不发猜出来的类型名）。
+    AURORA_TEST_CHECK(Provider<double>::describe_static().payload_type.empty());
+    AURORA_TEST_CHECK_FALSE(aurora::descriptor_to_json(Provider<double>::describe_static()).contains("payload"));
+
+    // 注入值不是属性键：载荷只占构造式第一个位置参数，属性表里不得出现 theme / locale 一类的名字。
+    for (const auto &prop : Provider<Theme>::describe_static().properties) {
+        AURORA_TEST_CHECK(prop.name != "theme");
+    }
 }
 
 AURORA_TEST_CASE(localizable_json_msg_roundtrip_preserves_id_and_args) {

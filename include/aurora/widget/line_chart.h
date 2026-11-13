@@ -15,24 +15,294 @@
 #include "aurora/render/painter.h"
 #include "aurora/theming/theme_scope.h"
 #include "aurora/widget/chart_common.h"
+#include "aurora/widget/props.h"
 #include "aurora/widget/widget.h"
 
 /// @brief Aurora 命名空间：折线图控件 LineChart 与其 header-only 实现。
 namespace aurora {
 
-/// @brief LineChart 属性（聚合；所有字段均有默认值）。
-struct LineChartProps {
-    std::vector<ChartSeries> series;  ///< 数据系列（`values` 等距，x = 索引）
-    std::vector<std::string> categories;  ///< x 轴类目标签；缺省 "1","2",...
-    bool show_dots = true;  ///< 是否绘制数据点圆点
-    float line_width = 2.0F;  ///< 折线宽度（dp）
-    float dot_radius = 3.0F;  ///< 数据点半径（dp）
-    bool show_crosshair = true;  ///< 悬停时是否绘制十字准线（吸附最近数据 x）
-    ChartAxisSpec axis_x;  ///< 类目轴
-    ChartAxisSpec axis_y;  ///< 数值轴（Linear）
-    ChartLegendSpec legend;  ///< 图例
-    /// @brief 图内留白（dp）：轴标签 / 值框的避让区。
-    EdgeInsets padding{.left = 8.0F, .top = 8.0F, .right = 8.0F, .bottom = 8.0F};
+/// @brief LineChart 的属性权威表：一行一字段，键名、私有字段、脏档位、约束与回落点只在行里声明一次。
+///
+/// 读件、写件、序列化、订阅采集与 schema 描述全部由这张表派生，因此本类不再有可直读的公有字段。
+/// 十行皆为**可空值件 + 常量档回落点**：折线图没有随作用域而变的属性（轴与网格的配色取自继承
+/// 主题、不属属性面），故十枚读件一律无参；「未设」由表态位表达，不再外泄为 `std::optional` 字段。
+///
+/// 迁移前十行都是带声明处默认值的裸字段；现在声明处默认值逐个落成各行回落基线（`series` /
+/// `categories` 的基线就是空序列，`axis_x` / `axis_y` / `legend` 的基线是各自默认构造），生效值逐值不变。
+///
+/// 四枚结构化行（`axis_x` / `axis_y` / `legend` 与数组行 `series` / `categories`）的编解码登记见
+/// `chart_common.h`：类型名、JSON 类型与双向转换都由那几处登记给出，本表只点名它们，
+/// 而它们一律**未登记 `validate`** —— 迁移前那几条通路就是「字段缺失 / 类型不符逐项回退默认」的宽容
+/// 口径，故这类行非法值不撤销表态、也不产生降级上报。
+///
+/// @note Thread: main-thread only
+/// @note Side-effects: 写入经宿主链接位标脏；未挂载时是纯 DTO
+class LineChartProps : public AbstractProps<LineChartProps> {
+  public:
+    // ---- 权威表：参数顺序即 schema 顺序 ----
+
+    /// @brief 可空值件：数据系列（`values` 等距，x = 索引）。回落点是空序列。
+    ///
+    /// 档位取「布局 + 绘制」：域计算、几何预留与描线三处都读它，不只是画。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto series_row() {
+        return prop_row<&LineChartProps::series_>("series")
+            .layout()
+            .paint()
+            .fallback(&LineChartProps::series_default)
+            .note("Data series array (values equally spaced, x = index)");
+    }
+
+    /// @brief 可空值件：x 轴类目标签；缺省以序号 "1","2",… 补齐。回落点是空序列。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto categories_row() {
+        return prop_row<&LineChartProps::categories_>("categories")
+            .layout()
+            .paint()
+            .fallback(&LineChartProps::categories_default)
+            .note("x axis category labels; defaults to the index");
+    }
+
+    /// @brief 可空值件：数据点圆点开关；回落基线为开。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto show_dots_row() {
+        return prop_row<&LineChartProps::show_dots_>("show_dots")
+            .paint()
+            .fallback(&LineChartProps::show_dots_default)
+            .note("Draw dots at the data points");
+    }
+
+    /// @brief 可空值件：折线宽度（dp）；回落基线 2.0，下界 0（0 是「显式要一条不画出来的线」）。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto line_width_row() {
+        return prop_row<&LineChartProps::line_width_>("line_width")
+            .paint()
+            .bounds("0")
+            .fallback(&LineChartProps::line_width_default)
+            .note("Line width (dp)");
+    }
+
+    /// @brief 可空值件：数据点半径（dp）；回落基线 3.0，下界 0。
+    ///
+    /// 本行还决定悬停命中阈值（半径 + 8dp），那是命中反查、不是第二个消费档位。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto dot_radius_row() {
+        return prop_row<&LineChartProps::dot_radius_>("dot_radius")
+            .paint()
+            .bounds("0")
+            .fallback(&LineChartProps::dot_radius_default)
+            .note("Data point radius (dp)");
+    }
+
+    /// @brief 可空值件：悬停十字准线开关（吸附最近数据 x）；回落基线为开。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto show_crosshair_row() {
+        return prop_row<&LineChartProps::show_crosshair_>("show_crosshair")
+            .paint()
+            .fallback(&LineChartProps::show_crosshair_default)
+            .note("Draw a crosshair snapped to the nearest data point on hover");
+    }
+
+    /// @brief 可空值件：类目轴规格。回落点是默认构造的 `ChartAxisSpec`（可见、五刻度、画网格）。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto axis_x_row() {
+        return prop_row<&LineChartProps::axis_x_>("axis_x")
+            .layout()
+            .paint()
+            .fallback(&LineChartProps::axis_x_default)
+            .note("Category axis spec: {visible,label,tick_count,show_grid_lines}");
+    }
+
+    /// @brief 可空值件：数值轴（Linear）规格。回落点是默认构造的 `ChartAxisSpec`。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto axis_y_row() {
+        return prop_row<&LineChartProps::axis_y_>("axis_y")
+            .layout()
+            .paint()
+            .fallback(&LineChartProps::axis_y_default)
+            .note("Value axis spec: {visible,label,tick_count,min,max,show_grid_lines,include_zero}");
+    }
+
+    /// @brief 可空值件：图例规格。回落点是默认构造的 `ChartLegendSpec`（可见、顶部）。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto legend_row() {
+        return prop_row<&LineChartProps::legend_>("legend")
+            .layout()
+            .paint()
+            .fallback(&LineChartProps::legend_default)
+            .note("Legend spec: {visible,position:Top|Bottom|Right}");
+    }
+
+    /// @brief 可空值件：图内留白（dp），轴标签 / 值框的避让区。回落基线四边各 8.0。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto padding_row() {
+        return prop_row<&LineChartProps::padding_>("padding")
+            .layout()
+            .paint()
+            .fallback(&LineChartProps::padding_default)
+            .note("In-chart padding (dp)");
+    }
+
+    /// @brief 权威表本体：本控件全部属性行的元组。
+    /// @return 按声明顺序排列的行元组（发射面与序列化面都遍历它）。
+    [[nodiscard]] static constexpr auto rows() {
+        return make_prop_rows(series_row(), categories_row(), show_dots_row(), line_width_row(), dot_radius_row(),
+                              show_crosshair_row(), axis_x_row(), axis_y_row(), legend_row(), padding_row());
+    }
+
+    // ---- 读面：每行恰一件，十行皆常量档 ⇒ 全部无参 ----
+
+    /// @brief 当前生效的数据系列。
+    /// @return 生效序列（数组行按值给出：未表态时为空序列）。
+    [[nodiscard]] auto series() const -> std::vector<ChartSeries> { return stated(series_row()); }
+
+    /// @brief 当前生效的 x 轴类目标签。
+    /// @return 生效标签（未表态时为空序列；补齐到点位数是控件侧 `resolved_categories` 的事）。
+    [[nodiscard]] auto categories() const -> std::vector<std::string> { return stated(categories_row()); }
+
+    /// @brief 当前生效的数据点圆点开关。
+    /// @return 生效开关。
+    [[nodiscard]] auto show_dots() const -> bool { return stated(show_dots_row()); }
+
+    /// @brief 当前生效的折线宽度（dp）。
+    /// @return 生效线宽。
+    [[nodiscard]] auto line_width() const -> float { return stated(line_width_row()); }
+
+    /// @brief 当前生效的数据点半径（dp）。
+    /// @return 生效半径。
+    [[nodiscard]] auto dot_radius() const -> float { return stated(dot_radius_row()); }
+
+    /// @brief 当前生效的十字准线开关。
+    /// @return 生效开关。
+    [[nodiscard]] auto show_crosshair() const -> bool { return stated(show_crosshair_row()); }
+
+    /// @brief 当前生效的类目轴规格。
+    /// @return 生效规格（未表态时为默认构造）。
+    [[nodiscard]] auto axis_x() const -> ChartAxisSpec { return stated(axis_x_row()); }
+
+    /// @brief 当前生效的数值轴规格。
+    /// @return 生效规格（未表态时为默认构造）。
+    [[nodiscard]] auto axis_y() const -> ChartAxisSpec { return stated(axis_y_row()); }
+
+    /// @brief 当前生效的图例规格。
+    /// @return 生效规格（未表态时为可见、顶部）。
+    [[nodiscard]] auto legend() const -> ChartLegendSpec { return stated(legend_row()); }
+
+    /// @brief 当前生效的图内留白（dp）。
+    /// @return 生效留白。
+    [[nodiscard]] auto padding() const -> EdgeInsets { return stated(padding_row()); }
+
+    // ---- 写面：实参一律裸 T；一次写入即「表态」，未表态才轮到回落点 ----
+
+    /// @brief 装入数据系列；表态即脱离空序列基线。
+    /// @param value 新系列（`values` 等距，x = 索引）。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_series(const std::vector<ChartSeries> &value) -> LineChartProps & { return assign(series_row(), value); }
+
+    /// @brief 装入 x 轴类目标签。
+    /// @param value 类目标签列表；不足点位数处以序号补齐。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_categories(const std::vector<std::string> &value) -> LineChartProps & {
+        return assign(categories_row(), value);
+    }
+
+    /// @brief 装入数据点圆点开关。
+    /// @param value true 时在数据点绘制圆点。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_show_dots(bool value) -> LineChartProps & { return assign(show_dots_row(), value); }
+
+    /// @brief 装入折线宽度（dp）。
+    /// @param value 新线宽；0 是「显式要一条不画出来的线」，与「未表态」不是同一件事。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_line_width(float value) -> LineChartProps & { return assign(line_width_row(), value); }
+
+    /// @brief 装入数据点半径（dp）；同时决定悬停命中阈值（半径 + 8dp）。
+    /// @param value 新半径。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_dot_radius(float value) -> LineChartProps & { return assign(dot_radius_row(), value); }
+
+    /// @brief 装入十字准线开关。
+    /// @param value true 时悬停绘制吸附准线。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_show_crosshair(bool value) -> LineChartProps & { return assign(show_crosshair_row(), value); }
+
+    /// @brief 装入类目轴规格。
+    /// @param value 轴规格（可见性 / 标签 / 刻度数等）。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_axis_x(const ChartAxisSpec &value) -> LineChartProps & { return assign(axis_x_row(), value); }
+
+    /// @brief 装入数值轴（Linear）规格。
+    /// @param value 轴规格（可见性 / 标签 / 刻度数 / 显式域 / include_zero 等）。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_axis_y(const ChartAxisSpec &value) -> LineChartProps & { return assign(axis_y_row(), value); }
+
+    /// @brief 装入图例规格。
+    /// @param value 图例规格（可见性 / 位置）。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_legend(const ChartLegendSpec &value) -> LineChartProps & { return assign(legend_row(), value); }
+
+    /// @brief 装入图内留白（dp）。
+    /// @param value 四边留白。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_padding(EdgeInsets value) -> LineChartProps & { return assign(padding_row(), value); }
+
+    // ---- 回落点提供者：常量档的唯一基线（与迁移前的字段声明处默认值逐值相同） ----
+
+    /// @brief 数据系列回落基线。
+    /// @return 空序列（无数据 ⇒ 不画）。
+    [[nodiscard]] static auto series_default() -> std::vector<ChartSeries> { return {}; }
+
+    /// @brief 类目标签回落基线。
+    /// @return 空序列（⇒ 全部类目以序号补齐）。
+    [[nodiscard]] static auto categories_default() -> std::vector<std::string> { return {}; }
+
+    /// @brief 数据点圆点开关回落基线。
+    /// @return true（默认画数据点圆点）。
+    [[nodiscard]] static auto show_dots_default() -> bool { return true; }
+
+    /// @brief 折线宽度回落基线。
+    /// @return 2.0F（dp）。
+    [[nodiscard]] static auto line_width_default() -> float { return 2.0F; }
+
+    /// @brief 数据点半径回落基线。
+    /// @return 3.0F（dp）。
+    [[nodiscard]] static auto dot_radius_default() -> float { return 3.0F; }
+
+    /// @brief 十字准线开关回落基线。
+    /// @return true（默认画准线）。
+    [[nodiscard]] static auto show_crosshair_default() -> bool { return true; }
+
+    /// @brief 类目轴回落基线。
+    /// @return 默认构造的轴规格（可见、五刻度、画网格、域含 0）。
+    [[nodiscard]] static auto axis_x_default() -> ChartAxisSpec { return {}; }
+
+    /// @brief 数值轴回落基线。
+    /// @return 默认构造的轴规格（无显式域 ⇒ 域按数据 nice 化）。
+    [[nodiscard]] static auto axis_y_default() -> ChartAxisSpec { return {}; }
+
+    /// @brief 图例回落基线。
+    /// @return 默认构造的图例规格（可见、顶部）。
+    [[nodiscard]] static auto legend_default() -> ChartLegendSpec { return {}; }
+
+    /// @brief 图内留白回落基线。
+    /// @return 四边各 8.0dp。
+    [[nodiscard]] static auto padding_default() -> EdgeInsets {
+        return EdgeInsets{.left = 8.0F, .top = 8.0F, .right = 8.0F, .bottom = 8.0F};
+    }
+
+  private:
+    std::optional<std::vector<ChartSeries>> series_;  ///< 数据系列表态位
+    std::optional<std::vector<std::string>> categories_;  ///< 类目标签表态位
+    std::optional<bool> show_dots_;  ///< 数据点圆点开关表态位
+    std::optional<float> line_width_;  ///< 折线宽度表态位（dp）
+    std::optional<float> dot_radius_;  ///< 数据点半径表态位（dp）
+    std::optional<bool> show_crosshair_;  ///< 十字准线开关表态位
+    std::optional<ChartAxisSpec> axis_x_;  ///< 类目轴规格表态位
+    std::optional<ChartAxisSpec> axis_y_;  ///< 数值轴规格表态位
+    std::optional<ChartLegendSpec> legend_;  ///< 图例规格表态位
+    std::optional<EdgeInsets> padding_;  ///< 图内留白表态位（dp）
+
+    friend class AbstractProps<LineChartProps>;
 };
 
 /// @brief 折线图控件（叶控件；契约见 specification/04-widget.md §3.8）。
@@ -41,20 +311,23 @@ struct LineChartProps {
 /// x 为等距索引（无独立 x 域），y 域与命中反查同源于 `LinearScale`。
 /// 悬停按「最近数据点欧氏距离」命中（阈值 = `dot_radius + 8dp`），并叠加吸附该点的十字准线。
 ///
+/// 属性一律经 `LineChartProps` 的读写件访问（本类公有继承它，故 `chart.set_line_width(3.0F)` 与
+/// `chart.line_width()` 都直接可用）；十行皆常量档，读件一律无参。
 /// @note Thread: main-thread only
 /// @note Rebuildable: yes, via from_json
 ///
 class LineChart : public LeafWidget, public LineChartProps {
   public:
-    /// @brief 默认构造：各属性取 LineChartProps 缺省值。
-    LineChart() = default;
-    /// @brief 以属性聚合构造（与链式 setter / 直接赋值等价）。
-    /// @param props 图表属性（数据系列 / 类目 / 线宽 / 点半径 / 轴 / 图例 / 留白）。
-    explicit LineChart(LineChartProps props) : LineChartProps(std::move(props)) {}
+    /// @brief 默认构造：十行皆未表态（生效值即各行回落基线）；并接线宿主。
+    LineChart() { bind(*this); }
 
-    /// @brief 运行时可查询的默认属性值。
-    /// @return 全缺省的 LineChartProps。
-    [[nodiscard]] static auto defaults() -> LineChartProps { return LineChartProps{}; }
+    /// @brief 配置块构造（specification/04-widget.md §2.5）：整份属性接管后接线宿主。
+    /// @param props 折线图属性对象，移动进本实例的 `LineChartProps` 基类子对象。
+    explicit LineChart(LineChartProps props) : LineChartProps(std::move(props)) { bind(*this); }
+
+    /// @brief 运行时可查询的默认属性值（属性表的单一事实来源，需求 SPEC.API.SENSIBLE-DEFAULTS.001）。
+    /// @return 一份缺省构造的 `LineChartProps`：各行未表态，生效值即该行回落点。
+    [[nodiscard]] static auto defaults() -> LineChartProps { return {}; }
 
     /// @brief 点击（抬起）命中数据点时触发：`(系列索引, 点索引)`。旁挂，不进序列化面。
     /// @param series_idx 回调形参：命中的数据系列索引。
@@ -63,79 +336,16 @@ class LineChart : public LeafWidget, public LineChartProps {
     /// NOLINTNEXTLINE(*-non-private-member-variables-in-classes)
     std::function<void(int series_idx, int point_idx)> on_point_tapped;
 
-    /// @brief 链式 setter（与 Props 直接赋值等价）：写入数据系列，标脏布局与绘制并重放入场动画。
-    /// @param s 数据系列（values 等距，x = 索引）。
-    /// @return 自身引用（链式调用）。
-    auto set_series(std::vector<ChartSeries> s) -> LineChart & {
-        series = std::move(s);
-        mark_needs_layout();
-        mark_needs_paint();
-        grow_.replay();
-        return *this;
-    }
-    /// @brief 链式 setter：写入 x 轴类目标签，标脏布局与绘制。
-    /// @param c 类目标签列表；不足点位数处以序号补齐。
-    /// @return 自身引用（链式调用）。
-    auto set_categories(std::vector<std::string> c) -> LineChart & {
-        categories = std::move(c);
-        mark_needs_layout();
-        mark_needs_paint();
-        return *this;
-    }
-    /// @brief 链式 setter：数据点圆点显隐开关，标脏绘制。
-    /// @param v true 时在数据点绘制圆点。
-    /// @return 自身引用（链式调用）。
-    auto set_show_dots(bool v) -> LineChart & {
-        show_dots = v;
-        mark_needs_paint();
-        return *this;
-    }
-    /// @brief 链式 setter：设置折线宽度（dp），标脏绘制。
-    /// @param w 线宽。
-    /// @return 自身引用（链式调用）。
-    auto set_line_width(float w) -> LineChart & {
-        line_width = w;
-        mark_needs_paint();
-        return *this;
-    }
-    /// @brief 链式 setter：设置数据点半径（dp），标脏绘制；同时决定悬停命中阈值（半径 + 8dp）。
-    /// @param r 点半径。
-    /// @return 自身引用（链式调用）。
-    auto set_dot_radius(float r) -> LineChart & {
-        dot_radius = r;
-        mark_needs_paint();
-        return *this;
-    }
-    /// @brief 链式 setter：写入类目轴规格，标脏布局。
-    /// @param a 轴规格（可见性 / 标签 / 刻度数等）。
-    /// @return 自身引用（链式调用）。
-    auto set_axis_x(ChartAxisSpec a) -> LineChart & {
-        axis_x = std::move(a);
-        mark_needs_layout();
-        return *this;
-    }
-    /// @brief 链式 setter：写入数值轴（Linear）规格，标脏布局。
-    /// @param a 轴规格（可见性 / 标签 / 刻度数 / 显式域 / include_zero 等）。
-    /// @return 自身引用（链式调用）。
-    auto set_axis_y(ChartAxisSpec a) -> LineChart & {
-        axis_y = std::move(a);
-        mark_needs_layout();
-        return *this;
-    }
-    /// @brief 链式 setter：写入图例规格，标脏布局（图例带会占用绘图区空间）。
-    /// @param l 图例规格（可见性 / 位置）。
-    /// @return 自身引用（链式调用）。
-    auto set_legend(ChartLegendSpec l) -> LineChart & {
-        legend = l;
-        mark_needs_layout();
-        return *this;
-    }
-    /// @brief 链式 setter：写入图内留白，标脏布局。
-    /// @param p 留白（dp）。
-    /// @return 自身引用（链式调用）。
-    auto set_padding(const EdgeInsets &p) -> LineChart & {
-        padding = p;
-        mark_needs_layout();
+    /// @brief 装入数据系列：转调属性面写件，再重播 grow-in 入场动画。
+    ///
+    /// 本控件唯一需要「写入之后另做一件事」的写件：动画重播是控件自身的事实，不进属性表，
+    /// 故控件侧留一枚同名覆写、按名隐藏属性面那件（不是第二个答案：值仍由同一行存储与回落给出）。
+    /// @param value 新系列（`values` 等距，x = 索引）。
+    /// @return 引用本控件，便于链式续写。
+    /// NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method) 同名覆写是迁移前的既有契约
+    auto set_series(const std::vector<ChartSeries> &value) -> LineChart & {
+        LineChartProps::set_series(value);
+        grow_.replay();  // 重播 grow-in 入场动画
         return *this;
     }
 
@@ -143,29 +353,47 @@ class LineChart : public LeafWidget, public LineChartProps {
     /// @return 固定为 "LineChart"。
     [[nodiscard]] auto type_name() const -> const char * override { return "LineChart"; }
 
-    /// @brief 静态描述符入口：属性矩阵 / 事件 / 不变式（序列化契约）。
+    /// @brief 静态描述符入口：属性矩阵由权威表派生，事件 / 不变式 / 样例留在本处。
     /// @return WidgetDescriptor（含 line_width ≥ 0、dot_radius ≥ 0 等不变式）。
-    [[nodiscard]] static auto describe_static() -> WidgetDescriptor;
+    [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
+        auto descriptor = props_descriptor("LineChart");
+        descriptor.events = {"on_point_tapped"};
+        descriptor.children_policy = "none";
+        descriptor.invariants = {"line_width >= 0", "dot_radius >= 0"};
+        descriptor.examples = {
+            "au::LineChart(au::LineChartProps().set_series({{ .name = \"A\", .values = {1, 3, 2} }}))"};
+        return descriptor;
+    }
     /// @brief 返回控件描述符，与 describe_static 同源。
     /// @return 同 describe_static()。
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
-    /// @brief 收集可观察信号：登记 grow-in 入场动画信号（动画期间值逐帧变化）。
-    /// @param out 收集输出容器，追加动画信号视图。
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&grow_.signal()); }
+    /// @brief 收集可观察信号：登记各行已绑定的外部来源，再登记 grow-in 入场动画信号。
+    /// @param out 收集输出容器，追加来源视图与动画信号裸指针。
+    auto collect_signals(StateSink &out) -> void override {
+        collect_prop_sources(out);
+        out.push(grow_.signal());
+    }
 
     /// @brief 动画期间不缓存 Display List（内容每帧变化）。
     /// @return 未在动画中时为 true（可缓存）。
     [[nodiscard]] auto can_cache_display_list() const -> bool override { return !grow_.animating(); }
 
-    /// @brief 写出序列化面属性（数据系列 / 类目 / 线宽 / 点半径 / 轴 / 图例 / 留白等）：先走基类
-    ///        （width/height/show），再补图表十个字段。
+    /// @brief 序列化自有属性到 `props`：先由基类写通用属性，再写各行；未表态的行不写键。
     /// @param props 目标 JSON 对象。
-    auto serialize_props(Json &props) const -> void override;
-    /// @brief 从 JSON 读回序列化面属性：各键按类型校验后写入，线宽 / 点半径负值归零，完成后标脏
-    ///        布局与绘制；字段集与 serialize_props 对称。
-    /// @param props 属性 JSON 对象。
-    auto deserialize_props(const Json &props) -> void override;
+    auto serialize_props(Json &props) const -> void override {
+        Widget::serialize_props(props);
+        props_serialize(props);
+    }
+
+    /// @brief 从 JSON 重建自有属性（与 `serialize_props` 对偶；键缺失则保留现值）。
+    /// @note 已登记校验的行（线宽 / 半径越界）非法值一律不写入并撤表态；系列 / 类目 / 轴 / 图例 /
+    ///       留白按既有宽容口径逐项回退默认（不登记校验，故照常表态且不上报）。
+    /// @param props 源 JSON 对象，按权威表逐行取键。
+    auto deserialize_props(const Json &props) -> void override {
+        Widget::deserialize_props(props);
+        props_deserialize(props);
+    }
 
     /// @brief 图表自带点击目标语义：始终参与点击（数据点命中即触发回调）。
     /// @return 恒为 true。
@@ -225,15 +453,22 @@ class LineChart : public LeafWidget, public LineChartProps {
     };
 
     /// @brief 点位数 = max(类目标签数, 各系列 values 的最大长度)。
+    /// @param data 本趟取出的数据系列（数组行按值读出，故由调用方取一次再传下来）。
+    /// @param labels 本趟取出的类目标签。
     /// @return 数据点位数。
-    [[nodiscard]] auto point_count() const -> std::size_t;
+    [[nodiscard]] static auto point_count(const std::vector<ChartSeries> &data, const std::vector<std::string> &labels)
+        -> std::size_t;
     /// @brief 解析生效类目标签：显式标签不足处以序号字符串 "1","2",… 补齐到点位数。
+    /// @param data 本趟取出的数据系列。
+    /// @param labels 本趟取出的类目标签。
     /// @return 与点位数等长的标签列表。
-    [[nodiscard]] auto resolved_categories() const -> std::vector<std::string>;
+    [[nodiscard]] static auto resolved_categories(const std::vector<ChartSeries> &data,
+                                                  const std::vector<std::string> &labels) -> std::vector<std::string>;
     /// @brief 计算数值轴域：全体值取域（非有限值剔除），空数据退化 [0,1]，axis_y.min/max 显式覆盖，
     ///        include_zero 并入 0。
+    /// @param data 本趟取出的数据系列。
     /// @return 带刻度文本的 LinearScale。
-    [[nodiscard]] auto compute_y_scale() const -> LinearScale;
+    [[nodiscard]] auto compute_y_scale(const std::vector<ChartSeries> &data) const -> LinearScale;
     /// @brief 由尺寸与字体算定绘图几何：扣除图例带与轴标签留白得绘图区，并生成图例命中区。
     /// @param size 控件尺寸。
     /// @param font 继承主题的字体。
@@ -255,10 +490,12 @@ class LineChart : public LeafWidget, public LineChartProps {
     /// @return 最近点 (系列索引, 点索引)；超阈值、无数据或未成图时为 `std::nullopt`。
     [[nodiscard]] auto nearest_point(const Geometry &g, const Point &local) const -> std::optional<std::pair<int, int>>;
     /// @brief 安全取数据点值：系列 / 点越界或非有限值（NaN / Inf）回退 0.0。
+    /// @param data 本趟取出的数据系列（数组行按值读出，热点循环里绝不逐点重取）。
     /// @param series_idx 系列索引。
     /// @param point_idx 点索引。
     /// @return 数据点值。
-    [[nodiscard]] auto series_value(std::size_t series_idx, std::size_t point_idx) const -> double;
+    [[nodiscard]] static auto series_value(const std::vector<ChartSeries> &data, std::size_t series_idx,
+                                           std::size_t point_idx) -> double;
 
     Geometry geom_;  ///< 布局期算定的绘图几何缓存（on_layout 写入，绘制 / 命中反查复用）
     ChartGrowIn grow_;  ///< grow-in 入场动画状态（描线进度 0→1；on_mount 接入帧循环）
@@ -266,29 +503,32 @@ class LineChart : public LeafWidget, public LineChartProps {
     std::optional<std::size_t> legend_hover_;  ///< 当前悬停的图例项索引；无悬停为空
 };
 
-inline auto LineChart::point_count() const -> std::size_t {
-    std::size_t n = categories.size();
-    for (const ChartSeries &s : series) {
+inline auto LineChart::point_count(const std::vector<ChartSeries> &data, const std::vector<std::string> &labels)
+    -> std::size_t {
+    std::size_t n = labels.size();
+    for (const ChartSeries &s : data) {
         n = std::max(n, s.values.size());
     }
     return n;
 }
 
-inline auto LineChart::resolved_categories() const -> std::vector<std::string> {
-    const std::size_t n = point_count();
+inline auto LineChart::resolved_categories(const std::vector<ChartSeries> &data, const std::vector<std::string> &labels)
+    -> std::vector<std::string> {
+    const std::size_t n = point_count(data, labels);
     std::vector<std::string> out;
     out.reserve(n);
     for (std::size_t i = 0; i < n; ++i) {
-        out.push_back(i < categories.size() ? categories[i] : std::to_string(i + 1));
+        out.push_back(i < labels.size() ? labels[i] : std::to_string(i + 1));
     }
     return out;
 }
 
-inline auto LineChart::series_value(std::size_t series_idx, std::size_t point_idx) const -> double {
-    if (series_idx >= series.size()) {
+inline auto LineChart::series_value(const std::vector<ChartSeries> &data, std::size_t series_idx, std::size_t point_idx)
+    -> double {
+    if (series_idx >= data.size()) {
         return 0.0;
     }
-    const std::vector<double> &vals = series[series_idx].values;
+    const std::vector<double> &vals = data[series_idx].values;
     if (point_idx >= vals.size()) {
         return 0.0;
     }
@@ -296,11 +536,11 @@ inline auto LineChart::series_value(std::size_t series_idx, std::size_t point_id
 }
 
 // min 与 max 同时显式时走 from_explicit，否则 from_domain；空数据退化 [0,1]。
-inline auto LineChart::compute_y_scale() const -> LinearScale {
+inline auto LineChart::compute_y_scale(const std::vector<ChartSeries> &data) const -> LinearScale {
     double lo = 0.0;
     double hi = 0.0;
     bool have = false;
-    for (const ChartSeries &s : series) {
+    for (const ChartSeries &s : data) {
         for (const double v : s.values) {
             if (!std::isfinite(v)) {
                 continue;
@@ -314,20 +554,21 @@ inline auto LineChart::compute_y_scale() const -> LinearScale {
         lo = 0.0;
         hi = 1.0;
     }
-    if (axis_y.min.has_value()) {
-        lo = *axis_y.min;
+    const ChartAxisSpec axis = axis_y();  // 结构化行按值读出，本趟只取一次
+    if (axis.min.has_value()) {
+        lo = *axis.min;
     }
-    if (axis_y.max.has_value()) {
-        hi = *axis_y.max;
+    if (axis.max.has_value()) {
+        hi = *axis.max;
     }
-    if (axis_y.include_zero) {
+    if (axis.include_zero) {
         lo = std::min(lo, 0.0);
         hi = std::max(hi, 0.0);
     }
-    if (axis_y.min.has_value() && axis_y.max.has_value()) {
-        return LinearScale::from_explicit(lo, hi, axis_y.tick_count);
+    if (axis.min.has_value() && axis.max.has_value()) {
+        return LinearScale::from_explicit(lo, hi, axis.tick_count);
     }
-    return LinearScale::from_domain(lo, hi, axis_y.tick_count);
+    return LinearScale::from_domain(lo, hi, axis.tick_count);
 }
 
 inline auto LineChart::point_x(const Geometry &g, std::size_t i) -> float {
@@ -340,46 +581,54 @@ inline auto LineChart::point_x(const Geometry &g, std::size_t i) -> float {
 
 // 轴可见性与刻度文本宽度决定左右 / 底部预留；图例命中区按与绘制同一套游标规则生成。
 inline auto LineChart::compute_geometry(const Size &size, const Font &font) const -> Geometry {
+    // 五行在本函数里逐档多次消费，数组行与结构化行皆按值读出 ⇒ 本趟各取一次再复用。
+    const std::vector<ChartSeries> data = series();
+    const std::vector<std::string> labels = categories();
+    const EdgeInsets pad = padding();
+    const ChartLegendSpec leg = legend();
+    const ChartAxisSpec x_axis = axis_x();
+    const ChartAxisSpec y_axis = axis_y();
+
     Geometry g;
-    g.cats = resolved_categories();
+    g.cats = resolved_categories(data, labels);
     g.point_count = g.cats.size();
-    g.y_scale = compute_y_scale();
+    g.y_scale = compute_y_scale(data);
 
     const float line_h = render::FontEngine::measure_height(font) + 4.0F;
-    float left = padding.left;
-    float top = padding.top;
-    float right = std::max(padding.left, size.width - padding.right);
-    float bottom = std::max(padding.top, size.height - padding.bottom);
+    float left = pad.left;
+    float top = pad.top;
+    float right = std::max(pad.left, size.width - pad.right);
+    float bottom = std::max(pad.top, size.height - pad.bottom);
 
     // 图例带 + 命中区（图例项区域优先于数据区）
-    if (legend.visible && !series.empty()) {
-        if (legend.position == LegendPosition::Top) {
+    if (leg.visible && !data.empty()) {
+        if (leg.position == LegendPosition::Top) {
             top += line_h;
-        } else if (legend.position == LegendPosition::Bottom) {
+        } else if (leg.position == LegendPosition::Bottom) {
             bottom -= line_h;
         } else {
             float widest = 0.0F;
-            for (const ChartSeries &s : series) {
+            for (const ChartSeries &s : data) {
                 widest = std::max(widest, render::FontEngine::measure_width(s.name, font));
             }
             right = std::max(left, right - (widest + 22.0F));
         }
     }
 
-    if (axis_x.visible) {
+    if (x_axis.visible) {
         bottom -= line_h;
-        if (!axis_x.label.empty()) {
+        if (!x_axis.label.empty()) {
             bottom -= line_h;
         }
     }
-    if (axis_y.visible) {
+    if (y_axis.visible) {
         float widest = 0.0F;
         const int digits = tick_digits(g.y_scale.step());
         for (const double t : g.y_scale.ticks()) {
             widest = std::max(widest, render::FontEngine::measure_width(format_number(t, Locale{}, digits), font));
         }
         left += widest + 6.0F;
-        if (!axis_y.label.empty()) {
+        if (!y_axis.label.empty()) {
             left += line_h;
         }
     }
@@ -388,27 +637,27 @@ inline auto LineChart::compute_geometry(const Size &size, const Font &font) cons
                   .size = Size{.width = std::max(0.0F, right - left), .height = std::max(0.0F, bottom - top)}};
 
     // 图例项命中区（与绘制同一套游标推进规则）
-    if (legend.visible && !series.empty()) {
+    if (leg.visible && !data.empty()) {
         float cursor_x = g.plot.origin.x;
         // Right（含未知位置）沿用绘图区顶部，即下面 else 分支不再重复赋同一值——
         // 重复赋值会让本初值在三条互斥分支下都永不被读（死存储）。
         float cursor_y = g.plot.origin.y;
-        if (legend.position == LegendPosition::Top) {
-            cursor_y = padding.top;
-        } else if (legend.position == LegendPosition::Bottom) {
-            cursor_y = size.height - padding.bottom - line_h;
+        if (leg.position == LegendPosition::Top) {
+            cursor_y = pad.top;
+        } else if (leg.position == LegendPosition::Bottom) {
+            cursor_y = size.height - pad.bottom - line_h;
         } else {
             cursor_x = g.plot.right() + 8.0F;
         }
-        for (const ChartSeries &s : series) {
+        for (const ChartSeries &s : data) {
             const float name_w = render::FontEngine::measure_width(s.name, font);
             const float item_w = 14.0F + name_w;
-            if (legend.position != LegendPosition::Right && cursor_x + item_w > size.width - padding.right) {
+            if (leg.position != LegendPosition::Right && cursor_x + item_w > size.width - pad.right) {
                 break;
             }
             g.legend_rects.push_back(
                 Rect{.origin = Point{.x = cursor_x, .y = cursor_y}, .size = Size{.width = item_w, .height = line_h}});
-            if (legend.position == LegendPosition::Right) {
+            if (leg.position == LegendPosition::Right) {
                 cursor_y += line_h;
             } else {
                 cursor_x += item_w + 12.0F;
@@ -449,16 +698,18 @@ inline auto LineChart::legend_hit(const Geometry &g, const Point &local) -> std:
 
 inline auto LineChart::nearest_point(const Geometry &g, const Point &local) const
     -> std::optional<std::pair<int, int>> {
-    if (g.plot.size.width <= 0.0F || g.plot.size.height <= 0.0F || g.point_count == 0U || series.empty()) {
+    // 命中反查逐点遍历全部系列：数组行按值读出，故本趟只取一次。
+    const std::vector<ChartSeries> data = series();
+    if (g.plot.size.width <= 0.0F || g.plot.size.height <= 0.0F || g.point_count == 0U || data.empty()) {
         return std::nullopt;
     }
-    const float threshold = dot_radius + 8.0F;
+    const float threshold = dot_radius() + 8.0F;
     float best = threshold;
     std::optional<std::pair<int, int>> best_hit;
-    for (std::size_t k = 0; k < series.size(); ++k) {
+    for (std::size_t k = 0; k < data.size(); ++k) {
         for (std::size_t i = 0; i < g.point_count; ++i) {
             const float px = point_x(g, i);
-            const float py = g.y_scale.to_px(series_value(k, i), g.plot.bottom(), g.plot.origin.y);
+            const float py = g.y_scale.to_px(series_value(data, k, i), g.plot.bottom(), g.plot.origin.y);
             const float dx = local.x - px;
             const float dy = local.y - py;
             const float d = std::sqrt((dx * dx) + (dy * dy));
@@ -494,164 +745,23 @@ inline auto LineChart::on_pointer_event(MouseEvent &e) -> void {
 }
 
 inline auto LineChart::accessibility_label() const -> std::string {
-    return "LineChart, " + std::to_string(series.size()) + " series, " + std::to_string(point_count()) + " points";
+    const std::vector<ChartSeries> data = series();
+    const std::vector<std::string> labels = categories();
+    return "LineChart, " + std::to_string(data.size()) + " series, " + std::to_string(point_count(data, labels)) +
+           " points";
 }
 
 inline auto LineChart::accessibility_value() const -> std::string {
     if (!hovered_point_.has_value()) {
         return std::string{};
     }
+    const std::vector<ChartSeries> data = series();
     const auto [k, i] = *hovered_point_;
-    if (k < 0 || i < 0 || static_cast<std::size_t>(k) >= series.size()) {
+    if (k < 0 || i < 0 || static_cast<std::size_t>(k) >= data.size()) {
         return std::string{};
     }
-    return series[static_cast<std::size_t>(k)].name + ": " +
-           std::to_string(series_value(static_cast<std::size_t>(k), static_cast<std::size_t>(i)));
-}
-
-// 属性矩阵逐项给出名称 / 类型 / 默认值 / JSON 类型与约束。
-inline auto LineChart::describe_static() -> WidgetDescriptor {
-    return WidgetDescriptor{
-        .name = "LineChart",
-        .properties =
-            {
-                {.name = "series",
-                 .type = "vector<ChartSeries>",
-                 .default_value = "[]",
-                 .required = false,
-                 .note = "Data series array (values equally spaced, x = index)",
-                 .json_type = "array"},
-                {.name = "categories",
-                 .type = "vector<string>",
-                 .default_value = "[]",
-                 .required = false,
-                 .note = "x axis category labels; defaults to the index",
-                 .json_type = "array"},
-                {.name = "show_dots",
-                 .type = "bool",
-                 .default_value = "true",
-                 .required = false,
-                 .note = "Draw dots at the data points",
-                 .json_type = "boolean"},
-                {.name = "line_width",
-                 .type = "float",
-                 .default_value = "2.0",
-                 .required = false,
-                 .note = "Line width (dp)",
-                 .json_type = "number",
-                 .min_value = "0"},
-                {.name = "dot_radius",
-                 .type = "float",
-                 .default_value = "3.0",
-                 .required = false,
-                 .note = "Data point radius (dp)",
-                 .json_type = "number",
-                 .min_value = "0"},
-                {.name = "show_crosshair",
-                 .type = "bool",
-                 .default_value = "true",
-                 .required = false,
-                 .note = "Draw a crosshair snapped to the nearest data point on hover",
-                 .json_type = "boolean"},
-                {.name = "axis_x",
-                 .type = "Json",
-                 .default_value = "{}",
-                 .required = false,
-                 .note = "Category axis spec: {visible,label,tick_count,show_grid_lines}",
-                 .json_type = "object"},
-                {.name = "axis_y",
-                 .type = "Json",
-                 .default_value = "{}",
-                 .required = false,
-                 .note = "Value axis spec: {visible,label,tick_count,min,max,show_grid_lines,include_zero}",
-                 .json_type = "object"},
-                {.name = "legend",
-                 .type = "Json",
-                 .default_value = R"({"visible":true,"position":"Top"})",
-                 .required = false,
-                 .note = "Legend spec: {visible,position:Top|Bottom|Right}",
-                 .json_type = "object"},
-                {.name = "padding",
-                 .type = "EdgeInsets",
-                 .default_value = "{8,8,8,8}",
-                 .required = false,
-                 .note = "In-chart padding (dp)",
-                 .json_type = "object"},
-                {.name = "width",
-                 .type = "Length",
-                 .default_value = "auto",
-                 .required = false,
-                 .note = "",
-                 .json_type = "array"},
-                {.name = "height",
-                 .type = "Length",
-                 .default_value = "auto",
-                 .required = false,
-                 .note = "",
-                 .json_type = "array"},
-                {.name = "show",
-                 .type = "bool",
-                 .default_value = "true",
-                 .required = false,
-                 .note = "",
-                 .json_type = "boolean"},
-            },
-        .events = {"on_point_tapped"},
-        .children_policy = "none",
-        .invariants = {"line_width >= 0", "dot_radius >= 0"},
-        .examples = {"au::LineChart(au::LineChartProps{ .series = {{ .name = \"A\", .values = {1, 3, 2} }} })"},
-    };
-}
-
-inline auto LineChart::serialize_props(Json &props) const -> void {
-    Widget::serialize_props(props);
-    props.set("series", chart_series_vector_to_json(series));
-    props.set("categories", string_vector_to_json(categories));
-    props.set("show_dots", Json{show_dots});
-    props.set("line_width", line_width);
-    props.set("dot_radius", dot_radius);
-    props.set("show_crosshair", Json{show_crosshair});
-    props.set("axis_x", chart_axis_spec_to_json(axis_x));
-    props.set("axis_y", chart_axis_spec_to_json(axis_y));
-    props.set("legend", chart_legend_spec_to_json(legend));
-    props.set("padding", edge_insets_to_json(padding));
-}
-
-// 键名与 serialize_props 一一对称；类型不符的键跳过不写。
-inline auto LineChart::deserialize_props(const Json &props) -> void {
-    Widget::deserialize_props(props);
-    if (props.contains("series")) {
-        series = json_to_chart_series_vector(*props.at("series"));
-    }
-    if (props.contains("categories")) {
-        categories = json_to_string_vector(*props.at("categories"));
-    }
-    if (props.contains("show_dots") && props.at("show_dots")->is_bool()) {
-        show_dots = props.at("show_dots")->as_or<bool>(false);
-    }
-    if (props.contains("line_width") && props.at("line_width")->is_number()) {
-        line_width = std::max(0.0F, props.at("line_width")->as_or<float>(0.0F));
-    }
-    if (props.contains("dot_radius") && props.at("dot_radius")->is_number()) {
-        dot_radius = std::max(0.0F, props.at("dot_radius")->as_or<float>(0.0F));
-    }
-    if (props.contains("show_crosshair") && props.at("show_crosshair")->is_bool()) {
-        show_crosshair = props.at("show_crosshair")->as_or<bool>(false);
-    }
-    if (props.contains("axis_x")) {
-        axis_x = json_to_chart_axis_spec(*props.at("axis_x"));
-    }
-    if (props.contains("axis_y")) {
-        axis_y = json_to_chart_axis_spec(*props.at("axis_y"));
-    }
-    if (props.contains("legend")) {
-        legend = json_to_chart_legend_spec(*props.at("legend"));
-    }
-    if (props.contains("padding")) {
-        padding = json_to_edge_insets(*props.at("padding"));
-    }
-    mark_needs_layout();
-    mark_needs_paint();
+    return data[static_cast<std::size_t>(k)].name + ": " +
+           std::to_string(series_value(data, static_cast<std::size_t>(k), static_cast<std::size_t>(i)));
 }
 
 /// @brief 绘制：数值轴、折线（grow-in 描线进度截断 + 末段插值）、数据点圆点（图例联动降透明）、
@@ -660,7 +770,7 @@ inline auto LineChart::deserialize_props(const Json &props) -> void {
 /// @param bounds 控件全局矩形（局部几何经原点偏移换算为全局坐标）。
 /// @param ctx 构建上下文（继承主题字体 / 配色）。
 inline auto LineChart::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void {
-    const Theme theme = inherit_theme(ctx);
+    const Theme &theme = inherit_theme(ctx);
     const Font &font = theme.type_scale.body_medium;
     const Point origin = bounds.origin;
     const Geometry &g = geom_;
@@ -669,16 +779,26 @@ inline auto LineChart::on_paint(Painter &p, const Rect &bounds, const BuildConte
     const Color grid = Color{theme.roles.on_surface.r, theme.roles.on_surface.g, theme.roles.on_surface.b, 31};
     const Color axis = Color{theme.roles.on_surface.r, theme.roles.on_surface.g, theme.roles.on_surface.b, 160};
 
-    if (axis_y.visible) {
-        draw_numeric_axis(p, origin, plot, g.y_scale, axis_y, font, grid, axis);
+    // 绘制档各行本帧只读一次：数组行与结构化行皆按值给出，逐点循环里绝不重取。
+    const std::vector<ChartSeries> data = series();
+    const ChartAxisSpec x_axis = axis_x();
+    const ChartAxisSpec y_axis = axis_y();
+    const ChartLegendSpec leg = legend();
+    const bool dots = show_dots();
+    const float stroke = line_width();
+    const float radius = dot_radius();
+    const bool crosshair = show_crosshair();
+
+    if (y_axis.visible) {
+        draw_numeric_axis(p, origin, plot, g.y_scale, y_axis, font, grid, axis);
     }
 
     // ---- 折线 + 数据点（含图例联动降透明）----
     const double grow_t = grow_.progress();  // grow-in：描线进度（无 Animator 时恒 1）
     std::optional<Point> hovered_px;
-    for (std::size_t k = 0; k < series.size(); ++k) {
+    for (std::size_t k = 0; k < data.size(); ++k) {
         const bool dimmed = legend_hover_.has_value() && (*legend_hover_ != k);
-        Color c = resolve_series_color(k, series[k].color, theme);
+        Color c = resolve_series_color(k, data[k].color, theme);
         if (dimmed) {
             c.a = static_cast<std::uint8_t>(std::lround(static_cast<float>(c.a) * 0.35F));
         }
@@ -686,7 +806,7 @@ inline auto LineChart::on_paint(Painter &p, const Rect &bounds, const BuildConte
         pts.reserve(g.point_count);
         for (std::size_t i = 0; i < g.point_count; ++i) {
             const float px = point_x(g, i);
-            const float py = g.y_scale.to_px(series_value(k, i), plot.bottom(), plot.origin.y);
+            const float py = g.y_scale.to_px(series_value(data, k, i), plot.bottom(), plot.origin.y);
             pts.push_back(Point{.x = origin.x + px, .y = origin.y + py});
             if (hovered_point_.has_value() && std::cmp_equal(hovered_point_->first, k) &&
                 std::cmp_equal(hovered_point_->second, i)) {
@@ -709,32 +829,32 @@ inline auto LineChart::on_paint(Painter &p, const Rect &bounds, const BuildConte
             }
             dot_count = keep;
         }
-        if (drawn.size() >= 2 && line_width > 0.0F) {
-            p.stroke_polyline(drawn, line_width, c);
+        if (drawn.size() >= 2 && stroke > 0.0F) {
+            p.stroke_polyline(drawn, stroke, c);
         }
-        if (show_dots && dot_radius > 0.0F) {
-            const float d = dot_radius * 2.0F;
+        if (dots && radius > 0.0F) {
+            const float d = radius * 2.0F;
             for (std::size_t idx = 0; idx < dot_count && idx < pts.size(); ++idx) {
                 const Point &pt = pts[idx];
-                const Rect dot{.origin = Point{.x = pt.x - dot_radius, .y = pt.y - dot_radius},
+                const Rect dot{.origin = Point{.x = pt.x - radius, .y = pt.y - radius},
                                .size = Size{.width = d, .height = d}};
-                p.fill_rounded_rect(dot, dot_radius, c);
+                p.fill_rounded_rect(dot, radius, c);
             }
         }
     }
 
     // ---- 类目轴 ----
-    if (axis_x.visible) {
-        BandScale band{g.point_count};
-        draw_category_axis(p, origin, plot, band, g.cats, axis_x, font, axis);
+    if (x_axis.visible) {
+        BandScale const band{g.point_count};
+        draw_category_axis(p, origin, plot, band, g.cats, x_axis, font, axis);
     }
 
     // ---- 图例 ----
-    if (legend.visible) {
-        for (std::size_t k = 0; k < g.legend_rects.size() && k < series.size(); ++k) {
+    if (leg.visible) {
+        for (std::size_t k = 0; k < g.legend_rects.size() && k < data.size(); ++k) {
             const Rect &r = g.legend_rects[k];
             const bool dimmed = legend_hover_.has_value() && (*legend_hover_ != k);
-            Color c = resolve_series_color(k, series[k].color, theme);
+            Color c = resolve_series_color(k, data[k].color, theme);
             if (dimmed) {
                 c.a = static_cast<std::uint8_t>(std::lround(static_cast<float>(c.a) * 0.35F));
             }
@@ -743,17 +863,17 @@ inline auto LineChart::on_paint(Painter &p, const Rect &bounds, const BuildConte
             p.fill_rounded_rect(swatch, 2.0F, c);
             const Rect box{.origin = Point{.x = origin.x + r.origin.x + 14.0F, .y = origin.y + r.origin.y},
                            .size = Size{.width = std::max(0.0F, r.size.width - 14.0F), .height = line_h}};
-            p.draw_text(box, series[k].name, font, axis);
+            p.draw_text(box, data[k].name, font, axis);
         }
     }
 
     // ---- 十字准线 + 悬停高亮 + 值框 ----
     if (hovered_px.has_value()) {
-        if (show_crosshair) {
+        if (crosshair) {
             p.draw_line(Point{.x = origin.x + hovered_px->x, .y = origin.y + plot.origin.y},
                         Point{.x = origin.x + hovered_px->x, .y = origin.y + plot.bottom()}, 1.0F, grid);
         }
-        const float d = std::max(4.0F, dot_radius * 2.0F) + 4.0F;
+        const float d = std::max(4.0F, radius * 2.0F) + 4.0F;
         const Rect ring{
             .origin = Point{.x = origin.x + hovered_px->x - (d * 0.5F), .y = origin.y + hovered_px->y - (d * 0.5F)},
             .size = Size{.width = d, .height = d}};
@@ -761,10 +881,10 @@ inline auto LineChart::on_paint(Painter &p, const Rect &bounds, const BuildConte
 
         if (hovered_point_.has_value()) {
             const auto [k, i] = *hovered_point_;
-            if (k >= 0 && static_cast<std::size_t>(k) < series.size()) {
+            if (k >= 0 && static_cast<std::size_t>(k) < data.size()) {
                 const std::string text =
-                    series[static_cast<std::size_t>(k)].name + ": " +
-                    std::to_string(series_value(static_cast<std::size_t>(k), static_cast<std::size_t>(i)));
+                    data[static_cast<std::size_t>(k)].name + ": " +
+                    std::to_string(series_value(data, static_cast<std::size_t>(k), static_cast<std::size_t>(i)));
                 const float w = render::FontEngine::measure_width(text, font) + 16.0F;
                 const float h = line_h + 8.0F;
                 float bx = hovered_px->x + 8.0F;

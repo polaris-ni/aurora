@@ -72,7 +72,7 @@ AURORA_TEST_CASE(padding_floor_at_zero_when_constraint_smaller) {
 }
 
 AURORA_TEST_CASE(padding_edges_clamps_negative_components) {
-    EdgeInsets ins{.left = -1.0F, .top = 2.0F, .right = 3.0F, .bottom = -4.0F};
+    EdgeInsets const ins{.left = -1.0F, .top = 2.0F, .right = 3.0F, .bottom = -4.0F};
     const PaddingEdges pe(ins);
     const EdgeInsets got = pe.insets();
     AURORA_TEST_CHECK_NEAR(got.left, 0.0F, 0.0F);

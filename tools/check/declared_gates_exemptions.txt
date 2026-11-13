@@ -1,0 +1,18 @@
+# Names that look like CTest gates in docs/CI but are NOT active declarations.
+# Format: <name> | <reason>. Full-line # comments and blank lines are ignored.
+# A name in this file that becomes registered is reported as stale (cleanup note).
+#
+# Why this file exists: a full audit of unregistered utest_/itest_/etest_/check_
+# tokens found 21 candidates; only utest_simd_parity was a genuine ghost gate.
+# Treating "name not found" as a violation would produce a 95% false-positive rate.
+utest_xxx | naming example in CODING_STANDARDS.md, not a real suite
+itest_xxx | naming example in CODING_STANDARDS.md, not a real suite
+etest_xxx | naming example in CODING_STANDARDS.md, not a real suite
+utest_a11y_ | stem prefix used as a naming example in manual-test docs
+utest_props_ | stem prefix used as a naming example in manual-test docs
+utest_net_noncrypto_random | retired suite; 06-app-platform.md says it left with its source
+utest_style_props | retired suite; 07-environment-modifier.md says it was deleted
+check_color | regex false positive: a Checkbox property name, not a checker
+check_linker_flag | regex false positive: a CMake function, not a checker
+etest_x11 | naming drift in ci.yml; the real suite is itest_x11_present
+test_simd_parity | historical file-name form; the real suite is utest_simd_parity

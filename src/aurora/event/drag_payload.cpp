@@ -251,7 +251,11 @@ auto deliver_session_end() -> void {
 // ---- DragPayload（pimpl）----
 
 struct DragPayload::Impl {
-    std::unordered_map<std::string, std::vector<std::uint8_t>> data;  ///< MIME → 原始字节
+    std::unordered_map<std::string, std::vector<std::uint8_t>> data;  ///< MIME → 原始字节（`from_bytes` 路径）
+    std::vector<std::string> lazy_formats;  ///< 声明的 MIME 清单（`from_lazy` 路径）
+    /// @brief 延迟取数器（`from_lazy` 路径）：字节在读取时才产出，取数点由排空阶段决定。
+    std::function<Result<std::vector<std::uint8_t>>(const std::string &)> lazy_fetch;
+    bool lazy = false;  ///< 本载荷是否走延迟取数路径（两条路径互斥，避免「有表又有回调」的双真源）
 };
 
 DragPayload::DragPayload() : impl_(std::make_unique<Impl>()) {}
@@ -267,9 +271,39 @@ auto DragPayload::from_bytes(std::unordered_map<std::string, std::vector<std::ui
     return std::shared_ptr<const DragPayload>(raw);
 }
 
-auto DragPayload::has(const std::string &mime) const -> bool { return impl_->data.contains(mime); }
+auto DragPayload::from_lazy(std::vector<std::string> formats,
+                            std::function<Result<std::vector<std::uint8_t>>(const std::string &)> fetch)
+    -> std::shared_ptr<const DragPayload> {
+    auto *raw = new DragPayload();  // NOLINT(*-owning-memory): 随即交 shared_ptr 接管
+    raw->impl_->lazy = true;
+    raw->impl_->lazy_fetch = std::move(fetch);
+    for (auto &mime : formats) {
+        if (mime.empty() || std::ranges::find(raw->impl_->lazy_formats, mime) != raw->impl_->lazy_formats.end()) {
+            continue;  // 空键无意义；重复声明去重（顺序即优先级，首次出现为准）
+        }
+        raw->impl_->lazy_formats.push_back(std::move(mime));
+    }
+    return std::shared_ptr<const DragPayload>(raw);
+}
+
+auto DragPayload::has(const std::string &mime) const -> bool {
+    if (impl_->lazy) {
+        // 延迟路径只有「声明」没有「数据」：格式是否可取就是清单里有没有它。
+        return std::ranges::find(impl_->lazy_formats, mime) != impl_->lazy_formats.end();
+    }
+    return impl_->data.contains(mime);
+}
 
 auto DragPayload::bytes(const std::string &mime) const -> Result<std::vector<std::uint8_t>> {
+    if (impl_->lazy) {
+        if (!has(mime)) {
+            return std::vector<std::uint8_t>{};  // 格式不存在 = Ok(空)，与内存路径同口径
+        }
+        if (!impl_->lazy_fetch) {
+            return std::vector<std::uint8_t>{};  // 声明了却无取数器：按空口径交出，不崩溃
+        }
+        return impl_->lazy_fetch(mime);  // 同步入口：立即取数（阻塞由调用方自担，语义不变）
+    }
     const auto it = impl_->data.find(mime);
     if (it == impl_->data.end()) {
         return std::vector<std::uint8_t>{};  // 格式不存在 = Ok(空)：空内容不是失败

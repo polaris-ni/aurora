@@ -35,7 +35,6 @@
 #include <memory>
 #include <optional>
 #include <string>
-#include <utility>
 #include <vector>
 
 #include "aurora/core/image.h"
@@ -258,11 +257,11 @@ class WebViewSink : public NativeViewSink {
     /// @brief 前进一页（无历史时空操作）。
     virtual auto go_forward() -> void = 0;
 
-    /// @brief 设置页面缩放系数（对应 `WebViewProps::zoom_factor`）。
+    /// @brief 设置页面缩放系数（对应 `WebViewProps` 的 `zoom_factor` 行）。
     /// @param zoom 缩放系数（1.0 为原始尺寸）。
     virtual auto set_zoom_factor(float zoom) -> void = 0;
 
-    /// @brief 设置是否允许页面执行脚本（对应 `WebViewProps::javascript_enabled`）。
+    /// @brief 设置是否允许页面执行脚本（对应 `WebViewProps` 的 `javascript_enabled` 行）。
     /// @param enabled 允许为 true。
     virtual auto set_javascript_enabled(bool enabled) -> void = 0;
 

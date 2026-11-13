@@ -54,6 +54,7 @@
 #include "aurora/widget/scroll.h"
 #include "aurora/widget/text.h"
 #include "aurora/widget/text_input.h"
+#include "bench_result.h"
 
 using aurora::Chip;
 using aurora::Column;
@@ -210,7 +211,7 @@ class AppBannerCarousel : public au::LeafWidget {
     std::vector<BenchBanner> items;
     // NOLINTEND(cppcoreguidelines-non-private-member-variables-in-classes)
 
-    auto collect_signals(std::vector<au::SignalViewBase *> & /*out*/) -> void override {}
+    auto collect_signals(au::StateSink & /*out*/) -> void override {}
     [[nodiscard]] auto type_name() const -> const char * override { return "AppBannerCarousel"; }
     // 横幅每帧整体平移 + 入场淡入：Display List 缓存会冻结平移与 alpha 首帧，故禁 DL 缓存，
     // 改为卡片一次性渲染进离屏层、每帧仅 composite。
@@ -393,7 +394,7 @@ class AppCellLeaf : public au::LeafWidget {
     au::Color tile_b{94, 53, 211};
     // NOLINTEND(cppcoreguidelines-non-private-member-variables-in-classes)
 
-    auto collect_signals(std::vector<au::SignalViewBase *> & /*out*/) -> void override {}
+    auto collect_signals(au::StateSink & /*out*/) -> void override {}
     [[nodiscard]] auto type_name() const -> const char * override { return "AppCellLeaf"; }
 
   protected:
@@ -462,10 +463,10 @@ class AppCellLeaf : public au::LeafWidget {
             chip->set_label("item " + std::to_string(r) + "-" + std::to_string(c));
             cells.emplace_back(chip);
         }
-        rows.emplace_back(std::make_shared<Row>(RowProps{.children = std::move(cells)}));
+        rows.emplace_back(std::make_shared<Row>(std::move(cells)));
     }
-    auto col = std::make_shared<Column>(ColumnProps{.children = std::move(rows)});
-    return Node{std::make_shared<Scroll>(ScrollProps{.child = Node{std::move(col)}})};
+    auto col = std::make_shared<Column>(std::move(rows));
+    return Node{std::make_shared<Scroll>(Node{std::move(col)})};
 }
 
 /// @brief app 场景的 Section 头（色条 + 标题）。
@@ -474,8 +475,9 @@ class AppCellLeaf : public au::LeafWidget {
     auto bar = std::make_shared<au::Canvas>(
         4.0F, 18.0F, [th](au::Painter &p, const au::Rect &b) -> void { p.fill_rounded_rect(b, 2.0F, th.accent); });
     auto text = std::make_shared<au::Text>(
-        au::TextProps{.content = title, .font = au::Font{.size_pt = 15.0F, .weight = 700}, .text_color = th.text});
-    text->modifier = au::Modifier{}.padding(au::EdgeInsets{.left = 10.0F, .top = 0.0F, .right = 0.0F, .bottom = 0.0F});
+        au::TextProps().set_content(title).set_font_size(15.0F).set_font_weight(700).set_color(th.text));
+    text->set_modifier(
+        au::Modifier{}.padding(au::EdgeInsets{.left = 10.0F, .top = 0.0F, .right = 0.0F, .bottom = 0.0F}));
     auto row = std::make_shared<Row>();
     row->add(Node{bar});
     row->add(Node{text});
@@ -506,10 +508,10 @@ class AppCellLeaf : public au::LeafWidget {
                 th.text);
         }
     });
-    auto bar_title = std::make_shared<au::Text>(au::TextProps{
-        .content = "Aurora Store", .font = au::Font{.size_pt = 20.0F, .weight = 700}, .text_color = th.primary});
-    bar_title->modifier =
-        au::Modifier{}.padding(au::EdgeInsets{.left = 12.0F, .top = 0.0F, .right = 0.0F, .bottom = 0.0F});
+    auto bar_title = std::make_shared<au::Text>(
+        au::TextProps().set_content("Aurora Store").set_font_size(20.0F).set_font_weight(700).set_color(th.primary));
+    bar_title->set_modifier(
+        au::Modifier{}.padding(au::EdgeInsets{.left = 12.0F, .top = 0.0F, .right = 0.0F, .bottom = 0.0F}));
     auto avatar = std::make_shared<au::Canvas>(28.0F, 28.0F, [th](au::Painter &p, const au::Rect &b) -> void {
         p.fill_rounded_rect(b, 14.0F, th.primary);
         p.draw_text(b, "A", au::Font{.size_pt = 14.0F, .weight = 700}, th.on_primary);
@@ -517,8 +519,8 @@ class AppCellLeaf : public au::LeafWidget {
     bar->add(Node{menu});
     bar->add(Node{bar_title});
     bar->add(Node{avatar});
-    bar->modifier =
-        au::Modifier{}.padding(au::EdgeInsets{.left = 16.0F, .top = 10.0F, .right = 16.0F, .bottom = 10.0F});
+    bar->set_modifier(
+        au::Modifier{}.padding(au::EdgeInsets{.left = 16.0F, .top = 10.0F, .right = 16.0F, .bottom = 10.0F}));
 
     // ---- 搜索行（放大镜图标 + 输入框）----
     auto search_row = std::make_shared<Row>();
@@ -529,11 +531,11 @@ class AppCellLeaf : public au::LeafWidget {
                                      .size = au::Size{.width = 7.0F, .height = 3.0F}},
                             1.5F, th.text_secondary);
     });
-    auto search_input = std::make_shared<au::TextInput>(au::TextInputProps{.placeholder = "Search apps and books"});
+    auto search_input = std::make_shared<au::TextInput>(au::TextInputProps().set_placeholder("Search apps and books"));
     search_row->add(Node{search_icon});
     search_row->add(Node{search_input});
-    search_row->modifier =
-        au::Modifier{}.padding(au::EdgeInsets{.left = 16.0F, .top = 0.0F, .right = 16.0F, .bottom = 8.0F});
+    search_row->set_modifier(
+        au::Modifier{}.padding(au::EdgeInsets{.left = 16.0F, .top = 0.0F, .right = 16.0F, .bottom = 8.0F}));
 
     // ---- 纵向滚动主体 ----
     std::vector<Node> body;
@@ -545,8 +547,8 @@ class AppCellLeaf : public au::LeafWidget {
 
     body.push_back(section_header("Categories"));
     auto chips = std::make_shared<Row>();
-    chips->modifier =
-        au::Modifier{}.padding(au::EdgeInsets{.left = 16.0F, .top = 0.0F, .right = 16.0F, .bottom = 8.0F});
+    chips->set_modifier(
+        au::Modifier{}.padding(au::EdgeInsets{.left = 16.0F, .top = 0.0F, .right = 16.0F, .bottom = 8.0F}));
     static const std::string CATEGORIES[] = {"Games", "Apps", "Movies", "Books", "Kids"};
     for (const auto &cat : CATEGORIES) {
         auto chip = std::make_shared<Chip>();
@@ -577,20 +579,20 @@ class AppCellLeaf : public au::LeafWidget {
             cell->tile_a = data.tile_a;
             cell->tile_b = data.tile_b;
             // 行内等分宽度（flex 权重），单元格自身按 max.width 布局。
-            cell->modifier = au::Modifier{}.expand().padding(
-                au::EdgeInsets{.left = 4.0F, .top = 4.0F, .right = 4.0F, .bottom = 4.0F});
+            cell->set_modifier(au::Modifier{}.expand().padding(
+                au::EdgeInsets{.left = 4.0F, .top = 4.0F, .right = 4.0F, .bottom = 4.0F}));
             row_cells.emplace_back(cell);
         }
-        grid_rows.emplace_back(std::make_shared<Row>(RowProps{.children = std::move(row_cells)}));
+        grid_rows.emplace_back(std::make_shared<Row>(std::move(row_cells)));
     }
-    body.emplace_back(std::make_shared<Column>(ColumnProps{.children = std::move(grid_rows)}));
+    body.emplace_back(std::make_shared<Column>(std::move(grid_rows)));
 
     body.push_back(section_header("Recommended for you"));
     // 静态推荐行：缩略图 + 两行文本。同理不用 LazyRow（横向可滚动控件同样会抢滚轮）。
     auto recos = std::make_shared<std::vector<BenchReco>>(app_recos());
     auto reco_row = std::make_shared<Row>();
-    reco_row->modifier =
-        au::Modifier{}.padding(au::EdgeInsets{.left = 16.0F, .top = 0.0F, .right = 16.0F, .bottom = 0.0F});
+    reco_row->set_modifier(
+        au::Modifier{}.padding(au::EdgeInsets{.left = 16.0F, .top = 0.0F, .right = 16.0F, .bottom = 0.0F}));
     for (int i = 0; i < AURORA_APP_RECO_VISIBLE; ++i) {
         const BenchReco &data = (*recos)[static_cast<std::size_t>(i)];  // NOLINT(*-redundant-parentheses)
         // 绘制回调经 Canvas 转入 std::function 后，分析器无法证明其不抛；wasm 口径
@@ -603,16 +605,16 @@ class AppCellLeaf : public au::LeafWidget {
                                    {data.tile_a, data.tile_b}, {0.0F, 1.0F});
             p.draw_text(b, data.title.substr(0, 1), au::Font{.size_pt = 34.0F, .weight = 700}, th.on_primary);
         });
-        auto title = std::make_shared<au::Text>(au::TextProps{
-            .content = data.title, .font = au::Font{.size_pt = 14.0F, .weight = 600}, .text_color = th.text});
-        auto subtitle = std::make_shared<au::Text>(au::TextProps{
-            .content = data.subtitle, .font = au::Font{.size_pt = 12.0F}, .text_color = th.text_secondary});
-        auto col = std::make_shared<Column>(
-            ColumnProps{.children = std::vector<Node>{Node{title}, Node{subtitle}}, .gap = 4.0F});
+        auto title = std::make_shared<au::Text>(
+            au::TextProps().set_content(data.title).set_font_size(14.0F).set_font_weight(600).set_color(th.text));
+        auto subtitle = std::make_shared<au::Text>(
+            au::TextProps().set_content(data.subtitle).set_font_size(12.0F).set_color(th.text_secondary));
+        auto col =
+            std::make_shared<Column>(std::vector<Node>{Node{title}, Node{subtitle}}, ColumnProps().set_gap(4.0F));
         auto item = std::make_shared<Row>();
         item->add(Node{thumb});
         item->add(Node{col});
-        item->modifier = au::Modifier{}.expand();
+        item->set_modifier(au::Modifier{}.expand());
         reco_row->add(Node{item});
     }
     body.emplace_back(reco_row);
@@ -632,37 +634,41 @@ class AppCellLeaf : public au::LeafWidget {
                 p.draw_text(b, wrap_elem(REVIEWERS, i).substr(0, 1), au::Font{.size_pt = 16.0F, .weight = 700},
                             th.on_primary);
             });
-        auto name = std::make_shared<au::Text>(au::TextProps{.content = wrap_elem(REVIEWERS, i),
-                                                             .font = au::Font{.size_pt = 13.0F, .weight = 600},
-                                                             .text_color = th.text});
-        auto meta = std::make_shared<au::Text>(au::TextProps{.content = "2026-09-1" + std::to_string(1 + (i % 9)),
-                                                             .font = au::Font{.size_pt = 11.0F},
-                                                             .text_color = th.text_secondary});
-        auto info =
-            std::make_shared<Column>(ColumnProps{.children = std::vector<Node>{Node{name}, Node{meta}}, .gap = 2.0F});
+        auto name = std::make_shared<au::Text>(au::TextProps()
+                                                   .set_content(wrap_elem(REVIEWERS, i))
+                                                   .set_font_size(13.0F)
+                                                   .set_font_weight(600)
+                                                   .set_color(th.text));
+        auto meta = std::make_shared<au::Text>(au::TextProps()
+                                                   .set_content("2026-09-1" + std::to_string(1 + (i % 9)))
+                                                   .set_font_size(11.0F)
+                                                   .set_color(th.text_secondary));
+        auto info = std::make_shared<Column>(std::vector<Node>{Node{name}, Node{meta}}, ColumnProps().set_gap(2.0F));
         auto head = std::make_shared<Row>();
         head->add(Node{avatar_small});
         head->add(Node{info});
-        auto body_text = std::make_shared<au::Text>(au::TextProps{.content = wrap_elem(BODIES, i),
-                                                                  .font = au::Font{.size_pt = 12.0F},
-                                                                  .text_color = th.text,
-                                                                  .max_lines = 2,
-                                                                  .soft_wrap = true});
-        auto card = std::make_shared<Column>(
-            ColumnProps{.children = std::vector<Node>{Node{head}, Node{body_text}}, .gap = 6.0F});
-        card->modifier =
-            au::Modifier{}.padding(au::EdgeInsets{.left = 16.0F, .top = 8.0F, .right = 16.0F, .bottom = 8.0F});
+        auto body_text = std::make_shared<au::Text>(au::TextProps()
+                                                        .set_content(wrap_elem(BODIES, i))
+                                                        .set_font_size(12.0F)
+                                                        .set_color(th.text)
+                                                        .set_max_lines(2)
+                                                        .set_soft_wrap(true));
+        auto card =
+            std::make_shared<Column>(std::vector<Node>{Node{head}, Node{body_text}}, ColumnProps().set_gap(6.0F));
+        card->set_modifier(
+            au::Modifier{}.padding(au::EdgeInsets{.left = 16.0F, .top = 8.0F, .right = 16.0F, .bottom = 8.0F}));
         body.emplace_back(card);
     }
 
-    auto body_col = std::make_shared<Column>(ColumnProps{.children = std::move(body)});
-    auto scroll = std::make_shared<Scroll>(ScrollProps{.child = Node{std::move(body_col)}});
-    scroll->modifier = au::Modifier{}.expand();
+    auto body_col = std::make_shared<Column>(std::move(body));
+    auto scroll = std::make_shared<Scroll>(Node{std::move(body_col)});
+    scroll->set_modifier(au::Modifier{}.expand());
 
     // ---- 底部导航 ----
     static const std::string NAV_LABELS[] = {"Home", "Top", "New", "Subs"};
     auto nav = std::make_shared<Row>();
-    nav->modifier = au::Modifier{}.padding(au::EdgeInsets{.left = 16.0F, .top = 8.0F, .right = 16.0F, .bottom = 8.0F});
+    nav->set_modifier(
+        au::Modifier{}.padding(au::EdgeInsets{.left = 16.0F, .top = 8.0F, .right = 16.0F, .bottom = 8.0F}));
     for (int i = 0; i < 4; ++i) {
         auto icon = std::make_shared<au::Canvas>(22.0F, 22.0F, [i, th](au::Painter &p, const au::Rect &b) -> void {
             const au::Color c = (i == 0) ? th.primary : th.text_secondary;
@@ -686,11 +692,11 @@ class AppCellLeaf : public au::LeafWidget {
                     c);  // 订阅：卡片
             }
         });
-        auto label = std::make_shared<au::Text>(au::TextProps{.content = wrap_elem(NAV_LABELS, i),
-                                                              .font = au::Font{.size_pt = 10.0F},
-                                                              .text_color = (i == 0) ? th.primary : th.text_secondary});
-        auto item =
-            std::make_shared<Column>(ColumnProps{.children = std::vector<Node>{Node{icon}, Node{label}}, .gap = 3.0F});
+        auto label = std::make_shared<au::Text>(au::TextProps()
+                                                    .set_content(wrap_elem(NAV_LABELS, i))
+                                                    .set_font_size(10.0F)
+                                                    .set_color((i == 0) ? th.primary : th.text_secondary));
+        auto item = std::make_shared<Column>(std::vector<Node>{Node{icon}, Node{label}}, ColumnProps().set_gap(3.0F));
         nav->add(Node{item});
     }
 
@@ -699,7 +705,7 @@ class AppCellLeaf : public au::LeafWidget {
     root.emplace_back(search_row);
     root.emplace_back(scroll);
     root.emplace_back(nav);
-    return Node{std::make_shared<Column>(ColumnProps{.children = std::move(root)})};
+    return Node{std::make_shared<Column>(std::move(root))};
 }
 
 /// @brief L5-C isolated scenario: LazyList self-driven scroll path (not via the outer Scroll buffer).
@@ -747,6 +753,23 @@ auto emit(const std::string &format, const ScrollBenchHarness::Result &r, bool &
     } else {
         AURORA_LOG_RAW("bench", r.to_markdown(), "\n");
     }
+}
+
+/// @brief Mirror every reported reading into the structured result file.
+/// @param result process-wide result object.
+/// @param prefix stable scene prefix for the metric keys.
+/// @param r one scene sample.
+auto collect(aurora::bench::BenchResult &result, const std::string &prefix, const ScrollBenchHarness::Result &r)
+    -> void {
+    result.metric(prefix + "avg_frame_ms", r.avg_frame_ms());
+    result.metric(prefix + "p50_ms", r.p50_ms());
+    result.metric(prefix + "p95_ms", r.p95_ms());
+    result.metric(prefix + "p99_ms", r.p99_ms());
+    result.metric(prefix + "worst_ms", r.worst_ms());
+    result.metric(prefix + "jitter_ms", r.jitter_ms());
+    result.metric(prefix + "long_tasks", static_cast<double>(r.long_task_count()), "count");
+    result.metric(prefix + "full_redraw_frames", static_cast<double>(r.full_redraw_frames()), "count");
+    result.flag(prefix + "trustworthy", r.trustworthy());
 }
 
 /// @brief Repeat sampling and take the best (the lowest p99).
@@ -928,6 +951,10 @@ auto main(int argc, char **argv) -> int {  // NOLINT(*-function-cognitive-comple
     cfg.scale = static_cast<float>(cli_args.get<double>("scale").value());
     cfg.fling = cli_args.flag("fling");
 
+    aurora::bench::process_result().identify("bench_scroll", scene);
+    aurora::bench::process_result().frame_counts(cfg.warmup_frames, 0, cfg.frames);
+    auto &result = aurora::bench::process_result();
+
     constexpr Size viewport{.width = 1100.0F, .height = 760.0F};  // fixed convention across all scenes
     bool csv_header_written = false;
 
@@ -952,6 +979,7 @@ auto main(int argc, char **argv) -> int {  // NOLINT(*-function-cognitive-comple
             AURORA_LOG_RAW("bench", note);
         }
         emit(format, r, csv_header_written);
+        collect(result, "app.", r);
     }
 
     if (scene == "synthetic" || scene == "all") {
@@ -963,6 +991,7 @@ auto main(int argc, char **argv) -> int {  // NOLINT(*-function-cognitive-comple
             AURORA_LOG_RAW("bench", note);
         }
         emit(format, r, csv_header_written);
+        collect(result, "synthetic.", r);
     }
 
     if (scene == "lazy" || scene == "all") {
@@ -974,6 +1003,7 @@ auto main(int argc, char **argv) -> int {  // NOLINT(*-function-cognitive-comple
             AURORA_LOG_RAW("bench", note);
         }
         emit(format, r, csv_header_written);
+        collect(result, "lazy.", r);
     }
 
     if (scene == "grid" || scene == "all") {
@@ -985,15 +1015,18 @@ auto main(int argc, char **argv) -> int {  // NOLINT(*-function-cognitive-comple
             AURORA_LOG_RAW("bench", note);
         }
         emit(format, r, csv_header_written);
+        collect(result, "grid.", r);
     }
 
+    result.trust(!any_untrustworthy, any_untrustworthy ? "self-check-failed" : "all self-checks passed");
+    const bool written = aurora::bench::finalize_process("bench_scroll", scene);
     if (any_untrustworthy) {
         // Non-zero exit code: the baseline collection script uses this to refuse writing untrusted
-        // readings into the comparison table.
+        // readings into the comparison table. The result file is still written with untrusted status.
         AURORA_LOG_ERROR("bench",
                          "At least one scenario reading is unreliable (scroll container not found / idle "
                          "frame drops); non-zero exit code set");
         return 2;
     }
-    return 0;
+    return written ? 0 : 1;
 }

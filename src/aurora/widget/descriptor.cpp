@@ -9,8 +9,15 @@ auto descriptor_to_json(const PropDescriptor &p) -> Json {
 
     j.set("name", p.name);
     j.set("type", p.type);
-    j.set("default", p.default_value);
+    // 默认值优先落原生表示（属性表行可静态求值的回落点）；没有原生值时才落显示串。
+    if (!p.default_native.is_null()) {
+        j.set("default", p.default_native);
+    } else {
+        j.set("default", p.default_value);
+    }
     j.set("required", Json{p.required});
+    // 来源型位与 `required` 同批同口径：描述符里两枚都恒发，由 schema 发射侧按稀疏布尔裁掉 false 那半。
+    j.set("source", Json{p.source});
     if (!p.note.empty()) {
         j.set("note", p.note);
     }
@@ -93,6 +100,13 @@ auto descriptor_to_json(const WidgetDescriptor &d) -> Json {
             inv.push_back(inv_item);
         }
         j.set("invariants", inv);
+    }
+    // 载荷声明与 `invariants` 同一条「空即不发」规则：只有注入类控件（`Provider<T>` 系）的载荷格非空。
+    if (!d.payload_type.empty()) {
+        Json payload = Json::object();
+        payload.set("type", d.payload_type);
+        payload.set("channel", d.payload_channel);
+        j.set("payload", payload);
     }
 
     return j;

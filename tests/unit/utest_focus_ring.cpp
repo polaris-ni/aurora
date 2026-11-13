@@ -9,9 +9,11 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstdlib>
+#include <memory>
+#include <utility>
 
 #include "aurora/aurora.h"
+#include "aurora/environment/environment.h"
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_focus_ring {
@@ -73,10 +75,39 @@ auto ring_sample(const Painter &p, const Rect &box) -> Color {
     return p.get_pixel(static_cast<int>(std::floor(box.origin.x + (box.size.width * 0.5F))), y);
 }
 
+/// 统计盒外某一行（距盒上沿 dy 处）的装饰像素数；用于把「环带外扩」钉在具体行上。
+auto decoration_in_row(const Painter &p, const Rect &box, float dy) -> int {
+    const int y = static_cast<int>(std::floor(box.origin.y - dy));
+    if (y < 0 || y >= p.height()) {
+        return 0;
+    }
+    const int x0 = static_cast<int>(std::floor(box.origin.x + 20.0F));
+    const int x1 = static_cast<int>(std::ceil(box.right() - 20.0F));
+    int n = 0;
+    for (int x = std::max(x0, 0); x < std::min(x1, p.width()); ++x) {
+        if (is_decoration(p.get_pixel(x, y))) {
+            ++n;
+        }
+    }
+    return n;
+}
+
+/// 造一个注入指定主题的构建上下文，供焦点环读取两枚度量令牌。
+auto themed_ctx(const Theme &t) -> std::pair<std::shared_ptr<au::Environment>, BuildContext> {
+    auto env = std::make_shared<au::Environment>();
+    env->set_local(t);
+    BuildContext ctx;
+    ctx.env = env.get();
+    return {std::move(env), ctx};
+}
+
+/// 标脏盒相对绘制盒的上边外扩距离（dp）；焦点环绘制与标脏必须同值。
+auto dirty_outset(const Widget &w) -> float { return w.paint_bounds().origin.y - w.dirty_bounds().origin.y; }
+
 /// 挂载 + 布局成 160×40 的盒，供用例自行驱动焦点管理器后再绘制。
 template <typename W>
 auto prep(W &w, BuildContext &ctx) -> void {
-    w.modifier.set(Modifier{}.size(160.0F, 40.0F));
+    w.set_modifier(Modifier{}.size(160.0F, 40.0F));
     w.mount(ctx);
     const Constraints cc{.min = Size{.width = 0.0F, .height = 0.0F},
                          .max = Size{.width = AURORA_CANVAS_W, .height = AURORA_CANVAS_H}};
@@ -238,6 +269,73 @@ AURORA_TEST_CASE(request_focus_keeps_the_pointer_arrival) {
     AURORA_TEST_CHECK(btn.is_focused());
     AURORA_TEST_CHECK(btn.focus_arrival() == FocusArrival::Pointer);
     AURORA_TEST_CHECK_FALSE(btn.focus_ring_shown());
+}
+
+AURORA_TEST_CASE(default_ring_metrics_match_the_existing_constant_band) {
+    // 默认 2 / 2 与改动前常量逐位相同：环带仍在盒外 2–4 dp，标脏外扩仍为 4。
+    Button btn{"Go"};
+    Painter p;
+    const Rect box = paint_on_white(btn, p, true, FocusArrival::Keyboard);
+    AURORA_TEST_REQUIRE_TRUE(btn.focus_ring_shown());
+    AURORA_TEST_CHECK(decoration_in_row(p, box, 3.0F) > 0);  // 环带内
+    AURORA_TEST_CHECK_EQ(decoration_in_row(p, box, 6.0F), 0);  // 环带外
+    AURORA_TEST_CHECK_NEAR(dirty_outset(btn), 4.0F, 1e-4F);
+}
+
+AURORA_TEST_CASE(ring_metrics_drive_paint_and_dirty_bounds_together) {
+    // 非默认令牌：间距 3 + 环宽 5 = 外扩 8。像素与标脏成对断言，只改一侧即转红。
+    Theme wide = Theme::light();
+    wide.controls.focus_ring_inset = 3.0F;
+    wide.controls.focus_ring_width = 5.0F;
+    auto [env, ctx] = themed_ctx(wide);
+    Button btn{"Go"};
+    prep(btn, ctx);
+    FocusManager fm;
+    fm.set_root(&btn);
+    fm.set_focus(&btn, FocusDirection::Forward, FocusArrival::Keyboard);
+    Painter p;
+    const Rect box = paint_frame(btn, p, ctx);
+    AURORA_TEST_REQUIRE_TRUE(btn.focus_ring_shown());
+    AURORA_TEST_CHECK(decoration_in_row(p, box, 7.0F) > 0);  // 环带内（3 + 5 的外边界之内）
+    AURORA_TEST_CHECK_EQ(decoration_in_row(p, box, 1.0F), 0);  // 间距区无环
+    AURORA_TEST_CHECK_EQ(decoration_in_row(p, box, 10.0F), 0);  // 环带外无环
+    AURORA_TEST_CHECK_NEAR(dirty_outset(btn), 8.0F, 1e-4F);
+}
+
+AURORA_TEST_CASE(theme_switch_dirty_bounds_take_the_two_frame_union) {
+    // 由小变大只按旧值标脏会裁掉新增环带，由大变小要擦掉旧环带：两帧取并集。
+    // 每次换主题先显示列表失效，模拟主题切换时整树重绘（否则 DL 缓存命中不走绘制分支）。
+    Button btn{"Go"};
+    BuildContext base;
+    prep(btn, base);
+    FocusManager fm;
+    fm.set_root(&btn);
+    fm.set_focus(&btn, FocusDirection::Forward, FocusArrival::Keyboard);
+    Painter first;
+    (void)paint_frame(btn, first, base);
+    AURORA_TEST_CHECK_NEAR(dirty_outset(btn), 4.0F, 1e-4F);
+
+    Theme wide = Theme::light();
+    wide.controls.focus_ring_inset = 3.0F;
+    wide.controls.focus_ring_width = 5.0F;
+    auto [env_wide, ctx_wide] = themed_ctx(wide);
+    btn.invalidate_display_list_up();
+    Painter grown;
+    (void)paint_frame(btn, grown, ctx_wide);
+    AURORA_TEST_CHECK_NEAR(dirty_outset(btn), 8.0F, 1e-4F);
+
+    Theme narrow = Theme::light();
+    narrow.controls.focus_ring_inset = 1.0F;
+    narrow.controls.focus_ring_width = 1.0F;
+    auto [env_narrow, ctx_narrow] = themed_ctx(narrow);
+    btn.invalidate_display_list_up();
+    Painter shrunk;
+    (void)paint_frame(btn, shrunk, ctx_narrow);
+    AURORA_TEST_CHECK_NEAR(dirty_outset(btn), 8.0F, 1e-4F);  // 并集：旧 8 仍在
+    btn.invalidate_display_list_up();
+    Painter settled;
+    (void)paint_frame(btn, settled, ctx_narrow);
+    AURORA_TEST_CHECK_NEAR(dirty_outset(btn), 2.0F, 1e-4F);  // 稳定帧回到新值
 }
 
 }  // namespace aurora::test_cases::utest_focus_ring

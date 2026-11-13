@@ -367,6 +367,23 @@ template <typename T>
     return *opt;
 }
 
+/// @brief 断言 optional 持有值并以**引用**取出（move-only 载荷用，`require_value` 按值版取不了）。
+///
+/// 误报与 `require_value` 同源（REQUIRE 把判定交给报告器函数，路径分析无法认定「已检查」），
+/// 空值分支同样显式抛 `CaseAbort`：分析器看不到报告器按 Fatal 抛出的一手，只靠 REQUIRE 会
+/// 沿「记过账但函数照常返回」的路径继续解引用空 optional。
+/// @tparam T 载荷类型（无需可拷贝）。
+/// @param opt 待取值的 optional（须为左值）。
+/// @return 载荷引用，生命周期与 `opt` 相同。
+template <typename T>
+[[nodiscard]] auto require_ref(std::optional<T> &opt) -> T & {
+    AURORA_TEST_REQUIRE(opt.has_value());
+    if (!opt.has_value()) {
+        throw CaseAbort{"require_ref: optional is empty"};
+    }
+    return *opt;
+}
+
 }  // namespace aurora::testing
 
 /// @brief 断言表达式为真（失败时打印 Actual / Expected）。

@@ -85,7 +85,8 @@ auto push_face(const std::string &family, const std::shared_ptr<FontFace> &ff) -
 // ---- 系统字体目录 catalog（族名 → 字体文件）----
 //
 // 为什么要有它：`list_font_families()` 的同源保证要求「枚举出来的族一定解析得到面」，而既有
-// 的 `register_system_fallbacks()` 只是**固定候选文件清单**（Win 8 个文件名 / Linux 10 个路径），
+// 的 `register_system_fallbacks()` 只是**固定候选文件清单**（Win 8 枚文件名、Linux 10 条路径、
+// macOS 9 条路径），
 // 且经 `add_default_face()` 只挂进 `""` / `"sans-serif"` 两个键——**不产生任何族名**。故系统字体
 // 目录扫描是本条从零新增的能力，不是「把已有的扫描暴露出来」。
 //
@@ -589,6 +590,39 @@ auto register_system_fallbacks() -> void {
         "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",  // Arch
         "/usr/share/fonts/wenquanyi/wqy-microhei/wqy-microhei.ttc",
         "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+    };
+    for (const char *path : candidates) {
+        if (path == nullptr) {
+            continue;
+        }
+        auto ff = make_face_from_file(path);
+        if (ff) {
+            add_default_face(ff);
+        }
+    }
+#elif defined(AURORA_PLATFORM_MACOS)
+    // macOS 的系统字体目录是固定位置（不引 CoreText / 不依赖 `system_font_roots()` 的扫描结果）：
+    // 保底链要的是「无论发现层成败都一定有可用 face」，故这里同样用显式候选清单，与 Win / Linux 两支
+    // 同形态。候选按「拉丁 → 中日韩」排列，且**排在内置 Noto Sans 之后**（本函数由
+    // `init_font_discovery()` 在内置注册之后调用，同权重解析按登记序取先者），因此纯拉丁度量
+    // 逐位不变，补齐的只是此前无 face 可落的路径：CJK 请求原先落成 tofu，现在落到系统真实字体。
+    // 本机实测（macOS 26.7.2 x86_64）：`Helvetica.ttc` / `LucidaGrande.ttc` / `Songti.ttc` /
+    // `Hiragino Sans GB.ttc` / `AquaKana.ttc` / `AppleSDGothicNeo.ttc` / `Arial Unicode.ttf` 在位，
+    // `PingFang.ttc` **缺席**（该文件随架构与系统版本浮动，故仍列作候选，不存在者由循环跳过）。
+    constexpr std::array<const char *, 9> candidates = {
+        // 拉丁回退
+        "/System/Library/Fonts/Helvetica.ttc",
+        "/System/Library/Fonts/LucidaGrande.ttc",  // Apple 的 UI 保底族
+        // 中文（简中宋体 / 冬青黑 / 黑体）
+        "/System/Library/Fonts/Supplemental/Songti.ttc",
+        "/System/Library/Fonts/Hiragino Sans GB.ttc",
+        "/System/Library/Fonts/PingFang.ttc",
+        // 日文与韩文
+        "/System/Library/Fonts/AquaKana.ttc",
+        "/System/Library/Fonts/AppleSDGothicNeo.ttc",
+        // 宽覆盖兜底（单文件含拉丁 + CJK + 符号；两份位置任其在位者命中）
+        "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+        "/Library/Fonts/Arial Unicode.ttf",
     };
     for (const char *path : candidates) {
         if (path == nullptr) {

@@ -63,4 +63,21 @@ inline auto set_strict_failure_handler(detail::StrictFailureHandler h) -> void {
     std::terminate();
 }
 
+/// @brief 契约违规硬失败（strict 无关）：FATAL 日志 + 失败处理器（缺省 `std::terminate`）。
+///
+/// 与 `on_strict_failure` 同一条抛出面（文档注释同款口径：收尾期无分配需求，实际不可抛）。
+/// 用于「无条件显形」的进程级契约——主线程投递的发起相违规（state/async.h）即走此口：
+/// 无值班的发起是编程错误，栈即元凶，不留静默回退；测试经 `set_strict_failure_handler`
+/// 注入捕获器（与严格模式共用同一枚处理器，家族一致）。
+/// @param message 违规描述，先经 `AURORA_LOG_FATAL` 写入 stderr。
+/// NOLINTNEXTLINE(bugprone-exception-escape)
+[[noreturn]] inline auto on_contract_violation(std::string_view message) -> void {
+    AURORA_LOG_FATAL("contract", message);
+    if (detail::g_strict_failure_handler) {
+        detail::g_strict_failure_handler(message);
+        std::terminate();  // handler 未终止则兜底，确保不穿透
+    }
+    std::terminate();
+}
+
 }  // namespace aurora

@@ -1,7 +1,7 @@
 #pragma once
 
 /// @brief 代理配置值类型与 `NO_PROXY` 例外匹配。
-/// @file net/proxy.h
+/// @file proxy.h
 ///
 /// 本头只回答一个问题：**「这个目标该走哪个代理，还是直连」**。它是纯值类型——不含句柄、
 /// 不含 socket、不含任何平台头，可在任意线程拷贝与比较。真正的 `CONNECT` / SOCKS5 握手是

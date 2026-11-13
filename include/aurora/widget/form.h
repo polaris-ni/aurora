@@ -11,6 +11,7 @@
 #include "aurora/core/font.h"
 #include "aurora/render/painter.h"
 #include "aurora/state/state.h"
+#include "aurora/theming/theme_scope.h"  // inherit_theme：错误态取主题 error 角色
 #include "aurora/widget/descriptor.h"
 #include "aurora/widget/widget.h"
 
@@ -185,8 +186,8 @@ class FormField : public SingleChild {
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
     /// @brief 信号采集：把字段错误态 `error_` 挂进视图层，供订阅刷新红框/错误文本。
-    /// @param out 收集目标：追加本字段可订阅的 SignalView 节点指针
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&error_); }
+    /// @param out 收集目标：追加本字段可订阅的来源句柄
+    auto collect_signals(StateSink &out) -> void override { out.push(error_); }
 
     /// @brief 执行验证：返回是否通过；错误消息写入响应式状态（驱动 UI 刷新）。
     /// @return true=验证通过（错误态已清除）；false=失败，消息见 `error_text()`
@@ -247,15 +248,16 @@ class FormField : public SingleChild {
             const Rect child_box{.origin = bounds.origin, .size = child_.bounds().size};
             child_.widget().paint(p, child_box, ctx);
             if (has_error()) {
+                const Color error = inherit_theme(ctx).roles.error;
                 // 红色边框标识错误态
-                p.draw_rect(child_box, Color(220, 53, 69, 255));
+                p.draw_rect(child_box, error);
                 // 错误文本绘制在子控件下方
                 const Rect text_box{
                     .origin = Point{.x = bounds.origin.x, .y = bounds.origin.y + child_box.size.height + 2.0F},
                     .size = Size{.width = bounds.size.width, .height = AURORA_ERROR_TEXT_HEIGHT}};
                 Font err_font;
                 err_font.size_pt = 11.0F;
-                p.draw_text(text_box, error_.get(), err_font, Color(220, 53, 69, 255));
+                p.draw_text(text_box, error_.get(), err_font, error);
             }
         }
     }
@@ -316,7 +318,7 @@ class Form : public Container {
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
     /// @brief 信号采集：Form 自身无响应式状态，字段信号经各 `FormField` 上报，此处不收集。
-    auto collect_signals(std::vector<SignalViewBase *> & /*out*/) -> void override {}
+    auto collect_signals(StateSink & /*out*/) -> void override {}
 
     /// @brief 验证全部字段（递归查找子树中的 FormField）：返回是否全部通过。
     /// @return true=所有字段验证通过；各失败字段的错误消息已写入自身状态

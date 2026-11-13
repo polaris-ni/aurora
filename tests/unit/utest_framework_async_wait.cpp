@@ -76,7 +76,7 @@ AURORA_TEST_CASE(timed_out_wait_reports_budget_and_rounds) {
 AURORA_TEST_CASE(timed_out_wait_does_not_swallow_later_observations) {
     // 等待失败之后，同一次用例里「现场为什么没变成那样」的观测才是定位线索：本头刻意把断言做成
     // 非致命（`CHECK` 级），这里用「超时 + 后续观测仍可得」证明它不吞。
-    Watch<int> state{0};
+    Watch<int> const state{0};
     const auto outcome =
         state.wait_for("stays-zero", [](const int &value) -> bool { return value == 7; }, AURORA_OBSERVE);
     AURORA_TEST_CHECK_FALSE(outcome.satisfied);

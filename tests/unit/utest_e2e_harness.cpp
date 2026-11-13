@@ -42,8 +42,8 @@ class NoPixelBufferSurface final : public au::Surface {
 
 /// @brief 全部后端标识（枚举器无条件出现，不随 feature 宏增减，故可全量遍历）。
 [[nodiscard]] auto all_backends() -> std::vector<e2e::Backend> {
-    return {e2e::Backend::Auto, e2e::Backend::Headless, e2e::Backend::Win32,   e2e::Backend::D3D11,
-            e2e::Backend::Glfw, e2e::Backend::X11,      e2e::Backend::Wayland, e2e::Backend::Wgpu};
+    return {e2e::Backend::Auto, e2e::Backend::Headless, e2e::Backend::Win32, e2e::Backend::D3D11, e2e::Backend::Glfw,
+            e2e::Backend::X11,  e2e::Backend::Wayland,  e2e::Backend::Wgpu,  e2e::Backend::MacOS};
 }
 
 /// @brief 错误码比对统一转 int：避免断言宏依赖枚举的流输出。
@@ -83,6 +83,10 @@ AURORA_TEST_CASE(backend_compiled_tracks_feature_macros) {
 #ifdef AURORA_BACKEND_GPU_WGPU
     wgpu = true;
 #endif
+    bool macos = false;
+#ifdef AURORA_BACKEND_MACOS
+    macos = true;
+#endif
 
     AURORA_TEST_CHECK_EQ(e2e::backend_compiled(e2e::Backend::Headless), headless);
     AURORA_TEST_CHECK_EQ(e2e::backend_compiled(e2e::Backend::Win32), win32);
@@ -91,6 +95,7 @@ AURORA_TEST_CASE(backend_compiled_tracks_feature_macros) {
     AURORA_TEST_CHECK_EQ(e2e::backend_compiled(e2e::Backend::X11), x11);
     AURORA_TEST_CHECK_EQ(e2e::backend_compiled(e2e::Backend::Wayland), wayland);
     AURORA_TEST_CHECK_EQ(e2e::backend_compiled(e2e::Backend::Wgpu), wgpu);
+    AURORA_TEST_CHECK_EQ(e2e::backend_compiled(e2e::Backend::MacOS), macos);
 
     // `Auto` 交平台自动选择，永远可请求（无真实后端时回退内存帧缓冲），故恒为 true。
     AURORA_TEST_CHECK_TRUE(e2e::backend_compiled(e2e::Backend::Auto));
@@ -104,6 +109,7 @@ AURORA_TEST_CASE(backend_compiled_tracks_feature_macros) {
     AURORA_TEST_CHECK_STREQ(e2e::backend_name(e2e::Backend::X11), "x11");
     AURORA_TEST_CHECK_STREQ(e2e::backend_name(e2e::Backend::Wayland), "wayland");
     AURORA_TEST_CHECK_STREQ(e2e::backend_name(e2e::Backend::Wgpu), "wgpu");
+    AURORA_TEST_CHECK_STREQ(e2e::backend_name(e2e::Backend::MacOS), "macos");
 }
 
 AURORA_TEST_CASE(uncompiled_backends_fail_with_reason_not_crash) {
@@ -152,7 +158,7 @@ AURORA_TEST_CASE(session_without_window_reports_error_shape) {
 AURORA_TEST_CASE(capture_frame_rejects_surface_without_pixel_buffer) {
     // 读回能力缺失不是「空帧」：须返回 unsupported 且消息沿用 `save_snapshot` 的既有措辞，
     // 使 E2E 适配层能把「不可读回」与「建窗失败」按同一口径记账。
-    NoPixelBufferSurface surface;
+    NoPixelBufferSurface const surface;
     const auto frame = e2e::capture_frame(surface);
     AURORA_TEST_REQUIRE_FALSE(frame.ok());
     AURORA_TEST_CHECK_EQ(code_of(frame.error()), code_of(au::ErrorCode::GeneralNotSupported));

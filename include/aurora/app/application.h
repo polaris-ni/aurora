@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <memory>
-#include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -18,6 +18,7 @@
 #include "aurora/app/window_host.h"
 #include "aurora/commands.h"
 #include "aurora/core/log.h"
+#include "aurora/core/main_queue.h"
 #include "aurora/core/platform.h"  // NOLINT
 #include "aurora/core/strict_mode.h"
 #include "aurora/core/thread.h"
@@ -71,6 +72,11 @@ class AudioContext;  // 前置声明：应用级默认音频上下文（仅作 s
 /// @note Thread: main-thread only
 /// @note Side-effects: paints (run loop renders frames)
 /// @note Rebuildable: no
+/// 成员按**生命周期分组**排布（信号 → 宿主与派发 → 总线/上下文 → 循环与状态），重排虽可收回
+/// 填充字节，但会改动构造/析构顺序；本类为进程级单实例，填充不构成内存压力，故不作优化目标
+/// （同一处置见 include/aurora/window/window.h 与 src/aurora/window/wayland_surface.cpp 的
+/// Padding 豁免）。
+/// NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding)
 class Application {
   public:
     /// @brief 无头便捷构造：登记一个**无 OS 窗口的宿主**，仅用于 render_to_png / 程序化派发。
@@ -207,7 +213,7 @@ class Application {
     }
 
     /// @brief 最近一次用户输入派发的目的窗口 id（活动窗口查询）。
-    /// @detail 语义是「最近一次用户输入派发的目的窗口」，**不等价于 OS 前台窗**——无头、
+    /// @details 语义是「最近一次用户输入派发的目的窗口」，**不等价于 OS 前台窗**——无头、
     ///         失焦两档下二者可以不同；本 API 只答「最近派发落在哪一扇」，不承诺 OS 聚焦
     ///         或前台态，也不预测「下一次事件会落到哪」。
     /// @return 最近记账的宿主 id；无记账记录时回落**存活**宿主（`main_host_` 优先，其次首个
@@ -254,7 +260,7 @@ class Application {
     // ---- 跨窗通信与几何持久化（specification/06-app-platform.md §2.4）----
 
     /// @brief 跨窗口事件总线：类型化广播 / 点对点通知，主线程同步扇出。
-    /// 共享状态请用既有 `Store<S>`（多窗口共享同一实例）；本总线只承载「一次性通知 / 命令」。
+    /// 共享状态可把同一 `State<S>` 句柄按值传给多个窗口；本总线只承载「一次性通知 / 命令」。
     /// @return 总线引用（生命周期同 Application）。
     [[nodiscard]] auto bus() -> WindowEventBus & { return bus_; }
 
@@ -349,7 +355,7 @@ class Application {
     }
 
     /// @brief 设置每帧回调（在 present_root 之前调用），用于注入自定义每帧逻辑
-    ///        （如把共享状态写入 Reactive 标签）。默认为空。
+    ///        （如把共享状态写入状态驱动的标签）。默认为空。
     /// @param cb 每帧回调；置空恢复默认（每帧不执行回调）。
     auto set_on_frame(std::function<void()> cb) -> void { on_frame_ = std::move(cb); }
 
@@ -369,14 +375,14 @@ class Application {
         main_host_->window()->set_overlay(std::move(overlay));
     }
 
-    /// @brief 当前窗口可见性状态（响应式：在 `Effect` 内读取可自动订阅刷新）。
+    /// @brief 当前窗口可见性状态（响应式：在 `effect` 回调内读取可自动订阅刷新）。
     /// 取值见 `WindowState`：Visible（前台激活）/ Occluded（失焦被遮挡）/ Hidden（最小化）。
-    /// @return 响应式状态引用（读取当前可见性；Effect 内读自动订阅）。
-    [[nodiscard]] auto window_state() -> State<WindowState> & { return window_state_; }
-    /// @brief 当前窗口几何态（响应式：在 `Effect` 内读取可自动订阅刷新）。
+    /// @return 只读值句柄（读取当前可见性；effect 内读自动订阅）。
+    [[nodiscard]] auto window_state() const -> ReadOnlyState<WindowState> { return window_state_; }
+    /// @brief 当前窗口几何态（响应式：在 `effect` 回调内读取可自动订阅刷新）。
     /// 取值见 `WindowMode`：Normal / Maximized / Minimized / FullScreen。
-    /// @return 响应式状态引用（读取当前几何态）。
-    [[nodiscard]] auto window_mode() -> State<WindowMode> & { return window_mode_; }
+    /// @return 只读值句柄（读取当前几何态）。
+    [[nodiscard]] auto window_mode() const -> ReadOnlyState<WindowMode> { return window_mode_; }
 
     /// @brief 注册窗口可见性状态命令式回调（与 `window_state()` 响应式订阅并存）。
     /// @param cb 可见性变化回调（仅在状态实际转移时触发）。
@@ -384,6 +390,33 @@ class Application {
     /// @brief 注册窗口几何态命令式回调（与 `window_mode()` 响应式订阅并存）。
     /// @param cb 几何态变化回调（仅在状态实际转移时触发）。
     auto set_on_window_mode(std::function<void(WindowMode)> cb) -> void { on_window_mode_ = std::move(cb); }
+
+    /// @brief OS 明暗偏好的应用级当前档（响应式：在 `effect` 回调内读取可自动订阅刷新）。
+    ///
+    /// 与 `window_state()` / `window_mode()` 的**关键差别是聚合范围**：那两枚只投影主窗口，
+    /// 本 State 聚合**全部宿主**上报的同一次系统切换（进程级事实只有一个真值源），同值不重复通知。
+    /// 取值为 OS **原值**（含 `Unspecified`）——框架不替应用回落明/暗，「系统不表态回哪一档」是应用策略。
+    ///
+    /// 未调用 `refresh_os_color_scheme()` 且系统尚未上报过变化时读 `Unspecified`：构造期不隐式读
+    /// 注册表（与 `platform()` 的「显式查询、跳过探测」同口径）。运行期跟随无需轮询——Win32 后端
+    /// 在 `WM_SETTINGCHANGE` 里重读偏好并逐宿主上报，应用级在此去重成一次通知。
+    /// @return 只读值句柄（读取当前 OS 档；effect 内读自动订阅）。
+    [[nodiscard]] auto os_color_scheme_state() const -> ReadOnlyState<ColorScheme> { return os_scheme_state_; }
+
+    /// @brief 注册 OS 明暗偏好变化的命令式回调（与 `os_color_scheme_state()` 响应式订阅并存）。
+    /// 只在**值实际变化**时触发（跨宿主、同值重复上报均去重），参数为 OS 原值。
+    /// @param cb OS 档变化回调；置空注销。
+    /// @note Thread: 回调在主线程（平台消息泵线程）被调，不在后端工作线程上触发。
+    auto set_on_os_color_scheme(std::function<void(ColorScheme)> cb) -> void { on_os_color_scheme_ = std::move(cb); }
+
+    /// @brief 显式 seed：现读一次系统明暗偏好并写入应用级 State。
+    ///
+    /// 幂等——与当前值相等时不产生通知；仅在值变化时更新 State 并触发 `set_on_os_color_scheme`
+    /// 的回调。供启动期解算当前档（消费者不必等第一扇窗上报），运行期跟随仍由后端上报驱动。
+    /// @note Side-effects: 读注册表 / 配置文件（与自由函数 `aurora::os_color_scheme()` 同款副作用）。
+    /// @note Thread: main-thread only
+    /// @note 平台无探测能力或探测失败时返回 `Unspecified`（不回落明/暗，与 State 口径一致）。
+    auto refresh_os_color_scheme() -> void;
 
     /// @brief 设置运行时严格模式（specification/01-core.md §4.3 / CI 门禁）。
     /// `run()` 期间套用到线程级开关；默认 Off。
@@ -528,7 +561,7 @@ class Application {
 
   private:
     /// @brief 记录一次派发的来源窗口（`active_window()` 的记账入口，O(1) 指针赋值）。
-    /// @detail 调用方负责先按记账范围（用户输入意图类事件）过滤；本函数只处理两件事：
+    /// @details 调用方负责先按记账范围（用户输入意图类事件）过滤；本函数只处理两件事：
     ///         空宿主不记账、模态选择器运行期内的派发不记账（否则选择器自身的输入会把
     ///         活动窗翻到选择器宿主）。
     /// @param host 本次派发的目的宿主（空指针 = 无目的窗口，不记账）。
@@ -639,14 +672,26 @@ class Application {
         }
     }
 
-    /// @brief 排水跨线程回投队列（主线程，每帧开头/退出前调用）。
-    auto drain_posted() -> void {
-        std::vector<std::function<void()>> q;
-        {
-            std::scoped_lock lk(posted_mutex_);
-            q.swap(posted_);
+    /// @brief OS 明暗偏好变化时聚合为应用级响应式 State 并触发命令式回调。
+    ///
+    /// 与 `on_window_state_changed` 同款的**先比后设**：`State::set` 对相等值照样发信号，去重只能
+    /// 在转发处做。本函数由**每个宿主**的上报表调用（非只主窗），故 N 扇窗各收一次同值切换时，
+    /// 第一次数值不等 ⇒ 更新 + 通知，其余次数值已相等 ⇒ 静默——跨宿主聚合的去重由此而来，
+    /// 无需额外记账。
+    /// @param s 后端上报的 OS 档位原值（含 `Unspecified`，不回落）。
+    auto on_os_color_scheme_changed(ColorScheme s) -> void {
+        if (s == os_scheme_state_.get()) {
+            return;
         }
-        for (auto &fn : q) {
+        os_scheme_state_.set(s);
+        if (on_os_color_scheme_) {
+            on_os_color_scheme_(s);
+        }
+    }
+
+    /// @brief 排水进程级唯一队列（主线程，每帧开头/收尾调用）。
+    auto drain_posted() -> void {
+        for (auto &fn : MainQueue::take_batch()) {
             if (fn) {
                 fn();
             }
@@ -661,7 +706,7 @@ class Application {
     /// @param app 本次帧循环所属的应用（nullptr = 摘除登记）。
     static auto set_loop_application(Application *app) -> void;
 
-    /// @brief 循环起手：严格模式、Scheduler 当前指针、主线程回投器、时间基准与帧计数复位。
+    /// @brief 循环起手：严格模式、Scheduler 当前指针、主线程回投值班租约、时间基准与帧计数复位。
     auto loop_begin() -> void {
         prev_strict_ = aurora::strict_mode();
         aurora::set_strict_mode(strict_);
@@ -669,18 +714,16 @@ class Application {
         loop_frames_ = 0;
         Scheduler::set_current(&sched_);
         // 帧循环所属应用登记：自绘选择器三入口据此判「有无 Application 上下文」
-        // （无上下文即等价非交互：WARN 回空，不挂起）。配对摘除见 loop_end。
+        // （无上下文即等价非交互：WARN 回空，不挂入）。配对摘除见 loop_end。
         set_loop_application(this);
-        // 跨线程回投：后台线程的 then 回调入队 + 唤醒睡眠中的主循环，
-        // 下一帧开头在主线程排水执行（兼具线程安全与不丢唤醒）。多窗口下须唤醒**全部**窗口的
-        // 等待通道——任一窗口睡在自己的 Surface 上都可能延迟回投的执行。
-        Task<bool>::set_main_poster([this](std::function<void()> fn) -> void {
-            {
-                std::scoped_lock lk(posted_mutex_);
-                posted_.push_back(std::move(fn));
-            }
-            request_wake_all();
-        });
+        // 跨线程回投：领取进程级唯一队列的值班租约——后台线程的 then 回调入队 + 唤醒睡眠中的
+        // 主循环，下一帧开头在主线程排水执行（兼具线程安全与不丢唤醒）。多窗口下须唤醒**全部**
+        // 窗口的等待通道——任一窗口睡在自己的 Surface 上都可能延迟回投的执行。
+        // 租约领取失败 = 并发 run（进程已允许多实例、只允一个 run）：硬失败，杜绝两个循环抢同一队列。
+        duty_ = MainQueue::on_duty([this] { request_wake_all(); });
+        if (!duty_.has_value()) {
+            on_strict_failure("Application::loop_begin: another main loop is already on duty (concurrent run)");
+        }
 #ifdef AURORA_PLATFORM_WASM
         raf_owner_ = this;  // rAF 蹦床守卫：只有持有循环的应用实例可被推进
 #endif
@@ -734,16 +777,23 @@ class Application {
         return opts_.max_frames <= 0 || loop_frames_ < opts_.max_frames;
     }
 
-    /// @brief 循环收尾：卸载回投器并排尽残留（仍在主线程）、清当前指针、还原严格模式。
-    ///        rAF 末帧同样走此处，退出后回到「无 poster 直接调用」的默认行为。
+    /// @brief 循环收尾：还值班租约 → 开打烊窗口把残留回投排尽（仍在主线程）→ 关窗 → 清当前指针 → 还原严格模式。
+    ///        rAF 末帧同样走此处，退出后回到「无值班的发起即硬失败」的默认行为。
     auto loop_end() -> void {
 #ifdef AURORA_PLATFORM_WASM
         if (raf_owner_ == this) {
             raf_owner_ = nullptr;
         }
 #endif
-        Task<bool>::set_main_poster(nullptr);
-        drain_posted();
+        // 时序纪律（见 core/main_queue.h）：先还租约（epoch→0），此后一切投递只会被打烊取消；
+        // 再在打烊窗口内排水——窗口内 `post` 因 epoch==0 恒拒，队列只减不增，一次捞即净。
+        if (duty_.has_value()) {
+            duty_->release();
+        }
+        {
+            const auto closing = MainQueue::closing_scope();  // 析构即关窗：此后无值班发起回到硬失败
+            drain_posted();
+        }
         Scheduler::set_current(nullptr);
         Animator::set_current(nullptr);
         set_loop_application(nullptr);  // 摘除帧循环所属登记（与 loop_begin 配对）
@@ -814,10 +864,15 @@ class Application {
     OsHotkeyRegistry os_hotkeys_;  ///< OS 级全局热键注册表（无焦点时也触发；平台无后端时 enabled()==false）。
     State<WindowState> window_state_{WindowState::Visible};  ///< 窗口可见性状态（响应式）。
     State<WindowMode> window_mode_{WindowMode::Normal};  ///< 窗口几何态（响应式）。
+    /// @brief OS 明暗偏好的应用级档位（响应式，跨宿主聚合去重；初值 `Unspecified`，见
+    ///        `os_color_scheme_state()`）。声明在 `window_mode_` 之后：同属「窗口级状态聚合」组。
+    State<ColorScheme> os_scheme_state_{ColorScheme::Unspecified};
     std::function<void(WindowState)> on_window_state_;  ///< 可见性状态命令式回调。
     std::function<void(WindowMode)> on_window_mode_;  ///< 几何态命令式回调。
-    std::mutex posted_mutex_;  ///< 跨线程回投队列锁。
-    std::vector<std::function<void()>> posted_;  ///< 待主线程执行的回投工作。
+    std::function<void(ColorScheme)> on_os_color_scheme_;  ///< OS 明暗偏好命令式回调（同值不触发）。
+    /// @brief 进程级唯一队列的值班租约（`loop_begin` 领取、`loop_end` 归还）；有值即在岗。
+    /// 并发 run 由 `MainQueue::on_duty` 的 CAS 结构性拒绝（见 loop_begin）。
+    std::optional<MainQueue::Lease> duty_;
 };
 
 /// @brief 流式应用构建器（specification/06-app-platform.md

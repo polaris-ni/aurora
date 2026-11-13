@@ -1,4 +1,4 @@
-// file_dialog_selfdrawn.cpp — 文件 / 目录选择器的桌面自绘实现（Linux / macOS）。
+// file_dialog_selfdrawn.cpp — 文件 / 目录选择器的桌面自绘实现。
 //
 // 架构（对应内部头 src/aurora/app/detail/file_picker.h 的四层）：
 //   L0 数据源  —— FsDirectorySource（std::filesystem 默认实现；测试可注入 mock）
@@ -11,8 +11,11 @@
 // 把「装了这个二进制」变成运行期前提；xdg-desktop-portal 的 FileChooser 是异步 DBus 信号，
 // 本库无 DBus 客户端。框架自绘零新增依赖，且状态机层可完全无头证。
 //
-// 非 AURORA_PLATFORM_LINUX / AURORA_PLATFORM_MACOS 平台本文件不含任何定义
-// （Win32 走 file_dialog_win32.cpp，WASM / Android / BSD 保留 file_dialog.h 内联回退）。
+// 门控：L0–L2 在 Linux 与 macOS 上都编译（模型 / 视图可在无头用例里直接断言）；L3 的公共
+// 入口只在**自绘腿真实生效**的组合上定义——Linux，以及「macOS 平台但未启用 AppKit 后端」
+// （GLFW / X11 / Headless）。macOS + AppKit 后端由 `file_dialog_macos.cpp` 提供原生面板，
+// 两处定义互斥，避免同符号重复定义。其余平台（Win32 走 file_dialog_win32.cpp；WASM /
+// Android / BSD 保留 file_dialog.h 内联回退）本文件不含任何定义。
 #include "aurora/core/platform.h"
 #if defined(AURORA_PLATFORM_LINUX) || defined(AURORA_PLATFORM_MACOS)
 
@@ -24,6 +27,7 @@
 #include <vector>
 
 #include "aurora/app/application.h"
+#include "aurora/app/detail/file_dialog_plan.h"
 #include "aurora/app/detail/file_picker.h"
 #include "aurora/app/file_dialog.h"
 #include "aurora/core/log.h"
@@ -151,6 +155,11 @@ namespace detail {
 
 FilePickerModel::FilePickerModel(PickerMode mode, file_dialog::Options opts, const DirectorySource &source)
     : mode_(mode), opts_(std::move(opts)), source_(&source) {
+    // 保存形态的名字栏初值：`suggested_name` 过折算层取末段后播种（Win32 腿投给 OS 的名字栏，本腿
+    // 投给状态机——同一份换算，两腿才落出同一个名字）。非保存形态一概不消费该格。
+    if (mode_ == PickerMode::SaveFile) {
+        save_name_ = aurora::file_dialog_plan::suggested_file_name(opts_.suggested_name);
+    }
     // 初始目录三级口径：未指定 → 数据源根（文档化默认，不算降级）；指定不可用 → 降级根并留痕；
     // 显式指定的目录列不出 → 同样降级根并留痕；连根都列不出 → 空条目启动（仍留痕）。
     const bool specified = !opts_.initial_dir.empty();
@@ -289,7 +298,10 @@ auto FilePickerModel::confirm() const -> std::vector<std::string> {
             break;
         case PickerMode::SaveFile:
             if (!save_name_.empty()) {
-                out.push_back(join_path(current_dir_, save_name_));
+                // 扩展名在确认时补（用户没打点才补），故改写过的名字同样吃这条规则；
+                // Win32 腿由 OS 在名字栏里补，两腿结果同一句：选定路径以该扩展名结尾。
+                out.push_back(join_path(current_dir_, aurora::file_dialog_plan::with_default_extension(
+                                                          save_name_, opts_.default_extension)));
             }
             break;
         case PickerMode::OpenFolder:
@@ -322,17 +334,17 @@ FilePickerView::FilePickerView(PickerMode mode, const file_dialog::Options &opts
 
     list_ = std::make_shared<ListView>(std::vector<std::string>{}, mode == PickerMode::OpenFile);
     list_->set_on_select([this](int row) -> void { on_row_selected(row); });
-    auto list_scroll = std::make_shared<Scroll>(ScrollProps{.child = Node{list_}});
+    auto list_scroll = std::make_shared<Scroll>(Node{list_});
     list_scroll->height(Length::fixed(AURORA_PICKER_LIST_HEIGHT));
 
-    auto up_button = std::make_shared<Button>(ButtonProps{.label = "Up"});
+    auto up_button = std::make_shared<Button>(ButtonProps().set_label("Up"));
     up_button->set_on_click([this]() -> void { go_up(); });
 
-    confirm_button_ = std::make_shared<Button>(ButtonProps{.label = confirm_label(mode)});
+    confirm_button_ = std::make_shared<Button>(ButtonProps().set_label(confirm_label(mode)));
     confirm_button_->set_on_click([this]() -> void { confirm(); });
     confirm_button_->set_enabled(has_confirmable_selection());
 
-    auto cancel_button = std::make_shared<Button>(ButtonProps{.label = "Cancel"});
+    auto cancel_button = std::make_shared<Button>(ButtonProps().set_label("Cancel"));
     cancel_button->set_on_click([this]() -> void { cancel(); });
 
     // 路径行：上一级 + （保存形态）文件名输入框。
@@ -341,6 +353,8 @@ FilePickerView::FilePickerView(PickerMode mode, const file_dialog::Options &opts
     if (mode == PickerMode::SaveFile) {
         name_input_ = std::make_shared<TextInput>();
         name_input_->set_placeholder("File name");
+        // 输入框初值与状态机同源（只喂其一不算闭合：状态机管确认结果、输入框管用户看得见的字）。
+        name_input_->set_value(model_.save_name());
         name_input_->set_on_changed([this](const std::string &value) -> void { model_.set_save_name(value); });
         path_row.emplace_back(name_input_);
     }
@@ -348,17 +362,16 @@ FilePickerView::FilePickerView(PickerMode mode, const file_dialog::Options &opts
     std::vector<Node> column;
     column.emplace_back(title);
     column.emplace_back(path_label_);
-    column.emplace_back(Row(RowProps{.children = std::move(path_row), .gap = AURORA_PICKER_GAP}));
+    column.emplace_back(Row(std::move(path_row), RowProps().set_gap(AURORA_PICKER_GAP)));
     column.emplace_back(list_scroll);
     if (!opts.filters.empty()) {
         auto filter_label = std::make_shared<Text>(filter_summary(opts.filters));
         filter_label->font_size(12);
         column.emplace_back(filter_label);
     }
-    column.emplace_back(
-        Row(RowProps{.children = {Node{confirm_button_}, Node{cancel_button}}, .gap = AURORA_PICKER_GAP}));
+    column.emplace_back(Row({Node{confirm_button_}, Node{cancel_button}}, RowProps().set_gap(AURORA_PICKER_GAP)));
 
-    set_content(Node{Column(ColumnProps{.children = std::move(column), .gap = AURORA_PICKER_GAP})});
+    set_content(Node{Column(std::move(column), ColumnProps().set_gap(AURORA_PICKER_GAP))});
     refresh_ui();
 }
 
@@ -516,6 +529,10 @@ auto FilePickerSession::run() -> std::vector<std::string> {
 
 namespace {
 
+// 自绘腿的公共入口只在「本腿真实生效」的组合上定义：Linux，或 macOS 未启用 AppKit 后端。
+// macOS + AppKit 的入口在 file_dialog_macos.cpp（原生面板），两处互斥。
+#if defined(AURORA_PLATFORM_LINUX) || (defined(AURORA_PLATFORM_MACOS) && !defined(AURORA_BACKEND_MACOS))
+
 /// @brief 自绘腿统一路由：无 Application 上下文即等价非交互（WARN 回空，不挂起）。
 auto run_selfdrawn(detail::PickerMode mode, const Options &opts, const detail::DirectorySource &source)
     -> std::vector<std::string> {
@@ -531,6 +548,7 @@ auto run_selfdrawn(detail::PickerMode mode, const Options &opts, const detail::D
 }  // namespace
 
 auto open_file(const Options &opts) -> Result<std::vector<std::string>> {
+    headless_last_options = opts;
     if (!headless_open_result.empty()) {
         return headless_open_result;  // 钩子优先：未构造选择器（计数器可证）
     }
@@ -542,6 +560,7 @@ auto open_file(const Options &opts) -> Result<std::vector<std::string>> {
 }
 
 auto save_file(const Options &opts) -> Result<std::string> {
+    headless_last_options = opts;
     if (!headless_save_result.empty()) {
         return headless_save_result;
     }
@@ -554,6 +573,7 @@ auto save_file(const Options &opts) -> Result<std::string> {
 }
 
 auto open_folder(const Options &opts) -> Result<std::string> {
+    headless_last_options = opts;
     if (!headless_folder_result.empty()) {
         return headless_folder_result;
     }
@@ -564,6 +584,16 @@ auto open_folder(const Options &opts) -> Result<std::string> {
     const std::vector<std::string> picked = run_selfdrawn(detail::PickerMode::OpenFolder, opts, source);
     return Result<std::string>{picked.empty() ? std::string{} : picked.front()};
 }
+
+#else
+
+// macOS + AppKit：入口在 file_dialog_macos.cpp。这里留一枚编译期锚点，防止将来误把
+// 本 TU 的门控改宽后出现「两条腿都没定义」的静默链接错误而无从归因。
+static_assert(true, "self-drawn entries are disabled on macOS with the AppKit backend");
+
+}  // namespace
+
+#endif  // 自绘腿入口生效条件
 
 }  // namespace aurora::file_dialog
 

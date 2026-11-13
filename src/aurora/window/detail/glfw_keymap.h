@@ -11,7 +11,6 @@
 // 收进本头后该配置由 `utest_glfw_keymap` 机械校验。
 //
 // 门控与 `glfw_surface.cpp` 同款：`AURORA_BACKEND_GLFW`。
-#include "aurora/core/platform.h"
 
 #ifdef AURORA_BACKEND_GLFW
 

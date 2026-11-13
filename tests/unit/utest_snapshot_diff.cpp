@@ -69,7 +69,7 @@ AURORA_TEST_CASE(identical_images_have_no_diff) {
 }
 
 AURORA_TEST_CASE(single_pixel_diff_counted_and_located) {
-    Image baseline = make_image(4, 4, 0, 0, 0);
+    Image const baseline = make_image(4, 4, 0, 0, 0);
     Image current = baseline;
     current.pixels[0] = 255;  // 首个像素 R 通道 0 → 255
 
@@ -86,7 +86,7 @@ AURORA_TEST_CASE(single_pixel_diff_counted_and_located) {
 }
 
 AURORA_TEST_CASE(max_color_delta_is_largest_single_channel) {
-    Image baseline = make_image(2, 2, 0, 0, 0);
+    Image const baseline = make_image(2, 2, 0, 0, 0);
     Image current = baseline;
     current.pixels[0] = 30;  // R 差 30
     current.pixels[4] = 200;  // 第二像素 R 差 200
@@ -97,7 +97,7 @@ AURORA_TEST_CASE(max_color_delta_is_largest_single_channel) {
 }
 
 AURORA_TEST_CASE(tolerance_absorbs_small_deltas) {
-    Image baseline = make_image(2, 2, 100, 100, 100);
+    Image const baseline = make_image(2, 2, 100, 100, 100);
     Image current = baseline;
     current.pixels[0] = 103;  // 差 3
 
@@ -118,7 +118,7 @@ AURORA_TEST_CASE(match_pixels_are_dimmed_in_diff_image) {
 }
 
 AURORA_TEST_CASE(passed_threshold_uses_ratio) {
-    Image baseline = make_image(4, 4, 0, 0, 0);
+    Image const baseline = make_image(4, 4, 0, 0, 0);
     Image current = baseline;
     current.pixels[0] = 255;  // 1/16 差异
 
@@ -149,7 +149,7 @@ AURORA_TEST_CASE(cluster_size_mismatch_and_empty_images_return_no_regions) {
 }
 
 AURORA_TEST_CASE(cluster_identical_images_have_no_regions) {
-    Image baseline = make_image(16, 16, 7, 8, 9);
+    Image const baseline = make_image(16, 16, 7, 8, 9);
     const Image &current = baseline;
     AURORA_TEST_CHECK_TRUE(cluster_diff_regions(baseline, current).empty());
 }
@@ -157,7 +157,7 @@ AURORA_TEST_CASE(cluster_identical_images_have_no_regions) {
 AURORA_TEST_CASE(cluster_single_pixel_yields_one_tile_sized_region) {
     // 16×16 / tile 8 → 2×2 网格；差异落在 (2,2) 属左上格 ⇒ 区域是整格 8×8，而非单点 1×1。
     // 这是刻意取舍：区域是「网格包络」，换来确定性与规整矩形（详见 snapshot_diff.h 的算法说明）。
-    Image baseline = make_image(16, 16, 0, 0, 0);
+    Image const baseline = make_image(16, 16, 0, 0, 0);
     Image current = baseline;
     set_px(current, 2, 2, 255);
 
@@ -175,7 +175,7 @@ AURORA_TEST_CASE(cluster_single_pixel_yields_one_tile_sized_region) {
 AURORA_TEST_CASE(cluster_merges_edge_adjacent_tiles_into_one_region) {
     // 32×32 / tile 8 → 4×4 网格；两点分别落在格 (0,0) 与 (1,0)，两者共边 ⇒ 四连通归并为一个区域，
     // 横向包络跨到 x=16。注意诊断是「相邻即可并一块」，而非像素级连通。
-    Image baseline = make_image(32, 32, 0, 0, 0);
+    Image const baseline = make_image(32, 32, 0, 0, 0);
     Image current = baseline;
     set_px(current, 0, 0, 255);
     set_px(current, 9, 1, 255);
@@ -189,7 +189,7 @@ AURORA_TEST_CASE(cluster_merges_edge_adjacent_tiles_into_one_region) {
 
 AURORA_TEST_CASE(cluster_separated_blocks_are_distinct_and_sorted_by_size) {
     // 两块差异分别在格 (0,0) 与格 (3,3)，既非共边也非对角相邻 ⇒ 两个独立区域，且按差异像素**降序**输出。
-    Image baseline = make_image(32, 32, 0, 0, 0);
+    Image const baseline = make_image(32, 32, 0, 0, 0);
     Image current = baseline;
     for (int x = 0; x < 2; ++x) {
         set_px(current, x, 0, 255);  // 格 (0,0)：2 点
@@ -207,14 +207,14 @@ AURORA_TEST_CASE(cluster_separated_blocks_are_distinct_and_sorted_by_size) {
 }
 
 AURORA_TEST_CASE(cluster_min_region_pixels_filters_small_regions) {
-    Image baseline = make_image(32, 32, 0, 0, 0);
+    Image const baseline = make_image(32, 32, 0, 0, 0);
     Image current = baseline;
     set_px(current, 0, 0, 255);  // 1 点
     for (int x = 24; x < 27; ++x) {  // 3 点
         set_px(current, x, 24, 255);
     }
 
-    DiffRegionOptions keep_all;
+    DiffRegionOptions const keep_all;
     AURORA_TEST_CHECK_EQ(cluster_diff_regions(baseline, current, 0, keep_all).size(), 2U);
 
     DiffRegionOptions drop_specks;
@@ -226,7 +226,7 @@ AURORA_TEST_CASE(cluster_min_region_pixels_filters_small_regions) {
 
 AURORA_TEST_CASE(cluster_tile_size_only_changes_bbox_precision_not_region_count) {
     // 同一条竖直差异线：网格边长只影响矩形是否贴边，不影响「这是一块区域」的判断。
-    Image baseline = make_image(16, 16, 0, 0, 0);
+    Image const baseline = make_image(16, 16, 0, 0, 0);
     Image current = baseline;
     for (int y = 2; y <= 6; ++y) {
         set_px(current, 5, y, 255);
@@ -255,7 +255,7 @@ AURORA_TEST_CASE(cluster_tile_size_only_changes_bbox_precision_not_region_count)
 
 AURORA_TEST_CASE(cluster_reports_per_region_max_color_delta) {
     // 两块区域的色差不同 ⇒ 区域级 max_color_delta 必须分别记录，不能只留全局最大值。
-    Image baseline = make_image(32, 32, 0, 0, 0);
+    Image const baseline = make_image(32, 32, 0, 0, 0);
     Image current = baseline;
     for (int x = 24; x < 27; ++x) {
         set_px(current, x, 24, 50);  // 格 (3,3)：3 点，色差 50
@@ -271,7 +271,7 @@ AURORA_TEST_CASE(cluster_reports_per_region_max_color_delta) {
 
 AURORA_TEST_CASE(cluster_tolerance_is_shared_with_compare_snapshots) {
     // 容差语义必须与 compare_snapshots 一致：被容差吸收的差异不应产出区域。
-    Image baseline = make_image(16, 16, 100, 100, 100);
+    Image const baseline = make_image(16, 16, 100, 100, 100);
     Image current = baseline;
     set_px(current, 2, 2, 103);  // 差 3
 
@@ -435,7 +435,7 @@ AURORA_TEST_CASE(report_size_mismatch_short_circuits_without_regions) {
 }
 
 AURORA_TEST_CASE(report_without_boxes_still_reports_regions_as_unattributed) {
-    Image baseline = make_image(32, 32, 0, 0, 0);
+    Image const baseline = make_image(32, 32, 0, 0, 0);
     Image current = baseline;
     set_px(current, 0, 0, 255);
 
@@ -453,7 +453,7 @@ AURORA_TEST_CASE(report_without_boxes_still_reports_regions_as_unattributed) {
 }
 
 AURORA_TEST_CASE(report_json_carries_global_and_per_region_facts) {
-    Image baseline = make_image(32, 32, 0, 0, 0);
+    Image const baseline = make_image(32, 32, 0, 0, 0);
     Image current = baseline;
     set_px(current, 0, 0, 255);
     set_px(current, 24, 24, 255);
@@ -473,7 +473,7 @@ AURORA_TEST_CASE(report_json_carries_global_and_per_region_facts) {
 
 AURORA_TEST_CASE(report_text_mentions_widget_path_and_type) {
     // to_text 的价值就在这一句：AI 拿到文本就能知道该去改哪个控件，不必自己遍历 accumulated JSON。
-    Image baseline = make_image(32, 32, 0, 0, 0);
+    Image const baseline = make_image(32, 32, 0, 0, 0);
     Image current = baseline;
     set_px(current, 0, 0, 255);
 
@@ -485,7 +485,7 @@ AURORA_TEST_CASE(report_text_mentions_widget_path_and_type) {
 }
 
 AURORA_TEST_CASE(report_text_truncates_regions_and_says_so) {
-    Image baseline = make_image(64, 64, 0, 0, 0);
+    Image const baseline = make_image(64, 64, 0, 0, 0);
     Image current = baseline;
     // 制造多块互不相连的差异（每块落在独立网格，彼此不四连通）。
     set_px(current, 2, 2, 255);
@@ -510,7 +510,7 @@ AURORA_TEST_CASE(report_text_marks_unattributed_regions) {
         WidgetBox{.path = "0",
                   .type = "Text",
                   .bounds = Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 8.0F, .height = 8.0F}}});
-    Image baseline = make_image(32, 32, 0, 0, 0);
+    Image const baseline = make_image(32, 32, 0, 0, 0);
     Image current = baseline;
     set_px(current, 30, 30, 255);
 
@@ -522,7 +522,7 @@ AURORA_TEST_CASE(report_text_marks_unattributed_regions) {
 
 AURORA_TEST_CASE(attribute_output_parallels_input_regions) {
     // 输出与输入等长同序 —— 调用方依赖按索引回配到区域。
-    Image baseline = make_image(32, 32, 0, 0, 0);
+    Image const baseline = make_image(32, 32, 0, 0, 0);
     Image current = baseline;
     set_px(current, 0, 0, 255);
     set_px(current, 24, 24, 255);

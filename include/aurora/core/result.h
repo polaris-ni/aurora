@@ -17,7 +17,8 @@ namespace aurora {
 /// - 进程外（JSON/日志/IDE 工具）：只认 `code`（冻结 slug，如 "nav-depth-exceeded"
 /// 改名标识符也不变）与 `code_enum`（C++ 标识符，调试用）。
 /// - 进程内：用 `code_enum` 做 `err.code_enum == ErrorCode::X` 类型安全分支，用 `severity`/
-/// `category`/`retryable` 元数据做策略判断。
+/// `domain`/`kind`/`retryable` 元数据做策略判断。`domain` 答「该去哪个子系统找」，`kind` 答
+/// 「坏在哪一层、该做什么动作」，二者正交。
 ///
 /// 所有元数据由 codespec/errors.toml 经生成器产出，经 make_error 自动填充，无需手填。
 /// @note Thread: thread-safe
@@ -37,16 +38,19 @@ struct Error {
     /// 指定初始化 + variant 持有」两层建模起来，故在个别 TU 上误判为「未初始化赋值」。
     ErrorCode code_enum{};  // NOLINT(clang-analyzer-core.uninitialized.Assign) 理由见上方 @note
     ErrorSeverity severity = ErrorSeverity::Error;  ///< 来自 errors.toml
-    ErrorCategory category = ErrorCategory::General;  ///< 来自 errors.toml
+    /// @brief 子系统归属（来自 errors.toml）；缺省取 `General`、`kind` 取 `Internal`，与零值哨兵
+    /// `ErrorCode{}` == `GeneralUnknown` 那一行的表元数据一致，故默认构造的 Error 不引入第三种组合。
+    ErrorDomain domain = ErrorDomain::General;
+    ErrorKind kind = ErrorKind::Internal;  ///< 故障性质（来自 errors.toml）
     bool retryable = false;  ///< 来自 errors.toml
 
-    /// @brief 序列化为单行 JSON：code/message/code_enum/severity/category/retryable 恒输出，
+    /// @brief 序列化为单行 JSON：code/message/code_enum/severity/domain/kind/retryable 恒输出，
     /// suggestion/docs/where/hint 非空才输出。
     /// @return JSON 对象一行文本（字符串字段做双引号、反斜杠与换行转义；不经三方 JSON 库）。
     [[nodiscard]] auto to_json() const -> std::string;
 };
 
-/// @brief 查表填充 Error 的 slug/severity/category/retryable 元数据与一个 message。
+/// @brief 查表填充 Error 的 slug/severity/domain/kind/retryable 元数据与一个 message。
 /// @param code 编译期枚举码（AURORA_ERROR_TABLE 索引；未知码由 at() 抛异常拦截）。
 /// @param message 人类可读描述（调用方给定，不经模板渲染）。
 /// @param hint 修复提示；空时回退表中的默认 hint。
@@ -60,7 +64,8 @@ struct Error {
         .hint = hint.empty() ? std::string(m.hint) : std::move(hint),
         .code_enum = code,
         .severity = m.severity,
-        .category = m.category,
+        .domain = m.domain,
+        .kind = m.kind,
         .retryable = m.retryable,
     };
 }
@@ -88,7 +93,7 @@ struct Error {
 }
 
 /// @brief 构造错误（向后兼容）：枚举 + message + suggestion/docs/where。
-///         slug/severity/category/fix 元数据仍来自表。
+///         slug/severity/domain/kind 元数据仍来自表。
 /// @param code 编译期枚举码（表索引）。
 /// @param message 最终人类可读描述。
 /// @param suggestion 修复建议（覆盖表值）。

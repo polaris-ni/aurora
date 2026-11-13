@@ -41,6 +41,7 @@ auto make_window(int w, int h, float scale) -> au::Window {
 
 // Print one table row: scene | logical size | scale | physical size | ms/frame.
 auto report(const char *scene, const std::string &size_label, float s, int dev_w, int dev_h, double ms) -> void {
+    aurora::bench::process_result().metric(std::string{scene} + "@" + size_label + "@" + aurora::bench::ffmt(1, s), ms);
     AURORA_LOG_RAW("bench", "| ", scene, " | ", size_label, " | ", aurora::bench::ffmt(1, s), " | ", dev_w, "x", dev_h,
                    " | ", aurora::bench::ffmt(3, ms), " |\n");
 }
@@ -60,9 +61,9 @@ auto build_tree(std::shared_ptr<aurora::Chip> *out_probe) -> aurora::Node {
             }
             chips.emplace_back(chip);
         }
-        rows.emplace_back(std::make_shared<aurora::Row>(aurora::RowProps{.children = std::move(chips)}));
+        rows.emplace_back(std::make_shared<aurora::Row>(std::move(chips)));
     }
-    return aurora::Node{std::make_shared<aurora::Column>(aurora::ColumnProps{.children = std::move(rows)})};
+    return aurora::Node{std::make_shared<aurora::Column>(std::move(rows))};
 }
 
 // Representative text (Latin + digits + CJK) covering the fallback chain and atlas-cache paths.
@@ -89,8 +90,8 @@ auto build_scroll_tree() -> aurora::Node {
         chip->set_label("row " + std::to_string(i));
         items.emplace_back(std::move(chip));
     }
-    auto col = std::make_shared<aurora::Column>(aurora::ColumnProps{.children = std::move(items)});
-    return aurora::Node{std::make_shared<aurora::Scroll>(aurora::ScrollProps{.child = aurora::Node{std::move(col)}})};
+    auto col = std::make_shared<aurora::Column>(std::move(items));
+    return aurora::Node{std::make_shared<aurora::Scroll>(aurora::Node{std::move(col)})};
 }
 
 }  // namespace
@@ -99,6 +100,7 @@ auto build_scroll_tree() -> aurora::Node {
 // try/catch 包装
 // NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
+    aurora::bench::process_result().identify("bench_render", "raster-matrix");
     const std::vector<std::pair<int, int>> bases = {{1280, 720}, {1920, 1080}, {2560, 1440}};
     const std::vector scales = {1.0F, 1.5F, 2.0F};
     constexpr int warmup = 3;
@@ -380,7 +382,7 @@ auto main() -> int {
     }
 
     AURORA_LOG_RAW("bench", "\n", aurora::bench::AURORA_BENCH_DISCLAIMER, "\n");
-    return 0;
+    return aurora::bench::finalize_process("bench_render", "raster-matrix") ? 0 : 1;
 }
 
 #else  // !AURORA_BACKEND_HEADLESS
@@ -388,8 +390,10 @@ auto main() -> int {
 // 无头后端未编译：本基准的唯一绘制目标是 `HeadlessSurface`，无替代实现——跳过并如实说明，
 // 不编译失败（基准的判据本身也无从成立）。
 auto main() -> int {
+    aurora::bench::process_result().identify("bench_render", "raster-matrix");
+    aurora::bench::process_result().skip("backend-unavailable");
     AURORA_LOG_RAW("bench", "bench_render: skipped (AURORA_BACKEND_HEADLESS not enabled, no paint target)\n");
-    return 0;
+    return aurora::bench::finalize_process("bench_render", "raster-matrix") ? 0 : 1;
 }
 
 #endif  // AURORA_BACKEND_HEADLESS

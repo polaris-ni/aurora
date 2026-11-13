@@ -364,7 +364,7 @@ class Painter {
     /// @return 有效裁剪矩形（逻辑 dp）。
     [[nodiscard]] auto clip_bounds() const -> Rect;
 
-    // ---- Display List 录制 / 回放（AURORA_ENABLE_DISPLAY_LIST）----
+    // ---- Display List 录制 / 回放 ----
     /// @brief 进入录制模式并将绘制命令写入给定 DisplayList（先清空）。绘制原语在录制模式下
     ///        仅记录命令、不直接上屏；嵌套调用以栈管理（子控件缓存 DL 压平并入父 DL）。
     /// @param dl 录制目标（进入时先 clear，压入录制栈）。
@@ -477,7 +477,7 @@ class Painter {
     bool skip_dl_record_ =
         false;  ///< Window 脏区裁剪绘制期间设为 true，抑制 DL 录制/回放（partial clip 下录制会丢失 clip 外子节点）
 
-    // ---- Display List 录制栈（AURORA_ENABLE_DISPLAY_LIST）----
+    // ---- Display List 录制栈 ----
     /// @brief 把一条文本绘制命令录入当前录制目标（变长字符串入池）。
     /// @param r 排版区域（逻辑 dp）。
     /// @param s UTF-8 文本。

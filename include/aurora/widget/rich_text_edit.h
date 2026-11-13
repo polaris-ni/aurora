@@ -331,7 +331,7 @@ class RichTextEdit : public LeafWidget {
 
     /// @brief 信号登记：文档模型为普通成员（非 reactive），无信号需登记，空实现。
     /// @param out 输出参数（本控件不使用）。
-    auto collect_signals([[maybe_unused]] std::vector<SignalViewBase *> &out) -> void override {}
+    auto collect_signals([[maybe_unused]] StateSink &out) -> void override {}
 
     // ---- 事件处理 ----
 
@@ -546,6 +546,11 @@ class RichTextEdit : public LeafWidget {
     /// @param bounds 行扫描参照盒（绘制区 / focus_bounds）。
     /// @return 宽 1dp、高一行高的光标盒；无法定位时为 nullopt。
     [[nodiscard]] auto caret_box_at(const Rect &bounds) const -> std::optional<Rect>;
+
+    /// @brief 返回包含 `caret` 的行的 [begin, end) 文档下标区间（end 不含行尾换行符）。
+    ///        用于行内 Home/End 跳转；越界或空文档时回退为整文档区间 [0, doc.size())。
+    /// @param caret 光标位置（文档下标）。
+    [[nodiscard]] auto line_bounds_for(std::size_t caret) const -> std::pair<std::size_t, std::size_t>;
 
     /// @brief 组合态绘制：preedit 内选区高亮 + preedit 文本 + 下划线 + 候选插入点光标。
     ///        在 `(x, y)` 处绘制，返回占用宽度（供调用方推进游标，实现「预编辑串挤开后续文本」）。

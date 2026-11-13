@@ -249,4 +249,105 @@ AURORA_TEST_CASE(timeline_empty_and_invalid_duration_edges) {
     AURORA_TEST_CHECK_NEAR(neg_gap.duration(), 0.2, 1e-12);
 }
 
+// ---- 关键帧分段曲线（Stop::curve） ----
+
+// @brief 判据 28/29：段 [stop_i, stop_{i+1}] 用**第 i 个** Stop
+// 的曲线整形；缺省线性与既有用例逐位一致；末点曲线不参与求值。
+AURORA_TEST_CASE(keyframes_segment_curve_belongs_to_left_stop) {
+    const aurora::Keyframes<double> shaped{{
+        {.time = 0.0, .value = 0.0, .curve = aurora::Curves::ease_in_quad()},
+        {.time = 0.5, .value = 10.0, .curve = aurora::Curves::ease_out_quad()},
+        {.time = 1.0, .value = 20.0},
+    }};
+    // 段 [0,0.5]：起点曲线二次缓入，local 0.5 → 0.25 → 2.5。
+    AURORA_TEST_CHECK_NEAR(shaped.value(0.25), 2.5, 1e-12);
+    // 段 [0.5,1]：用第二个 Stop 的二次缓出，local 0.5 → 0.75 → 17.5（不是第一个 Stop 的曲线）。
+    AURORA_TEST_CHECK_NEAR(shaped.value(0.75), 17.5, 1e-12);
+
+    // 恒线性基线：曲线确实改变了中间帧取值；缺省构造（既有形态）与基线逐位一致。
+    const aurora::Keyframes<double> linear{{
+        {.time = 0.0, .value = 0.0},
+        {.time = 0.5, .value = 10.0},
+        {.time = 1.0, .value = 20.0},
+    }};
+    AURORA_TEST_CHECK_NEAR(linear.value(0.25), 5.0, 1e-12);
+    AURORA_TEST_CHECK_NEAR(linear.value(0.75), 15.0, 1e-12);
+    AURORA_TEST_CHECK_NEAR(linear.value(0.0), 0.0, 1e-12);
+    AURORA_TEST_CHECK_NEAR(linear.value(1.0), 20.0, 1e-12);
+
+    // 末个 Stop 的曲线不参与求值：改掉它，任何时刻的取值都不变（把段归属口径钉死）。
+    const aurora::Keyframes<double> last_curve_changed{{
+        {.time = 0.0, .value = 0.0, .curve = aurora::Curves::ease_in_quad()},
+        {.time = 0.5, .value = 10.0, .curve = aurora::Curves::ease_out_quad()},
+        {.time = 1.0, .value = 20.0, .curve = aurora::Curves::bounce_out()},
+    }};
+    for (const double t : {0.0, 0.1, 0.25, 0.4, 0.5, 0.6, 0.75, 0.9, 1.0}) {
+        AURORA_TEST_CHECK_NEAR(last_curve_changed.value(t), shaped.value(t), 1e-12);
+    }
+
+    // 区间外仍取最近端点值（曲线不改变边界语义）。
+    AURORA_TEST_CHECK_NEAR(shaped.value(-0.5), 0.0, 1e-12);
+    AURORA_TEST_CHECK_NEAR(shaped.value(1.5), 20.0, 1e-12);
+}
+
+// @brief 判据 30：stable_sort 把曲线随所属 Stop 一起移动；同时刻停靠点按插入次序，求值取该段的起点值。
+AURORA_TEST_CASE(keyframes_sort_carries_curve_and_keeps_insertion_order_on_ties) {
+    const aurora::Keyframes<double> shaped{{
+        {.time = 0.0, .value = 0.0, .curve = aurora::Curves::ease_in_quad()},
+        {.time = 0.5, .value = 10.0, .curve = aurora::Curves::ease_out_quad()},
+        {.time = 1.0, .value = 20.0},
+    }};
+    // 乱序入参：排序后取值与正序完全一致（曲线跟着自己的 Stop 走，不跟位置走）。
+    const aurora::Keyframes<double> unsorted{{
+        {.time = 0.5, .value = 10.0, .curve = aurora::Curves::ease_out_quad()},
+        {.time = 1.0, .value = 20.0},
+        {.time = 0.0, .value = 0.0, .curve = aurora::Curves::ease_in_quad()},
+    }};
+    for (const double t : {0.0, 0.25, 0.5, 0.75, 1.0}) {
+        AURORA_TEST_CHECK_NEAR(unsorted.value(t), shaped.value(t), 1e-12);
+    }
+    AURORA_TEST_CHECK_TRUE(unsorted.stops()[0].curve.kind() == aurora::CurveKind::EaseInQuad);
+    AURORA_TEST_CHECK_TRUE(unsorted.stops()[1].curve.kind() == aurora::CurveKind::EaseOutQuad);
+    AURORA_TEST_CHECK_TRUE(unsorted.stops()[2].curve.kind() == aurora::CurveKind::Linear);
+
+    // 同时刻停靠点：稳定排序保持插入次序，t 落在该时刻时取**排序后靠前**那个（后一个只作下一段起点）。
+    const aurora::Keyframes<double> duplicated{{
+        {.time = 0.0, .value = 0.0},
+        {.time = 0.5, .value = 10.0},
+        {.time = 0.5, .value = 30.0},
+        {.time = 1.0, .value = 40.0},
+    }};
+    AURORA_TEST_CHECK_NEAR(duplicated.value(0.5), 10.0, 1e-12);
+    AURORA_TEST_CHECK_NEAR(duplicated.value(0.75), 35.0, 1e-12);  // 第二个停靠点作为下一段起点
+    const aurora::Keyframes<double> swapped_ties{{
+        {.time = 0.0, .value = 0.0},
+        {.time = 0.5, .value = 30.0},
+        {.time = 0.5, .value = 10.0},
+        {.time = 1.0, .value = 40.0},
+    }};
+    AURORA_TEST_CHECK_NEAR(swapped_ties.value(0.5), 30.0, 1e-12);  // 插入次序决定谁在前
+    AURORA_TEST_CHECK_NEAR(swapped_ties.value(0.75), 25.0, 1e-12);
+    // 零宽段本身退化取起点值（local 归 0，曲线在 0 处亦映射到 0）。
+    AURORA_TEST_CHECK_NEAR(duplicated.stops()[1].time, duplicated.stops()[2].time, 1e-12);
+}
+
+// @brief 判据 28 的向量形态：复合值类型逐段整形（颜色 lerp 与标量同一条路径）。
+AURORA_TEST_CASE(keyframes_segment_curve_applies_to_composite_value_type) {
+    using Stops = std::vector<aurora::Keyframes<aurora::Color>::Stop>;
+    const aurora::Keyframes<aurora::Color> kf{Stops{
+        {.time = 0.0, .value = aurora::Color::black(), .curve = aurora::Curves::ease_in_quad()},
+        {.time = 1.0, .value = aurora::Color{100, 0, 0}},
+    }};
+    // local 0.5 → 缓入 0.25 → 红通道 25（线性会是 50）；alpha 两端同值故不变。
+    AURORA_TEST_CHECK_EQ(static_cast<int>(kf.value(0.5).r), 25);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(kf.value(0.5).a), 255);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(kf.value(1.0).r), 100);
+    // 与同段线性基线对照，确认段曲线确实作用于复合类型而非仅标量重载。
+    const aurora::Keyframes<aurora::Color> linear_kf{Stops{
+        {.time = 0.0, .value = aurora::Color::black()},
+        {.time = 1.0, .value = aurora::Color{100, 0, 0}},
+    }};
+    AURORA_TEST_CHECK_EQ(static_cast<int>(linear_kf.value(0.5).r), 50);
+}
+
 }  // namespace aurora::test_cases::utest_timeline

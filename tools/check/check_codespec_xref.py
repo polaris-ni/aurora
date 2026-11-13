@@ -161,7 +161,7 @@ def check_heading_numbers(rel, lines, problems):
         key = (level, parent)
         seen.setdefault(key, []).append((number, lineno))
 
-    for (level, parent), items in seen.items():
+    for _key, items in seen.items():
         numbers = [n for n, _ in items]
         dupes = {n for n in numbers if numbers.count(n) > 1}
         for number, lineno in items:

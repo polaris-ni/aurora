@@ -44,7 +44,7 @@ AURORA_TEST_CASE(resolve_with_invalid_id_falls_back_to_text) {
     // localize 为 true 但 Id 无效 → 走字面（不经目录）。
     auto ls = aurora::LocalizedString::tr(aurora::AURORA_INVALID_MESSAGE_ID);
     ls.text = "orphan";
-    aurora::MessageCatalog catalog;
+    aurora::MessageCatalog const catalog;
     AURORA_TEST_CHECK_EQ(ls.resolve(&catalog, aurora::Locale{}), std::string("orphan"));
 }
 

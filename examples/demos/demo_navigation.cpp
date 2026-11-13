@@ -5,10 +5,10 @@
 // try/catch 包装
 // NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
-    au::Route home{au::Column{GradientTitle{"Home"}, gap(8), au::Text{au::LocalizedString{"This is the home page"}}},
-                   "home"};
-    au::Route about{au::Column{GradientTitle{"About"}, gap(8), au::Text{au::LocalizedString{"This is the about page"}}},
-                    "about"};
+    au::Route const home{
+        au::Column{GradientTitle{"Home"}, gap(8), au::Text{au::LocalizedString{"This is the home page"}}}, "home"};
+    au::Route const about{
+        au::Column{GradientTitle{"About"}, gap(8), au::Text{au::LocalizedString{"This is the about page"}}}, "about"};
 
     au::Navigator nav{home};
     nav.push(about);

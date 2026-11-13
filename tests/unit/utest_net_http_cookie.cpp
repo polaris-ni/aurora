@@ -18,7 +18,6 @@
 #include <atomic>
 #include <cctype>
 #include <chrono>
-#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -70,7 +69,7 @@ using aurora::testing::require_value;
 /// @return 已解析的 URL。
 [[nodiscard]] auto url_of(std::string_view text) -> Url {
     const auto parsed_url = Url::parse(text);
-    AURORA_TEST_REQUIRE_MSG(bool(parsed_url), parsed_url ? std::string{} : parsed_url.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(parsed_url), parsed_url ? std::string{} : parsed_url.error().message);
     return parsed_url.value();
 }
 
@@ -277,14 +276,18 @@ auto read_request(aurora::net::blocking::StreamSocket &socket, aurora::test::Pee
 /// @return 应答的 Result 层。
 [[nodiscard]] auto send_and_drive(const Client &client, Request request, std::string_view label = "send")
     -> Result<Response> {
+    // 常驻引擎的回投须有在岗值班者才落得住——本助手自带的替身在泵的同时排空全局队列。
+    const aurora::test::net::MainQueueLoop duty;
     auto task = client.send(std::move(request));
     AURORA_TEST_CHECK(aurora::test::net::drive_until(label, [&task] { return task.is_done(); }).satisfied);
+    // 未收尾时 `result()` 读的是空结果槽（帧外内存），先 REQUIRE 收尾再读，段错误不代替失败判据。
+    AURORA_TEST_REQUIRE_MSG(task.is_done(), "coro task not finished when result was read");
     const auto outer = task.result();
-    AURORA_TEST_REQUIRE_MSG(bool(outer), outer ? std::string{} : outer.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(outer), outer ? std::string{} : outer.error().message);
     // 本套件每一条 send 都应当成功：内层失败在这里就地暴露（拿错误消息当判据输出），不让 `.value()`
     // 在 CHECK 里抛出把现场盖掉。
     const auto &answered = outer.value();
-    AURORA_TEST_REQUIRE_MSG(bool(answered),
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(answered),
                             answered ? std::string{}
                                      : std::string{label}
                                            .append(": code=")

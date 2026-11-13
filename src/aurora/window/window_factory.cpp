@@ -311,7 +311,7 @@ auto create_window(const WaylandOptions &opts) -> Result<std::unique_ptr<Window>
 #ifdef AURORA_BACKEND_MACOS
 auto create_window(const MacOSOptions &opts) -> Result<std::unique_ptr<Window>> {
     auto surf = std::make_unique<MacOSSurface>(static_cast<int>(opts.size.width), static_cast<int>(opts.size.height),
-                                               opts.title);
+                                               opts.title, opts.style, opts.visibility);
     return make_window(std::move(surf), opts);
 }
 #endif

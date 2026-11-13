@@ -167,7 +167,7 @@ class NavigatorHost : public Widget {
 
     /// @brief 登记需订阅的信号视图：转场进度 `progress_`。
     /// @param out 输出向量：追加 `&progress_`（裸指针，非拥有），基类据此订阅转场进度变化并重绘。
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&progress_); }
+    auto collect_signals(StateSink &out) -> void override { out.push(progress_); }
 
     /// @brief 遍历展示子树（换页/转场期间为 `TransitionLayer`，否则为当前页的 Provider 包装）。
     /// @param fn 对每个可见子控件调用一次；展示节点为空（未挂载或空栈）时不调用。

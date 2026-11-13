@@ -42,7 +42,8 @@ struct ScrollSnap {
 /// @brief 收位滑动动画（snap 收位 / 程序化 scroll-to 的共用时序数学）。
 ///
 /// 150ms easeOutCubic 从 `from` 收敛到 `to`；由宿主控件的 `tick_gestures` 逐帧推进
-/// （Dismissible/ReorderableList 自驱动先例，不占 `Animator`）。reduce-motion 的短路
+/// （Dismissible/ReorderableList 自驱动先例，不占 `Animator`；倍率折算发生在宿主入口，本结构体
+/// 保持纯时序数学、不感知缩放）。reduce-motion 的短路
 /// 属宿主职责（对齐 `AnimationController::tick` 语义：直落端点、不产生中间帧）。
 struct ScrollGlide {
     /// @brief 默认滑动总时长：150ms easeOutCubic 收敛。
@@ -101,7 +102,7 @@ struct ScrollViewport {
     float offset_y = 0.0F;  ///< 当前滚动偏移（内容坐标，0 = 顶部）
     float content_h = 0.0F;  ///< 内容自然高度
     float viewport_h = 0.0F;  ///< 视口高度
-    float step = 16.0F;  ///< 每单位滚轮增量的滚动像素（与 ScrollProps::step 默认一致）
+    float step = 16.0F;  ///< 每单位滚轮增量的滚动像素（与 `ScrollProps::step_default()` 一致）
 
     /// @brief 最大可滚动偏移：内容超出视口的部分，不足时为 0（不可滚）。
     /// @return max(0, content_h - viewport_h)。

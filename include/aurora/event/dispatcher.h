@@ -102,10 +102,12 @@ class EventDispatcher {
     auto dispatch_mouse(Widget &root, MouseEvent &e, FocusManager *fm = nullptr) -> bool;
 
     /// @brief 连击判定时间窗（毫秒）：本次 Press 与上次**已完成**点击（Release）的间隔不超过该值才累加序号。
-    ///        初值 `AURORA_DEFAULT_CLICK_WINDOW_MS`（500ms）——库内约定常量，**未接线到系统双击速度设置**
-    ///        （Windows `GetDoubleClickTime` / X11 等），跨平台手感一致。
-    ///        可写：置 0 使每次点击都重置为 1；置极大值使窗口恒开。测试据此注入极端阈值。
-    std::uint32_t click_window_ms = AURORA_DEFAULT_CLICK_WINDOW_MS;
+    ///        初值取 `os_double_click_ms()`（默认跟随系统双击速度：Windows `GetDoubleClickTime()`、
+    ///        macOS `+[NSEvent doubleClickInterval]`、Linux 经 GLib GSettings，其余形态回退
+    ///        `AURORA_DEFAULT_CLICK_WINDOW_MS`）。可写：显式赋值即覆盖系统值；
+    ///        置 0 使每次点击都重置为 1；置极大值使窗口恒开。测试据此注入极端阈值；
+    ///        再读 `os_double_click_ms()` 回填即可恢复「跟随系统」。
+    std::uint32_t click_window_ms = os_double_click_ms();
 
     /// @brief 连击判定位移半径（逻辑 dp）：两次点击落点距离不超过该值才累加序号。
     ///        初值 `AURORA_DEFAULT_CLICK_RADIUS_DP`（4dp）。可写，语义同 `click_window_ms`。
@@ -181,8 +183,9 @@ class EventDispatcher {
     std::unordered_map<int, std::vector<HitNode>> pointer_capture_;
 
     /// @brief 上次无捕获 Move 的悬停命中链。
-    ///        HitNode.widget 为 `std::weak_ptr<Widget>`：虚拟列表（LazyList）等滚动回收子控件时，
-    ///        悬停链中对应的弱引用失效，`update_hover` 经 `lock()` 检测后安全跳过，绝不解引用悬垂指针。
+    ///        `HitNode` 带生命周期守卫：虚拟列表（LazyList）等滚动回收子控件时，悬停链中
+    ///        对应的守卫失效，`update_hover` 经 `lock()` 判活后跳过已回收节点；对存活节点也
+    ///        持住强引用跨越 `on_hover_change` 通知，绝不在回调后解引用已释放的控件。
     std::vector<HitNode> hover_chain_;
 
     /// @brief 连击判定状态（按「按键 + 指针」独立计数）；阈值取 `click_window_ms` / `click_radius_dp`。
@@ -215,8 +218,9 @@ class TouchDispatcher {
     /// @return 是否有任意触点命中（is_handled 由各 widget 写入 e）。
     auto dispatch(Widget &root, TouchEvent &e, FocusManager *fm = nullptr) -> bool;
 
-    /// @brief 连击（双 tap）判定时间窗（毫秒）；语义与 `EventDispatcher::click_window_ms` 一致。
-    std::uint32_t click_window_ms = AURORA_DEFAULT_CLICK_WINDOW_MS;
+    /// @brief 连击（双 tap）判定时间窗（毫秒）；语义与 `EventDispatcher::click_window_ms` 一致，
+    ///        初值同样取 `os_double_click_ms()`（默认跟随系统双击速度）。
+    std::uint32_t click_window_ms = os_double_click_ms();
 
     /// @brief 连击（双 tap）判定位移半径（逻辑 dp）；语义与 `EventDispatcher::click_radius_dp` 一致。
     float click_radius_dp = AURORA_DEFAULT_CLICK_RADIUS_DP;

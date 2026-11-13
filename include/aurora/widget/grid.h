@@ -2,17 +2,90 @@
 
 #include <algorithm>
 #include <initializer_list>
+#include <optional>
+#include <utility>
 #include <vector>
 
+#include "aurora/widget/props.h"
 #include "aurora/widget/widget.h"
 
 namespace aurora {
 
-/// @brief Grid 属性（聚合）：固定列数的网格布局容器。
-struct GridProps {
-    std::vector<Node> children;  ///< 子节点集合（构造/adopt 时接管）。
-    int columns = 1;  ///< 列数（行数 = ceil(n / columns)）
-    float gap = 4.0F;  ///< 单元格间距（像素）
+/// @brief `Grid` 的属性权威表：列数与间距各一行，子节点不入表。
+///
+/// 两行都是**常量档**（回落点是库内默认提供者，不随主题变），故读件一律无参；两行的唯一消费点都在
+/// `Grid::on_layout`，档位因此同为布局档。
+///
+/// 子节点不在本表里：子项只能随控件构造移入（`Grid(std::vector<Node>, GridProps)` 或
+/// `Grid{ a, b }`），运行期增删走 `Container::add` / `remove_child`，属性对象不承担容器内容。
+///
+/// @note Thread: main-thread only
+/// @note Side-effects: 写入经宿主链接位标脏；未挂载时是纯 DTO
+class GridProps : public AbstractProps<GridProps> {
+  public:
+    // ---- 权威表：参数顺序即 schema 顺序 ----
+
+    /// @brief 可空值件：列数；下界 1。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto columns_row() {
+        return prop_row<&GridProps::columns_>("columns")
+            .layout()
+            .bounds("1")
+            .fallback(&GridProps::columns_default)
+            .note("Column count");
+    }
+
+    /// @brief 可空值件：单元格间距（像素）；下界 0。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto gap_row() {
+        return prop_row<&GridProps::gap_>("gap")
+            .layout()
+            .bounds("0")
+            .fallback(&GridProps::gap_default)
+            .note("Cell spacing (px)");
+    }
+
+    /// @brief 权威表本体：本控件全部属性行的元组。
+    /// @return 按声明顺序排列的行元组（发射面与序列化面都遍历它）。
+    [[nodiscard]] static constexpr auto rows() { return make_prop_rows(columns_row(), gap_row()); }
+
+    // ---- 读面：每行恰一件，形态由该行回落点决定 ----
+
+    /// @brief 当前生效的列数。
+    /// @return 生效列数；未表态时为 1。
+    [[nodiscard]] auto columns() const -> int { return stated(columns_row()); }
+
+    /// @brief 当前生效的单元格间距（像素）。
+    /// @return 生效间距；未表态时为 4.0F。
+    [[nodiscard]] auto gap() const -> float { return stated(gap_row()); }
+
+    // ---- 写面：实参一律裸 T；一次写入即「表态」，未表态才轮到回落点 ----
+
+    /// @brief 装入列数。
+    /// @param value 新列数；写入件原样存入（下界由反序列化通道把关，布局入口另按「小于 1 视为 1」保底）。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_columns(int value) -> GridProps & { return assign(columns_row(), value); }
+
+    /// @brief 装入单元格间距（像素）。
+    /// @param value 新间距；0 是「显式不留间距」，与「未表态」不是同一件事。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_gap(float value) -> GridProps & { return assign(gap_row(), value); }
+
+    // ---- 回落点提供者：常量档的唯一基线（与迁移前的字段声明处默认值逐值相同） ----
+
+    /// @brief 列数回落基线。
+    /// @return 1。
+    [[nodiscard]] static auto columns_default() -> int { return 1; }
+
+    /// @brief 间距回落基线。
+    /// @return 4.0F。
+    [[nodiscard]] static auto gap_default() -> float { return 4.0F; }
+
+  private:
+    std::optional<int> columns_;  ///< 列数表态位
+    std::optional<float> gap_;  ///< 单元格间距表态位（像素）
+
+    friend class AbstractProps<GridProps>;
 };
 
 /// @brief 网格布局容器：按行优先把子项排进固定列数的网格。
@@ -20,132 +93,97 @@ struct GridProps {
 /// 每列宽 = 该列最宽子项自然宽；每行高 = 该行最高子项自然高。
 /// 若父约束给定有限宽度，则每列宽均分该宽度（子项在列宽约束下测量）。
 ///
-/// 采用**继承式双模 API**（specification/04-widget.md §2.5）：`GridProps` 字段即本控件公有字段，
-/// `columns`/`gap` 可直接赋值或以配置块构造
-/// `Grid{ GridProps{.children = ..., .columns = 2, .gap = 8} }`。
+/// 属性面全部经 `GridProps` 的读写件访问；子节点不入属性表：它们只能随构造移入
+/// （`Grid(std::vector<Node>, GridProps)` 或 `Grid{ a, b }`），运行期增删走
+/// `Container::add` / `remove_child`。
 /// @note Thread: main-thread only
 /// @note Rebuildable: yes, via from_json
 ///
 class Grid : public Container, public GridProps {
   public:
-    /// @brief 默认构造：无子项，columns=1、gap=4。
-    Grid() = default;
-    /// @brief 配置块构造（specification/04-widget.md §2.5）：children 移动进容器，columns/gap 直取字段值。
-    /// @param props GridProps 配置块，其 columns/gap 覆盖同名公有字段。
-    explicit Grid(GridProps props) {
-        children_ = std::move(props.children);
-        columns = props.columns;
-        gap = props.gap;
-    }
-    /// @brief 便捷构造：扁平罗列子项（Grid{ a, b, c, 2 }），columns/gap 取默认。
-    /// @param kids 子节点列表，转交 set_children 接管。
-    /// @param columns 列数；小于 1 时钳为 1。
-    /// @param gap 单元格间距（像素）。
-    Grid(std::initializer_list<Node> kids, int columns = 1, float gap = 4.0F) {
-        set_children(kids);
-        this->columns = columns > 0 ? columns : 1;
-        this->gap = gap;
+    /// @brief 默认构造：无子项、两行未表态（生效值即回落点），并接线宿主。
+    Grid() { bind(*this); }
+
+    /// @brief 配置块构造（specification/04-widget.md §2.5）：整份属性接管后接线宿主。
+    /// @param props 网格属性对象，移动进本实例的 `GridProps` 基类子对象。
+    explicit Grid(GridProps props) : GridProps(std::move(props)) { bind(*this); }
+
+    /// @brief 子项 + 配置块构造：子项整体移入容器，属性接管后接线宿主。
+    /// @param kids 初始子节点（整体移入 `children_`，节点身份不变，外部 `shared_ptr` 别名继续有效）。
+    /// @param props 网格属性对象；默认全未表态，生效值即各行回落点。
+    Grid(std::vector<Node> kids, GridProps props = {}) : GridProps(std::move(props)) {
+        adopt_children(std::move(kids));
+        bind(*this);
     }
 
-    /// @brief 设置列数（链式）。
-    /// @param c 新列数；小于 1 时钳为 1。
-    /// @return 自身引用，便于链式调用。
+    /// @brief 便捷构造：扁平罗列子项（Grid{ a, b }），免写 Node{} 与 Props 包裹。
+    /// @param kids 初始子项列表（经 set_children 存入容器）。
+    Grid(std::initializer_list<Node> kids) {
+        set_children(kids);
+        bind(*this);
+    }
+
+    /// @brief 运行时可查询的默认属性值（属性表的单一事实来源，需求 SPEC.API.SENSIBLE-DEFAULTS.001）。
+    /// @return 一份缺省构造的 `GridProps`：两行未表态，生效值即该行回落点。
+    [[nodiscard]] static auto defaults() -> GridProps { return {}; }
+
+    /// @brief 设置列数（链式）；转调 `GridProps::set_columns`，返回控件引用。
+    /// @param c 列数；写入件原样存入，布局入口按「小于 1 视为 1」保底。
+    /// @return Grid 引用（链式调用）。
+    /// NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method) 同名控件面写件（返回控件引用）
     auto set_columns(int c) -> Grid & {
-        columns = c > 0 ? c : 1;
+        GridProps::set_columns(c);
         return *this;
     }
-    /// @brief 设置单元格间距（链式）。
-    /// @param g 新间距（像素）。
-    /// @return 自身引用，便于链式调用。
+
+    /// @brief 设置单元格间距（链式）；转调 `GridProps::set_gap`，返回控件引用。
+    /// @param g 间距（像素）；负值原样存入（反序列化通道按描述不变量 `gap >= 0` 拒写）。
+    /// @return Grid 引用（链式调用）。
+    /// NOLINTNEXTLINE(bugprone-derived-method-shadowing-base-method) 同名控件面写件（返回控件引用）
     auto set_gap(float g) -> Grid & {
-        gap = g;
+        GridProps::set_gap(g);
         return *this;
     }
 
     /// @brief 收集本控件的可订阅信号视图。
-    /// @param out 输出参数，收集 SignalViewBase 指针；Grid 无信号，恒不写入。
-    auto collect_signals([[maybe_unused]] std::vector<SignalViewBase *> &out) -> void override {}
+    /// @param out 输出参数，收集响应式来源；Grid 无信号，恒不写入。
+    auto collect_signals([[maybe_unused]] StateSink &out) -> void override {}
     /// @brief 类型名，供序列化与运行时自描述使用。
     /// @return C 字符串 "Grid"。
     [[nodiscard]] auto type_name() const -> const char * override { return "Grid"; }
 
-    /// @brief 运行时自描述（规格附录 B）。
-    /// @return Grid 的控件描述符（columns/gap/尺寸属性、multiple 子策略与示例）。
+    /// @brief 运行时自描述（规格附录 B）：属性项全部由权威表发射，控件只补自己的事实。
+    /// @return 名为 "Grid" 的描述表：`properties` 按 `rows()` 点名顺序，无事件、可容纳多个子节点。
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
-        return WidgetDescriptor{
-            .name = "Grid",
-            .properties =
-                {
-                    {.name = "columns",
-                     .type = "int",
-                     .default_value = "1",
-                     .required = false,
-                     .note = "Column count",
-                     .json_type = "integer",
-                     .enum_values = {},
-                     .min_value = "1"},
-                    {.name = "gap",
-                     .type = "float",
-                     .default_value = "4.0",
-                     .required = false,
-                     .note = "Cell spacing (px)",
-                     .json_type = "number",
-                     .enum_values = {},
-                     .min_value = "0"},
-                    {.name = "width",
-                     .type = "Length",
-                     .default_value = "auto",
-                     .required = false,
-                     .note = "",
-                     .json_type = "array"},
-                    {.name = "height",
-                     .type = "Length",
-                     .default_value = "auto",
-                     .required = false,
-                     .note = "",
-                     .json_type = "array"},
-                    {.name = "show",
-                     .type = "bool",
-                     .default_value = "true",
-                     .required = false,
-                     .note = "",
-                     .json_type = "boolean"},
-                },
-            .events = {},
-            .children_policy = "multiple",
-            .allowed_child_types = {},
-            .invariants = {"columns >= 1", "gap >= 0"},
-            .examples = {R"(au::Grid({ au::Text("A"), au::Text("B") }, 2))"},
-        };
+        auto descriptor = props_descriptor("Grid");
+        descriptor.children_policy = "multiple";
+        descriptor.invariants = {"columns >= 1", "gap >= 0"};
+        descriptor.examples = {R"(au::Grid{ au::Text("A"), au::Text("B") })",
+                               R"(au::Grid({ au::Text("A"), au::Text("B") }, au::GridProps().set_columns(2)))"};
+        return descriptor;
     }
     /// @brief 运行时自描述：转发静态描述符。
-    /// @return Grid 的控件描述符（columns/gap/尺寸属性、multiple 子策略与示例）。
+    /// @return 与 `describe_static()` 相同的 WidgetDescriptor（名称/属性/不变量/示例）。
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
-    /// @brief 序列化网格属性：通用属性之外写入 columns 与 gap。
-    /// @param props 目标 JSON 对象。
+    /// @brief 序列化自有属性到 `props`：各行只在表态时写（未表态不写键，回落语义不外泄）。
+    /// @param props 写入目标 JSON 对象（就地填充键值）。
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
-        props.set("columns", columns);
-        props.set("gap", gap);
+        props_serialize(props);
     }
-    /// @brief 反序列化网格属性：读回 columns（<1 钳为 1）与 gap。
-    /// @param props 源 JSON 对象，缺键的字段保持当前值。
+    /// @brief 从属性 JSON 重建自有属性（与 `serialize_props` 对偶；键缺失则保留现值）。
+    /// @note 非法值一律不写入：可空行撤表态（生效值退回该行回落点）并经 Diagnostics 上报。
+    /// @param props 读取来源 JSON 对象。
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
-        if (props.contains("columns")) {
-            const int c = props.at("columns")->as_or<std::int32_t>(0);
-            columns = c > 0 ? c : 1;
-        }
-        if (props.contains("gap")) {
-            gap = props.at("gap")->as_or<float>(0.0F);
-        }
+        props_deserialize(props);
     }
 
   protected:
     auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
-        const int cols = columns > 0 ? columns : 1;
-        const float g = gap;
+        const int cols = std::max(columns(), 1);
+        const float g = gap();
         const size_t n = children_.size();
         const int rows = static_cast<int>((n + static_cast<size_t>(cols) - 1) / static_cast<size_t>(cols));
 

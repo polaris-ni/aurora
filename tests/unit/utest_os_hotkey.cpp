@@ -37,7 +37,7 @@ auto require_unsupported_platform() -> void {
     if (OsHotkeyRegistry::install_test_backend(false)) {
         return;
     }
-#ifdef AURORA_PLATFORM_WINDOWS
+#if defined(AURORA_PLATFORM_WINDOWS) || defined(AURORA_PLATFORM_MACOS)
     AURORA_TEST_SKIP("cannot simulate an unsupported platform without the inert test backend");
 #endif
 }
@@ -61,14 +61,14 @@ AURORA_TEST_CASE(handle_equality_follows_id) {
 }
 
 AURORA_TEST_CASE(remove_unknown_handle_returns_false) {
-    OsHotkeyRegistry registry;
+    OsHotkeyRegistry const registry;
     AURORA_TEST_CHECK_FALSE(registry.remove(OsHotkeyHandle{}));  // 无效句柄
     AURORA_TEST_CHECK_FALSE(registry.remove(OsHotkeyHandle{0xFFFFFFFFU}));  // 从未发放过的 ID
     AURORA_TEST_CHECK_EQ(registry.count(), std::size_t{0});
 }
 
 AURORA_TEST_CASE(fresh_registry_is_empty_and_drains_nothing) {
-    OsHotkeyRegistry registry;
+    OsHotkeyRegistry const registry;
     AURORA_TEST_CHECK_EQ(registry.count(), std::size_t{0});
     AURORA_TEST_CHECK_EQ(registry.drain_pending(), std::size_t{0});
     registry.clear();  // 空表清空不得崩溃
@@ -78,7 +78,7 @@ AURORA_TEST_CASE(fresh_registry_is_empty_and_drains_nothing) {
 AURORA_TEST_CASE(unsupported_platform_degrades_to_register_error) {
     require_unsupported_platform();
 
-    OsHotkeyRegistry registry;
+    OsHotkeyRegistry const registry;
     AURORA_TEST_CHECK_FALSE(registry.enabled());
     const auto res = registry.add(sample_combo(), []() -> void {});
     AURORA_TEST_REQUIRE_FALSE(res.ok());
@@ -103,7 +103,7 @@ AURORA_TEST_CASE(unsupported_platform_reports_disabled_before_any_registration) 
 AURORA_TEST_CASE(combination_without_primary_key_is_rejected) {
     require_inert_backend(true);
 
-    OsHotkeyRegistry registry;
+    OsHotkeyRegistry const registry;
     AURORA_TEST_REQUIRE_TRUE(registry.enabled());
     const auto res = registry.add(KeyCombo{ModifierKey::Control, KeyCode::Unknown}, []() -> void {});
     AURORA_TEST_REQUIRE_FALSE(res.ok());
@@ -116,7 +116,7 @@ AURORA_TEST_CASE(combination_without_primary_key_is_rejected) {
 AURORA_TEST_CASE(duplicate_combination_is_rejected) {
     require_inert_backend(true);
 
-    OsHotkeyRegistry registry;
+    OsHotkeyRegistry const registry;
     const auto first = registry.add(sample_combo(), []() -> void {});
     AURORA_TEST_REQUIRE_TRUE(first.ok());
     AURORA_TEST_CHECK_NE(first.value().id, 0U);
@@ -140,7 +140,7 @@ AURORA_TEST_CASE(duplicate_combination_is_rejected) {
 AURORA_TEST_CASE(remove_registered_handle_succeeds_once) {
     require_inert_backend(true);
 
-    OsHotkeyRegistry registry;
+    OsHotkeyRegistry const registry;
     const auto handle = registry.add(sample_combo(), []() -> void {});
     AURORA_TEST_REQUIRE_TRUE(handle.ok());
     AURORA_TEST_CHECK_TRUE(registry.remove(handle.value()));
@@ -153,7 +153,7 @@ AURORA_TEST_CASE(remove_registered_handle_succeeds_once) {
 AURORA_TEST_CASE(drain_without_hits_executes_nothing) {
     require_inert_backend(true);
 
-    OsHotkeyRegistry registry;
+    OsHotkeyRegistry const registry;
     bool fired = false;
     const auto handle = registry.add(sample_combo(), [&fired]() -> void { fired = true; });
     AURORA_TEST_REQUIRE_TRUE(handle.ok());
@@ -170,7 +170,7 @@ AURORA_TEST_CASE(registry_without_window_backend_does_not_crash) {
     require_inert_backend(false);
 
     for (int i = 0; i < 3; ++i) {
-        OsHotkeyRegistry registry;
+        OsHotkeyRegistry const registry;
         (void)OsHotkeyRegistry::enabled();
         (void)registry.count();
         (void)registry.drain_pending();

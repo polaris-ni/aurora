@@ -19,12 +19,29 @@ namespace aurora {
 // 分段说明：以下事件类型均为纯数据载荷，只在主线程构造与派发
 // （契约 Thread: main-thread only、Side-effects: pure 逐类成立，此处统一声明）。
 
-/// @brief 连击判定的**默认时间窗**（毫秒）：两次点击间隔不超过该值才可能累加连击序号。
-/// 单一真源：`EventDispatcher::click_window_ms` 以它为初值，窗口装饰层（Wayland CSD 标题栏
-/// 双击最大化）直接引用同一常量，避免「库内两套阈值」漂移。
-/// @note 该值是库内约定常量，**未接线到系统双击速度设置**（Windows `GetDoubleClickTime` /
-///       X11 `Xkb` 等），跨平台才有一致手感；后续接系统值时须同步调整本注释。
+/// @brief 连击判定的**兜底时间窗**（毫秒）：系统双击速度不可读时回落到此值。
+/// 窗口装饰层（Wayland CSD 标题栏双击最大化）直接引用同一常量，避免「库内两套阈值」漂移。
+/// 派发器 `click_window_ms` 的初值现已默认跟随系统（见 `os_double_click_ms()`），本常量仅作回退。
+/// @note 该值是库内兜底常量，不再作为派发器初值；连击窗口默认取 `os_double_click_ms()`
+///       （Windows `GetDoubleClickTime` 等真实系统值），仅在系统值不可读时回落到本常量。
 inline constexpr std::uint32_t AURORA_DEFAULT_CLICK_WINDOW_MS = 500;
+
+/// @brief 查询系统「双击速度」对应的连击时间窗（毫秒）。
+///
+/// 默认跟随系统：`EventDispatcher` / `TouchDispatcher` 的 `click_window_ms` 初值即取此函数。
+/// - Windows 走 `GetDoubleClickTime()`，取真实系统值（通常 100–1000ms）；
+/// - macOS 走 AppKit 的 `+[NSEvent doubleClickInterval]`（System Settings → Mouse 的双击速度滑杆，
+///   单位秒），按四舍五入折算成毫秒；报出非正 / 非有限值时回退 `AURORA_DEFAULT_CLICK_WINDOW_MS`；
+/// - Linux 经 GLib GSettings（`org.gnome.desktop.peripherals.mouse` → `double-click`）读取真实系统值，
+///   缺库 / 无会话时回退同常量；
+/// - Wasm / Headless / Android 与「macOS 后端关闭」的形态无「可零依赖读取」公开 API，回退到
+///   `AURORA_DEFAULT_CLICK_WINDOW_MS`（库内约定常量）。
+///
+/// 应用可显式写 `click_window_ms` 覆盖系统值（置 0 关闭连击判定、置极大值使窗口恒开），
+/// 再读本函数回填即可恢复「跟随系统」。三桌面平台（Windows / macOS / Linux）均已读到真实系统值，
+/// 其余形态回退常量；新增平台分支只改本函数。
+/// @return 连击时间窗（毫秒），恒为正（≥1）。
+[[nodiscard]] auto os_double_click_ms() -> std::uint32_t;
 
 /// @brief 连击判定的**默认位移半径**（逻辑 dp）：两次点击的落点距离不超过该值才可能累加连击序号。
 /// 单一真源：`EventDispatcher::click_radius_dp` 以它为初值，窗口装饰层与派发器共用。
@@ -280,6 +297,28 @@ class DragPayload : public std::enable_shared_from_this<DragPayload> {
     [[nodiscard]] static auto from_bytes(std::unordered_map<std::string, std::vector<std::uint8_t>> data)
         -> std::shared_ptr<const DragPayload>;
 
+    /// @brief 由**延迟取数器**构造载荷：只声明「有哪些格式」，字节在真正被读取时才经回调产出。
+    ///
+    /// 与 `from_bytes` 的分工：`from_bytes` 是「数据已在内存里」（无头测试、以及本进程自拖放的
+    /// 直取路径——那份数据本来就在本进程），`from_lazy` 是「数据仍挂在 OS 会话上」（跨进程拖入）。
+    /// 后者若在 `Drop` 回调里同步取数，一次跨进程 IO 就是**一帧的整段停顿**；改由本工厂构造后，
+    /// 取数发生在 `system_drag::pump_reads()` 的排空阶段（帧循环跨帧推进），`Drop` 回调只登记句柄。
+    ///
+    /// **同步入口的语义不变**：`bytes()` 仍是「立即取数」——保留它是为了让小载荷与无头测试有直
+    /// 通路径（提案第 2 条边界二），代价（阻塞）由选用同步入口的调用方自担。非阻塞入口
+    /// `read_async()` 才走排空兑现。
+    ///
+    /// **不缓存取数结果**：同一 MIME 的两次读取各自触发一次 `fetch`——「渲染一次即定型」是剪贴板
+    /// 延迟渲染的平台语义（`WM_RENDERFORMAT` 后由系统托管），拖放侧没有对应的托管方，凭空加一层
+    /// 缓存就是引入一条提案未定义的语义。
+    /// @param formats 可提供的 MIME 清单（顺序即优先级；空串条目被丢弃、重复项去重）。
+    /// @param fetch 按 MIME 取字节的回调；返回 `Error` 时读取侧得到结构化错误（跨进程取数失败
+    ///        归 `SystemDragReadFailed`，由回调自行产出该码）。
+    /// @return 只读载荷句柄；`formats` 为空时同样返回非空句柄（读取任何格式都得 `Ok` 空值）。
+    [[nodiscard]] static auto from_lazy(std::vector<std::string> formats,
+                                        std::function<Result<std::vector<std::uint8_t>>(const std::string &)> fetch)
+        -> std::shared_ptr<const DragPayload>;
+
     /// @brief 是否持有指定 MIME 的载荷。
     /// @param mime 待查询的 MIME（如 "text/plain"）。
     /// @return 该格式存在时 true；否则 false（含载荷句柄为空时）。
@@ -301,8 +340,11 @@ class DragPayload : public std::enable_shared_from_this<DragPayload> {
     auto read_async(const std::string &mime, std::function<void(Result<std::vector<std::uint8_t>>)> callback) const
         -> void;
 
-    /// @brief 便利读取：文件清单（解码 `text/uri-list`，只返回可映射为本地路径的条目）。
-    /// @return `Ok(路径清单)`；无该格式时为 `Ok(空清单)`。非 `file` scheme 的行静默跳过
+    /// @brief 便利读取：文件清单（解码 `text/uri-list`，只返回结构性合法的本地路径条目）。
+    ///
+    /// 非 `file` scheme 的行静默跳过；解码出口另已过滤内嵌 NUL / 控制字节、独立 `..` 段、空条目
+    /// 与非空 authority。**过滤不等于授权**：路径是否落在允许目录内、符号链接与权限由调用方负责。
+    /// @return `Ok(路径清单)`；无该格式时为 `Ok(空清单)`
     ///         （完整原始行经 `bytes("text/uri-list")` 取得）。
     [[nodiscard]] auto files() const -> Result<std::vector<std::string>>;
 
@@ -400,6 +442,9 @@ struct SystemDropEvent : Event {
     std::shared_ptr<const DragPayload> payload;
 
     /// @brief 便利读取：文件清单（委托 `DragPayload::files`；无载荷时为空清单）。
+    ///
+    /// 过滤口径与边界责任同 `DragPayload::files`：解码出口只挡结构性非法条目，允许目录、符号链接
+    /// 与权限仍由调用方负责。
     /// @return `Ok(路径清单)`；无载荷或无该格式时为 `Ok(空清单)`。
     [[nodiscard]] auto files() const -> Result<std::vector<std::string>>;
 
@@ -420,7 +465,8 @@ struct SystemDropEvent : Event {
     ///
     /// 与同步 `files()` 并列而非替换：大载荷走本入口，读取期间帧循环不停顿。无载荷时**同步**按
     /// 空口径兑现（没有会话可排空）；有载荷时经 `system_drag::pump_reads()` 在帧内排空兑现，
-    /// 宿主不排空 ⇒ 回调不到。回调只被调用一次。
+    /// 宿主不排空 ⇒ 回调不到。回调只被调用一次。解码出口的过滤口径与边界责任同
+    /// `DragPayload::files`：只挡结构性非法条目，真实路径边界仍由调用方负责。
     /// @param callback 兑现回调（`Ok(路径清单)` 或结构化 `Error`）。
     auto files_async(std::function<void(Result<std::vector<std::string>>)> callback) const -> void;
 

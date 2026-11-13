@@ -6,6 +6,7 @@
 #include <optional>
 #include <utility>
 
+#include "aurora/animation/animator.h"
 #include "aurora/animation/spring.h"
 #include "aurora/event/gesture.h"
 #include "aurora/render/painter.h"
@@ -70,8 +71,8 @@ class Dismissible : public SingleChild {
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
     /// @brief 收集本控件的可订阅信号视图。
-    /// @param out 输出参数，收集 SignalViewBase 指针；Dismissible 无信号，恒不写入。
-    auto collect_signals([[maybe_unused]] std::vector<SignalViewBase *> &out) -> void override {}
+    /// @param out 输出参数，收集响应式来源；Dismissible 无信号，恒不写入。
+    auto collect_signals([[maybe_unused]] StateSink &out) -> void override {}
 
     /// @brief 注册消除回调（替代默认摘除：回调存在时不再自动从父容器移除）。
     /// @param cb 消除完成回调，无入参；移动存入 on_dismissed_。
@@ -125,7 +126,7 @@ class Dismissible : public SingleChild {
         // 首次布局后按主轴向尺寸校准行程（同步给 DragToDismiss，跟手 1:1 与 paint 平移共用同值）。
         if (!travel_calibrated_) {
             travel_calibrated_ = true;
-            const float axis_size = (dtd_axis_ == DragAxis::Horizontal) ? self.width : self.height;
+            const float axis_size = (dtd_.axis() == DragAxis::Horizontal) ? self.width : self.height;
             if (axis_size > 0.0F) {
                 travel_distance = static_cast<double>(axis_size);
                 dtd_.set_travel(travel_distance);
@@ -145,8 +146,8 @@ class Dismissible : public SingleChild {
         }
         // 位移 + 渐隐（progress 1 → 0.5 透明度）：paint 期平移，不动布局盒。
         const auto shift = static_cast<float>(progress * travel_distance);
-        const Rect shifted{.origin = Point{.x = bounds.origin.x + (dtd_axis_ == DragAxis::Horizontal ? shift : 0.0F),
-                                           .y = bounds.origin.y + (dtd_axis_ == DragAxis::Vertical ? shift : 0.0F)},
+        const Rect shifted{.origin = Point{.x = bounds.origin.x + (dtd_.axis() == DragAxis::Horizontal ? shift : 0.0F),
+                                           .y = bounds.origin.y + (dtd_.axis() == DragAxis::Vertical ? shift : 0.0F)},
                            .size = bounds.size};
         const auto alpha = static_cast<float>(1.0 - (0.5 * progress));
         const double prev_alpha = p.global_alpha();
@@ -157,13 +158,19 @@ class Dismissible : public SingleChild {
 
     auto tick_gestures(std::chrono::steady_clock::time_point now) -> void override {
         SingleChild::tick_gestures(now);
-        // spring 推进：以墙钟差为 dt（tick 由 Application::tick 每帧驱动）。
+        // spring 推进：以墙钟差为 dt（tick 由 Application::tick 每帧驱动）。步长在
+        // `DragToDismiss::tick` 内经 `scaled_frame_dt` 折算，此处**不**预缩放——两层都乘
+        // 会让全局时间缩放变成倍率的平方。
         const double dt =
             last_tick_.has_value() ? std::chrono::duration<double>(now - *last_tick_).count() : (1.0 / 60.0);
         last_tick_ = now;
         const bool was_animating = dtd_.is_animating();
         dtd_.tick(dt);
-        if (was_animating || dtd_.is_dragging()) {
+        // 冻结判定复用同一漏斗（只取值不作推进步长）：步长为 0 即本帧弹簧未推进。
+        const bool frozen = scaled_frame_dt(dt) <= 0.0;
+        // 重绘请求的空闲纪律：跟手是 1:1 直接操作（不属动画时间轴，冻结也须跟手），
+        // spring 段则只在真有推进的帧标脏——否则冻结表现为「停着不动却满帧唤醒」。
+        if (dtd_.is_dragging() || (!frozen && was_animating)) {
             mark_needs_paint();
         }
         // spring 结束 + progress 已到 1 → 摘除。
@@ -194,7 +201,6 @@ class Dismissible : public SingleChild {
         // 无 Container 祖先（如直接作为根）：静默保持终态。
     }
 
-    DragAxis dtd_axis_ = DragAxis::Horizontal;
     DragToDismiss dtd_;
     std::function<void()> on_dismissed_;
     std::optional<std::chrono::steady_clock::time_point> last_tick_;

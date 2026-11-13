@@ -156,7 +156,7 @@ AURORA_TEST_CASE(snap_flyout_point_reaches_title_bar_in_column_host) {
     // 核心证人：弹窗画在栏盒之外，经 Column 宿主派发时该点必须进链并止于 TitleBar。
     int snap_hits = 0;
     const std::shared_ptr<TitleBar> bar = make_title_bar(snap_hits);
-    auto root = std::make_shared<Column>(ColumnProps{.children = {Node{bar}}, .gap = 0.0F});
+    auto root = std::make_shared<Column>(std::vector<Node>{Node{bar}}, ColumnProps().set_gap(0.0F));
     LayoutEngine::layout(*root, host_constraints());
 
     const Rect bb = child_box(*root, *bar);
@@ -179,7 +179,7 @@ AURORA_TEST_CASE(snap_flyout_press_fires_custom_entry_via_real_dispatch) {
     // 端到端：弹窗自定义项的 Press 经真实派发触发回调，并收起弹窗。
     int snap_hits = 0;
     const std::shared_ptr<TitleBar> bar = make_title_bar(snap_hits);
-    auto root = std::make_shared<Column>(ColumnProps{.children = {Node{bar}}, .gap = 0.0F});
+    auto root = std::make_shared<Column>(std::vector<Node>{Node{bar}}, ColumnProps().set_gap(0.0F));
     LayoutEngine::layout(*root, host_constraints());
 
     const Rect bb = child_box(*root, *bar);
@@ -228,7 +228,7 @@ AURORA_TEST_CASE(closed_title_bar_does_not_claim_flyout_area) {
     // 收起态逐位不变 + 关闭后陈旧点不中。
     int snap_hits = 0;
     const std::shared_ptr<TitleBar> bar = make_title_bar(snap_hits);
-    auto root = std::make_shared<Column>(ColumnProps{.children = {Node{bar}}, .gap = 0.0F});
+    auto root = std::make_shared<Column>(std::vector<Node>{Node{bar}}, ColumnProps().set_gap(0.0F));
     LayoutEngine::layout(*root, host_constraints());
 
     const Rect bb = child_box(*root, *bar);
@@ -262,7 +262,7 @@ AURORA_TEST_CASE(compat_entry_and_dispatch_entry_agree_pointwise) {
     // 与派发入口分叉，本用例钉住二者已同源。
     int snap_hits = 0;
     const std::shared_ptr<TitleBar> bar = make_title_bar(snap_hits);
-    auto root = std::make_shared<Column>(ColumnProps{.children = {Node{bar}}, .gap = 0.0F});
+    auto root = std::make_shared<Column>(std::vector<Node>{Node{bar}}, ColumnProps().set_gap(0.0F));
     LayoutEngine::layout(*root, host_constraints());
 
     const Rect bb = child_box(*root, *bar);

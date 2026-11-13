@@ -229,7 +229,6 @@ def check_document(root, path, cases, errors):
         return
     declared = []
     for position, (line_no, text) in enumerate(headings):
-        heading_line = text.rstrip()
         bare = text[5:].strip()
         id_match = CASE_HEADING_RE.match(text)
         if not id_match:

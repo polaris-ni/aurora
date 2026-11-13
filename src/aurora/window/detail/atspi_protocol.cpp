@@ -563,7 +563,7 @@ auto AtspiModel::text_slice(std::uint64_t id, std::int32_t start, std::int32_t e
 }
 
 auto AtspiModel::text_caret(std::uint64_t id) const -> std::int32_t {
-    Widget *w = widget_of(id);
+    Widget *const w = widget_of(id);
     if (w == nullptr) {
         return -1;
     }
@@ -579,7 +579,7 @@ auto AtspiModel::text_caret(std::uint64_t id) const -> std::int32_t {
 }
 
 auto AtspiModel::text_char_extents(std::uint64_t id, std::int32_t offset, std::uint32_t coord) const -> AtspiRectI {
-    Widget *w = widget_of(id);
+    Widget *const w = widget_of(id);
     if (w == nullptr || offset < 0) {
         return {};
     }
@@ -595,7 +595,7 @@ auto AtspiModel::text_char_extents(std::uint64_t id, std::int32_t offset, std::u
     }
     const auto box = w->accessibility_char_bounds(byte);
     const Rect dip = box.value_or(w->paint_bounds());
-    Rect local{
+    Rect const local{
         .origin = Point{.x = dip.origin.x - w->paint_bounds().origin.x +
                              ((node(id) != nullptr) ? node(id)->node.bounds.origin.x : 0.0F),
                         .y = dip.origin.y - w->paint_bounds().origin.y +
@@ -696,7 +696,7 @@ auto AtspiModel::accessible_at_point(std::uint64_t id, std::int32_t x, std::int3
         const auto kids = children(sub[i]);
         sub.insert(sub.end(), kids.begin(), kids.end());
     }
-    for (unsigned long long lid : std::views::reverse(sub)) {
+    for (unsigned long long const lid : std::views::reverse(sub)) {
         if (lid == AURORA_ATSPI_APP_ID) {
             continue;
         }

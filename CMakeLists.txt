@@ -8,6 +8,7 @@
 #   cmake/AuroraTools.cmake           — 工具/基准可执行（gen_api_tools / gen_error_codes / gen_debug_api / gen_i18n / MCP / CLI / LSP / bench_* 等）
 #   cmake/AuroraI18n.cmake            — i18n 词表生成下游助手（aurora_i18n_generate：JSON -> 生成头 + AUM1 bin）
 #   cmake/AuroraVerify.cmake          — 真机验收探针（tools/verify/ 下，默认 OFF + EXCLUDE_FROM_ALL）
+#   cmake/AuroraFuzz.cmake            — 覆盖引导模糊测试目标（tests/fuzz/ 下，默认 OFF + EXCLUDE_FROM_ALL，仅 Clang 独立构建）
 #   cmake/AuroraTests.cmake           — CTest 注册式 runner（GLOB tests/*.cpp + tests/unit + tests/integration 链入单一 aurora_test_runner，AURORA_TEST() 自注册）
 #   cmake/AuroraDemos.cmake           — 示例 demo 目标（examples/demos/ 下每组件一个可运行窗口；须在 AuroraTools 之后 include）
 #   cmake/AuroraInstrumentation.cmake — 覆盖率/ASan 插桩（须在全部目标定义之后）
@@ -29,7 +30,7 @@ project(aurora
 # 由 include/aurora/core/version.h 经 AURORA_VERSION_STRING 暴露给程序。
 # 带 FORCE：版本号以仓库声明为单一事实来源，既有 build 目录重新 configure 即同步升级；
 # 如需临时覆盖可改仓库源（发布 stable 时置空串）。
-set(AURORA_VERSION_SUFFIX "alpha.10" CACHE STRING
+set(AURORA_VERSION_SUFFIX "alpha.11" CACHE STRING
         "Pre-release suffix appended after PROJECT_VERSION (empty for stable releases)" FORCE)
 
 # 本仓源码树根（子项目安全版 CMAKE_SOURCE_DIR）：下游经 add_subdirectory 消费本仓时，
@@ -63,8 +64,40 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 # MSVC：源码为 UTF-8（含中文注释），必须以 /utf-8 解析，否则在 CJK 代码页（936）下
 # 多字节序列被误读导致 C4819/C1020 等伪错误。GCC/Clang 默认按 UTF-8 解析，无需处理。
+#
+# /bigobj 同处、同 MSVC 门控：经典 COFF 头的段数字段是 16 位，一枚 obj 至多 65,535 段，
+# 超了就在 TU 编译末尾报 fatal error C1128 且不产出 obj（加了 /bigobj 后 cl 改写扩展 COFF obj：
+# 段数字段留 0xFFFF 哨兵、真数落在扩展 TOC 记录里，dumpbin 的文件类型自此是 EXTENDED COFF OBJECT）。
+# 触发面是 Debug 腿独有的组合：Debug 预设带 /Zi（CodeView 给每个函数另开调试段），本文件的
+# hybrid-Debug 块又把 aurora 抬到 /O2（内联展开出更多 COMDAT 组）；同档一并抬 /O2 的
+# freetype/harfbuzz 从不报这枚错，CI 的红只落在 aurora 这一枚 TU。
+#
+# 受害者是 `src/aurora/widget/serialization.cpp`：它 include 52 枚控件头，并在这一枚 TU 里落
+# 72 处控件工厂注册（其中 66 处经 `reg_default`，每处都要展开该型属性表的逐行编解码模板），
+# 段数随属性行数单调增长，属性面批量迁移把它推过了限。CI 侧的越限事实：`core (windows-msvc-debug)`
+# 自 run 42275224108（2026-11-06，图表族逐型入表那两批）起逐日红，报错落点逐字是
+# `src\aurora\widget\serialization.cpp(1,1): error C1128`，同日更早的 run 42232006953 该腿仍绿；
+# 同期三条 Windows 腿 msvc Release / mingw / clang-cl Debug 全绿——MinGW 侧同一枚 TU 实测只
+# 6,964 段（DWARF 不像 CodeView 那样逐函数开段），这解释了为什么这枚旗标只需挂在 MSVC 分支：
+# GCC 侧的同族上限由汇编器参数 `-Wa,-mbig-obj` 另处理，落点与口径见下方末段。
+#
+# 本机段数只用来定机制，不能替 CI 定年、也不能担保修复：同一枚 TU 在两种编译面上差一个量级。
+# 手抄单 TU 探针（不带 PCH）：`/O2 /Zi /MDd` 85,147 段并当场复现 C1128，同档去掉 /Zi 64,432 段
+# （限内、余量只剩 1,103 段），Release 档 `/O2 /MD /DNDEBUG` 59,969 段；MSBuild 真实构建面（PCH
+# 生效、/O2 + /Zi）加 /bigobj 后 dumpbin 报 13,548 段。两处编译旗标不同（`/Yu` 与否），差值未归因，
+# 故「CI 是否转绿」当时只能以推送后的 CI 为准——该读数已到手：run 42489004411 的
+# `core (windows-msvc-debug)` 转 success（同分支更早的 run 42478361236 该腿仍 failure），
+# 本机那枚 13,548 段的 obj 从未是判据，也不该被当成判据。
+#
+# 为什么落在全局而非 `target_compile_options(aurora PRIVATE …)`：超限面是「把整族属性表实例化
+# 进一枚 TU 的翻译单元」，不止这一枚 .cpp——测试与工具侧同样 include 这些头，只钉库目标就是把
+# 修复面做得比故障面窄。代价仅 obj 的段数字段放宽：不改代码、不改 ABI、不作 usage
+# requirement 传播（装走的库与消费者无需带这枚旗标），lld-link 与 link.exe 都认 bigobj。
+# 同因先例见 `third_party/harfbuzz/CMakeLists.txt` 里为 hb-subset.cc 加的同一枚；MinGW 汇编器
+# 侧的对位旗标（`-Wa,-mbig-obj`）见 `cmake/AuroraUtils.cmake`，两枚的口径与实测记在
+# `codespec/BUILD_OPTIONS.md` §6 与 §8 编译器行。
 if (MSVC)
-    add_compile_options(/utf-8)
+    add_compile_options(/utf-8 /bigobj)
 endif ()
 
 # Emscripten：显式启用 C++ 异常。
@@ -174,6 +207,16 @@ endif ()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
+# macOS 后端开关：默认值须在此声明，不能等到 cmake/AuroraBackends.cmake——本文件在
+# `add_library(aurora)` 之前 include 的模块只有这几个，后端模块在其后；开关的取值同时决定
+# 下方 OBJCXX 语言是否要前置，故两者同处。口径与 AURORA_BACKEND_WIN32 及四枚
+# AURORA_ENABLE_AUDIO_* 一致：自己平台的原生后端默认开，其余平台默认关。
+if (APPLE)
+    option(AURORA_BACKEND_MACOS "Enable macOS (Cocoa/AppKit) backend (Apple only)" ON)
+else ()
+    option(AURORA_BACKEND_MACOS "Enable macOS (Cocoa/AppKit) backend (Apple only)" OFF)
+endif ()
+
 # macOS 后端语言前置：macos_surface.cpp 被标记为 OBJCXX（见 cmake/AuroraBackends.cmake），
 # OBJCXX 语言规则必须在 aurora 目标定义（下方 add_library）之前启用；否则 Ninja 生成器
 # 在 generate 阶段取不到 CMAKE_OBJCXX_COMPILE_OBJECT / ARCHIVE_* 规则（macOS CI 实测报错）。
@@ -251,6 +294,9 @@ aurora_apply_unity(aurora)
 if (AURORA_UNITY_BUILD)
     aurora_unity_exclude("${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/net/*.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/perf/profiler.cpp"
+            # 监控门面的进程级状态落在匿名命名空间（State / state() / Scope 等），
+            # 与同域其他 TU 合并时存在 ODR 重名风险，独立编译与关闭 unity 时逐字节相同。
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/perf/frame_monitor.cpp"
             # 成对实现文件在各自匿名命名空间定义同名符号，合并进同一 unity TU
             # 即 ODR 冲突（重名来源见下，独立编译与关闭 unity 时逐字节相同）：
             #  - app：os_hotkey.cpp / clipboard.cpp 的 test_backend() + TestBackend*
@@ -290,8 +336,8 @@ target_include_directories(aurora
         "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_compile_features(aurora PUBLIC cxx_std_20)
 # Warnings（mirrors CODING_STANDARDS.md §10）——aurora 自身目标级，不污染三方库与消费者目标。
-# -Wno-missing-field-initializers：本库大量采用聚合 Props 的部分初始化（如 ButtonProps{...} 仅给
-# 部分字段赋值），其余字段本就会被值初始化为零，该告警纯属噪音，故关闭。
+# -Wno-missing-field-initializers：本库仍有大量采用聚合 Props 的部分初始化（仅给部分字段赋值），
+# 其余字段本就会被值初始化为零，该告警纯属噪音，故关闭。
 # MSVC 不识别 GCC 风格 -W*（D8021 硬错误），保持其默认 /W3 即可。
 if (NOT MSVC)
     target_compile_options(aurora PRIVATE -Wall -Wextra -Wpedantic -Wno-missing-field-initializers)
@@ -307,8 +353,10 @@ target_link_libraries(aurora PUBLIC freetype harfbuzz)
 # bcrypt：系统熵源（src/aurora/net/random.cpp 的 Windows 腿，`BCryptGenRandom`）。它与 TLS 无关，
 # 故挂在顶层而非 cmake/AuroraNetTls.cmake 的 provider 块内——那一条只在 Schannel 开着时才链，
 # 而随机面是 WebSocket 掩码、multipart 边界与链路标识的共同底座，不能跟着一条可选的 TLS 配置走。
+# iphlpapi：链路态 Windows 采集腿（src/aurora/net/socket.cpp 的 `probe_default_route_win32` 查
+# 路由表 / 接口表 `GetIpForwardTable2` / `GetIfTable2` / `FreeMibTable`），与后端无关、恒编译。
 if (WIN32)
-    target_link_libraries(aurora PUBLIC ws2_32 advapi32 bcrypt winhttp)
+    target_link_libraries(aurora PUBLIC ws2_32 advapi32 bcrypt winhttp iphlpapi)
 endif ()
 # SystemConfiguration / CoreFoundation：同一采集腿的 macOS 分支读动态存储里的系统代理，
 # 与后端无关（AURORA_BACKEND_MACOS 关闭时该腿照样编译），故挂在顶层。
@@ -442,6 +490,9 @@ include(AuroraI18n)
 
 # ---- 真机验收探针（tools/verify/，默认 OFF + EXCLUDE_FROM_ALL；须在后端开关之后 include）----
 include(AuroraVerify)
+
+# ---- 模糊测试目标（tests/fuzz/，默认 OFF + EXCLUDE_FROM_ALL；须在插桩模块之前 include）----
+include(AuroraFuzz)
 
 # ---- 示例 demo（examples/demos/ 下每组件一个可运行窗口；独立模块，须在 AuroraTools 之后 include）----
 include(AuroraDemos)

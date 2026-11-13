@@ -142,7 +142,7 @@ NativeViewHost::~NativeViewHost() {
     // 先把票据里的宿主指针抹掉再拆条目：本函数体内 `this` 正在析构，票据对外仍可能可达
     // （控件侧若误持 `shared_ptr` 而非 `weak_ptr`），置空后任何回访都只会拿到空宿主。
     ticket_->host = nullptr;
-    for (std::unique_ptr<Entry> &e : entries_) {
+    for (std::unique_ptr<Entry> const &e : entries_) {
         if (e != nullptr && e->view != nullptr) {
             e->view->detach();
         }
@@ -181,7 +181,7 @@ auto NativeViewHost::register_view(WebView *owner, std::unique_ptr<WebViewSink> 
 }
 
 auto NativeViewHost::unregister_view(std::size_t token) -> void {
-    Entry *e = entry_by_token(token);
+    Entry *const e = entry_by_token(token);
     if (e == nullptr) {
         return;  // 重复注销幂等
     }
@@ -217,7 +217,7 @@ auto NativeViewHost::sync_geometry(bool geometry_may_have_changed) -> std::size_
     const EdgeInsets inset = content_inset_provider_ != nullptr ? content_inset_provider_() : EdgeInsets{};
 
     std::size_t dispatched = 0;
-    for (std::unique_ptr<Entry> &slot : entries_) {
+    for (std::unique_ptr<Entry> const &slot : entries_) {
         if (slot == nullptr) {
             continue;
         }

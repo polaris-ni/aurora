@@ -675,8 +675,7 @@ auto main(int argc, char **argv) -> int {
     // 两种模式都不设帧预算：自动段由帧回调在终态到达 / 截止时自行 quit。power_saving 关掉是
     // 为了保证自拖放期间帧循环持续泵平台消息——X 会话回调经 X 事件队列到达，空闲阻塞等待
     // 会把落放消息的派发推迟到截止之后。
-    aurora::Application app(aurora::Scene{aurora::Node{aurora::Column(
-                                aurora::ColumnProps{.children = {aurora::Node{panel}, aurora::Node{source}}})}},
+    aurora::Application app(aurora::Scene{aurora::Node{aurora::Column({aurora::Node{panel}, aurora::Node{source}})}},
                             std::move(made.value()),
                             aurora::WindowOptions{.size = aurora::Size{.width = 480.0F, .height = 300.0F},
                                                   .title = "Aurora drag verify",

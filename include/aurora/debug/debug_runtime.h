@@ -46,7 +46,7 @@ namespace debug {
 [[nodiscard]] auto why_trace(std::size_t limit = 64) -> Json;
 
 /// @brief 运行时诊断只读快照 JSON：薄封装 `Diagnostics::get_last_diagnostics()`。
-/// @return 含 count 与逐条 severity / category / message 的快照 JSON。
+/// @return 含 count 与逐条 severity / domain / kind / message 的快照 JSON。
 /// @note Release 返回 `{"available":false, ...}`。
 [[nodiscard]] auto diagnostics() -> Json;
 

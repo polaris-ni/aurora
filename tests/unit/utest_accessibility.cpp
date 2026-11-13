@@ -18,9 +18,11 @@
 
 #include "aurora/animation/animator.h"
 #include "aurora/core/accessibility.h"
+#include "aurora/core/color.h"
 #include "aurora/environment/build_context.h"
 #include "aurora/layout/layout_engine.h"
 #include "aurora/render/painter.h"
+#include "aurora/theming/theme.h"
 #include "aurora/widget/a11y_tree.h"
 #include "aurora/widget/button.h"
 #include "aurora/widget/checkbox.h"
@@ -465,24 +467,24 @@ AURORA_TEST_CASE(build_tree_honours_explicit_root_box) {
 
 AURORA_TEST_CASE(build_tree_self_fills_name_and_value_from_widgets) {
     // 控件自带语义：Button 取 label、Text 取文本、Progress 取数值（无需布局/绘制即可自填）。
-    aurora::Button button{
+    aurora::Button const button{
         std::string{"确定"}};  // CJK-LITERAL: cjk-fixture - Han button label under a11y name assertion
     AURORA_TEST_CHECK_EQ(aurora::build_accessibility_tree(button).name, std::string{"确定"});
 
-    aurora::Text text{
+    aurora::Text const text{
         std::string{"订单总额"}};  // CJK-LITERAL: cjk-fixture - Han text widget label under a11y assertion
     AURORA_TEST_CHECK_EQ(aurora::build_accessibility_tree(text).name, std::string{"订单总额"});
 
-    aurora::Checkbox checked{aurora::Reactive<bool>{true}};
+    aurora::Checkbox const checked{true};
     AURORA_TEST_CHECK_EQ(aurora::build_accessibility_tree(checked).value, std::string{"true"});
 
-    aurora::Switch off{aurora::Reactive<bool>{false}};
+    aurora::Switch const off{false};
     AURORA_TEST_CHECK_EQ(aurora::build_accessibility_tree(off).value, std::string{"false"});
 
-    aurora::Slider slider{aurora::Reactive<double>{0.5}};
+    aurora::Slider const slider{0.5};
     AURORA_TEST_CHECK_EQ(aurora::build_accessibility_tree(slider).value, std::to_string(0.5));
 
-    aurora::ProgressIndicator progress{aurora::Reactive<double>{0.25}};
+    aurora::ProgressIndicator const progress{0.25};
     AURORA_TEST_CHECK_EQ(aurora::build_accessibility_tree(progress).value, std::to_string(0.25));
 
     // 编辑框：name 取占位提示、value 取当前内容，两者互不相干。
@@ -495,7 +497,7 @@ AURORA_TEST_CASE(build_tree_self_fills_name_and_value_from_widgets) {
 }
 
 AURORA_TEST_CASE(build_tree_prefers_widget_hooks_and_exposes_hint) {
-    ProbeAnnotatedLeaf annotated;
+    ProbeAnnotatedLeaf const annotated;
     const auto tree = aurora::build_accessibility_tree(annotated);
     AURORA_TEST_CHECK_EQ(tree.role, aurora::AccessibilityRole::Button);
     AURORA_TEST_CHECK_EQ(tree.name, std::string{"提交订单"});  // CJK-LITERAL: cjk-fixture - Han probe hook fields below
@@ -503,7 +505,7 @@ AURORA_TEST_CASE(build_tree_prefers_widget_hooks_and_exposes_hint) {
     AURORA_TEST_CHECK_EQ(tree.hint, std::string{"回车提交"});
 
     // 未覆写的控件：三个钩子均为空串（保留给宿主自行覆写）。
-    ProbeLeaf plain{"Slider"};
+    ProbeLeaf const plain{"Slider"};
     const auto plain_tree = aurora::build_accessibility_tree(plain);
     AURORA_TEST_CHECK(plain_tree.name.empty());
     AURORA_TEST_CHECK(plain_tree.value.empty());
@@ -514,7 +516,7 @@ AURORA_TEST_CASE(build_tree_skips_invisible_children) {
     ProbeColumn column;
     column.add(aurora::Node{ProbeLeaf{"Button"}});
     column.add(aurora::Node{ProbeLeaf{"Text"}});
-    column.child(1).widget().show.set(false);
+    column.child(1).widget().set_show(false);
 
     // 与绘制 / 命中同口径：show == false 的子树不进语义树，避免朗读视觉上不存在的控件。
     const auto tree = aurora::build_accessibility_tree(column);
@@ -612,27 +614,76 @@ AURORA_TEST_CASE(font_scale_scales_text_layout_geometry) {
     constexpr aurora::Constraints bounded{.min = aurora::Size{},
                                           .max = aurora::Size{.width = 200.0F, .height = 400.0F}};
 
-    aurora::set_accessibility_settings(aurora::AccessibilitySettings{});
-    aurora::Text base{std::string{"Aurora"}};
-    base.font.size_pt = 14.0F;
-    aurora::LayoutEngine::layout(base, bounded);
+    // 通道口径：倍率只在唯一物化点折进主题快照的字阶（`Theme::with_accessibility`），控件读的是
+    // 折好的令牌——末端乘法已撤销，故「表态过的字号」不再被二次缩放，而「未表态」才随字阶走。
+    // 本例因此注入两档快照，而不是改进程级设置后指望控件自己读到倍率。
+    aurora::Environment plain;
+    plain.set<aurora::Theme>(aurora::Theme::light());
+    aurora::Environment enlarged;
+    enlarged.set<aurora::Theme>(
+        aurora::Theme::light().with_accessibility(aurora::AccessibilitySettings{.font_scale = 2.0F}));
+    aurora::BuildContext base_ctx;
+    base_ctx.env = &plain;
+    aurora::BuildContext scaled_ctx;
+    scaled_ctx.env = &enlarged;
 
-    aurora::set_accessibility_settings(aurora::AccessibilitySettings{.font_scale = 2.0F});
-    aurora::Text scaled{std::string{"Aurora"}};
-    scaled.font.size_pt = 14.0F;
-    aurora::LayoutEngine::layout(scaled, bounded);
+    // 未表态字号 = 作用域字阶正文档（Material 基线 14pt），随快照一起长大。
+    AURORA_TEST_CHECK_NEAR(aurora::Text{std::string{"Aurora"}}.font_size(base_ctx), 14.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(aurora::Text{std::string{"Aurora"}}.font_size(scaled_ctx), 28.0F, 1e-4F);
 
-    // 字号倍率生效 ⇒ 度量结果变大（相对比较，不依赖具体字体/度量后端）。
-    AURORA_TEST_CHECK(base.size().height > 0.0F);
-    AURORA_TEST_CHECK(scaled.size().height > base.size().height);
-    AURORA_TEST_CHECK(scaled.size().width > base.size().width);
+    aurora::Text unstated_base{std::string{"Aurora"}};
+    aurora::Text unstated_scaled{std::string{"Aurora"}};
+    aurora::LayoutEngine::layout(unstated_base, bounded, base_ctx);
+    aurora::LayoutEngine::layout(unstated_scaled, bounded, scaled_ctx);
+    // 度量结果变大（相对比较，不依赖具体字体/度量后端）。
+    AURORA_TEST_CHECK(unstated_base.size().height > 0.0F);
+    AURORA_TEST_CHECK(unstated_scaled.size().height > unstated_base.size().height);
+    AURORA_TEST_CHECK(unstated_scaled.size().width > unstated_base.size().width);
+
+    // 显式表态即以表态值为准：同一份放大快照下，作者写死的 14pt 与基线档读数一致（无二次缩放）。
+    aurora::Text stated{std::string{"Aurora"}};
+    stated.set_font_size(14.0F);
+    AURORA_TEST_CHECK_NEAR(stated.font_size(scaled_ctx), 14.0F, 1e-4F);
+    aurora::LayoutEngine::layout(stated, bounded, scaled_ctx);
+    aurora::Text stated_base{std::string{"Aurora"}};
+    stated_base.set_font_size(14.0F);
+    aurora::LayoutEngine::layout(stated_base, bounded, base_ctx);
+    AURORA_TEST_CHECK_NEAR(stated.size().height, stated_base.size().height, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(stated.size().width, stated_base.size().width, 1e-4F);
+}
+
+AURORA_TEST_CASE(high_contrast_switch_lifts_a_failing_text_pair) {
+    const ScopedSettings guard;
+
+    // 「开关置位 → 生效值变」要有可比的两端，而内置色列本就达线：达线的列折与不折同值，
+    // 断言会退化成空转。因此这里在登记表已有的文字对（`on_surface` / `surface`，下限 4.5:1）
+    // 上人为造一枚不达线的行——把前景压成底色——只测派生算法对**这一行**的响应。
+    // 口径边界（写进规格）：本例锁的是派生腿，不是「内置列在高对比下必须改变」；后者按风格档
+    // 与本机探测结果而定，跨机器不成立，故不进入断言。
+    ColorRoles weak = aurora::Theme::light().roles;
+    weak.on_surface = weak.surface;
+    aurora::Theme base = aurora::Theme::light();
+    base.roles = weak;
+    const double before = aurora::contrast_ratio(base.roles.on_surface, base.roles.surface);
+    AURORA_TEST_CHECK(before < 4.5);  // 构造成立：未折叠前确实低于该行的档位下限
+
+    const aurora::Theme raised = base.with_accessibility(aurora::AccessibilitySettings{.high_contrast = true});
+    const double after = aurora::contrast_ratio(raised.roles.on_surface, raised.roles.surface);
+    AURORA_TEST_CHECK_GE(after, 4.5);
+    // 只断言「这一对变了」，不断言变的是哪一端：派生次序是先底色后前景，
+    // 而把近白的底色再压暗会连带打穿同作底色参与的其他行，故严格轮多半会选中前景端——
+    // 但那是算法的内部取舍，不是对外契约，写死就变成对实现的镜像断言。
+    AURORA_TEST_CHECK_FALSE(raised.roles.on_surface == base.roles.on_surface &&
+                            raised.roles.surface == base.roles.surface);
+    // 未置位即恒等：折叠必须是输入的纯函数，中性设置不得动任何令牌（否则换档复原无从保证）。
+    AURORA_TEST_CHECK(base.with_accessibility(aurora::AccessibilitySettings{}) == base);
 }
 
 AURORA_TEST_CASE(focus_value_and_structure_changes_raise_events) {
     std::vector<aurora::AccessibilityEvent> events;
     const ScopedEventHandler listen{&events};
 
-    aurora::Checkbox box{aurora::Reactive<bool>{false}};
+    aurora::Checkbox box{false};
     box.set_value(true);
 
     ProbeColumn column;
@@ -765,7 +816,7 @@ AURORA_TEST_CASE(explicit_label_round_trips_through_props) {
     AURORA_TEST_CHECK_EQ(aurora::build_accessibility_tree(dst).name, std::string{"静音"});
 
     // 未声明不写键：空值落盘会被误读成「显式清空名字」。
-    aurora::Checkbox plain;
+    aurora::Checkbox const plain;
     aurora::Json plain_props = aurora::Json::object();
     plain.serialize_props(plain_props);
     AURORA_TEST_CHECK_FALSE(plain_props.contains("accessibility_label"));
@@ -1023,7 +1074,7 @@ AURORA_TEST_CASE(stable_key_and_labelled_by_round_trip_through_props) {
     AURORA_TEST_CHECK_EQ(dst.labelled_by_key(), std::string{"notify-label"});
 
     // 未声明不写键（同 `accessibility_label` 纪律）：空值落盘会被误读成「显式清空」。
-    aurora::Checkbox plain;
+    aurora::Checkbox const plain;
     aurora::Json plain_props = aurora::Json::object();
     plain.serialize_props(plain_props);
     AURORA_TEST_CHECK_FALSE(plain_props.contains("stable_key"));
@@ -1075,12 +1126,12 @@ AURORA_TEST_CASE(vertical_view_size_and_scroll_percent_are_consistent) {
     const double span = content - viewport;  // 可滚跨度 700
     const double view = aurora::compute_vertical_view_size({.viewport = viewport, .content = content});
     AURORA_TEST_CHECK_NEAR(view, 12.5, 1e-6);
-    aurora::AccessibilityScrollRange top{
+    aurora::AccessibilityScrollRange const top{
         .min = 0.0, .max = span, .position = 0.0, .viewport = viewport, .content = content};
     const double top_pct = (top.position - top.min) / (top.max - top.min) * 100.0;
     AURORA_TEST_CHECK_NEAR(top_pct, 0.0, 1e-9);
     AURORA_TEST_CHECK_NEAR(aurora::compute_vertical_view_size(top), view, 1e-9);
-    aurora::AccessibilityScrollRange mid{
+    aurora::AccessibilityScrollRange const mid{
         .min = 0.0, .max = span, .position = 350.0, .viewport = viewport, .content = content};
     const double mid_pct = (mid.position - mid.min) / (mid.max - mid.min) * 100.0;
     AURORA_TEST_CHECK(mid_pct > 1.0);  // 已离开顶部

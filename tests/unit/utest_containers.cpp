@@ -1,16 +1,22 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/widget/containers.h
-/// 测试说明: 覆盖 Column/Row 容器级行为——初始化列表构造与所有权、gap 落位、
+/// 测试说明: 覆盖 Column/Row 容器级行为——子项构造与所有权、gap 落位、
 /// MainAxisSize::Max 撑满、MainAxisAlignment::End 收尾对齐、CrossAxisAlignment::Stretch
 /// 拉伸子项交叉轴、CrossAxisAlignment::Baseline 基线对齐（Text/Button 混排、Modifier 内边距换算、
-/// Column 回退 Start 并一次性降级提示）、部分指定 Flex 字面量不翻转容器主轴、负 gap 校验、
+/// Column 回退 Start 并一次性降级提示）、反向排布是控件级开关而不翻转主轴、负 gap 校验、
 /// 属性序列化往返，以及容器子树绘制缓存
-/// （Display List / cache_layer）随全局光栅状态（AA 模式）世代失效
+/// （Display List / cache_layer）随全局光栅状态（AA 模式）世代失效。
+/// 属性单一声明迁移后另覆盖权威表的读消费面：逐行撤表态该键退出序列化、四枚常量档读件在
+/// 明 / 暗两档与库内解析全同且不存在带上下文的第二件、全量表态的 JSON 逐行复原生效值并落同一帧几何、
+/// 非法 JSON 逐档降级（`gap` 越界 / 形态不符拒写并撤表态、未登记校验的枚举名按宽容通路表态不上报）、
+/// 挂载后写入按行声明的布局档标脏而绘制档不动、反向开关不被序列化
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <utility>
 
 #include "aurora/core/diagnostics.h"
 #include "aurora/core/directionality.h"
@@ -19,6 +25,7 @@
 #include "aurora/modifier/modifier.h"
 #include "aurora/render/font_engine.h"
 #include "aurora/render/painter.h"
+#include "aurora/theming/theme.h"
 #include "aurora/widget/button.h"
 #include "aurora/widget/containers.h"
 #include "aurora/widget/text.h"
@@ -51,6 +58,16 @@ auto bounded(float w, float h) -> Constraints {
     return Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = w, .height = h}};
 }
 
+/// 造一个注入了指定主题的构建上下文（根级环境，无父指针）。
+/// 返回 holder + ctx：`ctx.env` 指向 holder 内的 Environment，二者须在同作用域内使用。
+auto themed_ctx(const Theme &t) -> std::pair<std::shared_ptr<Environment>, BuildContext> {
+    auto env = std::make_shared<Environment>();
+    env->set_local(t);
+    BuildContext ctx;
+    ctx.env = env.get();
+    return {std::move(env), ctx};
+}
+
 // ---- 子树绘制缓存（Display List / cache_layer）观测设施 ----
 constexpr int AURORA_CACHE_W = 260;
 constexpr int AURORA_CACHE_H = 48;
@@ -59,9 +76,9 @@ constexpr int AURORA_CACHE_H = 48;
 auto text_column(bool cache_layer) -> std::shared_ptr<Column> {
     auto txt = std::make_shared<Text>("Aurora Wedge 123");
     txt->font_size(20.0F);
-    auto col = std::make_shared<Column>(ColumnProps{.children = {Node{std::shared_ptr<Widget>(txt)}}});
+    auto col = std::make_shared<Column>(std::vector<Node>{Node{std::shared_ptr<Widget>(txt)}});
     if (cache_layer) {
-        col->modifier.set(Modifier().cache_layer());
+        col->set_modifier(Modifier().cache_layer());
     }
     LayoutEngine::layout(*col, bounded(static_cast<float>(AURORA_CACHE_W), static_cast<float>(AURORA_CACHE_H)));
     return col;
@@ -107,6 +124,55 @@ class AaModeRestore {
     render::TextAAMode saved_;
 };
 
+// ---- 属性权威表的观测设施（属性单一声明迁移批） ----
+
+/// 探针：把只在库内消费的读件提到可读位置（`present` 表态位、`resolve` 带上下文解析）。
+/// 两者都不升公共面，故判据只能经派生类点名读取；读到的仍是生产侧同一条函数，不是用例另算一遍。
+class ColumnProbe final : public Column {
+  public:
+    using Column::Column;
+    using Column::present;
+    using Column::resolve;
+};
+
+/// 同上，行容器的探针。
+class RowProbe final : public Row {
+  public:
+    using Row::present;
+    using Row::resolve;
+    using Row::Row;
+};
+
+/// 标脏观察器：`Widget::on_dirty` 的 bool 入参把两档合一，这里拆成两枚计数器。
+struct ContainersDirty {
+    int paints = 0;  ///< 绘制档落账次数
+    int layouts = 0;  ///< 布局档落账次数
+
+    /// @brief 把观察回调挂到目标控件上（挂上即归零，用例只断增量）。
+    /// @param target 待观察的控件。
+    template <typename W>
+    auto attach_to(W &target) -> void {
+        paints = 0;
+        layouts = 0;
+        target.on_dirty = [this](bool layout) {
+            if (layout) {
+                ++layouts;
+            } else {
+                ++paints;
+            }
+        };
+    }
+};
+
+/// 「带上下文的 gap 读件」形态：常量档行不应存在这第二件。
+/// 用概念而非裸 `requires` 式判定：GCC 在非模板上下文把非法简单要求判成硬错误而非 false。
+template <typename W>
+concept ScopedGapReader = requires(const W &probe, const BuildContext &scope) { probe.gap(scope); };
+
+/// 同上，对主轴尺寸策略行。
+template <typename W>
+concept ScopedMainAxisSizeReader = requires(const W &probe, const BuildContext &scope) { probe.main_axis_size(scope); };
+
 }  // namespace
 
 AURORA_TEST_CASE(initializer_list_registers_children_in_order) {
@@ -149,32 +215,37 @@ AURORA_TEST_CASE(row_gap_places_children_horizontally) {
     AURORA_TEST_CHECK_NEAR(row.child_nodes()[1].bounds().origin.x, 48.0F, 1e-4F);
 }
 
-AURORA_TEST_CASE(partial_flex_literal_cannot_flip_container_axis) {
-    // `Flex{.main_axis = X}` 这类部分指定初始化会把未写出的成员打回默认值 direction=Row，
-    // 曾让 Column 走横向布局（demo_column 面板内 "AB" 并排）。主轴归属控件类型，不随传入 Flex 漂移。
-    Column col{
-        ColumnProps{.children = {box(100.0F, 20.0F), box(100.0F, 20.0F)},
-                    .flex = Flex{.main_axis = MainAxisAlignment::Center, .cross_axis = CrossAxisAlignment::Center}}};
+AURORA_TEST_CASE(column_and_row_reverse_keep_own_axis) {
+    // 主轴归属控件类型：容器不再接受外部 Flex，轴向无从被异轴取值带偏（曾因部分指定的
+    // `Flex{.main_axis = X}` 把 direction 打回 Row，让 Column 横向排布）。取向只剩本轴 Reverse 一档。
+    Column col({box(100.0F, 20.0F), box(100.0F, 20.0F)}, ColumnProps()
+                                                             .set_main_axis_alignment(MainAxisAlignment::Center)
+                                                             .set_cross_axis_alignment(CrossAxisAlignment::Center));
     LayoutEngine::layout(col, bounded(200.0F, 200.0F));
-    AURORA_TEST_CHECK_TRUE(col.flex.direction == FlexDirection::Column);
+    AURORA_TEST_CHECK_FALSE(col.reverse());
     AURORA_TEST_CHECK_NEAR(col.child_nodes()[1].bounds().origin.y, 20.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(col.child_nodes()[1].bounds().origin.x, 0.0F, 1e-4F);
 
-    Row row{RowProps{.children = {box(40.0F, 20.0F), box(60.0F, 20.0F)},
-                     .flex = Flex{.direction = FlexDirection::Column, .main_axis = MainAxisAlignment::Center}}};
-    LayoutEngine::layout(row, bounded(300.0F, 100.0F));
-    AURORA_TEST_CHECK_TRUE(row.flex.direction == FlexDirection::Row);
-    AURORA_TEST_CHECK_NEAR(row.child_nodes()[1].bounds().origin.x, 40.0F, 1e-4F);
-    AURORA_TEST_CHECK_NEAR(row.child_nodes()[1].bounds().origin.y, 0.0F, 1e-4F);
-
-    // 纠轴向只针对「异轴」取值：本轴家族的 Reverse 是有效配置，必须原样保留。
-    Column rev_col{ColumnProps{.children = {box(100.0F, 20.0F), box(100.0F, 20.0F)},
-                               .flex = Flex{.direction = FlexDirection::RowReverse}}};
+    Column rev_col({box(100.0F, 20.0F), box(100.0F, 20.0F)});
+    rev_col.set_reverse();
+    AURORA_TEST_CHECK_TRUE(rev_col.reverse());
     LayoutEngine::layout(rev_col, bounded(200.0F, 200.0F));
-    AURORA_TEST_CHECK_TRUE(rev_col.flex.direction == FlexDirection::ColumnReverse);
     // 纵向反序：首项落底（容器高 40 - 子项高 20）。
     AURORA_TEST_CHECK_NEAR(rev_col.child_nodes()[0].bounds().origin.y, 20.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(rev_col.child_nodes()[1].bounds().origin.y, 0.0F, 1e-4F);
+
+    Row row({box(40.0F, 20.0F), box(60.0F, 20.0F)}, RowProps().set_main_axis_alignment(MainAxisAlignment::Center));
+    LayoutEngine::layout(row, bounded(300.0F, 100.0F));
+    AURORA_TEST_CHECK_FALSE(row.reverse());
+    AURORA_TEST_CHECK_NEAR(row.child_nodes()[0].bounds().origin.x, 0.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(row.child_nodes()[1].bounds().origin.y, 0.0F, 1e-4F);
+
+    Row rev_row({box(40.0F, 20.0F), box(60.0F, 20.0F)});
+    rev_row.set_reverse();
+    LayoutEngine::layout(rev_row, bounded(300.0F, 100.0F));
+    // 横向反序：首项贴右缘（容器宽 100 - 首项宽 40），次项占剩余左段。
+    AURORA_TEST_CHECK_NEAR(rev_row.child_nodes()[0].bounds().origin.x, 60.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(rev_row.child_nodes()[1].bounds().origin.x, 0.0F, 1e-4F);
 }
 
 AURORA_TEST_CASE(column_main_axis_size_max_fills_height) {
@@ -267,7 +338,7 @@ AURORA_TEST_CASE(row_baseline_accounts_for_modifier_padding) {
     plain->font_size(16.0F);
     auto padded = std::make_shared<Text>("Ag");
     padded->font_size(16.0F);
-    padded->modifier.set(Modifier().padding(10.0F));
+    padded->set_modifier(Modifier().padding(10.0F));
 
     Row row;
     row.add(Node{std::shared_ptr<Widget>(plain)});
@@ -356,10 +427,10 @@ AURORA_TEST_CASE(props_serialize_deserialize_roundtrip) {
 
     Column dst;
     dst.deserialize_props(props);
-    AURORA_TEST_CHECK_TRUE(dst.flex.main_axis == MainAxisAlignment::SpaceBetween);
-    AURORA_TEST_CHECK_TRUE(dst.flex.cross_axis == CrossAxisAlignment::Center);
-    AURORA_TEST_CHECK_TRUE(dst.flex.main_axis_size == MainAxisSize::Max);
-    AURORA_TEST_CHECK_NEAR(dst.gap, 12.0F, 0.0F);
+    AURORA_TEST_CHECK_TRUE(dst.main_axis_alignment() == MainAxisAlignment::SpaceBetween);
+    AURORA_TEST_CHECK_TRUE(dst.cross_axis_alignment() == CrossAxisAlignment::Center);
+    AURORA_TEST_CHECK_TRUE(dst.main_axis_size() == MainAxisSize::Max);
+    AURORA_TEST_CHECK_NEAR(dst.gap(), 12.0F, 0.0F);
 }
 
 AURORA_TEST_CASE(describe_reports_metadata) {
@@ -398,7 +469,7 @@ AURORA_TEST_CASE(row_rtl_via_environment_mirrors_children) {
     Row ltr;
     ltr.add(box(40.0F, 20.0F));
     ltr.add(box(60.0F, 20.0F));
-    BuildContext plain;
+    BuildContext const plain;
     ltr.mount(plain);
     ltr.layout(bounded(300.0F, 100.0F), plain);
     AURORA_TEST_CHECK_NEAR(ltr.child_nodes()[0].bounds().origin.x, 0.0F, 1e-4F);
@@ -444,9 +515,9 @@ AURORA_TEST_CASE(default_extra_hit_box_equals_own_layout_box) {
     // 两条判据：① 树上任何控件都不额外声明命中盒；② 密集取点上，命中链最深节点与
     // 「只按子布局盒判定」的参考实现逐点相同（参考实现即改动前的闸，故本用例可捕获任何漂移）。
     auto root = std::make_shared<Column>(
-        ColumnProps{.children = {Node{Button(ButtonProps{.label = "A"})}, Node{Button(ButtonProps{.label = "B"})},
-                                 Node{Button(ButtonProps{.label = "C"})}},
-                    .gap = 8.0F});
+        std::vector<Node>{Node{Button(ButtonProps().set_label("A"))}, Node{Button(ButtonProps().set_label("B"))},
+                          Node{Button(ButtonProps().set_label("C"))}},
+        ColumnProps().set_gap(8.0F));
     LayoutEngine::layout(*root, bounded(240.0F, 200.0F));
     AURORA_TEST_REQUIRE_EQ(root->child_count(), 3U);
 
@@ -478,6 +549,286 @@ AURORA_TEST_CASE(default_extra_hit_box_equals_own_layout_box) {
             AURORA_TEST_CHECK_EQ(actual, reference(probe));
         }
     }
+}
+
+// ===========================================================================
+// 权威表的读消费面（属性单一声明迁移批）：逐行撤表态该键退盘 / 四枚常量档两档恒等 /
+// 全量键复原落同一帧几何 / 非法值降级 / 挂载后逐档标脏而反向开关保持控件级
+// ===========================================================================
+
+AURORA_TEST_CASE(column_row_clear_unstates_each_row_and_drops_every_key) {
+    // 四行逐行「表态 ⇒ 该键在盘 ⇒ clear ⇒ 该键退盘且取值回到该行回落点」。
+    // 子项与反向开关都不进表：序列化里既没有 children，也没有 flex / direction / reverse。
+    ColumnProbe c(std::vector<Node>{box(10.0F, 10.0F), box(20.0F, 10.0F)});
+    c.set_main_axis_alignment(MainAxisAlignment::SpaceBetween)
+        .set_cross_axis_alignment(CrossAxisAlignment::Stretch)
+        .set_main_axis_size(MainAxisSize::Max)
+        .set_gap(6.0F);
+    Json stated = Json::object();
+    c.serialize_props(stated);
+    for (const char *key : {"main_axis_alignment", "cross_axis_alignment", "main_axis_size", "gap"}) {
+        AURORA_TEST_CHECK_TRUE(stated.contains(key));  // 四行全表态 ⇒ 四键逐键在盘
+    }
+    for (const char *key : {"children", "flex", "direction", "reverse"}) {
+        AURORA_TEST_CHECK_FALSE(stated.contains(key));  // 表外名字（子项 / 反向）不是属性键
+    }
+
+    c.clear(ColumnProps::main_axis_alignment_row());
+    AURORA_TEST_CHECK_FALSE(c.present(ColumnProps::main_axis_alignment_row()));
+    AURORA_TEST_CHECK(c.main_axis_alignment() == MainAxisAlignment::Start);  // 回落基线
+    c.clear(ColumnProps::cross_axis_alignment_row());
+    AURORA_TEST_CHECK_FALSE(c.present(ColumnProps::cross_axis_alignment_row()));
+    AURORA_TEST_CHECK(c.cross_axis_alignment() == CrossAxisAlignment::Start);
+    c.clear(ColumnProps::main_axis_size_row());
+    AURORA_TEST_CHECK_FALSE(c.present(ColumnProps::main_axis_size_row()));
+    AURORA_TEST_CHECK(c.main_axis_size() == MainAxisSize::Min);
+    c.clear(ColumnProps::gap_row());
+    AURORA_TEST_CHECK_FALSE(c.present(ColumnProps::gap_row()));
+    AURORA_TEST_CHECK_NEAR(c.gap(), 0.0F, 1e-6F);
+
+    Json cleared = Json::object();
+    c.serialize_props(cleared);
+    for (const char *key : {"main_axis_alignment", "cross_axis_alignment", "main_axis_size", "gap"}) {
+        AURORA_TEST_CHECK_FALSE(cleared.contains(key));  // 意图集合里再无一键
+    }
+    AURORA_TEST_CHECK_EQ(c.child_count(), 2U);  // 撤表态不动子项所有权
+
+    // 行容器同形：同一张表形态、同一批键、同一套撤表态动作。
+    RowProbe r;
+    r.set_main_axis_alignment(MainAxisAlignment::End)
+        .set_cross_axis_alignment(CrossAxisAlignment::Center)
+        .set_main_axis_size(MainAxisSize::Max)
+        .set_gap(5.0F);
+    Json row_stated = Json::object();
+    r.serialize_props(row_stated);
+    for (const char *key : {"main_axis_alignment", "cross_axis_alignment", "main_axis_size", "gap"}) {
+        AURORA_TEST_CHECK_TRUE(row_stated.contains(key));
+    }
+    r.clear(RowProps::main_axis_alignment_row());
+    r.clear(RowProps::cross_axis_alignment_row());
+    r.clear(RowProps::main_axis_size_row());
+    r.clear(RowProps::gap_row());
+    Json row_cleared = Json::object();
+    r.serialize_props(row_cleared);
+    for (const char *key : {"main_axis_alignment", "cross_axis_alignment", "main_axis_size", "gap"}) {
+        AURORA_TEST_CHECK_FALSE(row_cleared.contains(key));
+    }
+}
+
+AURORA_TEST_CASE(column_row_constant_rows_read_identically_under_light_and_dark) {
+    // 恒等关系的正面取证：四行全是常量档，没有 `x(ctx)` 第二件，其无参读件**就是**生效值——
+    // 明 / 暗两档主题下与库内 `resolve(row, ctx)` 取值全同；缺这组断言则「窄面不丢语义」只是断言。
+    static_assert(!ScopedGapReader<Column>);
+    static_assert(!ScopedGapReader<Row>);
+    static_assert(!ScopedMainAxisSizeReader<Column>);
+    static_assert(!ScopedMainAxisSizeReader<Row>);
+
+    const auto [env_l, light] = themed_ctx(Theme::light());
+    const auto [env_d, dark] = themed_ctx(Theme::dark());
+    ColumnProbe c;
+    AURORA_TEST_CHECK(c.main_axis_alignment() == c.resolve(ColumnProps::main_axis_alignment_row(), light));
+    AURORA_TEST_CHECK(c.main_axis_alignment() == c.resolve(ColumnProps::main_axis_alignment_row(), dark));
+    AURORA_TEST_CHECK(c.cross_axis_alignment() == c.resolve(ColumnProps::cross_axis_alignment_row(), light));
+    AURORA_TEST_CHECK(c.cross_axis_alignment() == c.resolve(ColumnProps::cross_axis_alignment_row(), dark));
+    AURORA_TEST_CHECK(c.main_axis_size() == c.resolve(ColumnProps::main_axis_size_row(), light));
+    AURORA_TEST_CHECK(c.main_axis_size() == c.resolve(ColumnProps::main_axis_size_row(), dark));
+    AURORA_TEST_CHECK_NEAR(c.gap(), c.resolve(ColumnProps::gap_row(), light), 1e-6F);
+    AURORA_TEST_CHECK_NEAR(c.gap(), c.resolve(ColumnProps::gap_row(), dark), 1e-6F);
+
+    // 表态后仍与解析同值（两半都恒等，才排除「无参读件读的是另一份存储」）；
+    // 控件面同名写件返回控件引用，链式表的是「同一个对象」而非第二份属性。
+    Column &chain = c.set_gap(5.0F).set_main_axis_size(MainAxisSize::Max);
+    AURORA_TEST_CHECK(&chain == static_cast<Column *>(&c));
+    AURORA_TEST_CHECK_NEAR(c.gap(), 5.0F, 1e-6F);
+    AURORA_TEST_CHECK_NEAR(c.gap(), c.resolve(ColumnProps::gap_row(), light), 1e-6F);
+    AURORA_TEST_CHECK(c.main_axis_size() == MainAxisSize::Max);
+    AURORA_TEST_CHECK(c.main_axis_size() == c.resolve(ColumnProps::main_axis_size_row(), dark));
+
+    RowProbe r;
+    AURORA_TEST_CHECK(r.main_axis_alignment() == r.resolve(RowProps::main_axis_alignment_row(), light));
+    AURORA_TEST_CHECK(r.cross_axis_alignment() == r.resolve(RowProps::cross_axis_alignment_row(), dark));
+    AURORA_TEST_CHECK(r.main_axis_size() == r.resolve(RowProps::main_axis_size_row(), light));
+    AURORA_TEST_CHECK_NEAR(r.gap(), r.resolve(RowProps::gap_row(), dark), 1e-6F);
+    Row &row_chain = r.set_cross_axis_alignment(CrossAxisAlignment::Stretch);
+    AURORA_TEST_CHECK(&row_chain == static_cast<Row *>(&r));
+    AURORA_TEST_CHECK(r.cross_axis_alignment() == CrossAxisAlignment::Stretch);
+}
+
+AURORA_TEST_CASE(column_row_full_key_json_restores_every_effective_value) {
+    // 逐行表态的属性对象，其序列化输出即迁移前「全量键」的键集与取值形态（旧写件恒写四键）；
+    // 把它灌回一份空白属性对象 + 同样的子项，每行都必须重新表态且生效值逐键相等，
+    // 最终落同一帧几何：每个子项的布局盒逐值相同（布局级的「同一帧像素」）。
+    Column src(std::vector<Node>{box(10.0F, 10.0F), box(20.0F, 10.0F), box(30.0F, 10.0F)},
+               ColumnProps()
+                   .set_main_axis_alignment(MainAxisAlignment::SpaceBetween)
+                   .set_cross_axis_alignment(CrossAxisAlignment::Center)
+                   .set_main_axis_size(MainAxisSize::Max)
+                   .set_gap(4.0F));
+    Json legacy = Json::object();
+    src.serialize_props(legacy);
+    for (const char *key : {"main_axis_alignment", "cross_axis_alignment", "main_axis_size", "gap"}) {
+        AURORA_TEST_CHECK_TRUE(legacy.contains(key));
+    }
+
+    ColumnProbe dst(std::vector<Node>{box(10.0F, 10.0F), box(20.0F, 10.0F), box(30.0F, 10.0F)});
+    dst.deserialize_props(legacy);
+    AURORA_TEST_CHECK_TRUE(dst.present(ColumnProps::main_axis_alignment_row()));
+    AURORA_TEST_CHECK_TRUE(dst.present(ColumnProps::cross_axis_alignment_row()));
+    AURORA_TEST_CHECK_TRUE(dst.present(ColumnProps::main_axis_size_row()));
+    AURORA_TEST_CHECK_TRUE(dst.present(ColumnProps::gap_row()));
+    AURORA_TEST_CHECK(dst.main_axis_alignment() == MainAxisAlignment::SpaceBetween);
+    AURORA_TEST_CHECK(dst.cross_axis_alignment() == CrossAxisAlignment::Center);
+    AURORA_TEST_CHECK(dst.main_axis_size() == MainAxisSize::Max);
+    AURORA_TEST_CHECK_NEAR(dst.gap(), 4.0F, 1e-6F);
+
+    const BuildContext ctx;
+    LayoutEngine::layout(src, bounded(200.0F, 120.0F), ctx);
+    LayoutEngine::layout(dst, bounded(200.0F, 120.0F), ctx);
+    AURORA_TEST_REQUIRE_NEAR(src.size().width, dst.size().width, 1e-4F);
+    AURORA_TEST_REQUIRE_NEAR(src.size().height, dst.size().height, 1e-4F);
+    AURORA_TEST_REQUIRE_EQ(src.child_nodes().size(), dst.child_nodes().size());
+    for (std::size_t i = 0; i < src.child_nodes().size(); ++i) {
+        const Rect a = src.child_nodes()[i].bounds();
+        const Rect b = dst.child_nodes()[i].bounds();
+        AURORA_TEST_CHECK_NEAR(a.origin.x, b.origin.x, 1e-4F);
+        AURORA_TEST_CHECK_NEAR(a.origin.y, b.origin.y, 1e-4F);
+        AURORA_TEST_CHECK_NEAR(a.size.width, b.size.width, 1e-4F);
+        AURORA_TEST_CHECK_NEAR(a.size.height, b.size.height, 1e-4F);
+    }
+
+    // 行容器同形：同一份全量键 JSON 在另一张同形表上逐行复原。
+    Row row_src(std::vector<Node>{box(10.0F, 10.0F), box(10.0F, 20.0F)},
+                RowProps()
+                    .set_main_axis_alignment(MainAxisAlignment::SpaceEvenly)
+                    .set_cross_axis_alignment(CrossAxisAlignment::End)
+                    .set_main_axis_size(MainAxisSize::Max)
+                    .set_gap(3.0F));
+    Json row_legacy = Json::object();
+    row_src.serialize_props(row_legacy);
+    RowProbe row_dst(std::vector<Node>{box(10.0F, 10.0F), box(10.0F, 20.0F)});
+    row_dst.deserialize_props(row_legacy);
+    AURORA_TEST_CHECK_TRUE(row_dst.present(RowProps::main_axis_alignment_row()));
+    AURORA_TEST_CHECK_TRUE(row_dst.present(RowProps::gap_row()));
+    AURORA_TEST_CHECK(row_dst.main_axis_alignment() == MainAxisAlignment::SpaceEvenly);
+    AURORA_TEST_CHECK(row_dst.cross_axis_alignment() == CrossAxisAlignment::End);
+    AURORA_TEST_CHECK_NEAR(row_dst.gap(), 3.0F, 1e-6F);
+    LayoutEngine::layout(row_src, bounded(200.0F, 120.0F), ctx);
+    LayoutEngine::layout(row_dst, bounded(200.0F, 120.0F), ctx);
+    AURORA_TEST_REQUIRE_EQ(row_src.child_nodes().size(), row_dst.child_nodes().size());
+    for (std::size_t i = 0; i < row_src.child_nodes().size(); ++i) {
+        AURORA_TEST_CHECK_NEAR(row_src.child_nodes()[i].bounds().origin.x, row_dst.child_nodes()[i].bounds().origin.x,
+                               1e-4F);
+        AURORA_TEST_CHECK_NEAR(row_src.child_nodes()[i].bounds().size.width,
+                               row_dst.child_nodes()[i].bounds().size.width, 1e-4F);
+    }
+}
+
+AURORA_TEST_CASE(column_row_invalid_json_degrades_and_enum_names_stay_lenient) {
+    // 非法值一律不写入：可空行撤表态退回该行回落点，且降级经 `Diagnostics` 上报。
+    Diagnostics::take();  // 清掉前序用例残留，本条只看自己产生的降级
+
+    // ① 数值行越界（`gap` 下界 0）⇒ 撤表态，生效值回 0，而不是把 -3 烘进字段。
+    ColumnProbe c;
+    c.set_gap(2.0F);
+    Json below_min = Json::object();
+    below_min.set("gap", Json{-3.0});
+    c.deserialize_props(below_min);
+    AURORA_TEST_CHECK_FALSE(c.present(ColumnProps::gap_row()));  // 撤的是表态位
+    AURORA_TEST_CHECK_NEAR(c.gap(), 0.0F, 1e-6F);  // 退回回落点而非保留 2.0 / 烘进 -3.0
+    AURORA_TEST_CHECK(Diagnostics::count() >= 1);
+
+    // ② 数值行形态不符（喂串）⇒ 同样拒写并撤表态。
+    c.set_gap(2.0F);
+    Json wrong_type = Json::object();
+    wrong_type.set("gap", Json{"wide"});
+    c.deserialize_props(wrong_type);
+    AURORA_TEST_CHECK_FALSE(c.present(ColumnProps::gap_row()));
+    AURORA_TEST_CHECK_NEAR(c.gap(), 0.0F, 1e-6F);
+
+    // ③ 枚举名走的是另一条通路：`PropCodec<枚举>` 未登记 `validate`，未知名字按既定解析退
+    //    默认档**且照常写入表态位**，不产生降级上报。
+    const std::size_t reported = Diagnostics::count();
+    c.clear(ColumnProps::main_axis_alignment_row());
+    Json unknown_enum = Json::object();
+    unknown_enum.set("main_axis_alignment", Json{"diagonal"});
+    c.deserialize_props(unknown_enum);
+    AURORA_TEST_CHECK_TRUE(c.present(ColumnProps::main_axis_alignment_row()));  // 宽容通路照样表态
+    AURORA_TEST_CHECK(c.main_axis_alignment() == MainAxisAlignment::Start);  // 未知名 ⇒ 该枚举默认档
+    AURORA_TEST_CHECK(Diagnostics::count() == reported);  // 不报降级
+
+    // ④ 反面对照（防空转）：同一路径灌合法值仍照常写入并表态。
+    Json good = Json::object();
+    good.set("main_axis_alignment", Json{"Center"});
+    good.set("cross_axis_alignment", Json{"Stretch"});
+    good.set("main_axis_size", Json{"Max"});
+    good.set("gap", Json{4.0});
+    c.deserialize_props(good);
+    AURORA_TEST_CHECK(c.main_axis_alignment() == MainAxisAlignment::Center);
+    AURORA_TEST_CHECK(c.cross_axis_alignment() == CrossAxisAlignment::Stretch);
+    AURORA_TEST_CHECK(c.main_axis_size() == MainAxisSize::Max);
+    AURORA_TEST_CHECK_NEAR(c.gap(), 4.0F, 1e-6F);
+
+    // 行容器同形：同一套降级口径不因控件而变。
+    RowProbe r;
+    r.set_gap(1.0F);
+    Json row_bad = Json::object();
+    row_bad.set("gap", Json{-2.0});
+    r.deserialize_props(row_bad);
+    AURORA_TEST_CHECK_FALSE(r.present(RowProps::gap_row()));
+    AURORA_TEST_CHECK_NEAR(r.gap(), 0.0F, 1e-6F);
+
+    Diagnostics::take();
+}
+
+AURORA_TEST_CASE(column_row_mounted_writers_mark_layout_tier_and_reverse_is_control_level) {
+    // 四行都只声明布局档：挂载后每次写入都只落布局档，绘制档不落账；同值写入由行上的判等守卫短路。
+    // 反向排布是控件级开关（既不是属性行也不序列化），只标布局档。
+    Column c;
+    const BuildContext ctx;
+    c.mount(ctx);
+    ContainersDirty dirty;
+    dirty.attach_to(c);
+
+    c.set_gap(3.0F);
+    AURORA_TEST_CHECK_EQ(dirty.layouts, 1);
+    AURORA_TEST_CHECK_EQ(dirty.paints, 0);
+    c.set_gap(3.0F);  // 同值：判等短路，不落账
+    AURORA_TEST_CHECK_EQ(dirty.layouts, 1);
+    c.set_main_axis_alignment(MainAxisAlignment::Center);
+    c.set_cross_axis_alignment(CrossAxisAlignment::Stretch);
+    c.set_main_axis_size(MainAxisSize::Max);
+    AURORA_TEST_CHECK_EQ(dirty.layouts, 4);
+    AURORA_TEST_CHECK_EQ(dirty.paints, 0);
+
+    AURORA_TEST_CHECK_FALSE(c.reverse());
+    c.set_reverse();
+    AURORA_TEST_CHECK_TRUE(c.reverse());
+    AURORA_TEST_CHECK_EQ(dirty.layouts, 5);
+    c.set_reverse();  // 同值：不落账
+    AURORA_TEST_CHECK_EQ(dirty.layouts, 5);
+    c.set_reverse(false);
+    AURORA_TEST_CHECK_FALSE(c.reverse());
+    AURORA_TEST_CHECK_EQ(dirty.layouts, 6);
+
+    // 反向不改变四行的生效值，也不进序列化。
+    c.set_reverse();
+    AURORA_TEST_CHECK(c.main_axis_size() == MainAxisSize::Max);
+    Json out = Json::object();
+    c.serialize_props(out);
+    for (const char *key : {"reverse", "direction", "flex"}) {
+        AURORA_TEST_CHECK_FALSE(out.contains(key));
+    }
+
+    // 行容器同形：同一条控件级反向开关与同一档标脏。
+    Row r;
+    r.mount(ctx);
+    ContainersDirty row_dirty;
+    row_dirty.attach_to(r);
+    r.set_gap(2.0F);
+    r.set_reverse();
+    AURORA_TEST_CHECK_TRUE(r.reverse());
+    AURORA_TEST_CHECK_EQ(row_dirty.layouts, 2);
+    AURORA_TEST_CHECK_EQ(row_dirty.paints, 0);
 }
 
 }  // namespace aurora::test_cases::utest_containers

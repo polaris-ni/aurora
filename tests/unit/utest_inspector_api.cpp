@@ -73,7 +73,7 @@ auto bounded(float w, float h) -> Constraints {
 /// 对同款不变量亦有告警。返回实际比对到的节点数，供调用方断言遍历确实走满（而非中途空转
 /// 也让测试通过）。
 auto cross_check_enum_and_address(Widget &root, const Json &node_json, const std::string &path) -> std::size_t {
-    Widget *w = Inspector::find_widget(root, path);
+    Widget *const w = Inspector::find_widget(root, path);
     AURORA_TEST_CHECK_TRUE(w != nullptr);
     if (w == nullptr) {
         return 0;
@@ -91,7 +91,7 @@ auto cross_check_enum_and_address(Widget &root, const Json &node_json, const std
 }  // namespace
 
 AURORA_TEST_CASE(tree_text_and_rich_dump_widget_tree) {
-    Node root = make_tree();
+    Node const root = make_tree();
     const std::string text = Inspector::tree_text(root);
     // 缩进树：每行一个 type_name，父子按层级缩进。
     AURORA_TEST_CHECK_TRUE(text.find("Column") != std::string::npos);
@@ -205,7 +205,7 @@ AURORA_TEST_CASE(apply_patch_sets_props_by_path) {
 }
 
 AURORA_TEST_CASE(query_and_find_node_by_path) {
-    Node root = make_tree();
+    Node const root = make_tree();
 
     // 按类型名精确匹配查询。
     AURORA_TEST_CHECK_EQ(Inspector::query("Text", root).size(), 1U);
@@ -227,7 +227,7 @@ AURORA_TEST_CASE(find_widget_by_path_resolves_and_rejects_invalid) {
 
     // 空路径即根自身；层级路径逐段下降。
     AURORA_TEST_CHECK_EQ(Inspector::find_widget(w, ""), &w);
-    Widget *child = Inspector::find_widget(w, "0");
+    Widget *const child = Inspector::find_widget(w, "0");
     AURORA_TEST_REQUIRE_TRUE(child != nullptr);
     AURORA_TEST_CHECK_EQ(child->type_name(), std::string_view{"Text"});
 
@@ -248,7 +248,7 @@ AURORA_TEST_CASE(find_widget_and_tree_json_full_reach_virtualized_root) {
     Animator anim;
     auto host = std::make_shared<NavigatorHost>(anim);
     host->push(Route{make_tree(), "home"});
-    Node root{host};  // 供门面的 `Node` 入口使用；host 为树根，本无 `layout_parent_` 可被清
+    Node const root{host};  // 供门面的 `Node` 入口使用；host 为树根，本无 `layout_parent_` 可被清
 
     const Json tree = Inspector::tree_json_full(root);
     AURORA_TEST_CHECK_EQ(require_field<std::string>(tree, "type"), "NavigatorHost");
@@ -273,7 +273,7 @@ AURORA_TEST_CASE(find_widget_and_tree_json_full_reach_virtualized_root) {
 }
 
 AURORA_TEST_CASE(get_state_walks_json_tree) {
-    Node root = make_tree();
+    Node const root = make_tree();
     // get_state 沿 dump_tree_json 产出的 JSON 树按 "/" 路径取片段。
     AURORA_TEST_CHECK_EQ(Inspector::get_state("type", root), "Column");
     AURORA_TEST_CHECK_EQ(Inspector::get_state("children/0/type", root), "Text");
@@ -367,7 +367,7 @@ AURORA_TEST_CASE(simulate_text_input_writes_into_target) {
 
 AURORA_TEST_CASE(simulate_scroll_moves_offset_and_clamps) {
     // 以滚动容器为目标派发滚轮事件：delta_y 为负使偏移增大 |delta|×step，且钳制在可滚范围内。
-    Scroll sc{ScrollProps{.child = box(300.0F, 800.0F), .step = 10.0F}};
+    Scroll sc{box(300.0F, 800.0F), ScrollProps().set_step(10.0F)};
     LayoutEngine::layout(sc, bounded(300.0F, 200.0F));
     AURORA_TEST_CHECK_NEAR(sc.offset_y(), 0.0F, 1e-4F);
 

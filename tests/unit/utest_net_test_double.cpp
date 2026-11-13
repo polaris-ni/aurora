@@ -22,7 +22,6 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -172,6 +171,7 @@ auto write_into(LegLog &log) -> aurora::net::WriteDone {
 /// @brief 读一轮并回报字节（EOF 时返回空串）。
 /// @param stream 目标流。
 /// @param scratch 读缓冲。
+/// @param ok 可选输出：读操作是否成功（传 nullptr 则不回报）。
 /// @return 本轮读到的字节；对端已停写或失败时为空串（失败另有 `ok` 输出）。
 [[maybe_unused]] auto read_round(StreamTransport &stream, std::vector<char> &scratch, bool *ok = nullptr)
     -> std::string {

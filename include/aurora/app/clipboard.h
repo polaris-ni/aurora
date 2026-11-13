@@ -7,8 +7,11 @@
 
 #include "aurora/core/image.h"
 #include "aurora/core/result.h"
+#include "aurora/state/subscription.h"
 
 namespace aurora {
+
+class Widget;
 
 /// @brief 剪贴板惰性提供要约：声明「我能给哪些格式、按 MIME 怎么取字节」，数据在真正被读取时才生成。
 ///
@@ -25,16 +28,61 @@ struct ClipboardOffer {
     std::function<Result<std::vector<std::uint8_t>>(const std::string &mime)> provide;
 };
 
+/// @brief 剪贴板通知类别：位掩码，可组合订阅（见 `Clipboard::on_event`）。
+enum class ClipboardEventKind : std::uint8_t {
+    None = 0,  ///< 空掩码（不订阅任何类别；作为 `on_event` 的 `kinds` 入参是参数错）。
+    ContentChanged = 1U << 0U,  ///< 系统剪贴板内容发生变化。
+    OwnershipLost = 1U << 1U,  ///< 本进程的剪贴板所有权被其它进程夺走。
+};
+
+/// @brief 合并两类通知位。
+/// @param lhs 左操作数
+/// @param rhs 右操作数
+/// @return 两类通知位的并集
+[[nodiscard]] constexpr auto operator|(ClipboardEventKind lhs, ClipboardEventKind rhs) noexcept -> ClipboardEventKind {
+    // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange) 位掩码枚举按位组合，结果为合法组合值而非单枚举量
+    return static_cast<ClipboardEventKind>(static_cast<std::uint8_t>(lhs) | static_cast<std::uint8_t>(rhs));
+}
+
+/// @brief 取两类通知位的交集。
+/// @param lhs 左操作数
+/// @param rhs 右操作数
+/// @return 两类通知位的交集（不相交时为空掩码）
+[[nodiscard]] constexpr auto operator&(ClipboardEventKind lhs, ClipboardEventKind rhs) noexcept -> ClipboardEventKind {
+    return static_cast<ClipboardEventKind>(static_cast<std::uint8_t>(lhs) & static_cast<std::uint8_t>(rhs));
+}
+
+/// @brief 就地合并通知位。
+/// @param lhs 被修改的掩码
+/// @param rhs 追加的通知位
+/// @return `lhs` 的引用（合并后）
+constexpr auto operator|=(ClipboardEventKind &lhs, ClipboardEventKind rhs) noexcept -> ClipboardEventKind & {
+    lhs = lhs | rhs;
+    return lhs;
+}
+
+/// @brief `flags` 是否包含 `kind` 位。
+/// @param flags 待检查的掩码
+/// @param kind 目标通知类别
+/// @return 包含该位时为 true
+[[nodiscard]] constexpr auto clipboard_event_has(ClipboardEventKind flags, ClipboardEventKind kind) noexcept -> bool {
+    return static_cast<std::uint8_t>(flags & kind) != 0U;
+}
+
 /// @brief 剪贴板抽象（specification/06-app-platform.md §8.2）。
 ///
 /// - 文本：`set_text`/`get_text`，各平台实现：
 /// - Windows：`SetClipboardData(CF_UNICODETEXT)` / `GetClipboardData(CF_UNICODETEXT)`
 /// - Linux：`xclip -selection clipboard` / `xsel --clipboard`（需安装 xclip 或 xsel）
-/// - macOS：`pbcopy` / `pbpaste`
+/// - macOS：`pbcopy` / `pbpaste`（文本沿用外壳工具；富格式另走 `NSPasteboard`，见下）
 /// - 图像：`set_image`/`get_image`，仅 Windows 经 `SetClipboardData(CF_DIB)` 实现，
-/// 其它平台报 `GeneralNotSupported`。
+/// 其它平台报 `GeneralNotSupported`（macOS 的 `image/png` 经 `set_payload` 走 `NSPasteboard`，
+/// 不在图像通道）。
 /// - 富格式（自定义 MIME / 文件清单 / HTML）：`set_payload` / `get_payload` 及其便利封装。
-/// 格式名一律取自 `app/mime_types.h` 的常量表。
+/// 格式名一律取自 `app/mime_types.h` 的常量表。Windows 由剪贴板 owner 窗口承载（`CF_HDROP` /
+/// HTML Format / 自定义注册格式，惰性提供走 `WM_RENDERFORMAT`），macOS 由 `NSPasteboard`
+/// 承载（文件 URL / HTML / 自定义 type，惰性提供走 `NSPasteboardItemDataProvider`）；Linux
+/// 富格式机制尚未接线，读写如实报 `ClipboardFormatUnsupported`。
 ///
 /// **失败口径**（一律机器可见，不再以空串 / 静默 no-op 冒充成功）：
 ///
@@ -45,14 +93,14 @@ struct ClipboardOffer {
 /// `ClipboardWriteFailed` | | 本平台无剪贴板实现 | `GeneralNotSupported` | |
 /// 图像尺寸超限或像素缓冲与维度不一致（调用方参数错） | `GeneralInvalidArgument` | | 可访问但当前没有文本 / 图像 |
 /// `Ok("")` / `Ok(空 Image)`——**空内容不是失败** |
-/// | 富格式：本平台没有该 MIME 的读写机制 | `ClipboardFormatUnsupported`（category platform、
-/// `retryable = false`——机制缺失是稳态，重试无益） |
+/// | 富格式：本平台没有该 MIME 的读写机制 | `ClipboardFormatUnsupported`（domain clipboard、kind
+/// unsupported、`retryable = false`——机制缺失是稳态，重试无益） |
 /// | 富格式：格式未写入 / 载荷里没有可落成文件的条目 | `Ok(空值)`——空内容同样不是失败 |
 /// | 惰性要约不合法（`formats` 为空或 `provide` 为空回调） | `GeneralInvalidArgument` |
-/// | 惰性提供：回调返回 `Error`，或回调为空而该格式被真正请求 | `ClipboardProviderFailed`（category
-/// platform、`retryable = false`——同一笔数据是否重试由应用决定，库不代做重试） |
-/// | 变更监听：本平台无监听机制（注册即失败，**不谎报**） | `ClipboardListenUnsupported`（category
-/// platform、`retryable = false`——机制缺失是稳态） |
+/// | 惰性提供：回调返回 `Error`，或回调为空而该格式被真正请求 | `ClipboardProviderFailed`（domain
+/// clipboard、kind io、`retryable = false`——同一笔数据是否重试由应用决定，库不代做重试） |
+/// | 变更监听：本平台无监听机制（注册即失败，**不谎报**） | `ClipboardListenUnsupported`（domain
+/// clipboard、kind unsupported、`retryable = false`——机制缺失是稳态） |
 ///
 /// 空文本与空图像是契约内的 no-op：不触碰剪贴板、保留既有内容，返回 `Ok`。富格式同口径：
 /// `set_payload` 写空字节、`set_files` 写空清单、`set_html` 写空串都为 no-op，保留既有内容。
@@ -63,20 +111,24 @@ struct ClipboardOffer {
 /// **惰性提供与监听（本类同址扩充，不新开门面）**：`set_offer` 注册延迟渲染要约——各格式的数据在
 /// 真正被读取时才经 `provide` 回调生成（对标 Win32 `SetClipboardData(format, NULL)` 的
 /// `WM_RENDERFORMAT`、macOS pasteboard promise、GTK4 `GdkContentProvider`），与既有立即写通道
-/// **混用合法且互不覆盖**；`on_ownership_lost` / `on_change` 分别承载所有权被夺与内容变化两类平台
-/// 通知，其中 `on_change` 在无监听机制的平台上**注册即失败**（`clipboard-listen-unsupported`）——
-/// 与 `available_formats()` 「如实反映此刻能读到什么，不因 API 已声明就谎报可用」同款定调；
+/// **混用合法且互不覆盖**；`on_event` 以位掩码承载所有权被夺与内容变化两类平台通知（纯多播、
+/// 注册序派发），其中请求 `ContentChanged` 在无监听机制的平台上**注册即失败**
+/// （`clipboard-listen-unsupported`）——与 `available_formats()` 「如实反映此刻能读到什么，不因
+/// API 已声明就谎报可用」同款定调；
 /// `clear()` 是**主动清空**，与空写入 no-op 的「保留既有内容」语义相反，二者并列写明以防误用。
 /// 监听注册不是内容：`clear()` 清内容（要约即所有权声明，随内容一并清空），监听注册留存。
 ///
-/// **立骨期边界**：富格式 API 只在 memory 测试后端下承载数据；非测试路径上各平台一律返回
-/// `ClipboardFormatUnsupported`（平台机制由后续落地，本轮不触碰 Win32 既有 text / image 实现）。
-/// 故 `available_formats` 在平台路径上如实只列 `text/plain`（`image/png` 仅 Win32 有图像机制），
-/// 富格式在机制落地前不入列——不因「新 API 已声明」就谎报可用格式。`text/plain` 的读写在平台
-/// 路径上仍走 `set_text` / `get_text`。惰性要约同此边界：平台路径如实报
-/// `ClipboardFormatUnsupported`；`on_change` 平台路径如实报 `ClipboardListenUnsupported`；
-/// `clear()` 按平台到位程度分部接线（Win32 `EmptyClipboard`、Linux `xsel --clear`，macOS 未接
-/// 则如实报 `GeneralNotSupported`）。
+/// **平台接线现状**：富格式由平台后端函数表承载——Win32 后端随剪贴板 owner 窗口登记（无窗口
+/// 时未登记，如实报 `ClipboardFormatUnsupported`），macOS 后端在首次问到后端时自举登记
+/// （`NSPasteboard` 是应用级资源，无窗口同样可用），Linux 尚无富格式后端。后端登记时
+/// `available_formats` 由其如实枚举此刻剪贴板实际持有的格式（含惰性要约声明的格式）；未登记时
+/// 退回立骨期口径，只列既有机制覆盖的档位（`text/plain`，Win32 另加 `image/png`）。`text/plain`
+/// 的读写在平台路径上仍走 `set_text` / `get_text`。惰性提供与变更监听按机制有无分部接线：
+/// `set_offer` 在 Win32 / macOS 可用、Linux 报 `ClipboardFormatUnsupported`；`on_event` 请求
+/// `ContentChanged` 时在 Win32 可用、macOS 因 `NSPasteboard` 无系统变更通知（库也不轮询）报
+/// `ClipboardListenUnsupported`（只请求 `OwnershipLost` 恒成功）。`clear()` 按平台到位程度分部接线（Win32
+/// `EmptyClipboard`、 Linux `xsel --clear`、macOS `pbcopy` 空输入重写 pasteboard；其余平台如实报
+/// `GeneralNotSupported`）。
 ///
 /// @note Thread: main-thread only
 /// @note Side-effects: none (accesses system clipboard)
@@ -107,9 +159,10 @@ class Clipboard {
 
     /// @brief 列出当前剪贴板持有的 MIME 清单。
     ///
-    /// 如实反映「此刻能读到什么」：平台路径上是各平台既有机制所覆盖的格式（文本三平台恒在列、
-    /// 图像仅 Windows 在列），富格式待平台机制落地后才入列；memory 测试后端下则反映实际写入的
-    /// 格式。调用方据此决定走哪条读取通道，而不是凭「API 已声明」假设格式可用。
+    /// 如实反映「此刻能读到什么」：平台后端登记时枚举该后端实际持有的格式（Win32 剪贴板格式、
+    /// macOS pasteboard 类型，含惰性要约声明的格式）；未登记时退回既有机制覆盖的档位
+    /// （`text/plain`，Win32 另加 `image/png`）；memory 测试后端下则反映实际写入的格式。调用方
+    /// 据此决定走哪条读取通道，而不是凭「API 已声明」假设格式可用。
     /// @return `Ok(MIME 清单)`——一个格式都没有时为 `Ok(空清单)`（空内容不是失败）；
     /// 本平台无剪贴板实现时为 `GeneralNotSupported`。
     [[nodiscard]] static auto available_formats() -> Result<std::vector<std::string>>;
@@ -138,8 +191,10 @@ class Clipboard {
 
     /// @brief 读取剪贴板里的本地路径清单（解码 `AURORA_MIME_URI_LIST`）。
     ///
-    /// 只返回可映射为本地路径的条目：非 `file` scheme 的行（`http://` 等）静默跳过；全部条目都
-    /// 被跳过时为 `Ok(空清单)`——空内容不是失败。完整原始行经 `get_payload` 取得。
+    /// 只返回可映射为本地路径的条目：非 `file` scheme 的行（`http://` 等）静默跳过；解码出口另有
+    /// 结构性闸门，带内嵌 NUL / 控制字节、独立 `..` 段、空条目或非空 authority 的条目按同一口径
+    /// 跳过。全部条目都被跳过时为 `Ok(空清单)`——空内容不是失败。完整原始行经 `get_payload` 取得。
+    /// **过滤不等于授权**：库不校验路径是否落在允许的目录内，符号链接、允许目录与权限仍由调用方负责。
     /// @return `Ok(路径清单)`；本平台无该格式的读取机制为 `ClipboardFormatUnsupported`。
     [[nodiscard]] static auto get_files() -> Result<std::vector<std::string>>;
 
@@ -164,31 +219,45 @@ class Clipboard {
     /// 不缓存（每次读取各自重试提供）。
     /// @param offer 惰性提供要约（格式清单 + 按 MIME 取字节的回调）；`formats` 为空或 `provide`
     /// 为空回调均为参数错。
-    /// @return 成功为 `Ok`；要约不合法为 `GeneralInvalidArgument`；本平台无惰性提供机制（立骨期
-    /// 平台路径）为 `ClipboardFormatUnsupported`。
+    /// @return 成功为 `Ok`；要约不合法为 `GeneralInvalidArgument`；本平台无惰性提供机制为
+    /// `ClipboardFormatUnsupported`（Win32 / macOS 已接线；Linux 尚未接线）。
     static auto set_offer(const ClipboardOffer &offer) -> Result<void>;
 
-    /// @brief 注册「剪贴板所有权被其它进程夺走」的回调（Win32 `WM_DESTROYCLIPBOARD`、X11
-    /// selection owner 被夺、Wayland selection 事件、macOS 所有权变更的平台锚）。
+    /// @brief 订阅剪贴板通知（句柄形态）：`kinds` 位掩码指定要接收的类别。
     ///
-    /// 与 `set_offer` **成对**：惰性提供所依赖的缓存与临时资源在本回调里释放；未注册惰性要约时
-    /// 本回调不触发（没有可失去的所有权的要约）。所有权丢失是**正常态不是故障**，故走回调而不
-    /// 产出错误码。注册新回调**替换**旧回调（不叠加，避免多注册点各自持资源；`on_change` 同款）。
-    /// @param callback 所有权丢失回调；传空回调即注销既有回调。
-    static auto on_ownership_lost(std::function<void()> callback) -> void;
-
-    /// @brief 注册「系统剪贴板内容变化」的回调（Win32 `AddClipboardFormatListener`、Qt
-    /// `dataChanged`、GTK `changed`、macOS changeCount 轮询的平台锚）。
+    /// **纯多播**：同一回调注册几次就收几次，互不替换。派发按注册先后（FIFO）用注册快照逐条调用
+    /// ——回调内新注册的条目**下一轮**才生效，回调内取消的条目**立即**停止接收（含本轮尚未轮到的
+    /// 条目）。回调形参即命中类别；派发在通知到达的线程上串行执行，实现须轻量、不得在其中触发
+    /// 重布局或再次读写剪贴板。
     ///
-    /// **不谎报**：平台无监听机制时**注册即失败**、返回 `ClipboardListenUnsupported`——注册了却
-    /// 收不到通知会让调用方逻辑静默失效，故宁可如实报错（与 `available_formats()` 的如实反映同款
-    /// 定调）。注册语义同 `on_ownership_lost`：替换不叠加。回调在派发线程上串行调用，实现须轻量、
-    /// 不得在其中触发重布局或再次读写剪贴板。
-    /// @param callback 内容变化回调；传空回调即注销既有回调（注销不需要监听机制）。
-    /// @return 成功为 `Ok`；本平台无变更监听机制为 `ClipboardListenUnsupported`。
-    static auto on_change(std::function<void()> callback) -> Result<void>;
+    /// **不谎报**：请求 `ContentChanged` 而本平台无变更监听机制时**注册即失败**、返回
+    /// `ClipboardListenUnsupported`（注册了却收不到通知会让调用方逻辑静默失效，与
+    /// `available_formats()` 的如实反映同款定调）；只请求 `OwnershipLost` 恒成功——所有权丢失
+    /// 不依赖内容监听机制。返回的 `Subscription` 管理本次订阅：析构或显式 `reset()` 即注销，
+    /// 注销不需要监听机制。
+    /// @param kinds 订阅的通知类别（至少包含一类）。
+    /// @param callback 收到通知时的回调（形参为命中类别）；空回调为参数错。
+    /// @return 成功为 `Ok(Subscription)`；空回调或空 `kinds` 为 `GeneralInvalidArgument`；
+    /// 请求 `ContentChanged` 而本平台无监听机制为 `ClipboardListenUnsupported`。
+    [[nodiscard]] static auto on_event(ClipboardEventKind kinds, std::function<void(ClipboardEventKind)> callback)
+        -> Result<Subscription>;
 
-    /// @brief 程序化清空：清空系统剪贴板全部格式（Win32 `EmptyClipboard`、`xsel --clear` 的平台锚）。
+    /// @brief 订阅剪贴板通知（owner 守卫形态）：`owner` 销毁即自动注销。
+    ///
+    /// 守卫只影响**该条目的存活**，不改变纯多播与快照派发语义；owner 必须由 `std::shared_ptr`
+    /// 托管（`weak_from_this()` 可用），否则弱守卫无从建立——静默退化为强引用反而会把控件的生命
+    /// 周期拖到监听注册之后。
+    /// @param owner 订阅归属控件（`Widget` 或其子类，须由 `std::shared_ptr` 托管）。
+    /// @param kinds 订阅的通知类别（至少包含一类）。
+    /// @param callback 收到通知时的回调（形参为命中类别）；空回调为参数错。
+    /// @return 成功为 `Ok(Subscription)`；owner 非 `shared_ptr` 托管、空回调或空 `kinds` 为
+    /// `GeneralInvalidArgument`；请求 `ContentChanged` 而本平台无监听机制为
+    /// `ClipboardListenUnsupported`。
+    [[nodiscard]] static auto on_event(Widget &owner, ClipboardEventKind kinds,
+                                       std::function<void(ClipboardEventKind)> callback) -> Result<Subscription>;
+
+    /// @brief 程序化清空：清空系统剪贴板全部格式（Win32 `EmptyClipboard`、Linux `xsel --clear`、
+    /// macOS `pbcopy` 空输入重写 pasteboard 的平台锚）。
     ///
     /// 与空写入**语义相反**：空文本 / 空图像 / 空字节 / 空清单的 `set_*` 是契约内 no-op、**保留
     /// 既有内容**；本入口是**主动清空**。清空后 `available_formats()` 返回 `Ok(空清单)`；惰性要约
@@ -196,42 +265,6 @@ class Clipboard {
     /// @return 成功为 `Ok`；剪贴板打不开为 `ClipboardAccessFailed`、清空动作失败为
     /// `ClipboardWriteFailed`；本平台无清空机制为 `GeneralNotSupported`。
     static auto clear() -> Result<void>;
-
-    // ---- 测试注入点（test-only，见 specification/06-app-platform.md §8.2）----
-    // 仓库私有测试设施（tests/）用于并行隔离的最小注入面：声明常驻（消费端调用始终可编译），
-    // 实现体按 `AURORA_ENABLE_DEBUG && AURORA_ENABLE_TEST_HOOKS` 双宏裁切，
-    // 任一关闭（含 Release 下 DEBUG 自动关闭）时返回 `false` / no-op，平台行为不变。
-
-    /// @brief 安装进程内 memory 后端：此后 set/get 全部走内存，不触碰系统剪贴板。
-    /// @return 注入是否生效（双宏未齐备时为 `false`）。
-    [[nodiscard]] static auto install_test_backend() -> bool;
-
-    /// @brief 清空 memory 后端内容（后端未安装时为 no-op）。
-    static auto reset_test_backend() -> void;
-
-    /// @brief 卸载 memory 后端，恢复平台实现。
-    /// @return 是否确有后端被卸载（双宏未齐备时为 `false`）。
-    [[nodiscard]] static auto remove_test_backend() -> bool;
-
-    /// @brief 模拟「所有权被其它进程夺走」（平台后端 / 测试接缝，**应用代码不应调用**）。
-    ///
-    /// 仅在 memory 后端已安装且持有惰性要约时有效：触发一次 `on_ownership_lost` 回调，并清空要约
-    /// 与其已渲染缓存（模拟新所有者的内容取代本方）。未持有要约时为 no-op——没有可失去的所有权，
-    /// 与 `on_ownership_lost` 的成对语义一致。
-    static auto emit_ownership_lost() -> void;
-
-    /// @brief 模拟「剪贴板内容发生变化」（平台后端 / 测试接缝，**应用代码不应调用**）。
-    ///
-    /// 仅在已注册 `on_change` 时触发一次回调；不改变内容本身（真实平台上任何内容变化都会触发，
-    /// 那属接线期语义；memory 后端只提供显式模拟入口）。未注册回调时静默返回。
-    static auto emit_change() -> void;
-
-    /// @brief 模拟「平台有无剪贴板变更监听机制」（测试专用，默认 true = 模拟支持监听）。
-    ///
-    /// 置 false 后 `on_change` 注册即失败（`ClipboardListenUnsupported`），用于覆盖「无机制时
-    /// 不谎报」判据；仅在 memory 后端已安装时有意义（平台路径本就如实报无机制）。
-    /// @param supported true = 模拟有监听机制；false = 模拟无监听机制。
-    static auto set_listen_supported(bool supported) -> void;
 };
 
 }  // namespace aurora

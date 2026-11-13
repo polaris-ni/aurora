@@ -107,7 +107,7 @@ auto gradient_linear_scanline_scalar(std::uint8_t *row, int x0, int n, float sx,
 auto gradient_radial_scanline_scalar(std::uint8_t *row, int x0, int n, float cx, float py, float inv_r,
                                      const std::uint8_t *c0, const std::uint8_t *c1, float stop0, float range) -> int;
 
-// ---- 显式 SIMD 实现（供 test_simd_parity 直接比对）----
+// ---- 显式 SIMD 实现（供 tests/unit/utest_simd_parity.cpp 逐位比对）----
 #ifdef AURORA_ENABLE_SIMD
 /// @brief 显式 SSE2 实现：逐通道伽马混合的标量黄金逐位镜像，4 像素一组，尾部回落标量。
 /// @param px 像素段首指针；每像素 4 字节，RGB 写回混合结果、A 写 255。

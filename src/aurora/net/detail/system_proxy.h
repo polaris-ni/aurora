@@ -1,7 +1,7 @@
 #pragma once
 
 /// @brief 系统代理设置的平台无关投影与解析口。
-/// @file net/detail/system_proxy.h
+/// @file system_proxy.h
 ///
 /// 各平台把「操作系统里配了什么」压成同一枚 `SystemProxySnapshot` 的三个文本字段，本件负责把
 /// 文本变成 `ProxyEnvironment`。**平台 API 一律不出现在这里**：WinHTTP 的 `INTERNET_PER_CONN_*`

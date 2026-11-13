@@ -13,31 +13,30 @@ auto main() -> int {
         au::TextInput email_input;
         email_input.set_value("alice@example.com").set_placeholder("Enter email");
 
-        return au::Node{au::Column{au::ColumnProps{.children =
-                                                       {
-                                                           au::Node{au::Text{"User info form"}},
-                                                           au::Node{std::move(name_input)},
-                                                           au::Node{std::move(email_input)},
-                                                           au::Node{au::Button{au::ButtonProps{.label = "Submit"}}},
-                                                           au::Node{au::Checkbox{au::Reactive{true}}},
-                                                       },
-                                                   .gap = 8.0F}}};
+        return au::Node{au::Column(
+            {
+                au::Node{au::Text{"User info form"}},
+                au::Node{std::move(name_input)},
+                au::Node{std::move(email_input)},
+                au::Node{au::Button{au::ButtonProps().set_label("Submit")}},
+                au::Node{au::Checkbox{true}},
+            },
+            au::ColumnProps().set_gap(8.0F))};
     };
 
     // InspectorPanel 包裹目标树
     au::InspectorPanel inspector{target_tree, 0.4F};
 
     // 用 Splitter 分栏：左侧 Inspector，右侧被检查的 UI
-    au::Node target = target_tree();
-    au::Splitter splitter =
-        au::HSplitter(au::Node{std::move(inspector)},
-                      au::Node{au::Column{au::ColumnProps{.children =
-                                                              {
-                                                                  au::Node{au::Text{"Inspected UI tree"}},
-                                                                  target,
-                                                              },
-                                                          .gap = 8.0F}}},
-                      0.4F);
+    au::Node const target = target_tree();
+    au::Splitter splitter = au::HSplitter(au::Node{std::move(inspector)},
+                                          au::Node{au::Column(
+                                              {
+                                                  au::Node{au::Text{"Inspected UI tree"}},
+                                                  target,
+                                              },
+                                              au::ColumnProps().set_gap(8.0F))},
+                                          0.4F);
     splitter.set_min_sizes(180.0F, 200.0F);
 
     au::Node root = au::Column{

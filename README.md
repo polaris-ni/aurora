@@ -4,7 +4,7 @@
 渲染，不依赖 GPU；以编译型静态库交付。
 
 - 单一入口头：`#include "aurora/aurora.h"`，命名空间 `namespace aurora;`（推荐别名 `namespace au = aurora;`）
-- 当前版本：`1.0.0-alpha.10`（早期预览开发版，**尚不构成 API 稳定性承诺**；事实源见 `CHANGELOG.md` 的 `currentVersion`）
+- 当前版本：`1.0.0-alpha.11`（早期预览开发版，**尚不构成 API 稳定性承诺**；事实源见 `CHANGELOG.md` 的 `currentVersion`）
 - 运行期版本常量：`AURORA_VERSION_STRING`（`include/aurora/core/version.h`）
 
 ## 特性总览
@@ -55,10 +55,10 @@ int main() {
 namespace au = aurora;
 
 int main() {
-    au::Node root = au::Node{ au::Column(au::ColumnProps{.children = {
+    au::Node root = au::Node{ au::Column({
         au::Node{ std::move(au::Text("Hello, Aurora!").font_size(24)) },
-        au::Node{ au::Button(au::ButtonProps{.label = "Click me"}) },
-    }})};
+        au::Node{ au::Button(au::ButtonProps().set_label("Click me")) },
+    })};
 
     au::WindowOptions base{ .title = "Hello Aurora" }; // .title 为基类成员，指定初始化器不能指名基类
     au::Win32Options opts;                             // 先构造基类选项再拷贝至派生选项

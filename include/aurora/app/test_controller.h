@@ -89,7 +89,9 @@ class TestController {
     /// @brief 推进若干帧：每帧依次 tick 手势计时 → Animator → Scheduler → present。
     /// @param frames 帧数；<= 0 视为 1。
     /// @return present 失败返回带信息的 Error（如 Surface 失效）；否则空 Result。
-    /// @note 帧序与 `Application::run` 一致（唯一差异：无跨线程回投排水的 drain_posted）。
+    /// @note 帧序与 `Application::run` 一致：每帧开头先排空跨线程回投（`MainQueue::take_batch`）。
+    ///       控制器构造即领取值班租约（`wake` 为空——无头循环不睡在平台等待里），
+    ///       析构时按 `loop_end` 时序还租约并排空残留；并发构造第二个控制器 = 并发 run，硬失败。
     [[nodiscard]] auto pump(int frames = 1) -> Result<void>;
 
     /// @brief 连续推进直到「无事可做」——某帧为 idle 跳帧且无运行中动画。

@@ -66,8 +66,8 @@ TEST_R7_WHITELIST = {}
 # ---- TEST-R8 目录白名单：目录定类型 + 强制前缀 -----------------------------
 # 类型目录：其中的 *.cpp 一律是测试 TU，且必须带对应前缀（Suite 恒等于文件 stem）。
 TEST_TYPE_DIRS = (("unit", "utest_"), ("integration", "itest_"), ("e2e", "etest_"))
-# 设施目录：框架 / 支撑 / 基准 / 夹具，非类型目录，不受前缀约束。
-TEST_FACILITY_DIRS = ("framework", "support", "fixtures", "golden")
+# 设施目录：框架 / 支撑 / 基准 / 夹具 / 覆盖引导模糊测试，非类型目录，不受前缀约束。
+TEST_FACILITY_DIRS = ("framework", "support", "fixtures", "golden", "fuzz")
 
 # TEST-R10 趋势基线：跨 ≥3 模块域的测试文件（catch-all 反模式）允许存量上限。
 CATCH_ALL_BASELINE = 20
@@ -291,19 +291,19 @@ def parse_test_header(repo, rel):
             continue
         m = TYPE_RE.match(line)
         if m and type_v is None:
-            type_v = m.group(1).strip();
+            type_v = m.group(1).strip()
             continue
         m = NOTE_RE.match(line)
         if m and note_v is None:
-            note_v = m.group(1).strip();
+            note_v = m.group(1).strip()
             continue
         m = STD_TARGET_RE.match(line)
         if m and std_v is None:
-            std_v = m.group(1).strip();
+            std_v = m.group(1).strip()
             continue
         m = ALT_TARGET_RE.match(line)
         if m and alt_v is None:
-            alt_v = m.group(1).strip();
+            alt_v = m.group(1).strip()
             continue
     has_std_block = (type_v is not None and std_v is not None and note_v is not None)
     fmt = "standard" if has_std_block else ("alt" if alt_v is not None else "none")

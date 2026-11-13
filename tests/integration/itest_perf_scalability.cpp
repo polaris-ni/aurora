@@ -62,10 +62,10 @@ auto build_scene(int n) -> Node {
             ++btn_idx;
             btns.emplace_back(Button("Btn " + std::to_string(btn_idx)));
         }
-        rows.emplace_back(Row{RowProps{.children = std::move(btns), .gap = 4.0F}});
+        rows.emplace_back(Row(std::move(btns), RowProps().set_gap(4.0F)));
         remaining -= count;
     }
-    return Node{Column{ColumnProps{.children = std::move(rows), .gap = 2.0F}}};
+    return Node{Column(std::move(rows), ColumnProps().set_gap(2.0F))};
 }
 
 // FrameStats 快照（run 结束后一次性读取）。

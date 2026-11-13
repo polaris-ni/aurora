@@ -34,15 +34,11 @@ cmake -S . -B build -DAURORA_BACKEND_GLFW=ON
 最小可编译配方（完整版见 `examples/demos/demo_glfw_surface.cpp`）：
 
 ```cpp
-#include <chrono>
-
 #include "aurora/aurora.h"
 namespace au = aurora;
 int main() {
     au::enable_dpi_awareness();                 // 必须在建窗前（进程级 DPI 感知）
     au::Node root = au::Text("Hello GLFW!");
-    au::FocusManager fm;
-    fm.set_root(&root.widget());
 
     au::GlfwOptions opts;                       // size/title 继承自 WindowOptions，逐字段赋值
     opts.size = au::Size{480.0F, 320.0F};
@@ -51,22 +47,11 @@ int main() {
     auto win_res = au::create_window(opts);
     if (!win_res)
         return 1;
-    auto win = std::move(win_res.value());
-    win->surface().set_event_handler([&](au::Event &e) {
-        if (auto *me = dynamic_cast<au::MouseEvent *>(&e))
-            au::EventDispatcher::dispatch(root.widget(), *me, &fm);
-        else if (auto *ke = dynamic_cast<au::KeyEvent *>(&e))
-            au::EventDispatcher::dispatch(root.widget(), *ke, fm);
-    });
-    win->run([&] {                              // 帧循环：关闭窗口即退出
-        const auto t0 = std::chrono::steady_clock::now();
-        (void)win->present_root(root);
-        const double elapsed_ms = std::chrono::duration<double, std::milli>(
-            std::chrono::steady_clock::now() - t0).count();
-        win->set_next_wait(au::compute_wait_timeout(
-            win->has_pending_dirty(), /*anim_active=*/false, /*next_deadline_ms=*/-1.0,
-            /*frame_budget_ms=*/1000.0 / 60.0, elapsed_ms, win->surface().paces_frames()));
-    });                                         // 不设 next_wait 则退化为忙轮询
+
+    // 帧循环由 Application 统一驱动：事件派发 / 焦点 / 帧节流 / 跨线程回投排空都在其中；
+    // Window 不再自带 run()（关闭窗口即退出）。
+    au::Application app{au::Scene{root}, std::move(win_res.value()), opts};
+    app.run();
 }
 ```
 
@@ -77,17 +62,17 @@ int main() {
 ## 3 布局：纵向 / 横向排列
 
 ```cpp
-au::Node root = au::Node{ au::Column(au::ColumnProps{ .children = {
+au::Node root = au::Node{ au::Column({
     au::Node{ au::Text("标题").font_size(24) },
     au::Node{ au::Text("副标题") },
-    au::Node{ au::Button(au::ButtonProps{ .label = "点我" }) },
-}}) };
+    au::Node{ au::Button(au::ButtonProps().set_label("点我")) },
+}) };
 
-au::Node row = au::Node{ au::Row(au::RowProps{ .children = {
+au::Node row = au::Node{ au::Row({
     au::Node{ au::Text("左") },
     au::Node{ au::Spacer() },          // 吸收剩余空间，把两侧推开
     au::Node{ au::Text("右") },
-}}) };
+}) };
 ```
 
 > 对齐语义：主轴对齐（`Center` / `SpaceBetween` 等）只有在父约束强制容器更大时才可见。若想让 `SpaceBetween` 生效，给父容器一个固定尺寸或 `Expand`（见 §9）。
@@ -134,9 +119,9 @@ au::Node chart = au::Canvas(160, 90, [](au::Painter &p, au::Rect b) {
 ## 7 条件显示（Show）
 
 ```cpp
-auto visible = std::make_shared<au::State<bool>>(true);
-au::Node n = au::Show(visible, au::Text("仅条件为真时可见"));
-visible->set(false);   // 触发刷新，widget 消失
+au::State<bool> visible{true};
+au::Node n = au::Show(visible, au::Text("仅条件为真时可见"));   // 句柄按值传入，共享同一来源
+visible.set(false);   // 触发刷新，widget 消失
 ```
 
 ---
@@ -144,11 +129,11 @@ visible->set(false);   // 触发刷新，widget 消失
 ## 8 动态列表（Repeater）
 
 ```cpp
-auto items = std::make_shared<au::State<std::vector<std::string>>>(std::vector<std::string>{"A","B","C"});
+au::State<std::vector<std::string>> items{std::vector<std::string>{"A", "B", "C"}};
 au::Node list = au::Repeater<std::string>{ items, [](const std::string &s, int i) {
     return au::Text(s);
 }};
-items->set(std::vector<std::string>{"X","Y"});   // 列表自动重建
+items.set(std::vector<std::string>{"X", "Y"});   // 列表自动重建
 ```
 
 ---
@@ -156,32 +141,25 @@ items->set(std::vector<std::string>{"X","Y"});   // 列表自动重建
 ## 9 响应式状态（细粒度信号）
 
 ```cpp
-// 方式 1：使用内置响应式 widget（Show / Repeater 等接受 State<T>）
-auto visible = std::make_shared<au::State<bool>>(true);
-au::Node n = au::Show(visible, au::Text("条件显示"));
-visible->set(false);  // 触发定点刷新，widget 消失
+// 值本身：State<T> 可写；交给只读消费方时隐式降级为 ReadOnlyState<T>
+au::State<int> count{0};
 
-// 方式 2：使用 Effect 手动建立依赖（底层机制）
-au::State<int> count{ 0 };
+// 跟随变化：effect 调用即首跑，读取的来源自动成为依赖；返回值持有即生效
 int observed = 0;
-au::Effect e([&]() -> void { observed = count.get(); });  // 读取信号即登记依赖
-e.run();           // 首次运行：observed = 0
-count.set(42);     // 触发 Effect 重跑：observed = 42（定点刷新，无全树 diff）
-```
+auto watch = au::effect([&]() -> void { observed = count.get(); });  // 首跑 observed = 0
+count.set(42);                                                       // 重跑 observed = 42
+// watch 析构（或 watch.reset()）即取消；无全树 diff，只重跑读取过该来源的回调
 
-> **注意**：仅在构造时读取 `state->get()` **不会**建立响应式依赖。必须通过 `Effect` 或使用接受 `State<T>` 的 widget（Show / Repeater）才能实现定点刷新。
-
-```cpp
-// 方式 3：用 connect + Subscription 订阅任意信号（析构自动取消，无监听器泄漏）
-au::State<int> count{ 0 };
+// 需要逐值回调而不做派生计算：直接向来源订阅（立即交付当前值一次，此后逐次送达）
 int seen = 0;
-{
-    au::Subscription sub = au::connect(count, [&](int v){ seen = v; });  // 立即 seen = 0
-    count.set(7);                                                        // → seen = 7
-}                                                                        // sub 离开作用域 → 自动取消订阅
+au::Subscription sub = count.subscribe([&](int v) { seen = v; });  // 立即 seen = 42
+count.set(7);                                                       // → seen = 7
+// sub 离开作用域即取消；回调内读取其他句柄不会扩充本订阅
 ```
 
-**为何不是 `bind`**：`State` 基类链上的 `std::enable_shared_from_this` 使 `std` 进入实参的 ADL 关联命名空间集，无限定 `bind(state, fn)` 会被变参转发的 `std::bind` 吸走——编译通过但回调永不执行。故本 API 定名 `connect`（原 `bind` 已于 1.0.0-alpha.1 改名），与 `std` 名字无重叠。
+> **注意**：仅在构造时读取 `count.get()` **不会**建立响应式依赖——`.get()` 只取值。要跟随变化，要么在 `effect` 内读取，要么把句柄交给接受 `ReadOnlyState<T>` 的控件（`Show` / `TextProps::content` 等）。
+
+> **从 `connect` / `bind` 迁移**：旧版 `connect(state, fn)`（首值立即回调）已并入 `subscribe`（同为立即首值）。`bind` 改名 `connect` 的历史（`std::enable_shared_from_this` 使 `std` 进入 ADL 关联命名空间，`std::bind` 会劫持无限定调用）随该入口一并归档。
 
 ---
 
@@ -194,12 +172,12 @@ au::Node fixed = std::move(wide);        // Node 仅移动派生对象（Widget 
 
 au::Theme theme = au::Theme::light();
 theme.roles.primary = au::colors::AURORA_BLUE;   // 覆写色角色
-auto themed = au::ThemeProvider{ theme, au::Button(au::ButtonProps{ .label = "主题按钮" }) };
+auto themed = au::ThemeProvider{ theme, au::Button(au::ButtonProps().set_label("主题按钮")) };
 ```
 
 ### 10.1 色角色与类型安全扩展
 
-控件经 `inherit_theme(ctx)` 读主题：角色为直接字段访问，无哈希查找、无堆分配；控件未显式设色时回落对应角色（各控件契约见 [`specification/04-widget.md`](specification/04-widget.md)）。应用可整体覆写角色基准值，或以类型为键挂自定义令牌面：
+控件经 `inherit_theme(ctx)` 读主题：返回 `const Theme &`（注入存储本身，本次布局 / 绘制遍历内有效），快照按引用取用、字段直读，唯一一次间接在注入层的映射查表——无哈希查找、无堆分配；控件未显式设色时回落对应角色（各控件契约见 [`specification/04-widget.md`](specification/04-widget.md)）。应用可整体覆写角色基准值，或以类型为键挂自定义令牌面：
 
 ```cpp
 au::Theme theme = au::Theme::dark();
@@ -220,7 +198,7 @@ if (const auto *brand = theme.extensions.get<BrandAccent>()) {  // 未注册返�
 默认即现代样式（圆角方框 + 抗锯齿勾号 + hover / 按下反馈，勾选色跟随主题 `primary`），链式可定制：
 
 ```cpp
-au::Checkbox cb{ au::Reactive<bool>{ true } };
+au::Checkbox cb{ true };   // 字面量即建自有来源；也可传外部 au::State<bool> 共享
 cb.set_active_color(au::Color{ 46, 160, 67, 255 })   // 勾选填充色（不设则跟随主题 primary）
   .set_check_color(au::colors::AURORA_WHITE)                // 勾号颜色
   .set_border_color(au::Color{ 140, 140, 146, 255 }) // 未勾选描边色
@@ -239,12 +217,13 @@ cb.set_active_color(au::Color{ 46, 160, 67, 255 })   // 勾选填充色（不设
 回调式（`au::async` 底层经有界 `aurora::ThreadPool::default_pool()` 执行）：
 
 ```cpp
+au::State<int> out{0};             // 由 UI 侧持有，句柄可按值抄给回调
 au::async([]() -> int {            // 后台线程执行
     int s = 0; for (int i = 1; i <= 100; ++i) s += i;
     return s;                       // 或返回 Result<int>
 }).with_timeout(std::chrono::seconds(5))   // opt-in 超时
- .then([](const au::Result<int> &r) {      // 结果回主线程
-    if (r) out->set(r.value());     // 回写 State 触发刷新
+ .then([out](const au::Result<int> &r) {   // 装好主线程投递器后回 UI 线程
+    if (r) out.set(r.value());      // 回写 State 触发刷新
     else   au::Diagnostics::report(r.error().message, {}, r.error().code);
 });
 ```
@@ -252,13 +231,13 @@ au::async([]() -> int {            // 后台线程执行
 协程式（`co_await` 在后台执行，续体回主线程）：
 
 ```cpp
-au::CoroTask<void> load() {
+auto load = [out]() -> au::CoroTask<void> {   // 捕获句柄：与上方回调同一枚 State
     au::Result<int> r = co_await au::co_async([]() -> int {
         int s = 0; for (int i = 1; i <= 100; ++i) s += i;
         return s;
     });
-    if (r) out->set(r.value());
-}
+    if (r) out.set(r.value());
+};
 au::launch(load());                // 启动顶层协程
 ```
 
@@ -287,34 +266,36 @@ app.run();
 组件级声明式（响应式为主 + 可选回调）：
 
 ```cpp
-// 时钟：子 UI 经 ticks() 绑定自动刷新
-au::Node clock = au::Timer(1s, [](const au::SignalView<int> &tick) {
-    return au::Text(au::computed([&] {
-        return au::LocalizedString{ "tick: " + std::to_string(tick.get()) }; }));
+// 时钟：子 UI 经 ticks() 只读句柄派生刷新
+au::Node clock = au::Timer(1s, [](au::ReadOnlyState<int> tick) {
+    auto label = au::computed([tick]() -> au::LocalizedString {
+        return au::LocalizedString{ "tick: " + std::to_string(tick.get()) };
+    });
+    return au::Text(au::TextProps().set_content(label));
 });
 
 // 自动显现：2s 后 on_tick 置位 shown
-auto shown = std::make_shared<au::State<bool>>(false);
+au::State<bool> shown{ false };
 au::Node reveal = au::Timer(2s,
-    [shown](const au::SignalView<int> &) {
+    [shown](au::ReadOnlyState<int>) {
         return au::Show(shown, au::Text(au::LocalizedString{ "revealed!" })); },
-    [shown](int) { shown->set(true); });
+    [shown](int) { shown.set(true); });
 ```
 
 - `set_timeout(d, cb)` 一次性；`set_interval(period, cb)` 周期；返回值 `TimerHandle` 可 `cancel()`、`active()` 查询。
 - `Timer` 挂载时向 `Scheduler::current()` 注册，析构自动取消；无运行中 App 时降级（记 `Diagnostics::warn`）不崩溃。
 
-> **`au::LocalizedString`**：`au::LocalizedString{ "revealed!" }` 由 `const char*` 构造，持有字面文本，未启用本地化时直接显示（查表失败也回退为 `text`）。需按 `Locale` 查 `MessageCatalog` 解析时用 `au::LocalizedString::tr(id)`——`id` 是构建期 `gen_i18n` 生成头里的 `constexpr au::MessageId` 常量（用法见 `codespec/specification/07-environment-modifier.md` §6.3），控件层（如 `Button::label`）统一吃 `LocalizedString`，故 `.content = "Hi"` 可隐式转换。最小配方三行：
+> **`au::LocalizedString`**：`au::LocalizedString{ "revealed!" }` 由 `const char*` 构造，持有字面文本，未启用本地化时直接显示（查表失败也回退为 `text`）。需按 `Locale` 查 `MessageCatalog` 解析时用 `au::LocalizedString::tr(id)`——`id` 是构建期 `gen_i18n` 生成头里的 `constexpr au::MessageId` 常量（用法见 `codespec/specification/07-environment-modifier.md` §6.3），控件层（如 `Button` 的 `label`）统一吃 `LocalizedString`，`TextProps::set_content` 另收 `const char*` 与 `std::string` 并隐式转 `LocalizedString`。最小配方三行：
 >
 > ```cpp
 > // 构建期：aurora_i18n_generate(TARGET myapp NAMESPACE myapp::msg BASE messages_en.json
 > //         LOCALES messages_zh-Hans-CN.json OUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/i18n)
 > (void)au::default_catalog().load_binary(std::span<const std::byte>{read_whole_file("messages_en.bin")});
 > au::default_catalog().set_default_locale(au::Locale{.language = "en"});
-> au::Text{au::TextProps{.content = myapp::msg::demo::greeting(3, "Ada")}};   // 具名强类型生成 API
+> au::Text(au::TextProps().set_content(myapp::msg::demo::greeting(3, "Ada")));   // 具名强类型生成 API
 > ```
 >
-> 切语言有两条通道：子树 `au::LocaleProvider{std::make_shared<au::State<au::Locale>>(loc), child}`（响应式，换值即整子树重解析），或窗口级默认 `window.set_locale(loc)`（自下一帧起根注入）。两者换值都会向下清子树缓存，整屏文案同帧重解析；子树 Provider 优先于窗口级。
+> 切语言有两条通道：子树 `au::LocaleProvider{locale, child}`（`locale` 为宿主持有的 `au::State<au::Locale>` 句柄；响应式，换值即整子树重解析），或窗口级默认 `window.set_locale(loc)`（自下一帧起根注入）。两者换值都会向下清子树缓存，整屏文案同帧重解析；子树 Provider 优先于窗口级。
 
 ---
 
@@ -432,6 +413,59 @@ AURORA_LOG_RAW("bench", r.p99_ms(), " ", r.jitter_ms(), " ", r.full_redraw_frame
 AURORA_LOG_RAW("bench", "scroll_buffer_bytes peak=", r.counters_max().scroll_buffer_bytes, "\n");
 ```
 
+**统一结果文件**（六个基准工具每次运行都额外落盘一份 JSON，标准输出不变）：
+
+```bash
+# 指定本次运行的落盘目录与元数据；不指定时默认 bench-results/
+AURORA_BENCH_RESULT_DIR=bench-results/run-01 \
+AURORA_BENCH_TESTBED=win-release-headless \
+AURORA_BENCH_COMMIT="$(git rev-parse HEAD)" \
+./build/bench_scroll.exe --scene app --format csv
+# 产物：bench-results/run-01/bench_scroll.app.json
+```
+
+采样不可信、后端不可用或场景跳过时同样落盘，但 `status` 与 `data_status` 会带原因码，比较载体判数据缺失而非通过。契约字段见 `tools/include/bench_result.h`。
+
+**入库基线与统计判定**（`tools/check/bench_compare.py`，零第三方依赖）：
+
+```bash
+# 只有这个显式动作可以改写入库基线；普通比较永不改写
+python3 tools/check/bench_compare.py write-baseline \
+  --results bench-results/run-01 \
+  --baseline tools/check/perf_baselines.json \
+  --commit "$(git rev-parse HEAD)" --fingerprint release-headless
+
+# 同一份代码两臂同码对照标定噪声预算，再对两臂做判定
+python3 tools/check/bench_compare.py calibrate \
+  --base bench-results/aa-base --head bench-results/aa-head \
+  --out bench-results/noise-budget.json
+python3 tools/check/bench_compare.py compare \
+  --base bench-results/base --head bench-results/head \
+  --seed 20261109 --noise-budget bench-results/noise-budget.json \
+  --baseline tools/check/perf_baselines.json --out bench-results/verdict.json
+```
+
+`compare` 每臂有效重复不少于九次、交错顺序由 `--seed` 决定；结论为「通过 / 回归 / 噪声不足 / 数据缺失」四选一，非「通过」时退出码为 1。入库基线只作跨提交趋势，同次双构建交错对照才作回归判定。`tools/check/bench_nightly.py selftest` 可本地复验注入变异自证；夜间编排见 `.github/workflows/nightly-bench.yml`。
+
+**下游应用的最小监控配方**（恒开门面，预编译 Release 库直接可用，不需要 `AURORA_ENABLE_PROFILING`）：
+
+```cpp
+#include "aurora/aurora.h"
+
+const auto sub = au::FrameMonitor::subscribe([](const au::FrameBatch &batch) {
+    for (std::size_t i = 0; i < batch.count; ++i) {
+        AURORA_LOG_RAW("bench", batch.samples[i].index, " ", batch.samples[i].frame_delta, "\n");
+    }
+});
+const auto metric = au::FrameMonitor::register_metric("my-view-render-ms");
+au::FrameMonitor::set_metric(metric, 1.25);
+AURORA_LOG_RAW("bench", au::FrameMonitor::snapshot_json(), "\n");
+au::FrameMonitor::unregister_metric(metric);
+au::FrameMonitor::unsubscribe(sub);
+```
+
+零订阅者时 `au::FrameMonitor::diagnostics()` 的四项采集计数恒为零，`begin_scope` 返回空句柄且不读时钟。完整示例见 `examples/demos/demo_frame_monitor.cpp`，预编译库消费探针见 `tools/verify/installed_consumer/`。
+
 ---
 
 ## 15 序列化：树 ⇄ JSON
@@ -451,7 +485,7 @@ au::serialization::apply_patch(a_json, patch);             // a 变为 b
 
 ```cpp
 std::string code = au::serialization::to_code(root.widget());
-// 输出等效的 au::Column(au::ColumnProps{...}) 源码，可反贴回项目
+// 输出等效的 au::Column({...}, au::ColumnProps().set_gap(...)) 源码，可反贴回项目
 
 // 指定风格
 std::string step = au::serialization::to_code(j, au::serialization::CodeStyle::StepByStep);
@@ -502,7 +536,7 @@ cmake --build build --target aurora_api_json   # 推荐：内部跑 gen_api_tool
 
 ## 19 持久化配置（Preferences）
 
-轻量键值配置，以单个 JSON 文件为后端（对标 `SharedPreferences` / `UserDefaults`）。初始化时**显式指定文件位置**；未指定则仅存内存。`set` 只写内存与响应式 `State`，落盘由 `flush()` 主动触发。
+轻量键值配置，以单个 JSON 文件为后端（对标 `SharedPreferences` / `UserDefaults`）。初始化时**显式指定文件位置**；未指定则仅存内存。`set` 只写内存与只读句柄，落盘由 `flush()` 主动触发。
 
 ```cpp
 #include "aurora/aurora.h"
@@ -514,21 +548,27 @@ Preferences &prefs = Preferences::instance("app", Preferences::default_config_di
 //    或显式绝对路径：Preferences &prefs = Preferences::instance_at("app", "C:/data/settings.json");
 //    （普通构造器仍可用：内存模式 Preferences mem; 文件模式 Preferences p{ "C:/data/settings.json" };）
 
-// 2) 响应式绑定到已有控件（Switch 等）
-au::Switch sw{ prefs.binding<bool>("dark_mode", false),
+// 2) 可编辑控件：本地 State 供控件读写，提交时经 prefs 命令落内存、flush 落盘
+au::State<bool> dark_mode{ prefs.get("dark_mode", false) };
+au::Switch sw{ dark_mode,
     [&prefs](bool v) { prefs.set("dark_mode", v); prefs.flush(); } };
 
-// 3) 读取：类型不匹配或缺失回退默认值
+// 3) 只读展示：watch 返回 ReadOnlyState<T>，存储写入自动推送；控件不能经它写回
+au::Text hint{ au::TextProps().set_content(au::computed([persisted = prefs.watch<bool>("dark_mode", false)]() {
+    return au::LocalizedString{ "persisted = " + std::string{ persisted.get() ? "true" : "false" } };
+})) };
+
+// 4) 读取：类型不匹配或缺失回退默认值
 int volume = prefs.get("volume", 5);
 
-// 4) 主动刷新到文件（进程锁 + 原子写）；重新启动后构造即加载，reload 可从文件恢复
+// 5) 主动刷新到文件（进程锁 + 原子写）；重新启动后构造即加载，reload 可从文件恢复
 if (auto r = prefs.flush(); !r.ok()) { /* r.error() */ }
 ```
 
 - **单例粒度**：`instance(name)` 按名注册表，每个 `name` 唯一；首次调用按参数创建，后续忽略路径参数。
 - **并发安全**：实例内部 `std::mutex` 保护（独占锁；不用 `std::shared_mutex`，因 MinGW-w64 winpthreads 的 rwlock 在并发写锁竞争下会触发 `__shared_mutex_pthread::lock()` 断言）。`flush` / `reload` 经跨平台文件锁（`<file>.lock`）+ 原子 `rename` 保证多进程安全。可多线程并发 `set` / `get` / `flush`。
 - 支持值类型：`bool` / 整数 / 浮点 / `std::string` / `std::vector` / JSON 对象。
-- `watch<T>` 返回 `std::shared_ptr<State<T>>`，可手动订阅；`binding<T>` 返回 `Binding<T>`（非拥有，须保持 `Preferences` 存活）。
+- `watch<T>` 返回 `ReadOnlyState<T>`：可订阅、可交给只读控件（如 `TextProps::content`）；**没有写入口**，修改配置只走 `set` / `remove` / `clear`，落盘仍须 `flush`。表单草稿由应用自己的 `State` 保存（见上方第 2 步），本类不做读写双向绑定。
 
 ### 19.1 分组（group）
 
@@ -540,9 +580,9 @@ auto ui = prefs.group("ui");
 ui.set("theme", std::string("dark"));
 ui.set("font_size", 14);
 
-// 控件直接绑定分组内的键（删除走分组墓碑路径）
-au::Switch sw{ ui.binding<bool>("dark_mode", false),
-    [&prefs](bool v) { prefs.group("ui").set("dark_mode", v); prefs.flush(); } };
+// 控件绑定分组内的键：草稿 State 驱动绘制，提交回分组（删除走分组墓碑路径）
+au::State<bool> grouped{ ui.get("dark_mode", false) };
+au::Switch sw{ grouped, [&prefs](bool v) { prefs.group("ui").set("dark_mode", v); prefs.flush(); } };
 
 // 链式嵌套分组
 prefs.group("ui").group("editor").set("font", std::string("Mono"));
@@ -558,7 +598,7 @@ ui.clear();
 
 ## 20 视频播放器（VideoPlayer）
 
-`media/` 子系统以抽象 `VideoSource` 为解码扩展点，内置零依赖 `ImageSequenceSource`（图片序列 / 动画）作为自包含样例。播放由 `Application::tick` 自动驱动，控件与 UI 可绑定 `Reactive` 播放状态。
+`media/` 子系统以抽象 `VideoSource` 为解码扩展点，内置零依赖 `ImageSequenceSource`（图片序列 / 动画）作为自包含样例。播放由 `Application::tick` 自动驱动；控件与 UI 经只读播放信号（`playing_signal()` / `progress_signal()` / `volume_signal()` / `muted_signal()`，均为 `ReadOnlyState<T>`）跟随状态，播放控制仍走命令（`toggle_play()` / `seek_fraction()` / `set_volume()`）。
 
 ```cpp
 #include "aurora/aurora.h"
@@ -649,7 +689,7 @@ au::FontEngine::set_text_aa_mode(au::TextAAMode::ClearType);
 ```
 
 - `family` 为空字符串 / `"sans-serif"` / `"Noto Sans"` / `"default"` 均指向内置默认字体。
-- 缺字（如未注册 CJK 的 Latin 字体）自动沿系统字体回退链（msyh / simsun / MSGOTHIC 等）查找，避免豆腐块。
+- 缺字（如未注册 CJK 的 Latin 字体）自动沿系统字体回退链（Windows msyh / simsun / MSGOTHIC；macOS Songti / Hiragino Sans GB / PingFang / AquaKana / Apple SD Gothic Neo / Arial Unicode）查找，避免豆腐块。
 - 度量（`measure_width` / `caret_x` / `hit_test_char`）与绘制（`draw_text`）在逻辑 dp 空间一致；`display_*` 系列按物理像素尺寸折算，用于缩放屏下的实显命中校正（见 [`specification/03-layout-render.md`](specification/03-layout-render.md) §8.2）。
 
 ---
@@ -666,10 +706,10 @@ using namespace au;
 
 // 1) 构建目标 UI 树
 auto target_tree = []() -> au::Node {
-    return au::Node{ au::Column(au::ColumnProps{ .children = {
+    return au::Node{ au::Column({
         au::Node{ au::Text("Hello") },
-        au::Node{ au::Button(au::ButtonProps{ .label = "Click" }) },
-    } }) };
+        au::Node{ au::Button(au::ButtonProps().set_label("Click")) },
+    }) };
 };
 
 // 2) 创建 InspectorPanel（接受目标树获取函数 + 左侧占比）
@@ -740,31 +780,31 @@ au::Column root;
 auto *title = label(root, "标题");                         // Text*，自动加为 root 子节点
 auto *ok    = button(root, "确定", {}, []{ /* 回调 */ });   // Button*；第四参 on_click 可选
 auto *name  = input(root, "默认值");                        // TextInput*
-auto *flag  = checkbox(root, au::reactive(true));           // Checkbox*
-auto *vol   = slider(root, au::reactive(0.5));              // Slider*
+auto *flag  = checkbox(root, true);                          // Checkbox*；字面量即建自有 State
+auto *vol   = slider(root, 0.5);                             // Slider*；也可传外部 au::State<bool> / au::State<double> 共享
 auto *box   = vbox(root);   // Column*；hbox → Row*，stack → Stack*，grid → Grid*，scroll → Scroll*
 ```
 
-工厂返回的裸指针生命周期由父树 `shared_ptr` 持有，**父树销毁后即失效**，勿长期持有。容器类工厂第二参数为既有 `XxxProps`（默认 `{}`）；`label` / `button` 首参为主文案，覆盖对应 Props 字段。
+工厂返回的裸指针生命周期由父树 `shared_ptr` 持有，**父树销毁后即失效**，勿长期持有。容器类工厂第二参数为既有 `XxxProps`（默认 `{}`）；`label` / `button` 首参为主文案，覆盖对应 Props 字段；`scroll` 例外——内容节点占第二参数，属性块后移一位（`scroll(parent, Node, ScrollProps = {})`）。
 
 ### 23.2 Scroll
 
 单子垂直滚动容器：固定视口裁切内容、滚轮增量滚动；内容量再大也只缓冲「视口 ×(1 + 2 × overscan)」的有界离屏窗口，纯滚动帧整页仅一次平移合成、不重栅。
 
 ```cpp
-au::Column list{ au::ColumnProps{ .children = {
-    au::Text("行 1"), au::Text("行 2"), /* …长列表… */ } } };
+au::Column list({
+    au::Text("行 1"), au::Text("行 2"), /* …长列表… */ });
 
-// 方式 1：配置块构造（可设 step / overscan）
-au::Scroll scroll{ au::ScrollProps{ .child = std::move(list), .step = 16.0F } };
+// 方式 1：内容 + 属性块构造（内容走构造首参，属性经链式写件表态）
+au::Scroll scroll{ au::Node{std::move(list)}, au::ScrollProps().set_step(16.0F) };
 
 // 方式 2：便捷构造（取首项为唯一子节点）
 au::Node n = au::Scroll{ au::Column{ au::Text("A"), au::Text("B") } };
 ```
 
-- `ScrollProps` 字段：`.child`（唯一子节点 `Node`）、`.step`（每单位滚轮增量的滚动像素，默认 16）、`.overscan`（视口上下各留 overscan 屏缓冲，默认 1；缓冲内存不随内容量增长）。
-- 继承式双模：`.step` 可直接赋值（`scroll.step = 16`），或 `Scroll{ ScrollProps{...} }` 配置块构造。
-- 工厂层等价：`au::ui::scroll(parent, ...)`。
+- `ScrollProps` 属性面六行（已迁到属性单一声明形态，见 [`specification/04-widget.md`](specification/04-widget.md) §2.5）：`step`（每单位滚轮增量的滚动像素，默认 16）、`overscan`（视口上下各留 overscan 屏缓冲，默认 1；缓冲内存不随内容量增长）、`restore_key`（空 = 不参与位置保存）、吸附三件套 `snap_extent` / `snap_paging` / `snap_alignment`。取值走无参读件（`scroll.step()`），写入走链式写件（`ScrollProps().set_step(24.0F)`），撤表态走 `clear(ScrollProps::step_row())`；六行里只有 `overscan` 是绘制档（它决定离屏缓冲的逻辑高度）。
+- 内容子节点不入属性表：只能随构造移入（`Scroll{ Column{...} }` 或 `Scroll(Node, ScrollProps)`），构造后换内容走容器自身的 `set_child`。
+- 工厂层等价：`au::ui::scroll(parent, child, props)`。
 
 > 凡靠自身偏移平移内容的容器（`Scroll` / `LazyList` / `GridView`），**偏移变化必须 `mark_needs_paint()`** 把视口标脏，否则只有自驱动动画控件会跟随滚动。
 
@@ -812,11 +852,11 @@ AURORA_TEST_CASE(button_click_smoke) {
 ```cpp
 // Outlined 风格按钮：透明背景 + 描边 + 自定义悬停/按下色 + 最小尺寸
 auto btn = au::Button("Save");
-btn.background(au::colors::AURORA_TRANSPARENT)
-   .text_color(au::Color{ 0, 90, 200, 255 })
-   .set_border(au::Color{ 0, 90, 200, 255 }, 1.5f)
+btn.set_color(au::colors::AURORA_TRANSPARENT)
+   .set_on_color(au::Color{ 0, 90, 200, 255 })
+   .set_border_color(au::Color{ 0, 90, 200, 255 }).set_border_width(1.5f)
    .set_hover_color(au::Color{ 0, 90, 200, 24 })   // 不设则由背景色自动调暗
-   .set_min_size(96.0F, 36.0F);
+   .set_min_width(96.0F).set_min_height(36.0F);
 
 // 步进滑块 + 自定义轨道 / 滑块；active_color 不设则跟随主题 primary
 auto sl = au::Slider();
@@ -866,7 +906,7 @@ class GradientButton : public au::Button {
 - **强类型尺寸**：`width(au::px(100))` 合法；`width(100)` 编译失败（无 `Length(int)` 隐式转换）。
 - **子类新增与基类同名方法会静默 override 基类虚函数**：新增方法前须确认基类中不存在同名虚函数。
 
-> 状态选择指南（State vs Store vs Binding vs Computed）与生命周期速查见 [`CONCEPTS.md`](CONCEPTS.md) §2。
+> 状态选择指南（`State` / `ReadOnlyState` / `computed` / `effect`）与生命周期速查见 [`CONCEPTS.md`](CONCEPTS.md) §2。
 
 ---
 
@@ -980,7 +1020,7 @@ au::Json j = au::debug::feature_flags_json();
 au::WindowOptions opts;
 opts.size  = au::Size{ 720, 480 };
 opts.title = "文档";
-opts.style.decoration = au::DecorationPolicy::Borderless;   // 移除系统标题栏（CSD 接管）
+opts.style.decoration = au::DecorationPolicy::Borderless;   // 移除系统标题栏，保留可拖拽缩放边框
 
 au::TitleBar bar;
 bar.set_title("文档")                                       // 主标题
@@ -1004,6 +1044,8 @@ if (chrome && chrome->valid()) {
     chrome->toggle_maximize();   // 经 Surface 驱动真实窗口动作（Wayland serial 时效约束：仅事件栈内调用）
 }
 ```
+
+**边缘缩放由谁承担随后端不同**：Wayland / X11 / Win32 上 `Borderless` 的缩放热区由应用自绘，拖拽须经 `chrome->begin_resize(edge)` 把按下交给 OS（Win32 回报 `HT*`、Wayland 发 `xdg_toplevel.resize`）；macOS 无此必要——该档落 `FullSizeContentView` 组合掩码，边缘缩放由原生窗框视图直接承担。本配方**当前不给控件级边缘命中测试**：`TitleBar` 只消费 `begin_move`，`begin_resize` 尚无调用方，跨后端的自绘缩放整链属未落地缺口（登记见 [`specification/07-environment-modifier.md`](specification/07-environment-modifier.md) §4.1「控件侧消费现状」）；需要该行为的形态请暂用 `ServerSide` 或 macOS 的 `Borderless`。
 
 ---
 
@@ -1044,10 +1086,10 @@ auto make_card = [](const char *label, bool custom_cb) -> au::Node {
     return au::Node{dis};   // 未注册回调时：飞出后自动从最近 Container 祖先摘除并重排
 };
 
-au::Node root = au::Node{ au::Column(au::ColumnProps{ .children = {
+au::Node root = au::Node{ au::Column({
     make_card("swipe me ->", false),
     make_card("custom callback", true),
-} }) };
+}) };
 
 au::Scene scene{ std::move(root) };
 au::Application app{ std::move(scene), 520, 420 };  // 无头便捷构造；真实窗口见配方 2
@@ -1113,12 +1155,15 @@ using namespace au;
 auto main() -> int {
     enable_dpi_awareness();  // 必须在建窗前
 
-    auto pings = std::make_shared<State<int>>(0);  // 共享状态：多窗口共用一个 State 即可
-    auto root = Column{ColumnProps{.children = {
+    auto pings = State<int>{0};  // 共享状态：多窗口共用一个来源即可
+    auto ping_label = computed([pings]() -> LocalizedString {
+        return LocalizedString{"pings = " + std::to_string(pings.get())};
+    });
+    auto root = Column({
         Text{"Main window"},
-        Text{TextProps{.content = Reactive{pings}}},
-        Button{ButtonProps{.label = "Broadcast"}},
-    }}};
+        Text{TextProps().set_content(ping_label)},
+        Button{ButtonProps().set_label("Broadcast")},
+    });
 
     WindowOptions opts;
     opts.size = Size{.width = 800.0F, .height = 600.0F};
@@ -1130,7 +1175,7 @@ auto main() -> int {
 
     Application app{Scene{std::move(root)}, std::move(win.value()), opts};
 
-    // 跨窗通信：`bus()` 承载**一次性通知/命令**；共享**状态**直接用共享 State/Store。
+    // 跨窗通信：`bus()` 承载**一次性通知/命令**；共享**状态**直接传同一枚 State 句柄。
     auto sub = app.bus().on<std::string>([](const std::string &msg, WindowId from) -> void {
         AURORA_LOG_INFO("demo", "msg from window ", from, ": ", msg);
     });
@@ -1142,10 +1187,10 @@ auto main() -> int {
     aux_opts.title = "Auxiliary";
     aux_opts.role = WindowRole::Auxiliary;
     if (auto aux = create_native_window(aux_opts)) {
-        Node aux_root = Column{ColumnProps{.children = {
+        Node aux_root = Column({
             Text{"Auxiliary window"},
-            Text{TextProps{.content = Reactive{pings}}},
-        }}};
+            Text{TextProps().set_content(ping_label)},
+        });
         (void)app.open_window(std::move(aux.value()), Scene{std::move(aux_root)}, aux_opts);
     }
 
@@ -1168,7 +1213,7 @@ auto main() -> int {
 
 ## 33 图表控件
 
-五图（`BarChart` / `LineChart` / `Sparkline` / `PieChart` / `ScatterChart`）均为「`XxxProps` 纯值属性 + `class Xxx : public LeafWidget, public XxxProps` + `defaults()`」形态；数据进序列化面，AI 可经 `aurora_api.json` schema + `from_json` 生成带真实数据的图表。
+五图（`BarChart` / `LineChart` / `Sparkline` / `PieChart` / `ScatterChart`）均为「`XxxProps` 属性 + `class Xxx : public LeafWidget, public XxxProps` + `defaults()`」形态；数据进序列化面，AI 可经 `aurora_api.json` schema + `from_json` 生成带真实数据的图表。五图的 `XxxProps` 现在**全部**迁到属性单一声明形态（字段私有、只经 `set_<键>()` 写入、只经同名读件取值，契约见 [`specification/04-widget.md`](specification/04-widget.md) §2.5），写法见下面样例；**数组与结构体实参内部的指定初始化器不受影响**（`PieSection` / `ChartSeries` / `ChartAxisSpec` / `ChartLegendSpec` / `ScatterSeries` / `ChartPoint` 本身仍是聚合类型）。
 
 ```cpp
 #include "aurora/aurora.h"
@@ -1176,41 +1221,39 @@ auto main() -> int {
 using namespace au;
 
 auto main() -> int {
-    BarChart chart{BarChartProps{
-        .series = {
-            ChartSeries{.name = "cpu", .values = {12.0, 18.0, 9.0, 24.0}, .color = Color{0x2D, 0x9B, 0xFD, 255}},
-            ChartSeries{.name = "mem", .values = {8.0, 10.0, 14.0, 12.0}},
-        },
-        .categories = {"Mon", "Tue", "Wed", "Thu"},
-        .legend = ChartLegendSpec{.visible = true, .position = LegendPosition::Top},
-    }};
+    BarChart chart{BarChartProps()  // 已迁形态：链式装入，一行一次整值表态
+                       .set_series({ChartSeries{.name = "cpu",
+                                                 .values = {12.0, 18.0, 9.0, 24.0},
+                                                 .color = Color{0x2D, 0x9B, 0xFD, 255}},  // 元素内仍是聚合写法
+                                      ChartSeries{.name = "mem", .values = {8.0, 10.0, 14.0, 12.0}}})
+                       .set_categories({"Mon", "Tue", "Wed", "Thu"})
+                       .set_legend(ChartLegendSpec{.visible = true, .position = LegendPosition::Top})};
     chart.set_stacked(true);  // 分组并排 / 堆叠切换（链式 setter）
     chart.on_point_tapped = [](int si, int pi) -> void {  // 回调旁挂，不进序列化面
         AURORA_LOG_INFO("chart", "tapped series ", si, " point ", pi);
     };
 
-    PieChart donut{PieChartProps{
-        .sections = {PieSection{.name = "mobile", .value = 45.0},
-                     PieSection{.name = "desktop", .value = 30.0},
-                     PieSection{.name = "tablet", .value = 15.0}},
-        .center_space_ratio = 0.45F,  // > 0 ⇒ 环形
-        .show_percentage_labels = true,
-    }};
+    PieChart donut{PieChartProps()  // 已迁形态：链式装入，扇区数组按整值表态
+                       .set_sections({PieSection{.name = "mobile", .value = 45.0},
+                                      PieSection{.name = "desktop", .value = 30.0},
+                                      PieSection{.name = "tablet", .value = 15.0}})  // 元素内仍是聚合写法
+                       .set_center_space_ratio(0.45F)  // > 0 ⇒ 环形
+                       .set_show_percentage_labels(true)};
 
-    LineChart trend{LineChartProps{
-        .series = {ChartSeries{.name = "latency", .values = {4.0, 6.0, 3.0, 8.0, 5.0}}},
-        .show_dots = true,
-    }};
+    LineChart trend{LineChartProps()
+        .set_series({ChartSeries{.name = "latency", .values = {4.0, 6.0, 3.0, 8.0, 5.0}}})  // 元素内仍是聚合写法
+        .set_show_dots(true)
+        .set_axis_x(ChartAxisSpec{.tick_count = 4})};  // 已迁形态：链式装入，结构化行整值表态
 
-    ScatterChart pts{ScatterChartProps{
-        .series = {ScatterSeries{.name = "samples",
-                                 .points = {ChartPoint{.x = 1.0, .y = 2.0}, ChartPoint{.x = 3.0, .y = 4.0}}}},
-    }};
+    ScatterChart pts{ScatterChartProps()  // 已迁形态：链式装入，散点数组按整值表态
+                        .set_series({ScatterSeries{.name = "samples",
+                                                   .points = {ChartPoint{.x = 1.0, .y = 2.0},  // 元素内仍是聚合写法
+                                                              ChartPoint{.x = 3.0, .y = 4.0}}}})};
 
-    Sparkline spark{SparklineProps{.values = {4.0, 6.0, 3.0, 8.0, 5.0}, .line_width = 2.0F}};
+    Sparkline spark{SparklineProps().set_values({4.0, 6.0, 3.0, 8.0, 5.0}).set_line_width(2.0F)};  // 已迁形态：链式装入
 
-    Application app{Scene{Column{ColumnProps{.children = {Node{chart}, Node{donut}, Node{trend},
-                                                              Node{pts}, Node{spark}}}}}};
+    Application app{Scene{Column{Node{chart}, Node{donut}, Node{trend},
+                                 Node{pts}, Node{spark}}}};
     return app.run();
 }
 ```
@@ -1257,7 +1300,7 @@ auto main() -> int {
     with_button.add(Node{Button{"OK"}});
     with_button.set_cross_axis_alignment(CrossAxisAlignment::Baseline);
 
-    Application app{Scene{Column{ColumnProps{.children = {Node{mixed}, Node{icon}, Node{with_button}}}}}};
+    Application app{Scene{Column{Node{mixed}, Node{icon}, Node{with_button}}}};
     return app.run();
 }
 ```
@@ -1325,8 +1368,8 @@ auto main() -> int {
 using namespace au;
 
 auto main() -> int {
-    auto items = std::make_shared<State<std::vector<std::string>>>(
-        std::vector<std::string>{"需求评审", "接口联调", "写回归用例"});
+    auto items = State<std::vector<std::string>>{
+        std::vector<std::string>{"需求评审", "接口联调", "写回归用例"}};
 
     auto list = std::make_shared<ReorderableList<std::string>>(
         items,
@@ -1341,7 +1384,7 @@ auto main() -> int {
 
     // 数据已由控件改写，这里只做持久化 / 派生状态刷新。
     list->set_on_reorder([items](int from, int to) -> void {
-        save_order(items->get());   // from → to（下标均为改写后的语义）
+        save_order(items.get());   // from → to（下标均为改写后的语义）
     });
 
     auto viewport = std::make_shared<Column>();                 // 给明确高度 ⇒ 列表按父约束取视口
@@ -1355,7 +1398,7 @@ auto main() -> int {
 
 要点：
 
-- **控件改写数据**：松手落位后控件把 `State<std::vector<T>>` 旋转到新顺序再触发 `on_reorder(from, new_index)`；宿主要复用顺序请读 `items->get()`，别在回调里再改一次（会重复换位）。程序化重排用 `list->reorder(from, to)`，`to` 是**落位后的最终下标**。
+- **控件改写数据**：松手落位后控件把 `State<std::vector<T>>` 旋转到新顺序再触发 `on_reorder(from, new_index)`；宿主要复用顺序请读 `items.get()`，别在回调里再改一次（会重复换位）。程序化重排用 `list->reorder(from, to)`，`to` 是**落位后的最终下标**。
 - **手柄带 vs 整项拖**：条目若自带 `Clickable` / `Button`，其 Press 会被子项消费（冒泡 stop-on-handled），列表收不到按下 ⇒ 只能 `set_drag_handle(true)`（右侧 48dp 手柄带由列表自留）；条目是纯展示（`Row`/`Text`，无点击）时整项可拖（默认）。
 - **落位与让位**：让位是**绘制期偏移**（`Node::bounds` 不动，命中链同步补偿），松手 spring 落位后才提交数据；`reduce_motion` 下直接落位。换位判定带 ±2dp 滞回。
 - **近边缘自动滚动**：被拖项进入视口上下 `auto_scroll_threshold`（默认 48dp）带内按比例滚动，且滚动量吃进跟手位移（被拖项屏幕位置守恒）；拖拽期间滚轮被吞。
@@ -1372,13 +1415,16 @@ Aurora 的无障碍**默认在跑**——你不需要为「让 NVDA 读出界面
 ### 37.1 开箱即得的默认行为
 
 ```cpp
+au::State<double> volume{0.6};   // 可编辑模型：控件写回这里
+au::State<bool> agreed{false};
+
 au::Scene build_ui() {
     return au::Column{
-        au::Text{au::TextProps{ .content = "订单总额" }},
-        au::Button{au::ButtonProps{ .label = "提交" }},
-        au::TextInput{au::TextInputProps{ .value = "abc", .placeholder = "请输入" }},
-        au::Slider{au::Reactive{volume}},
-        au::Checkbox{au::Reactive{agreed}},
+        au::Text(au::TextProps().set_content("订单总额")),
+        au::Button{au::ButtonProps().set_label("提交")},
+        au::TextInput{au::TextInputProps().set_value("abc").set_placeholder("请输入")},
+        au::Slider{volume},
+        au::Checkbox{agreed},
     };
 }
 
@@ -1449,10 +1495,11 @@ class IconButton : public au::LeafWidget {
 压制显式声明与控件自带文案（与 ARIA 一致）：
 
 ```cpp
-auto caption = std::make_shared<au::Text>(au::TextProps{.content = au::LocalizedString{"季度汇总"}});
+auto caption = std::make_shared<au::Text>(au::TextProps().set_content(au::LocalizedString{"季度汇总"}));
 caption->set_stable_key("sum-caption");            // 对标 HTML `id`：宿主命名、跨重建不变
 
-auto agree = std::make_shared<au::Checkbox>(au::Reactive{checked});
+au::State<bool> checked{false};
+auto agree = std::make_shared<au::Checkbox>(checked);
 agree->set_labelled_by("sum-caption");             // 对标 `aria-labelledby`：名字是引用，非拷贝
                                                    // ⇒ caption 文案变了，agree 的读屏名跟着变
 ```
@@ -1555,10 +1602,8 @@ class Divider : public au::LeafWidget {
 using namespace au;
 
 // 整页：周期取视口高，配 Start / Center / End 对齐方位
-au::Scroll pager{au::ScrollProps{
-    .child = au::Node{build_pages()},
-    .snap = ScrollSnap::page(ScrollSnapAlignment::Start),
-}};
+au::Scroll pager{au::Node{build_pages()},
+                 au::ScrollProps().set_snap_paging(true).set_snap_alignment(ScrollSnapAlignment::Start)};
 
 // 条目吸附：按固定周期（= 行高 / 格高）收位，居中展示
 auto list = std::make_shared<LazyList>(200, [](int i) -> Node { return Node{Text(std::to_string(i))}; },
@@ -1566,14 +1611,15 @@ auto list = std::make_shared<LazyList>(200, [](int i) -> Node { return Node{Text
 list->set_snap(ScrollSnap{.extent = 48.0F, .alignment = ScrollSnapAlignment::Center});
 ```
 
-收位不是跳变：滚轮落点后 150ms easeOutCubic 短滑动收敛到对齐点（自驱动 `tick_gestures`，不占 `Animator`）。程序化滚动用 `scroll_to(offset, animate)`（`LazyList` 另有 `scroll_to_item(index, animate)`），`animate = false` 即时落位；`set_offset` / `set_scroll_offset` 会**作废进行中的滑动**。观测点 `is_gliding()`。
+收位不是跳变：滚轮落点后 150ms easeOutCubic 短滑动收敛到对齐点（自驱动 `tick_gestures`，不占 `Animator`，但步长仍经 `scaled_frame_dt` 折算——`Animator::set_time_scale` 的缩放与冻结对它生效，见 `specification/05-event-navigation.md` §6.2）。程序化滚动用 `scroll_to(offset, animate)`（`LazyList` 另有 `scroll_to_item(index, animate)`），`animate = false` 即时落位；`set_offset` / `set_scroll_offset` 会**作废进行中的滑动**。观测点 `is_gliding()`。
 
 ### 38.2 下拉刷新
 
 ```cpp
-auto scroll = std::make_shared<Scroll>(ScrollProps{.child = Node{build_feed()}});
+auto scroll = std::make_shared<Scroll>(Node{build_feed()});
 auto pull = std::make_shared<PullToRefresh>(
-    PullToRefreshProps{.child = Node{std::move(scroll)}, .threshold = 64.0F, .max_pull = 128.0F});
+    Node{std::move(scroll)},
+    PullToRefreshProps().set_threshold(64.0F).set_max_pull(128.0F));  // 子树是构造首参，属性链式
 
 std::weak_ptr<PullToRefresh> weak_pull = pull;   // 回调可能晚于控件析构
 pull->on_refresh([weak_pull]() -> void {
@@ -1590,13 +1636,12 @@ pull->on_refresh([weak_pull]() -> void {
 ### 38.3 吸顶分组头部
 
 ```cpp
-au::Scroll grouped{au::ScrollProps{.child = au::Node{au::Column{au::ColumnProps{
-    .children = {
-        au::Node{au::StickyHeader{au::Node{au::Text{"今天"}}}},
-        au::Node{message_row(1)},  // ...
-        au::Node{au::StickyHeader{au::Node{au::Text{"昨天"}}}},
-        au::Node{message_row(2)},  // ...
-    }}}}}};
+au::Scroll grouped{au::Node{au::Column{
+    au::Node{au::StickyHeader{au::Node{au::Text{"今天"}}}},
+    au::Node{message_row(1)},  // ...
+    au::Node{au::StickyHeader{au::Node{au::Text{"昨天"}}}},
+    au::Node{message_row(2)},  // ...
+}}};
 ```
 
 `StickyHeader` 正常参与布局（占自身高度、随内容滚），滚过视口顶部后由宿主按 pin 位压顶重绘；下一条头部逼近时把本条**顶出**（CSS `position: sticky` 同语义）。宿主为 `Scroll`（多个头部依次堆叠）或 `LazyList`（粘性项作为普通行实例化）。
@@ -1604,14 +1649,14 @@ au::Scroll grouped{au::ScrollProps{.child = au::Node{au::Column{au::ColumnProps{
 ### 38.4 滚动驱动动画与嵌套滚动
 
 ```cpp
-auto scroll = std::make_shared<Scroll>(ScrollProps{.child = Node{build_hero()}});
+auto scroll = std::make_shared<Scroll>(Node{build_hero()});
 
 // 偏移信号：任何滚动通道（滚轮 / 拖拽 / 收位滑动帧 / 程序化）落位即发布
-auto fade = std::make_shared<State<float>>(1.0F);
-au::Effect drive([&]() -> void {
-    const float offset = scroll->offset_signal().get();   // Effect 作用域内读取即订阅
-    fade->set(std::clamp(1.0F - offset / 200.0F, 0.0F, 1.0F));
-});
+au::State<float> fade{1.0F};
+auto drive = au::effect([&]() -> void {
+    const float offset = scroll->offset_signal().get();   // effect 回调内读取即登记依赖
+    fade.set(std::clamp(1.0F - offset / 200.0F, 0.0F, 1.0F));
+});   // drive 持有即生效；离开作用域自动取消
 ```
 
 嵌套滚动无需接线：滚轮判给**最近可滚动祖先**，内层滚到端点后未消费的量经 `ScrollEvent::remaining_y` 上冒给外层（故 `PullToRefresh{Scroll{...}}` 到顶即下拉、外层 `Scroll` 内嵌 `LazyList` 内层先滚）。路由细节见 [`specification/05-event-navigation.md`](specification/05-event-navigation.md) §3.3。
@@ -1637,7 +1682,7 @@ au::Effect drive([&]() -> void {
 
 using namespace au;
 
-au::TextInput field{au::TextInputProps{.placeholder = "请输入姓名"}};
+au::TextInput field{au::TextInputProps().set_placeholder("请输入姓名")};
 field.on_changed([](const std::string &s) -> void { /* 只收到已上屏文本 */ });
 ```
 
@@ -1717,7 +1762,7 @@ X11 自动段已覆盖焦点宣告往返与 XTEST 假键落字；Wayland 自动�
 - **下标是码点**：`cursor_index` / `sel_*` 按码点折算，代理对不会被切半。
 - **组合事件只到焦点控件**：不经命中链、不冒泡，故容器不会误吞。
 - **只有 `Application` 驱动才有 IME**：裸 `Window` + `present_root` 没有任何事件处理器（连 Tab 焦点都不通），详见 [`specification/06-app-platform.md`](specification/06-app-platform.md) §8.5。
-- **平台桥覆盖**：Win32（IMM32）、X11（XIM）、Wayland（text-input-v3，门 `AURORA_HAVE_WL_TEXT_INPUT`）已接；GLFW / macOS / Wasm 仍只有契约——写了钩子也收不到事件，接线状态见 [`specification/05-event-navigation.md`](specification/05-event-navigation.md) §2.4。
+- **平台桥覆盖**：Win32（IMM32）、X11（XIM）、Wayland（text-input-v3，门 `AURORA_HAVE_WL_TEXT_INPUT`）与 macOS（`NSTextInputClient`）已接；GLFW / Wasm 仍只有契约——写了钩子也收不到事件，接线状态见 [`specification/05-event-navigation.md`](specification/05-event-navigation.md) §2.4。
 
 ---
 
@@ -2171,8 +2216,168 @@ if (!res) {
 - **`tag` 双重身份**：既是去重 / 替换标识（同一 tag 的后续通知在支持去重的服务器上替换前一条），也是激活回调回传的键；空 tag 由实现层换成稳定占位键，回调里收到空串。
 - **激活回调依赖宿主排空**：Win32 依附宿主消息泵（`PeekMessage` 天然覆盖，`pump_events()` 在那里是 no-op）；Linux 必须靠 `NotificationCenter::pump_events()` 驱动 GLib 主循环迭代 / libdbus 套接字读取，建议每帧一次——用 `Application::run()` 时框架已在帧循环里做了，自己写主循环要显式调。**不排空 ⇒ 通知照常显示、回调不到**（不会虚假成功）。
 - **失败口径**：一切失败统一为 `ErrorCode::NotificationPostFailed`（`detail` 指出缺失哪个库 / 哪个系统调用失败），永久失败、不可重试；不抛异常、不静默 no-op。Linux 走 `libnotify` → `libdbus` → `notify-send` 三层运行时降级链（全部 `dlopen` / `popen`，无构建期依赖），**全部**缺失才返回该错误，第三层没有激活回调。
-- **平台矩阵**：Windows（`Shell_NotifyIconW` 气球）支持激活回调；Linux 前两层支持；Headless 只记录 `last_notification()` 且返回成功；macOS / 其它本轮不支持，`notify()` 返回错误。
+- **平台矩阵**：Windows（`Shell_NotifyIconW` 气球）支持激活回调；Linux 前两层支持；macOS 经 `NSUserNotificationCenter`（legacy API）支持（`tag` → `identifier` 原位替换、点击经 delegate 回传；只对 `.app` 包可得，裸可执行文件返回 `NotificationPostFailed`；`timeout_ms` 与 `urgency` 样式不受支持，后者折算为提示音）；Headless 只记录 `last_notification()` 且返回成功；其余平台本轮不支持，`notify()` 返回错误。
 - **Win32 的可见副作用**：应用本身没有托盘图标时，发通知会在通知区域**短暂出现一个图标**（气球必须依附图标），气球消失后实现会 `NIM_DELETE` 撤掉，不长期占位；已有 `SystemTray` 时复用其图标。
 - **无桌面 / 测试友好**：`last_notification()` 在**所有**平台上维护（含投递失败的调用），是无桌面环境的主动观测面；`install_recording_backend()` 可强制只记录、不触达系统通知服务，供开发机上的字段往返测试。
 
 可编译样例见 `examples/demos/demo_notification.cpp`；契约见 [`specification/06-app-platform.md`](specification/06-app-platform.md) §8.7。
+
+---
+
+## 45 网络请求与三态渲染（Resource 三态绑定）
+
+把一次 HTTP 交换直接接成 widget 可读的三态信号：`Loading / Ready(T) / Failed(Error)`。读取即登记依赖，落定即定点刷新，对位业界 `FutureBuilder`。取消（`reload()` 或宿主卸载）会真掐掉在途连接，而不只是丢掉结果。
+
+```cpp
+#include "aurora/aurora.h"
+#include "aurora/net/http_client.h"
+#include "aurora/net/http_binding.h"
+#include "aurora/state/resource.h"
+namespace au = aurora;
+namespace net_http = aurora::net::http;
+
+struct Quote { std::string text; int seq; std::uint16_t status; };
+
+// 应答投影：把 Response 折成你要的值类型。非 2xx 在这里自己判——
+// bind_resource 只把传输 / 协议层失败走错误侧（见下方「要点」）。
+[[nodiscard]] auto project(const net_http::Response &response) -> au::Result<Quote> {
+    if (response.status() / 100 != 2) {
+        return au::Result<Quote>{au::make_error(
+            au::ErrorCode::HttpRequestInvalid, "unexpected status " + std::to_string(response.status()))};
+    }
+    // 真实场景在此解析 response.body()（如 aurora::json::parse）→ Quote；解析失败同样 return 错误。
+    return au::Result<Quote>{Quote{
+        .text = std::string{response.body().begin(), response.body().end()},
+        .seq = 0,
+        .status = response.status(),
+    }};
+}
+
+net_http::Client client;  // 配置（超时 / 代理 / TLS）一次设好，复用
+const std::string url = "https://api.example.com/quote";
+
+// 一行绑成三态资源：发出即 Loading，落定即定点刷新；reload() 会取消前序在途连接并重发。
+auto quote = net_http::bind_resource<Quote>(client, net_http::Request::get(url), project);
+
+// 三分支读取即订阅：资源每次落定（或重发回到 Loading）时重算，只刷这块文本。
+// phase() / value() / error() 都读同一份快照来源，故一次落定只触发一次重算。
+auto line = au::computed([quote]() -> au::LocalizedString {
+    if (quote.phase() == au::ResourcePhase::Loading) {
+        return au::LocalizedString{"加载中…"};
+    }
+    if (const auto *value = quote.value()) {
+        return au::LocalizedString{value->text};
+    }
+    return au::LocalizedString{"失败：" + quote.error().value_or(au::Error{}).message};
+});
+
+aurora::Button reload{aurora::ButtonProps().set_label(au::LocalizedString{"reload"})};
+reload.on_click = [quote]() mutable -> void { quote.reload(); };  // 掐在途连接 + 重发
+
+// widget 直接读派生值：au::Text(au::TextProps().set_content(line))
+```
+
+要点：
+
+- **`bind_resource` 是 `Resource<T>::from(producer)` 的网络特化**：它把 `Client::send` 的协程出口折算成 `Task<T>`，交给既有的 `Resource` 三态机。`state/` 不认识网络，这条通道不被 HTTP 独占（文件读取、进程间调用同样能产出 `Resource`）。
+- **取消是真的取消**：`reload()` 与宿主卸载走 `Task::cancel()`，经 `Cancellation` 掐掉在途那条连接；对端看到的是一次中断，不是一条被读完的连接。没有本绑定件时，`Resource` 装 HTTP 只丢结果、连接照跑完。
+- **非 2xx 不是失败**：`bind_resource` 把 4xx / 5xx 作为成功的 `Response` 交出，状态码归调用方在投影里判（上方 `project` 内的 `response.status()`）。只有传输与协议层失败才走 `Result` 的错误侧。
+- **widget 不读 Resource 本身**：`au::Show` / `au::Text` 等消费的是 `ReadOnlyState<X>`（见 §9）。上方把三态经 `computed` 折成一枚 `ReadOnlyState<LocalizedString>` `line`，widget 直接读它——这就是「异步结果 → 派生显示文本 → UI 是状态的纯函数」的标准接法。
+- **取图一行版**：图片走 `au::set_default_image_fetcher(au::net::http::image_fetcher())`（`image_fetcher()` 返回的形态与 `au::ImageFetcher` 别名同构），`ImageView` 的 URL 入口即被这条通道接住，无需手写 `bind_resource`。
+
+全部形态（流式 `deliver_stream`、事件流 `deliver_sse`、WebSocket `deliver_ws`、回调式 `deliver`）见 [`include/aurora/net/http_binding.h`](include/aurora/net/http_binding.h) 与 [`specification/02-state.md`](specification/02-state.md) §5.4；可编译样例见 `examples/demos/demo_net_http.cpp`。
+---
+
+## 46 动画进阶配方（循环 / 全局缩放 / 手势定位 / 弹簧 / 分段曲线）
+
+五个配方只依赖 `animation/` 的四个公共头（`animator.h` / `timeline.h` / `easing.h` / `spring.h`）与 `Application` 的帧循环；片段里的 `app` 指既有 `au::Application`（建窗见配方 2），照 §29 的省略口径；权威语义见 [`specification/05-event-navigation.md`](specification/05-event-navigation.md) §6.1–§6.7。
+
+### 46.1 循环与往复：`repeat` 取代手写端点翻转
+
+```cpp
+au::AnimationController breathe{1.6};   // 背景呼吸：同向重启（到 1 回 0 续跑）
+au::AnimationController pingpong{1.2};  // 来回缩放：往复（到端点翻方向）
+au::AnimationController thrice{0.5};    // 有限计数：到达端点 3 次后置终态停住
+au::State<au::Color> tinted{au::Color{59, 130, 246}};
+au::State<float> scale_v{0.6F};
+
+au::Application app{std::move(scene), 520, 520};
+app.animator().bind(breathe, au::Tween<au::Color>{au::Color{59, 130, 246}, au::Color{236, 72, 153}}, tinted);
+app.animator().bind(pingpong, au::Tween<float>{0.6F, 1.4F}, scale_v);
+// 无需再每帧判 `is_completed()` / `is_dismissed()` 后手动翻方向——端点行为由 repeat 登记。
+thrice.repeat(3, /*alternate=*/true);
+thrice.forward();
+breathe.repeat();  // count <= 0（含缺省 -1 与 0）= 无限循环
+breathe.forward();
+pingpong.repeat(-1, /*alternate=*/true);
+pingpong.forward();
+```
+
+要点：`repeat` **只登记模式、不起播也不改方向**（起播仍要 `forward()` / `reverse()`，与方向正交）；有限计数只在耗尽那一帧产生 `Completed`，所以 `AnimatedValue::on_completed` 这类一次性回调在循环全程不触发；`reset()` / `stop()` 把模式清回 `Once`（无限循环的退出方式就是这两个）。代价要写明：`repeat(-1, ...)` 在途期间 `Animator::has_active()` 恒真，应用不会进入空闲深睡——这是「常驻动效」本身的语义，不是缺陷。`reduce_motion` 开启时单帧落本次目标端点并置终态，**不进入循环**。
+
+### 46.2 调试慢放与冻结：`set_time_scale`
+
+```cpp
+app.animator().set_time_scale(0.35);  // 全场慢放（动画时间轴按 0.35 倍推进）
+app.animator().set_time_scale(0.0);   // 冻结：不推进、不写回、不再钉住帧循环
+app.animator().set_time_scale(1.0);   // 还原；解冻自动送一帧使在途自驱动动画续跑
+const double now_scale = app.animator().time_scale();  // 读当前倍率（缺省 1.0）
+```
+
+要点：这是**调试 / 演示 / 降速**入口，不是业务动画 API——业务要快慢请改 `duration` 或换曲线。它只缩放动画时间轴：不改 `duration`、不改曲线、不改目标 `State` 终值，也**不缩放事件、布局、输入与 `Scheduler` 定时任务**；近边缘自动滚边（`DragAutoScroll` / `ReorderableList` 滚边）与媒体播放钟（`VideoPlayer`）是有意的例外（前者是速度型手感，后者是内容时钟）。与 Flutter `timeDilation` 互为倒数（`timeDilation = 2` ⇔ `time_scale = 0.5`）。负值与 NaN / inf 一律夹取为 `0.0`（冻结）。同一倍率覆盖所有动画路径：`Animator` 登记控制器、`AnimatedValue` / `TweenAnimation` / `TimelinePlayer` 的 `tick`、控件自驱的收位滑动与弹簧——同一条帧步长**至多折算一次**，业务侧不需要也不应该自己再乘。
+
+### 46.3 手势直接定位进度：`set_progress`
+
+```cpp
+au::AnimationController drawer{0.3};
+au::State<double> progress{0.0};
+au::State<float> translate{0.0F};
+app.animator().bind(drawer, au::Tween<double>{0.0, 1.0}, progress);
+
+au::Modifier grab = au::Modifier{}
+                        .size(320.0F, 56.0F)
+                        .draggable(
+                            [&drawer, &translate](au::Point delta, au::Point /*pos*/) -> void {
+                                translate.set(translate.get() + static_cast<float>(delta.x));  // 跟手位移
+                                drawer.set_progress(static_cast<double>(translate.get()) / 320.0);  // 只定位
+                            },
+                            /*on_start=*/[&drawer]() -> void { drawer.stop(); },  // 打断在途播放，交给人手
+                            /*on_end=*/[&drawer]() -> void {
+                                // 松手接管：过半程正向收尾，否则反向回位（都从当前进度续播）
+                                drawer.value() >= 0.5 ? drawer.forward() : drawer.reverse();
+                            });
+```
+
+要点：`set_progress(t)` 越界夹入 `[0,1]`，写回经**外部脏位**送达——手势发生在帧边界之前时，同一帧的绑定阶段就把新进度插值写回目标 `State`，跟手不掉帧。它与 `reset(v)` 是两条语义：`reset` 会按值改写 `status_`（`>=1` → `Completed`，否则 `Dismissed`）并把循环模式清回 `Once`，`set_progress` 两者都不碰，因此静止态调用不会让 `has_active()` 变真、播放中调用等于重定位后续跑。缩放为 `0.0`（冻结）时 `set_progress` **仍然生效**：冻结停的是推进步长，不是定位。
+
+### 46.4 弹簧即插到 `State`：`SpringAnimation`
+
+```cpp
+au::State<double> offset{0.0};
+au::SpringAnimation spring{offset};              // 写回目标是一枚 State<double> 句柄
+spring.set_range(0.0, 1.0);                       // 值域受限的目标才夹取（欠阻尼会回弹越界）
+spring.on_settled([]() -> void { /* 定格一次：每次 animate_to 至多触发一回 */ });
+spring.animate_to(1.0, au::SpringDescription{.stiffness = 170.0, .damping = 22.0, .mass = 1.0},
+                  /*initial_velocity=*/240.0,     // 拖拽速度交接
+                  /*tolerance=*/0.01);            // 收敛容差：与目标值同单位域，不是归一化时间
+spring.attach(app.animator());                    // 接入帧循环；句柄离开作用域也安全
+```
+
+要点：`SpringSimulation` 仍是**纯求解器**（`value` / `velocity` / `is_settled` / `target`），本封装只补驱动层——逐帧写 `State`、`is_settled` 后定格于目标值并停帧（不再增长内部时间、不再写 `State`、`has_active()` 转假）。漏掉收敛判定是这类手写最常见的缺陷（表现为「定格前多写几帧」或「永不停帧的空转」），所以判定收在原语一处，调用方不再复刻。没有 `Application` 在跑时改用手驱动：`spring.tick(raw_dt)`（入参是裸帧间隔，内部经同一漏斗折算）。`attach` 走 `Animator::add_frame_binding(fn, owner)`，归属弹簧自持的登记时钟，故注销方式是 `app.animator().remove(spring.clock())`——把弹簧作为控件成员注册进全局 `Animator` 时，仍须在控件析构前注销。只做标量 `double`：向量 / 矩形 / 颜色由调用方组合多个实例（各写一枚 `State<double>`），框架不做泛化。`reduce_motion` 下单帧落目标并结束。
+
+### 46.5 关键帧分段曲线：每段各取该段起点的曲线
+
+```cpp
+au::Keyframes<double> kf{std::vector<au::Keyframes<double>::Stop>{
+    {.time = 0.0, .value = 0.0, .curve = au::Curves::ease_in_quad()},   // 段 [0, 0.5] 起慢终快
+    {.time = 0.5, .value = 10.0, .curve = au::Curves::ease_out_quad()}, // 段 [0.5, 1] 起快终慢
+    {.time = 1.0, .value = 20.0},                                       // 末点的曲线不参与求值
+}};
+au::State<double> v{0.0};
+au::AnimationController ctrl{0.6};
+app.animator().bind(ctrl, kf, v);  // bind 有 Keyframes 重载，脏帧按段曲线写回
+ctrl.forward();
+```
+
+要点：段 `[stop_i, stop_{i+1}]` 的整形曲线取**第 *i* 个 `Stop`** 的 `curve`，末个 `Stop` 的曲线不参与任何取值；缺省 `curve` 为线性，所以既有 `Stop{time, value}` 写法逐位不变。同时刻的相邻停靠点（零宽段）取该段起点值；停靠点经稳定排序，同时刻保持插入次序、`curve` 随所属 `Stop` 一起移动。跨槽位的「每段不同缓动」不归 `Keyframes` 管——那是 §29 `TimelinePlayer` 的每轨道一条带曲线的 `Tween`。
+

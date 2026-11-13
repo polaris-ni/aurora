@@ -1,0 +1,67 @@
+name: Supply chain audit
+
+on:
+  schedule:
+    - cron: "47 4 * * 1"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "codespec/third_party_versions.json"
+      - "tools/sca/**"
+      - "tools/check/check_third_party_versions.py"
+      - "tools/check/check_workflow_yaml.py"
+      - ".github/dependabot.yml"
+      - ".github/workflows/sca.yml"
+
+permissions:
+  contents: read
+
+# This workflow is deliberately separate from ci.yml. ci.yml owns the full
+# 9-job lint gate matrix and its four fixed exits (push / PR / weekly / manual);
+# adding a job there would change that matrix and need a change proposal.
+# Everything here is read-only reporting plus the local inventory gate.
+jobs:
+  inventory:
+    name: Vendored version inventory + SBOM
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Verify inventory against vendored sources
+        run: python3 tools/check/check_third_party_versions.py --root .
+
+      - name: Verify workflow YAML scalar hazards
+        run: python3 tools/check/check_workflow_yaml.py --root .
+
+      - name: Generate CycloneDX SBOM
+        run: python3 tools/sca/generate_sbom.py --root . --out aurora-sbom.cdx.json
+
+      - name: Report upstream version lag
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # The report is an input for human review, not an automated CVE verdict.
+        # OSV has no C++ package/version mapping for these libraries, so a query
+        # there returns zero results even for known-vulnerable old versions.
+        # A "lag" row means "go read the upstream release notes", not "fail CI".
+        run: python3 tools/sca/report_upstream.py --root . --out-md upstream-report.md --out-json upstream-report.json
+
+      - name: Publish report to job summary
+        if: always()
+        run: cat upstream-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: sca-report
+          path: |
+            aurora-sbom.cdx.json
+            upstream-report.md
+            upstream-report.json
+          if-no-files-found: error

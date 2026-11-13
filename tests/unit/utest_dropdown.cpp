@@ -10,6 +10,9 @@
 /// 回归背景：修复前 Dropdown 只覆写 `on_hit_test`（兼容入口），派发入口 `on_hit_test_chain`
 /// 恒返回空 ⇒ 面板看得见、点不中（选中回调永不触发）。
 ///
+/// 另覆盖字号面：未表态时取作用域主题的字阶正文档（主框宽度实测随之变化）、显式表态钉住、
+/// 序列化「只写意图」与非法值回填降级。
+///
 /// 探针取点纪律：面板矩形由**公开状态实测**重建（主框高 / 行高 / 选项数 / 布局宽），不读私有
 /// 成员；取点前先断言「该点确实在布局盒之外」，否则覆盖区前提不成立、判据会退化成空转。
 
@@ -18,11 +21,13 @@
 #include <string>
 #include <vector>
 
+#include "aurora/environment/environment.h"
 #include "aurora/environment/media_query.h"
 #include "aurora/event/dispatcher.h"
 #include "aurora/layout/layout_engine.h"
 #include "aurora/modifier/modifier.h"
 #include "aurora/render/painter.h"
+#include "aurora/theming/theme.h"
 #include "aurora/widget/button.h"
 #include "aurora/widget/containers.h"
 #include "aurora/widget/dropdown.h"
@@ -49,6 +54,17 @@ auto host_box() -> Rect {
 auto host_constraints() -> Constraints {
     return Constraints{.min = Size{.width = 0.0F, .height = 0.0F},
                        .max = Size{.width = AURORA_HOST_WIDTH, .height = AURORA_HOST_HEIGHT}};
+}
+
+/// @brief 造一个注入了指定主题的构建上下文（根级环境，无父指针）。
+/// @param t 要注入的主题（按值拷进 holder 内的 Environment）。
+/// @return holder + ctx：`ctx.env` 指向 holder 内的 Environment，二者须在同作用域内使用。
+auto themed_ctx(const Theme &t) -> std::pair<std::shared_ptr<Environment>, BuildContext> {
+    auto env = std::make_shared<Environment>();
+    env->set_local(t);
+    BuildContext ctx;
+    ctx.env = env.get();
+    return {std::move(env), ctx};
 }
 
 auto press(float x, float y) -> MouseEvent {
@@ -132,7 +148,7 @@ auto make_dropdown(ChangeLog &log) -> std::shared_ptr<Dropdown> {
 /// @param viewport 绘制盒（同时充当视口原点：控件的全局位置由它决定）。
 /// @param ctx 构建上下文（须带 `MediaQuery`，否则视口高读数为 0、翻转退化为恒向下）。
 [[maybe_unused]] void paint_once(Widget &w, const Rect &viewport, const BuildContext &ctx) {
-    // **必须** begin()：`AURORA_ENABLE_OCCLUSION_CULLING` 下 `Container::on_paint` 用
+    // **必须** begin()：`Container::on_paint` 用
     // `p.clip_bounds()` 裁剪子树，未 begin 的 Painter 其裁剪区为空 ⇒ 整棵子树被剔除、
     // 子控件的 `focus_bounds_` 永不写入（本轮实测：直接 paint 某控件能读到绘制盒，
     // 经未 begin 的 root 遍历则读到零盒）。
@@ -146,7 +162,7 @@ AURORA_TEST_CASE(panel_point_reaches_dropdown_in_column_host) {
     // 核心证人：面板画在布局盒之外，经 Column 宿主派发时该点必须进链并止于 Dropdown。
     ChangeLog log;
     const std::shared_ptr<Dropdown> dd = make_dropdown(log);
-    auto root = std::make_shared<Column>(ColumnProps{.children = {Node{dd}}, .gap = 0.0F});
+    auto root = std::make_shared<Column>(std::vector<Node>{Node{dd}}, ColumnProps().set_gap(0.0F));
     LayoutEngine::layout(*root, host_constraints());
 
     const Rect db = child_box(*root, *dd);
@@ -167,11 +183,11 @@ AURORA_TEST_CASE(panel_press_selects_option_via_real_dispatch) {
     // 端到端：Press 开合走真实派发，面板行 Press 触发 on_change 并改写选中序号。
     ChangeLog log;
     const std::shared_ptr<Dropdown> dd = make_dropdown(log);
-    auto btn = Button(ButtonProps{.label = "Below"});
+    auto btn = Button(ButtonProps().set_label("Below"));
     int btn_hits = 0;
     btn.set_on_click([&btn_hits]() -> void { ++btn_hits; });
-    auto root =
-        std::make_shared<Column>(ColumnProps{.children = {Node{dd}, Node{std::move(btn)}}, .gap = AURORA_SIBLING_GAP});
+    auto root = std::make_shared<Column>(std::vector<Node>{Node{dd}, Node{std::move(btn)}},
+                                         ColumnProps().set_gap(AURORA_SIBLING_GAP));
     LayoutEngine::layout(*root, host_constraints());
 
     const Rect db = child_box(*root, *dd);
@@ -201,7 +217,7 @@ AURORA_TEST_CASE(panel_point_reaches_dropdown_in_lazy_list_item) {
     ChangeLog log;
     const std::shared_ptr<Dropdown> dd = make_dropdown(log);
     int other_hits = 0;
-    auto other = std::make_shared<Button>(ButtonProps{.label = "Other"});
+    auto other = std::make_shared<Button>(ButtonProps().set_label("Other"));
     other->set_on_click([&other_hits]() -> void { ++other_hits; });
 
     auto list = std::make_shared<LazyList>(
@@ -230,11 +246,11 @@ AURORA_TEST_CASE(closed_dropdown_never_covers_the_sibling_below) {
     // 收起态逐位不变：追加盒为空，主框下方的点照旧归下方兄弟按钮。
     ChangeLog log;
     const std::shared_ptr<Dropdown> dd = make_dropdown(log);
-    auto btn = Button(ButtonProps{.label = "Below"});
+    auto btn = Button(ButtonProps().set_label("Below"));
     int btn_hits = 0;
     btn.set_on_click([&btn_hits]() -> void { ++btn_hits; });
-    auto root =
-        std::make_shared<Column>(ColumnProps{.children = {Node{dd}, Node{std::move(btn)}}, .gap = AURORA_SIBLING_GAP});
+    auto root = std::make_shared<Column>(std::vector<Node>{Node{dd}, Node{std::move(btn)}},
+                                         ColumnProps().set_gap(AURORA_SIBLING_GAP));
     LayoutEngine::layout(*root, host_constraints());
 
     const Widget &sibling = root->child_nodes().back().widget();
@@ -258,11 +274,11 @@ AURORA_TEST_CASE(point_below_open_panel_still_goes_to_sibling) {
     // 覆盖区外不抢：面板底边以下的点（落在下方兄弟按钮盒内）仍归兄弟，不被追加盒吞掉。
     ChangeLog log;
     const std::shared_ptr<Dropdown> dd = make_dropdown(log);
-    auto btn = Button(ButtonProps{.label = "Below"});
+    auto btn = Button(ButtonProps().set_label("Below"));
     int btn_hits = 0;
     btn.set_on_click([&btn_hits]() -> void { ++btn_hits; });
-    auto root =
-        std::make_shared<Column>(ColumnProps{.children = {Node{dd}, Node{std::move(btn)}}, .gap = AURORA_SIBLING_GAP});
+    auto root = std::make_shared<Column>(std::vector<Node>{Node{dd}, Node{std::move(btn)}},
+                                         ColumnProps().set_gap(AURORA_SIBLING_GAP));
     LayoutEngine::layout(*root, host_constraints());
 
     const Rect db = child_box(*root, *dd);
@@ -293,7 +309,7 @@ AURORA_TEST_CASE(stale_panel_point_misses_after_close) {
     // 展开结束后陈旧点不中：收起即追加盒为空，上一帧还在面板内的点不得再命中 Dropdown。
     ChangeLog log;
     const std::shared_ptr<Dropdown> dd = make_dropdown(log);
-    auto root = std::make_shared<Column>(ColumnProps{.children = {Node{dd}}, .gap = 0.0F});
+    auto root = std::make_shared<Column>(std::vector<Node>{Node{dd}}, ColumnProps().set_gap(0.0F));
     LayoutEngine::layout(*root, host_constraints());
 
     const Rect db = child_box(*root, *dd);
@@ -317,10 +333,10 @@ AURORA_TEST_CASE(compat_entry_and_dispatch_entry_agree_pointwise) {
     // 树上只放可点击控件（Button/Dropdown）——纯叶控件（如 Text）不入链是另一条既有规则。
     ChangeLog log;
     const std::shared_ptr<Dropdown> dd = make_dropdown(log);
-    auto above = Button(ButtonProps{.label = "Above"});
-    auto below = Button(ButtonProps{.label = "Below"});
-    auto root = std::make_shared<Column>(
-        ColumnProps{.children = {Node{std::move(above)}, Node{dd}, Node{std::move(below)}}, .gap = 0.0F});
+    auto above = Button(ButtonProps().set_label("Above"));
+    auto below = Button(ButtonProps().set_label("Below"));
+    auto root = std::make_shared<Column>(std::vector<Node>{Node{std::move(above)}, Node{dd}, Node{std::move(below)}},
+                                         ColumnProps().set_gap(0.0F));
     LayoutEngine::layout(*root, host_constraints());
     dd->set_open(true);
 
@@ -378,8 +394,8 @@ AURORA_TEST_CASE(grandchild_extra_hit_box_propagates_three_levels) {
     // 每行 = Row 内放 Dropdown（复现 borealis 设置面板的「LazyList → Row → Dropdown」形态）。
     // 上下内边距各 8 ⇒ 行高 56 时 Dropdown 的紧约束盒高 40，与真实场景一致。
     auto make_row = [](const std::shared_ptr<Dropdown> &target) -> Node {
-        const auto row = std::make_shared<Row>(RowProps{.children = {Node{target}}});
-        row->modifier.set(Modifier{}.padding(8.0F));
+        const auto row = std::make_shared<Row>(std::vector<Node>{Node{target}});
+        row->set_modifier(Modifier{}.padding(8.0F));
         return Node{row};
     };
     const std::shared_ptr<Node> row0 = std::make_shared<Node>(make_row(dd));
@@ -420,8 +436,8 @@ AURORA_TEST_CASE(clipped_list_item_extra_hit_box_stays_unreachable) {
     // 即「条目可见但面板不可见」的最坏形态——面板本就不该可点。
     ChangeLog log;
     const std::shared_ptr<Dropdown> dd = make_dropdown(log);
-    const std::shared_ptr<Row> row = std::make_shared<Row>(RowProps{.children = {Node{dd}}});
-    row->modifier.set(Modifier{}.padding(8.0F));
+    const std::shared_ptr<Row> row = std::make_shared<Row>(std::vector<Node>{Node{dd}});
+    row->set_modifier(Modifier{}.padding(8.0F));
     // 20 行，Dropdown 在最后一行（index 19）。
     auto make_row = [row](int index) -> Node { return index == 19 ? Node{row} : Node{}; };
     auto list = std::make_shared<LazyList>(20, make_row, 56.0F);
@@ -465,8 +481,8 @@ AURORA_TEST_CASE(scroll_and_lazy_list_agree_on_clipped_extra_hit_box) {
     // 面板自其下方 30dp 起 ⇒ 整段落在视口下沿（260）之外。
     {
         const std::shared_ptr<Dropdown> dd = make_dropdown(log);
-        const std::shared_ptr<Row> row = std::make_shared<Row>(RowProps{.children = {Node{dd}}});
-        row->modifier.set(Modifier{}.padding(8.0F));
+        const std::shared_ptr<Row> row = std::make_shared<Row>(std::vector<Node>{Node{dd}});
+        row->set_modifier(Modifier{}.padding(8.0F));
         auto list =
             std::make_shared<LazyList>(20, [row](int i) -> Node { return i == 19 ? Node{row} : Node{}; }, 56.0F);
         LayoutEngine::layout(*list, host_constraints());
@@ -494,8 +510,8 @@ AURORA_TEST_CASE(scroll_and_lazy_list_agree_on_clipped_extra_hit_box) {
     {
         const std::shared_ptr<Dropdown> dd = make_dropdown(log);
         auto content = std::make_shared<Column>(
-            ColumnProps{.children = {Node{Button(ButtonProps{.label = "top"})}, Node{dd}}, .gap = 400.0F});
-        auto scroller = std::make_shared<Scroll>(ScrollProps{.child = Node{content}});
+            std::vector<Node>{Node{Button(ButtonProps().set_label("top"))}, Node{dd}}, ColumnProps().set_gap(400.0F));
+        auto scroller = std::make_shared<Scroll>(Node{content});
         LayoutEngine::layout(*scroller, host_constraints());
         dd->set_open(true);
         scroller->scroll_by(9999.0F);
@@ -556,7 +572,8 @@ AURORA_TEST_CASE(scroll_passes_viewport_space_offset_to_descendant_extra_hit_box
     auto filler = std::make_shared<OffsetProbe>();
     // gap 600dp 撑出远超视口（260dp）的内容高，使滚动真正生效。**单子项时 gap 不产生间距**
     // （它是「相邻子项」间距），故必须两个子项。缺此垫高则 offset 恒 0、判据不可观测。
-    auto content = std::make_shared<Column>(ColumnProps{.children = {Node{probe}, Node{filler}}, .gap = 600.0F});
+    auto content =
+        std::make_shared<Column>(std::vector<Node>{Node{probe}, Node{filler}}, ColumnProps().set_gap(600.0F));
     scroller->add(Node{content});
     LayoutEngine::layout(*scroller, host_constraints());
 
@@ -752,6 +769,48 @@ AURORA_TEST_CASE(scroll_handles_limited_panel_and_falls_through_otherwise) {
         dd.on_scroll(sc2);
         AURORA_TEST_CHECK_TRUE(sc2.is_handled);
     }
+}
+
+AURORA_TEST_CASE(font_size_follows_type_scale_when_unset) {
+    Dropdown dd{std::vector<std::string>{"Alpha", "Beta", "Gamma"}};
+
+    // ① 未表态 ⇒ 取作用域主题的字阶正文档（进程级 light 档 = Material 正文基准 14pt）。
+    AURORA_TEST_CHECK_NEAR(dd.effective_font_size(BuildContext{}), 14.0F, 1e-4F);
+
+    // ② 换档 ⇒ 未表态的下拉跟着字阶走；宽度实测同步变化说明回落点进了布局路径，不只停在解析器。
+    Theme tuned;
+    tuned.type_scale.body_medium.size_pt = 24.0F;
+    const auto [env, ctx] = themed_ctx(tuned);
+    (void)env;
+    AURORA_TEST_CHECK_NEAR(dd.effective_font_size(ctx), 24.0F, 1e-4F);
+    // 两个独立实例各排一次：同实例连排两次会命中布局缓存、整段跳过 `on_layout`（见 `Widget::layout`），
+    // 那样宽度相等只证明缓存生效，证不了字号进了布局路径。
+    Dropdown wide{std::vector<std::string>{"Alpha", "Beta", "Gamma"}};
+    Dropdown narrow{std::vector<std::string>{"Alpha", "Beta", "Gamma"}};
+    LayoutEngine::layout(wide, host_constraints(), ctx);
+    LayoutEngine::layout(narrow, host_constraints(), BuildContext{});
+    AURORA_TEST_CHECK_GT(wide.size().width, narrow.size().width);
+
+    // ③ 显式表态钉住：两档作用域都读显式值，主题覆盖不了它。
+    dd.set_font_size(11.0F);
+    AURORA_TEST_CHECK_NEAR(dd.effective_font_size(ctx), 11.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(dd.effective_font_size(BuildContext{}), 11.0F, 1e-4F);
+
+    // ④ 只写意图 + 回填降级：表态过才落键；未表态/非法值都不落键，回落点交回主题。
+    Json stated = Json::object();
+    dd.serialize_props(stated);
+    AURORA_TEST_CHECK_NEAR(require_field<float>(stated, "font_size"), 11.0F, 1e-4F);
+    Dropdown const unstated{std::vector<std::string>{"Alpha"}};
+    Json bare = Json::object();
+    unstated.serialize_props(bare);
+    AURORA_TEST_CHECK_FALSE(bare.contains("font_size"));
+    Json junk = Json::object();
+    junk.set("font_size", Json{"not-a-number"});
+    dd.deserialize_props(junk);
+    AURORA_TEST_CHECK_NEAR(dd.effective_font_size(BuildContext{}), 14.0F, 1e-4F);
+    Json cleared = Json::object();
+    dd.serialize_props(cleared);
+    AURORA_TEST_CHECK_FALSE(cleared.contains("font_size"));  // 对照：非法值确实清了表态
 }
 
 }  // namespace aurora::test_cases::utest_dropdown

@@ -3,7 +3,9 @@
 /// 测试说明: 覆盖字体发现的初始化与 family 解析：内嵌默认字体可用、未知 family 回退默认链、
 /// 内存字体注册后可按 family 解析出可用 FT_Face、face id 稳定，以及 shutdown 后重新 init 可恢复。
 ///           另覆盖字体族枚举 `list_font_families()`：与 `resolve_faces` 的同源性（对拍判据）、
-///           稳定序去重、等宽判定以度量为准、过滤分支、内置等宽族可见
+///           稳定序去重、等宽判定以度量为准、过滤分支、内置等宽族可见。
+///           另覆盖 macOS 一支的系统保底链（平台门控）：默认链首仍是内置 Noto Sans、链上确有系统面、
+///           全链对 CJK 码位取得非零字形索引（非 Apple 构建与无 CJK 字体文件的宿主如实记 SKIP）
 
 #include <algorithm>
 #include <cstdint>
@@ -437,6 +439,43 @@ AURORA_TEST_CASE(fallback_chain_names_are_resolvable_like_listed_families) {
         }
     }
     AURORA_TEST_CHECK(any_listed_family_resolved);
+}
+
+AURORA_TEST_CASE(macos_system_fallbacks_cover_cjk_behind_the_builtin_default) {
+    // macOS 一支的系统保底链：`register_system_fallbacks()` 在 macOS 上此前是 `(void)0`——保底层
+    // 只剩内置 Noto Sans（纯拉丁），于是 CJK 请求在任何 macOS 机器上都落成豆腐块。本例钉两件事：
+    // ① 补齐的面**排在 Noto Sans 之后**（默认链首仍是它，纯拉丁度量逐位不变，这是本批的硬前提）；
+    // ② 表意文字 / 假名 / 谚文在全链里至少一枚 face 有字形。判据取 `FT_Get_Char_Index` 而非度量宽度：
+    // 豆腐块也有宽度，只有字形索引为 0 才说明全链都缺字。
+#ifndef AURORA_PLATFORM_MACOS
+    // 非 Apple 主机上本例的前提不成立：`register_system_fallbacks()` 的 macOS 一支根本不会被编进库。
+    // 这里不写 `return;`——下面的 `#else` 体在本形态下已被预处理器整块剔除，函数到 skip 记录即结束，
+    // 补一条 return 只会被 tidy 判为 `readability-redundant-control-flow`。
+    AURORA_TEST_SKIP("macOS-only leg: register_system_fallbacks() reads /System/Library/Fonts on Apple hosts");
+#else
+    render::init_font_discovery();
+    const auto faces = render::resolve_faces("");
+    AURORA_TEST_REQUIRE_FALSE(faces.empty());
+    AURORA_TEST_REQUIRE_NOT_NULL(faces.front()->face);
+    const char *head_family = faces.front()->face->family_name;
+    AURORA_TEST_CHECK_MSG(head_family != nullptr && std::string(head_family) == "Noto Sans",
+                          (head_family != nullptr) ? head_family : "(null)");
+    // 保底链不止内置那一枚：macOS 上 `Helvetica.ttc` 属系统必带，注册成功即 ≥ 2。
+    // 本条抓的是「清单写了但一支都没落进链」（路径错 / 加载失败静默）——只断言覆盖面会漏掉它。
+    AURORA_TEST_CHECK_GE(faces.size(), 2U);
+    const auto covers = [&faces](unsigned cp) {
+        return std::ranges::any_of(faces, [cp](const render::FontFace *f) {
+            return f != nullptr && f->face != nullptr && FT_Get_Char_Index(f->face, cp) != 0U;
+        });
+    };
+    if (!covers(0x4E2D)) {
+        // 本机连一份 CJK 字体文件都不在位（精简安装 / 非 ASCII 字体被移除）：前提不成立，如实 SKIP。
+        AURORA_TEST_SKIP("no CJK-capable system font file on this macOS host: the fallback leg has nothing to add");
+        return;
+    }
+    // あ（平假名）与 中 同属 macOS 随系统必带的覆盖面；谚文按机器装不装韩文族浮动，不作判据。
+    AURORA_TEST_CHECK_TRUE(covers(0x3042));
+#endif
 }
 
 }  // namespace aurora::test_cases::utest_font_discovery

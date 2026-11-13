@@ -87,10 +87,10 @@ struct Event {
 
 | 成员 | 初值 | 常量 | 语义 |
 |:---|:---|:---|:---|
-| `click_window_ms` | 500 | `AURORA_DEFAULT_CLICK_WINDOW_MS` | 连击时间窗（毫秒）；**置 0 即关闭连击判定**（任何间隔都不累加），置极大值使窗口恒开——供测试注入极端阈值，无需全局时钟钩子 |
+| `click_window_ms` | `os_double_click_ms()` | `AURORA_DEFAULT_CLICK_WINDOW_MS`（系统不可读时回退） | 连击时间窗（毫秒）；**默认跟随系统双击速度**（Windows `GetDoubleClickTime()`、macOS `+[NSEvent doubleClickInterval]`、Linux 经 GLib GSettings 读取、其余（Wasm / Headless / Android 与 macOS 后端关闭）回退库级常量）；**置 0 即关闭连击判定**（任何间隔都不累加），置极大值使窗口恒开——供测试注入极端阈值，无需全局时钟钩子 |
 | `click_radius_dp` | 4 | `AURORA_DEFAULT_CLICK_RADIUS_DP` | 连击位移半径（逻辑 dp） |
 
-阈值是**库内约定常量，未接线到系统双击速度设置**（Windows `GetDoubleClickTime` / X11 等）；取库内一致值换跨平台手感一致，后续接系统值时须同步修订本段。
+阈值默认**跟随系统双击速度设置**（`os_double_click_ms()`）：三桌面平台都读真实系统值——Windows `GetDoubleClickTime()`（已是毫秒）、macOS `+[NSEvent doubleClickInterval]`（**秒**，按四舍五入折算成毫秒；亚毫秒夹为 1、非正 / 非有限回退常量，折算落在可单测的纯函数 `src/aurora/event/detail/macos_click_config.h`，AppKit 调用在同名 `.cpp` 的 ObjC++ TU）、Linux 经 GLib GSettings（`org.gnome.desktop.peripherals.mouse` → `double-click`）；Wasm / Headless / Android 与「macOS 后端关闭」的形态回退库级常量 `AURORA_DEFAULT_CLICK_WINDOW_MS`。应用可显式写 `click_window_ms` 覆盖，再读 `os_double_click_ms()` 回填即恢复跟随系统。真机取证见 `aurora_verify_macos_double_click` / `aurora_verify_linux_double_click` / `aurora_verify_windows_double_click`（`08-tooling.md` §7.5）：macOS 一支以独立 AppKit 读回作交叉见证，并如实申报本机出厂值 0.5s 与回退常量同为 500ms、该等值判据在此刻不具区分力（`--interactive` 段现场挪滑杆才算跟）。
 
 **窗口装饰层（Wayland CSD 标题栏双击最大化）直接引用同一对常量**（`AURORA_DEFAULT_CLICK_WINDOW_MS` / `AURORA_DEFAULT_CLICK_RADIUS_DP`），不另写一套，避免「库内两套阈值」漂移。两者语义正交：CSD 标题栏属窗口装饰层、不进 widget 树、不经 `EventDispatcher`，因此它读不到（也无需读）派发器实例上的可调成员，只能引常量。历史值为 300ms / 5px，统一后与其它平台一致为 500ms / 4dp。
 
@@ -118,7 +118,7 @@ struct Event {
 | Wayland | `on_modifiers` 经 xkbcommon 维护的 `mods` 缓存 | `send_mouse` 与 `ptr_axis`（滚轮）均填该缓存，与键盘路径（`on_key`）读的同一个字段。**Wayland 协议不随指针事件送修饰态**（`wl_pointer` 的 enter/motion/button 回调都没有 mods 参数），故该缓存是本后端指针路径唯一可得来源，不新增机制 |
 | GLFW | ① `on_mouse_button` 的**回调形参 `mods`**（GLFW 在按钮回调上确实发掩码）；② `on_cursor_pos` / `on_scroll` 读 `glfwGetKey` 的**缓存事件态** | 两条入口都收敛到 `src/aurora/window/detail/glfw_modifiers.h`，避免同一后端内两种 Shift 语义。入口 ② 的合法性依据：GLFW 只给 button / key / char 回调发掩码，这两个回调的签名不给；`glfwGetKey` 读的是 GLFW 自己随 key 事件推进的缓存、**不是对系统的物理轮询**（`third_party/glfw/docs/input.md`：「This function only returns cached key event state. It does not poll the system for the current state of the key.」）。左右两侧任一按下即置位，与 Win32 侧同归并口径。**仓库固定 GLFW 3.5.1，没有「读当前修饰态」的窗口属性**（`GLFW_MODIFIERS` 在 3.6 开发分支与 master 上均尚未存在，3.6 也未发布），故不升级依赖 |
 | WASM | `EmscriptenMouseEvent` 的 `ctrlKey` / `shiftKey` / `altKey` / `metaKey` 四个 `bool`（字段名以本机 emsdk 的 `html5.h` 实测为准，与键盘路径读的 `EmscriptenKeyboardEvent` 同名同型） | `wasm_surface.h` 的 `on_mouse` 内折算；DOM 事件自带该快照，读取即「那一刻」的状态。**本后端不注册滚轮回调**（不产 `ScrollEvent`），不属漏实现而是另一条独立能力 |
-| macOS | — | 指针通道整条未实装（骨架文件零 `MouseEvent` / `ScrollEvent` 构造），不伪造实现 |
+| macOS | `NSEvent.modifierFlags`（AppKit 在每个鼠标 / 滚轮事件上携带完整修饰快照） | 折算走 `src/aurora/window/detail/macos_keymap.h` 的 `macos_modifiers_from_flags`（**零 AppKit 头的纯函数**：Shift `1<<17`、Control `1<<18`、Option→Alt `1<<19`、Command→Meta `1<<20`），与键盘 / 拖放路径同一实现。`mouseDown` / `mouseUp` / `mouseDragged` / 右键与中键族、`scrollWheel` 均从事件自带 flags 取值并回填 `Impl::modifiers` 缓存；缓存另供系统拖放桥读取（拖放回调不带修饰位）。失焦时缓存清 `None`——此后修饰键事件不再送达，留着旧值就是谎报 |
 
 **合成事件一律 `None`**：由触控合成的 `MouseEvent`、以及 `Widget::scroll_by` / `Scroll::scroll_by` 这类程序化滚动合成的 `ScrollEvent` 恒为 `ModifierKey::None`——它们不对应任何物理修饰态，凭空补一个「当前修饰态」会让消费方把程序化滚动误判成用户手势。**本仓当前的合成点清单**（逐条对应单测）：
 
@@ -178,7 +178,8 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 | `X11Surface` | ✅ **XIM 桥已接**（`src/aurora/window/x11_surface.cpp` 内联）：`XIMPreeditCallbacks` 风格协商 + draw/caret 回调回推，PreeditNothing 逐级降级 |
 | `WaylandSurface` | ✅ **text-input-unstable-v3 桥已接**（`src/aurora/window/wayland_surface.cpp` 内联，门 `AURORA_HAVE_WL_TEXT_INPUT`）：enable 判据 = 焦点 ∧ provider 非零盒；组合内容/上屏/回删全部折算成契约事件 |
 | `HeadlessSurface` | 无输入法概念；组合事件由测试直接构造并派发（`tests/unit/utest_ime_composition.cpp`） |
-| GLFW / Wasm / macOS | ⬜ **契约级**：事件与控件侧行为已完备，缺平台桥（macOS `NSTextInputClient`、Wasm DOM `composition*`）。须有真实桌面/浏览器输入法环境后补，无头 CI 无法完成 |
+| `MacOSSurface` | ✅ **`NSTextInputClient` 桥已接**（`src/aurora/window/macos_surface.cpp` 内联）：内容视图实现该协议，`insertText:replacementRange:` / `setMarkedText:selectedRange:replacementRange:` / `unmarkText` / `doCommandBySelector:` 折算成契约事件，`firstRectForCharacterRange:` 以 provider 的 caret 盒回推候选窗位置（屏幕坐标由 `convertRectToScreen:` 换算）；marked text 以 UTF-16 长度记 `markedRange`，上屏即清 `marked` 标志。真机输入法联调待有桌面会话的 macOS 环境 |
+| GLFW / Wasm | ⬜ **契约级**：事件与控件侧行为已完备，缺平台桥（Wasm DOM `composition*`）。须有真实浏览器输入法环境后补，无头 CI 无法完成 |
 
 各平台的取舍与实现细节（IMM32 而非 TSF、`WM_IME_CHAR` 吞字纪律、XIM 风格协商与溢出取字、v3 enable 判据与去重）见 [`06-app-platform.md`](06-app-platform.md) §8.5；真机验收见 `tools/verify/win32_ime_live_probe.cpp` / `x11_ime_live_probe.cpp` / `wayland_ime_live_probe.cpp`。
 
@@ -204,6 +205,8 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 
 `TouchDispatcher`（`dispatcher.h`）处理触控路径：实体方法 `dispatch(Widget& root, TouchEvent&, FocusManager* = nullptr) -> bool`，按 `TouchPoint::id` 做指针捕获，原始多点流全链广播 + 合成 `MouseEvent` 手势流冒泡，焦点行为与鼠标路径一致。合成事件同样过 `ClickTracker`，因此**触摸支持双 tap**（`click_count` 达 2），与鼠标双击同口径；`click_window_ms` / `click_radius_dp` 在 `TouchDispatcher` 上有同名的公开可调成员。
 
+**滚动条拖拽是 `dispatch_mouse` 指针捕获的又一消费者**（CHG-075）：四容器（`Scroll` / `LazyList` / `GridView` / `LazyRow`）在条带内的 Press 走同一条捕获机制——Press 命中条带即缓存命中链、后续 Move / Release 持续派发给按下时目标直到 Release 解除，与 `Splitter` 拖拽、`ReorderableList` 抓取同径，**不新增第二套拖拽通道**；条带外的 Press 仍按常规命中链下降给内容子树。拖拽映射的几何换算（`Δoffset = Δpointer × max_offset/(track − thumb)`）在控件内完成，派发层无新增代码。
+
 ### 3.2 命中测试
 
 `Widget::hit_test(local, bounds, ctx)` 返回命中的子节点：`local` 相对本组件原点，`bounds` 为绝对矩形，`ctx` 为构建上下文。
@@ -213,6 +216,8 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 **可滚动容器自动进入命中链**：`Widget::hit_test_chain` 在「无命中的后代、自身不可点击」时仍会把 `wants_scroll()` 为真且命中点落在内容盒内的控件自身纳入链尾——内容全非可点击时滚动容器也必须在链内，否则滚轮落空。容器**无需**再覆写 `on_hit_test` 返回 `this`。
 
 **自带拖拽区的容器必须把自身显式入链**：基类 `Widget::hit_test_chain`（`src/aurora/widget/widget.cpp`）只在「后代链非空 / `wants_click()` / `wants_scroll()` / 带 Input 修饰」之一成立时才把控件自身追加进链尾。因此靠 `on_pointer_event` 自绘拖拽带、又不 `wants_click()` 的容器（典型为 `Splitter` 的分隔条）若在其拖拽带上返回**空**后代链，就会整条链为空，被派发器判为「点在空白处」而根本不投递 Press——拖拽在任何后端都失效，且与 `on_hit_test`（点命中）口径不一致而难以察觉。此类控件须在拖拽带内返回 `std::vector{HitNode{this, weak_from_this(), bounds.origin}}`，并在带内无交互后代的空白点同样自入链，否则拖拽过程中指针一旦越出拖拽带，后续 Move 会因链空被丢弃。契约由 `utest_splitter` 的 `hit_chain_at_divider_includes_splitter` 与 `divider_drag_via_dispatcher_updates_ratio_and_clamps` 守护。
+
+**滚动条带自交自身、不下降**（CHG-075）：带滚动条的容器在条带（轨道 / 滑块）内必须把自身纳入命中链（否则 Press 落空、拖拽失效），且 `on_pointer_event` 在条带内**不下降**给内容子树——拖拽与轨道翻页只在条带内消费，条带外才照常命中内容。这与「自带拖拽区的容器必须把自身显式入链」同构（拖动带 = 滚动条带），由 `utest_scrollbar_containers` 的 `drag_within_band_does_not_descend_to_content` 守护。
 
 ### 3.2.1 覆盖绘制与命中链（追加命中盒）
 
@@ -282,7 +287,7 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 | 视口逻辑高 | 查 `env_` 环境链上最近祖先注入的 `MediaQuery`（存的是 `root_env_` 地址，窗口期恒定、每帧原地更新） | 事件回调（`on_pointer_event` / `on_scroll`）签名**不带 `BuildContext`**，只有布局 / 绘制两条路拿得到环境 |
 | 本控件全局顶边 y | 命中链下降时由祖先累加传入（`ancestor_offset`）；事件路径另有一路——`MouseEvent::position`（全局）减 `local_position`（本地） | 绘制期写回的 `focus_bounds_` **有缓存缺口**：`Widget::paint` 在显示列表缓存命中时提前 `return`，跳过 `focus_bounds_` 写入（`src/aurora/widget/widget.cpp`），故它不是可靠的真值源 |
 
-⚠️ **写 `env_` 不可只写在 `on_layout`**：`Widget::layout` 在**布局缓存命中时直接 `return`、完全跳过 `on_layout`**（`AURORA_ENABLE_LAYOUT_CACHE` 下），故靠 `on_layout` 单点写入不可靠。本仓既有 `TitleBar` 正是把 `env_` 只写在 `on_layout`（`title_bar.h`）——同款隐患，仅因 `WindowChrome` 缺失时有 null 兜底而未暴露。正确做法：**`on_paint` 为主写入点**（每帧必过）+ `on_layout` / `on_mount` 为兜底。
+⚠️ **写 `env_` 不可只写在 `on_layout`**：`Widget::layout` 在**布局缓存命中时直接 `return`、完全跳过 `on_layout`**（布局缓存恒开），故靠 `on_layout` 单点写入不可靠。本仓既有 `TitleBar` 正是把 `env_` 只写在 `on_layout`（`title_bar.h`）——同款隐患，仅因 `WindowChrome` 缺失时有 null 兜底而未暴露。正确做法：**`on_paint` 为主写入点**（每帧必过）+ `on_layout` / `on_mount` 为兜底。
 
 **「视口」的两种语义（注入那份为准）**：① **第一真值源** = `Window::prepare_context` 注入 `root_env_` 的那份（`MediaQuery::from_surface`，等价于 `Window::size()` ← `Surface::size()`），多窗口下各窗口互不串；② **可选覆写** = 应用经 `Provider<MediaQuery>` 显式注入的子树视口，适用于把子树布局在嵌入区、面板应贴合该区而非整窗的场景。`PanelGeometry` 读的是「最近祖先 Provider 值」，无 Provider 时即落到 ①。`Provider<T>` 是本仓既有的按子树覆盖机制（`widget/provider.h`），`MediaQuery` 是其已支持的类型。
 
@@ -350,7 +355,7 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 
 `dispatch(Widget&, ScrollEvent&)`（`event/dispatcher.cpp`）把滚轮判给**最近可滚动祖先**，并在内层吃到端点后把余量交给外层：
 
-1. 取命中链，自**最深**（链尾）向根遍历，跳过 `wants_scroll()` 为假的控件——可点击子控件（`Button` 等）不拦截滚轮，嵌套时最深滚动者优先。
+1. 取命中链，自**最深**（链尾）向根遍历；每个节点先按 `HitNode` 守卫经 `lock()` 判活并在整跳派发期间持住强引用，已回收节点整跳跳过（不得读裸 `ptr`），再跳过 `wants_scroll()` 为假的控件——可点击子控件（`Button` 等）不拦截滚轮，嵌套时最深滚动者优先。
 2. 每一跳先把 `e.remaining_y` 归零再调 `on_scroll`：**不写余量的 handler 视为全量消费**（默认 0），与旧「一次性消费、不冒泡」约定逐位兼容，既有自定义 `on_scroll` 无需改动。
 3. 该跳回传非零余量（clamp 后没吃尽的增量，与 `delta_y` 同单位同号）⇒ 令 `e.delta_y = e.remaining_y`，继续交给更浅一层可滚动祖先。
 4. 链上存在可滚动者但全部吃完仍有剩 ⇒ 止步（返回 `true`）；链上**无可滚动者** ⇒ 兜底回落点命中目标直接派发一次、不再冒泡（保持历史行为）。
@@ -470,7 +475,7 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 - **四态共用一个结构**：`SystemDropEvent` 以 `phase` 字段区分 `Enter` / `Over` / `Leave` / `Drop`（与 `MouseEvent` + `MouseAction` 同款惯例，不造四个事件类型）。四态**一律不冒泡**、只交给命中目标——沿用文件拖放的既有派发规则；`Enter` / `Over` 是「询问」态，读取载荷按空口径返回，**只有 `Drop` 态保证带载荷**。
 - **坐标口径**：`position` 与其余位置类事件一致，取「整幅表面逻辑坐标」（§2.3）；后端只做「屏幕 → 客户区 → 逻辑」一次换算，命中侧以整窗下沉壳为派发根，与绘制共用同一条平移。
 - **accept 查询是单一真值源**：`Widget::query_system_drag_accept(formats) -> DragAction` 返回「本控件会执行什么动作」，基类默认 `DragAction::None`（不接受）。派发器在 `Enter` / `Over` 两态命中后调用它，与源建议动作 `proposed` 求交写入 `allowed`（两侧表态冲突即 `None`），宿主据此决定 OS 光标反馈。该查询在 `Over` 态按指针采样频率发生，**实现须常量级、禁止触发重布局**。
-- **载荷读取**：`DragPayload` 是 pimpl 的只读句柄（`std::shared_ptr<const DragPayload>`），按 MIME 取原始字节；`files()` / `text()` / `image()` / `bytes(mime)` 为便利读取，一律返回 `Result`，**格式不存在 = `Ok` 空值**（空内容不是失败，与 `Clipboard` 同口径）。`files()` 解码 `text/uri-list`，只返回可映射为本地路径的条目，非 `file` scheme 的行静默跳过。
+- **载荷读取**：`DragPayload` 是 pimpl 的只读句柄（`std::shared_ptr<const DragPayload>`），按 MIME 取原始字节；`files()` / `text()` / `image()` / `bytes(mime)` 为便利读取，一律返回 `Result`，**格式不存在 = `Ok` 空值**（空内容不是失败，与 `Clipboard` 同口径）。`files()` 解码 `text/uri-list`，只返回结构性合法的本地路径条目：非 `file` scheme 的行静默跳过，解码出口另已过滤内嵌 NUL / 控制字节、独立 `..` 段、空条目与非空 authority（口径同 `06-app-platform.md` §8.2）。**过滤不等于授权**，路径是否落在允许目录内、符号链接与权限由调用方负责。
 - **动作口径**：`DragAction{None, Copy, Move, Link}`，`None` 表示不接受 / 无动作（也是取消与失败的返回值，**不是成功**）。
 - **拖出（事件驱动执行模型）**：控件经 `on_provide_drag()` 声明 `DragOffer`（格式清单 + 按 MIME 提供字节的回调，另含可选影像与热点偏移、源侧缺省动作、Move 确认回调四枚可选字段），`begin_system_drag()` 经 `system_drag::begin` 发起会话——**发起即返回**，不阻塞到会话结束（单线程 UI + 帧循环下，阻塞即要么饿死回调、要么引入嵌套消息泵的重入面；平台壳侧契约见 [`06-app-platform.md`](06-app-platform.md) §8.9）。`system_drag::cancel()` 调用时机不受限（会话外 no-op、会话内取消并就地收口在途读取）。终态经帧循环 `system_drag::pump_reads()` 投递。结束回调族与应用内拖拽的 `on_drag_end` **刻意分名**（同一控件上两套拖拽语义不共名）。
 - **源侧回调族四条序列**（`on_system_drag_begin` / `on_system_drag_cancel` / `on_system_drag_end(outcome, action)`，五种路径缺一即契约不全）：
@@ -487,7 +492,7 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 - **Move 确认与回滚**：目标接收成功后源删除回调（`DragOffer::on_move_confirmed`）被调用一次，且**严格早于** `on_system_drag_end(Succeeded, Move)` 投递（事件驱动下该顺序从外部可断言；源不得在收到确认前删除数据）。删除回调返回 `Error` ⇒ 会话终态改写为 `Failed` + `Move` 并上报 `system-drag-move-rollback`，目标侧数据保持不动。
 - **修饰键翻译归属（唯一翻译点）**：`proposed` 由宿主 / 后端在派发前经 `system_drag::proposed_action_for(modifiers, default_action)` 一次写定；控件只读 `proposed` 与 `allowed`、不做翻译（控件侧不存在第二处翻译）。Ctrl → Copy、Shift → Move、Ctrl+Shift → Link（Windows 惯例）；无有效修饰键 ⇒ 取源侧缺省动作（`DragOffer::default_action`，缺省 `Copy`）——`ModifierKey::None` 两义（没按 / 程序化合成），不可靠修饰键缺席推定。比对前按 `AURORA_MODIFIER_PRESSABLE_MASK` 摘除锁定态位（NumLock 常开的实现上 Win32 `GetKeyState` 一类返回含锁定态位，不摘会让 Ctrl 组合静默失配且本地难复现）。
 - **非阻塞读取契约**：`DragPayload::read_async` 与 `SystemDropEvent` 的 `*_async` 便利读取登记在途项，结果经帧循环排空兑现（宿主不排空 ⇒ 回调不到，不谎报）；同一 const 句柄可并发读取、各自独立兑现一次、不互相取消；墙钟超时兑现 `system-drag-read-failed`；会话收口就地兑现，不悬挂。同步 `bytes()` 一族保留供小载荷与同步后端；事件层便利读取与 `DragPayload` 直连两条路结果一致。
-- **自动滚边协议**：拖放悬停近边缘的滚动由 `DragAutoScroll` 内核驱动（`scroll_viewport.h`）——时间戳全部由调用方帧计时供给（内核不自读时钟，宿主可冻结 / 快进）；按侵入深度比例给速，带宽 clamp 到视口半高；共享常量 `AURORA_AUTO_SCROLL_THRESHOLD_DP = 48.0`（与 `ReorderableList` 同名缺省值相等——进程内拖拽与跨进程拖放两条路径手感一致的锚点）与 `AURORA_AUTO_SCROLL_MAX_SPEED = 600.0`；带外 / 视口未定尺 / 新鲜度超时（`AURORA_DRAG_AUTO_SCROLL_STALE_S = 1.0`，意图沉默即收车）就地收车。派发落点 `Widget::on_system_drag_auto_scroll(position)`：基类沿祖先链上溯至**最近可滚动祖先**（覆写并返回 true 者即可滚动），`Over` 态给落点、`Leave` / `Drop` 给 `nullopt`；本契约不新增滚动实现，只补「拖入时谁驱动滚动」。
+- **自动滚边协议**：拖放悬停近边缘的滚动由 `DragAutoScroll` 内核驱动（`scroll_viewport.h`）——时间戳全部由调用方帧计时供给（内核不自读时钟，宿主可冻结 / 快进）；按侵入深度比例给速，带宽 clamp 到视口半高；共享常量 `AURORA_AUTO_SCROLL_THRESHOLD_DP = 48.0`（与 `ReorderableList` 同名缺省值相等——进程内拖拽与跨进程拖放两条路径手感一致的锚点）与 `AURORA_AUTO_SCROLL_MAX_SPEED = 600.0`；带外 / 视口未定尺 / 新鲜度超时（`AURORA_DRAG_AUTO_SCROLL_STALE_S = 1.0`，意图沉默即收车）就地收车。派发落点 `Widget::on_system_drag_auto_scroll(position)`：基类沿祖先链上溯至**最近可滚动祖先**（覆写并返回 true 者即可滚动），`Over` 态给落点、`Leave` / `Drop` 给 `nullopt`；本契约不新增滚动实现，只补「拖入时谁驱动滚动」。滚边态与收位滑动态是**两个互不抢占的独立状态**：宿主帧计时里先推进滚边、再推进滑动，且**没有滑动在途时不得进入滑动块**（`Scroll` 与 `LazyList` 两宿主同形）——未激活的 `ScrollGlide::tick` 返回的是上一目标，若滚边在途时仍走那条块，刚由滚边推进的偏移会被拽回那个旧值（从未滑过即为 0，表现为「拖文件到列表边缘，列表反而跳回开头」）。帧计时的去留按「两者都空闲」判，写段只归激活的那条驱动。**Overlay 滚动条保持窗口是第三条驱动**（CHG-075）：滚轮 / 程序化滚动后容器进入 1 秒保持窗口、`needs_gesture_tick_` 持续置位直到到期摘除；三者（收位滑动 / 拖入滚边 / Overlay 保持窗口）都空闲才摘帧计时——`LazyRow` 此前无帧计时入口、本次补齐以承载这条驱动。
 - **无障碍替代路径**：可接收拖放的控件（`accepts_system_drag()` 为 true）须同时提供 `system_drag_alternative_path()`（人类可读描述，如「上下文菜单的『移动到』项」）；缺省为空 = 该控件只有拖拽一条路，无障碍树构建时把节点标记为「仅拖拽可达」（`AccessibilityNode::is_drag_only_reachable()` = `drag_reachable && 替代路径为空`），桥与工具链据此告警。粘贴、文件对话框等非拖拽入口在 UI 上须可达；放置反馈不得只靠光标形态表达（颜色 / 高亮 / 文案同时给）。
 - **平台后端映射（四后端事件翻译）**：后端只做五件事——坐标、formats、proposed、allowed、载荷，其余全在本节已冻结的契约里。平台无关的那一层是**零平台头折算层** `src/aurora/window/detail/system_drag_translate.h`（可无头单测），平台桥只把 OS 原生值搬进 `DragInFrame`、再把写定的 `allowed` 搬回 OS 光标反馈：
 
@@ -496,7 +501,7 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
   | Win32 OLE | `IDropTarget::DragEnter` | `DragOver` | `DragLeave` | `Drop` | `DragOver` / `DragEnter` 的 `pdwEffect`（`DROPEFFECT_*`） | **拖入 / 拖出均已接线**（拖出走库自管拖拽线程，见下） |
   | X11 Xdnd | `XdndEnter`（类型经折算层换 MIME，空则不建会话） | `XdndPosition` | `XdndLeave` | `XdndDrop` | `XdndStatus`（接受位 + 动作 + 空矩形） | **拖入 / 拖出均已接线**（二者共用 `x11_drag.h` 的同一桥实例，见下） |
   | Wayland | `data_offer` + `offer`（线上名清单）先行，`enter` 建会话 | `motion` | `leave` | `drop`（之后 `receive` 经管道取数、`finish` 收口） | `wl_data_offer.accept(serial, mime)` + `set_actions(dest_actions, preferred)` | **拖入 / 拖出均已接线**（二者共用 `wayland_drag.h` 的同一桥实例，见下） |
-  | macOS | `draggingEntered` | `draggingUpdated` | `draggingExited` | `performDragOperation`（取数**同步**完成：AppKit 读取 API 自身阻塞到数据就绪） | `draggingEntered` / `draggingUpdated` 返回的 `NSDragOperation`（**accept 闸门是 `prepareForDragOperation` 的返回值**，闸门为 NO 时 AppKit 不调 perform） | **拖入 / 拖出均已接线**（二者共用 `macos_drag.h` 的同一桥实例，见下；窗口壳仍为骨架，运行期需真实窗口承载会话） |
+  | macOS | `draggingEntered` | `draggingUpdated` | `draggingExited` | `performDragOperation`（取数**同步**完成：AppKit 读取 API 自身阻塞到数据就绪） | `draggingEntered` / `draggingUpdated` 返回的 `NSDragOperation`（**accept 闸门是 `prepareForDragOperation` 的返回值**，闸门为 NO 时 AppKit 不调 perform） | **拖入 / 拖出均已接线**（二者共用 `macos_drag.h` 的同一桥实例，见下；桥在 `create_window` 末尾装到真实 `NSWindow` 的内容视图上） |
 
   - **坐标**：OS 会话坐标 → 客户区像素 → **整幅表面逻辑坐标**（§2.3）；除数取宿主的 `scale`（宿主内 DPI 的唯一真值源），折算层不另读 DPI。
   - **formats**：OS 格式 → MIME 清单，取值一律出自 `app/mime_types.h`（单一真源），未登记格式丢弃；顺序即源侧优先级，折算不得重排。
@@ -530,20 +535,22 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 
 | 类型 | 说明 | 头文件 |
 |:---|:---|:---|
-| `AnimationController` | 驱动一条归一化进度（0→1）。`forward(from = -1)` 正向、`reverse()` 反向、`reset(t = 0)` 复位、`value()` 取进度。时长在构造 `AnimationController(duration_seconds, value)` 时确定，**无 `set_duration`** | `animator.h` |
+| `AnimationController` | 驱动一条归一化进度（0→1）。`forward(from = -1)` 正向、`reverse()` 反向、`reset(t = 0)` 复位、`stop()` 静止、`value()` 取进度、`set_progress(t)` 外部定位（不改状态语义，见 §6.2）、`repeat(count = -1, alternate = false)` 进入循环模式（只登记模式、不起播）、`mode()` / `is_repeating()` 读端点行为。时长在构造 `AnimationController(duration_seconds, value)` 时确定，**无 `set_duration`** | `animator.h` |
 | `AnimationStatus` | 动画状态枚举 `Dismissed`（进度 0）/ `Forward`（正向播放中）/ `Reverse`（反向播放中）/ `Completed`（进度 1）。`AnimationController::status()` 与 `AnimatedValue::status()` 均提供状态查询；其中 `is_completed()` 两者都有，而 `is_dismissed()` / `is_animating()` 仅属 `AnimationController`（`AnimatedValue` 只暴露 `status()` 与 `is_completed()`） | `animator.h` |
+| `PlaybackMode` | 端点行为枚举 `Once`（到端点即钳制并置对应终态，缺省）/ `Repeat`（到端点按 `repeat` 的次数与方向规则续播）。与 `AnimationStatus` 是两个正交轴：前者说「到端点怎么办」，后者说「现在往哪走 / 停在哪」 | `animator.h` |
 | `Tween<T>` | 补间函数。`Tween<T>(a, b, curve)`，`value(t)` 按曲线在 a→b 间插值；支持 `int` / `float` / `Size` / `Point` / `Color` 等 | `timeline.h` |
-| `Keyframes<T>` | 关键帧序列。`Keyframes<T>(stops)`，每帧 `Stop{time, value}`，**插值严格线性**；`value(t)` 在分段间插值 | `timeline.h` |
+| `Keyframes<T>` | 关键帧序列。`Keyframes<T>(stops)`，每帧 `Stop{time, value, curve}`；**第 *i* 个 `Stop` 的 `curve` 整形它向后的那一段**（`[stop_i, stop_{i+1}]`），缺省线性 ⇒ 既有 `Stop{time, value}` 写法逐位不变。末个 `Stop` 的曲线不参与求值。`value(t)` 按段插值，零宽段取该段起点值 | `timeline.h` |
 | `Curve` / `Curves` | 缓动曲线。`Curves::linear()` / `ease_in()` / `ease_out()` / `ease_in_out()` / `ease_in_out_cubic()` 等（无 `steps` 工厂） | `easing.h` |
 | `SpringDescription` | 弹簧物理参数（`stiffness` / `damping` / `mass`），配合 `SpringSimulation` 用于物理感动画 | `spring.h` |
-| `Animator` | 帧循环驱动器 | `animator.h` |
+| `Animator` | 帧循环驱动器：`drive` / `bind` 登记控制器，`tick(dt)` 每帧推进并按绑定写回 `State`，`add_binding(fn)` 追加无归属帧回调，`add_frame_binding(fn, owner)` 追加**带帧步长且按控制器归属可注销**的帧回调，`remove(c)` 注销控制器及其绑定，`has_active()` 供帧调度决策，`set_time_scale` / `time_scale()` 是应用内全局时间缩放入口（见 §6.2） | `animator.h` |
 | `AnimatedValue<T>` | 「`State<T>` + `Tween` + 控制器」三合一句柄 | `animator.h` |
+| `SpringAnimation` | 弹簧到 `State<double>` 的即插**驱动**封装：自持模拟时间轴、逐帧写目标、`is_settled` 后定格并停帧。`animate_to(target, spring, initial_velocity = 0.0, tolerance = 0.01)` 起播、`tick(raw_dt)` 自驱、`attach(Animator&)` 接入帧循环、`on_settled(cb)`、`set_range(lo, hi)`、`is_running()` / `target()` / `clock()`。`SpringSimulation` 仍是纯求解器，本类型只补驱动层 | `spring.h` |
 | `TweenAnimation<T>` | 自包含动画值：拥有自己的 `State<T>`，可独立推进。`animate_to(target, duration_s[, curve])` 起步、`tick(dt)` 每帧推进、`get()` 取当前值、`is_animating()`、`as_signal()` 交出内部 `State<T>` 供响应式绑定 | `animator.h` |
 | `TimelineInterval` | 归一化子区间 [begin, end]（对应 Flutter `Interval`）；`contains(t)` 判归属，`local(t)` 把总进度映射为区间局部进度（区间外夹取端点：t ≤ begin → 0，t ≥ end → 1） | `timeline.h` |
 | `TimelineSpec` / `TimelineResolved` | 时间轴构建器与求值结果（纯值）：`sequence()` / `parallel()` / `staggered(item, gap, count)` 组合子方法链声明子段，`add(时长秒)` / `add(子组)` 追加；`build()` 展开为槽位区间表 + 总时长。见 §6.6 | `timeline.h` |
 | `TimelinePlayer` | 时间轴播放器：单主控制器驱动全部轨道（槽位 + `Tween<T>` + 目标 `State<T>`）；`forward` / `reverse` / `stop` 中断续播，`track<T>` 类型安全绑轨，`attach(Animator)` 接入帧循环。见 §6.6 | `animator.h` |
 
-`timeline.h` 实际只提供 `lerp` 重载族（算术 / `Point` / `Size` / `Color` / `EdgeInsets` / `Rect`）、`Tween<T>`、`Keyframes<T>` 与时间轴编排（`TimelineSpec` / `TimelineResolved`，见 §6.6）。多段编排优先用 `TimelineSpec` + `TimelinePlayer`；单条多关键帧曲线仍可用 `Keyframes<T>` 的 `Stop{time, value}` 序列表达，或经 `Animator::add_binding` 追加帧回调按 `AnimationController::status()` / `value()` 分段驱动。
+`timeline.h` 实际只提供 `lerp` 重载族（算术 / `Point` / `Size` / `Color` / `EdgeInsets` / `Rect`）、`Tween<T>`、`Keyframes<T>` 与时间轴编排（`TimelineSpec` / `TimelineResolved`，见 §6.6）。多段编排优先用 `TimelineSpec` + `TimelinePlayer`；单条多关键帧曲线仍可用 `Keyframes<T>` 的 `Stop{time, value, curve}` 序列表达（每段曲线取该段起点 `Stop`，见上表），或经 `Animator::add_binding` 追加帧回调按 `AnimationController::status()` / `value()` 分段驱动。`spring.h` 提供 `SpringDescription` / `SpringSimulation`（纯求解器）与 `SpringAnimation`（驱动封装），动画域公共头共四个：`animator.h` / `timeline.h` / `easing.h` / `spring.h`。
 
 ### 6.2 Animator 与生命周期
 
@@ -553,11 +560,31 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 
 > 凡「控制器是某控件的成员、却注册进 `Application` 全局 `Animator`」的场景（典型如 `NavigatorHost`），**必须**在析构函数中调用 `remove(const AnimationController&)` 注销该控制器及其全部绑定，否则控件析构后下一帧 `tick` 就会写入已释放内存（use-after-free）。对未登记过的控制器调用是无操作，可重复调用。
 
+**帧回调的两种形态**：`add_binding(fn)` 收 `void()`，不归属任何控制器，故 `remove(c)` **摘不掉**它（用于与树同寿命的观察者）；`add_frame_binding(fn, owner)` 收 `void(double dt)` 并绑定一个归属控制器，`remove(owner)` 会连同该绑定一并摘除。带 `dt` 是给「自持时间轴的驱动件」用的（`SpringAnimation::attach` 即走这条），回调收到的 `dt` **已由 `Animator` 折算**，绑定体内不得再过一次漏斗。
+
+**端点行为与进度定位**：`repeat(count, alternate)` 只登记 `PlaybackMode::Repeat`，起播仍需 `forward()` / `reverse()`；它与方向正交（先 `forward` 再 `repeat` 不覆盖方向、先 `repeat` 再 `forward` 不清模式），`reset()` / `stop()` 把模式清回 `Once`。`count <= 0`（含缺省 `-1` 与 `0`）是无限循环，`0` 不表示「播 0 次」；`count > 0` 每次到达端点递减，归零后在最后到达的端点置终态。有限计数耗尽才产生 `Completed`，所以 `on_completed` 这类一次性回调在循环全程不触发、只在置终态那一帧触发一次。`alternate = false` 为同向重启（到 1 回 0 续跑），为真则每次到达端点翻转方向。无限循环在途期间 `Animator::has_active()` 恒真——应用不再进入空闲深睡，这是能力本身的代价，退出方式是 `stop()` / `reset()`。
+
+`set_progress(t)` 供手势跟手在帧边界前外部定位：越界夹入 `[0,1]`，**不改写 `status_`、不清 `PlaybackMode`**（播放中调用 = 重定位后续跑，静止态调用 = 只定位且不使 `has_active()` 变真），因此「拖拽跟手 → 松手由 `forward` / `reverse` 接管收尾」无需借道 `reset` 的状态副作用。写回经**外部脏位**送达：`dirty()` 取「推进脏 ∨ 外部脏」，`tick()` 入口只清推进脏，外部脏活到 `Animator` 帧末统一 `clear_dirty()`，故同一帧的绑定阶段即可把新进度插值写回目标 `State`。时间缩放为 `0.0` 时 `set_progress` **仍然生效**（缩放冻结的是推进步长，不是定位语义）。
+
+**应用内全局时间缩放**：`set_time_scale(scale)` 是调试 / 演示 / 降速入口，**非业务动画契约**（不改 `duration`、不改目标 `State` 终值、不改曲线，也不缩放事件、布局、输入与 `Scheduler` 定时任务）；`1.0` 正常、`2.0` 两倍速、`0.5` 慢放、`0.0` 冻结，负值与非有限值夹取为 `0.0`。与 Flutter `timeDilation` 互为倒数。
+
+缩放只有一个入口：自由函数 `scaled_frame_dt(raw_seconds)`（`Animator::scale_frame_dt` 的当前实例侧薄封装），它把裸帧步长**只做乘法**折算成动画时间轴步长；`Animator::current()` 为空（无头 / golden 场景）时**恒等返回**，故既有确定性基线逐字节不变；倍率 `1.0` 时逐比特恒等。**不夹取**是就地取舍：入参既可能是调用方声明的步长（`Animator::tick(1.0)` 做「一步到位」是既有契约），也可能是控件自驱路径的墙钟差（既有 `Skeleton` 用例以 3 秒差推进相位），在此夹取会同时改掉两者语义。
+
+同一条帧步长从取值到消费**至多经过漏斗一次**：`Animator::tick` 折算后推进控制器并把已折算的 `dt` 交给 `add_frame_binding` 回调；各控件自驱路径（`Scroll` / `LazyList` / `GridView` / `PullToRefresh` 的收位滑动、`ReorderableList::tick_settle` 的落位弹簧、`Skeleton` 的相位累加、`DragToDismiss` 经 `SpringAnimation` 的弹簧段）在**自己的 `tick_gestures` / `tick` 入口**取一次裸墙钟差并折算，下游求解器（`ScrollGlide::tick`、`SpringSimulation::value`）保持纯时序数学、不感知缩放。两层都乘会让倍率变成平方。
+
+**明确不缩放的例外**：近边缘自动滚边（`DragAutoScroll::advance` / `ReorderableList::tick_auto_scroll`）是速度型手感而非一段有始有终的时序；媒体播放钟（`VideoPlayer`）是内容时钟，缩放它等于改播放速度。`reduce_motion` **优先于**缩放——短路落端点的路径不乘倍率，否则「一步到位」的无障碍语义会变成「慢速播放」。
+
+**冻结（`0.0`）不得产生常驻帧**，两条停手机制各自可证：`Animator` 侧登记控制器本帧不推进即不置脏、绑定不写回，`has_active()` 同时转假；控件自驱侧拿到 `0` 步长后不推进、不写回、不标脏、不请求帧，其逐控件在途标志（`needs_gesture_tick_`）**保留**——解冻不能指望控件自己醒（全局入口触达不到私有标志），故 `0 → >0` 置一位重挂请求，由 `Application::wait_once` 消费出「下一帧不深睡」，那一帧里各控件照常 `tick_gestures` 并自行续帧；无在途动画时那是一帧空转，代价与「解冻」这一动作同频。就地取舍：冻结期间若帧循环已深睡，控件侧墙钟锚点停在那一帧，解冻首帧的 `now - last` 含整段停摆时长、在途滑动会一次跳进相应进度；冻结帧照常刷新锚点，故只要帧循环还产出别的脏帧就看不出该折算。
+
+**弹簧的生命周期告诫同样适用**：`SpringAnimation::attach(anim)` 内部 `drive` 一个自持的登记时钟并经 `add_frame_binding` 绑定，故控件把弹簧注册进 `Application` 全局 `Animator` 时，仍须在析构前 `remove(spring.clock())`（该时钟同时作注销键）。弹簧收敛定格后自己 `stop()` 该时钟，`has_active()` 随之转假——漏掉收敛判定会表现为「定格前多写几帧」或「永不停帧的空转」，所以收敛判定收在原语一处，调用方不再重复实现。
+
 ### 6.3 AnimatedValue
 
 `AnimatedValue<T>` 把 `State<T>`、一条 `Tween` 与控制器收拢一处，**内部以 `shared_ptr` 持有驱动载荷（pimpl）**，因此句柄可按值返回、自由拷贝，且 `attach(animator)` 后即使原句柄离开作用域，帧循环仍安全持有驱动载荷（不悬垂）。
 
-接口：`forward(from)`、`tick(dt)`（自驱动一帧）、`progress()`、`current()`（目标 `State` 当前值）、`is_completed()`、`on_completed(cb)`（到达终点的一次性回调）、`attach(Animator&)`（接入帧循环）。
+接口：`forward(from)`、`tick(dt)`（自驱动一帧）、`progress()`、`current()`（目标 `State` 当前值）、`is_completed()`、`on_completed(cb)`（到达终点的一次性回调）、`attach(Animator&)`（接入帧循环）、`controller()`（交出内部控制器）。
+
+`AnimatedValue<T>` **不转发** `repeat` / `set_progress`——播放模式与外部定位是控制器轴上的能力，句柄只再暴露它已有的三合一面；需要循环或跟手定位时经 `controller()` 设置（`handle.controller().repeat(...)` / `handle.controller().set_progress(t)`）。句柄不自持时间缩放：`tick(dt)` 内部经 `scaled_frame_dt` 折算（受当前 `Animator` 的倍率约束），`attach` 路径收到的 `dt` 已由 `Animator` 折算、不再二次缩放。
 
 ### 6.4 统一入口 animate
 
@@ -582,11 +609,17 @@ auto h2 = au::animate(opacity, au::Tween<float>(1.0F, 0.0F, au::Curves::linear()
 // 每帧：h2.tick(dt);
 ```
 
+其余自驱动形态同一条漏斗：`TweenAnimation<T>::tick(dt)`、`TimelinePlayer::tick(dt)`、`AnimatedValue<T>::tick(dt)`、`SpringAnimation::tick(dt)` 都在入口调 `scaled_frame_dt`，故应用内缩放与冻结对「不接 `Animator` 的手动推进」同样生效（`Animator::current()` 为空时恒等，单测手喂 `dt` 不受影响）。弹簧没有 `animate(...)` 式的自由函数入口，其即插形态就是 `SpringAnimation` 本身（见 §6.1 与 §6.7）。
+
 ### 6.5 设计约束
 
 动画只改变 `State<T>`（视觉属性如 opacity / transform），**不改变布局盒模型**；布局快照在动画前后一致（与 [`03-layout-render.md`](03-layout-render.md) §10.2 规则 7 同源）。
 
 **自驱动动画**：在 `on_paint` 末尾 `mark_needs_paint()` 自调度下一帧、并用 `std::chrono::steady_clock` 算 `dt` 手动缓动的控件，必须覆写 `can_cache_display_list()` 返回 `false`（[`04-widget.md`](04-widget.md) §2.4）。
+
+**缩放边界**：`Animator::set_time_scale` 只作用于**动画时间轴**——不缩放事件、布局、输入与 `Scheduler` 定时任务，也不改 `duration`、曲线与目标 `State` 终值。它是调试 / 演示 / 降速入口，**不进入业务动画契约**（业务侧要快慢就调 `duration` 或换曲线）。取值域与例外清单见 §6.2。
+
+**无障碍优先**：`reduce_motion` 优先于缩放与循环——短路路径单帧落本次目标端点、置终态，不产生中间帧，也不因 `repeat` 而往复；倍率不参与该短路的换算。
 
 ### 6.6 Timeline 编排（TimelineSpec / TimelinePlayer）
 
@@ -624,12 +657,13 @@ player.attach(app.animator());
 - **生命周期**：沿用 `AnimatedValue` 模式——载荷 `shared_ptr` 自持，`attach` 后句柄可离开作用域不悬垂；轨道目标 `State<T>` 为非拥有引用，必须比播放器存活更久；
 - **类型擦除边界**：轨道存储在播放器内部以 `shared_ptr<void>` + apply 函数擦除；公共 API（`track<T>`）全程类型安全，擦除不经接口泄漏；
 - **写序**：同帧多轨道按绑定序写入，无相互依赖的 State 间无顺序假设。
+- **分段曲线的两条路径**：跨槽位的「每段不同缓动」用 `TimelinePlayer`——每轨道一条 `Tween<T>`、各自带 `curve`，槽位区间天然就是分段边界；单条动画内的多段缓动（同值同时间轴、逐停靠点换曲线）用 `Keyframes<T>` 的 `Stop{time, value, curve}`，段取**该段起点** `Stop` 的曲线（见 §6.1）。两者不互相代偿：`TimelinePlayer` 不为单轨道开分段接口，`Keyframes<T>` 不感知槽位与总时长。
 
 ### 6.7 手势驱动动画（DragToDismiss / Dismissible）
 
 单指拖动跟手 + 松手 spring 裁决的 drag-to-dismiss 语义（pointer-agnostic，鼠标 / 触摸统一走 `pointer_id` 抽象流）。
 
-**`DragToDismiss`（`event/gesture.h`）**：拖动消除驱动器，内部持有 `DragRecognizer`。
+**`DragToDismiss`（`event/gesture.h`）**：拖动消除驱动器，内部持有 `DragRecognizer` 与一个 **`SpringAnimation`**（写回目标即它的进度 `State<double>`，值域经 `set_range(0, 1)` 夹取）。弹簧段复用公共封装，本类不再自持「累积模拟时间 + `is_settled` 定格 + 写 `State`」的私有实现——收敛与 `reduce_motion` 短路都只有原语一处；对外的帧入口也只有 `tick(raw_dt)` 一个（`Dismissible` 传裸墙钟差，折算发生在 `SpringAnimation::tick` 内，本类不预缩放）。
 
 - **跟手 = 直接操作而非动画**：drag 期间 `progress` 逐事件写为「主轴位移 / `travel`（消除行程，逻辑 dp）」，1:1 映射；`reduce_motion` 不干预跟手（无障碍语义：直接操作保持 1:1 响应）。负方向夹取 0，超行程夹取 1。
 - **松手裁决**：`on_release()` 按 `progress ≥ threshold`（默认 0.5）判落点——≥ 阈值 spring 到 1，收敛后触发 `on_dismissed`；否则 spring 回 0（静默，不触发回调）。拖动速度（最近事件位移 / 固定 60Hz 采样假设，主轴分量）作 spring 初速度：方向与裁决一致保留、相反丢弃。
@@ -652,6 +686,17 @@ player.attach(app.animator());
 ### 7.1 Route
 
 `Route`（`navigation/route.h`）是一条路由。构造 `Route(Node root, std::string name = "", RouteTransition transition = {})`；`root()` 返回该页 UI 子树，`name()` 返回路由名。
+
+`RouteTransition` 是转场描述值：`animated`（是否用转场动画）/ `kind`（`TransitionKind`）/ `curve`（缺省 `Curves::linear()`）/ `duration_seconds`（缺省 `0.3`）。
+
+**现状限制（转场侧尚未接线）**：
+
+- `NavigatorHost` 的转场曲线**硬编码** `Curves::ease_in_out()`（其 `anim_.bind` 一处），逐路由的 `RouteTransition::curve` 当前不生效——该字段是声明位，不是已兑现的能力。
+- `pop()` / `pop_to_root()` **强制** `TransitionKind::Fade`，仅 `push` 读 `RouteTransition::kind`。
+- `TransitionKind` 目前只有 `Fade` / `Slide` 两态。
+- 没有声明式 `PageRouteBuilder`（路由即转场描述）封装，现形是 `NavigatorHost` + `Route` 的命令式接法。
+
+可中断 / 交互式转场所需的原语已在动画层就位（`AnimationController::set_progress` 定位不改状态语义、`Keyframes` 分段曲线、`SpringAnimation` 的即插收敛），上表限制属导航层接线，不属这些原语缺失。
 
 ### 7.2 Navigator
 
@@ -750,10 +795,8 @@ app.tick();                                  // 显式推进一帧（内部驱�
 // 父组件设了 font_size=20，子组件「自动继承」
 
 // ✅ 显式样式传递
-au::ThemeProvider{ my_theme, au::Column(au::ColumnProps{
-    .children = {
-        // 此子树内所有组件可经 ctx.environment<Theme>() 读取 my_theme
-    },
+au::ThemeProvider{ my_theme, au::Column({
+    // 此子树内所有组件可经 ctx.environment<Theme>() 读取 my_theme
 }) };
 
 // 或显式参数（不经隐式继承）

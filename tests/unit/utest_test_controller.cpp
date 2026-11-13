@@ -30,8 +30,8 @@ constexpr int AURORA_HEIGHT = 240;
 
 /// @brief 测试树干：Column[ Button#ok(label="OK"), Text#msg(content="hello"), TextInput#in ]。
 struct Fixture {
-    std::shared_ptr<Button> btn = std::make_shared<Button>(ButtonProps{.label = LocalizedString{"OK"}});
-    std::shared_ptr<Text> msg = std::make_shared<Text>(TextProps{.content = LocalizedString{"hello"}});
+    std::shared_ptr<Button> btn = std::make_shared<Button>(ButtonProps().set_label(LocalizedString{"OK"}));
+    std::shared_ptr<Text> msg = std::make_shared<Text>(TextProps().set_content(LocalizedString{"hello"}));
     std::shared_ptr<TextInput> input = std::make_shared<TextInput>();
     int clicks = 0;
 
@@ -65,7 +65,7 @@ struct Fixture {
 
 AURORA_TEST_CASE(pump_renders_first_frame_then_idle_frames_are_skipped) {
 #ifdef AURORA_BACKEND_HEADLESS
-    Fixture fx;
+    Fixture const fx;
     auto tc = fx.controller();
 
     AURORA_TEST_REQUIRE_TRUE(tc.pump().ok());
@@ -84,7 +84,7 @@ AURORA_TEST_CASE(pump_renders_first_frame_then_idle_frames_are_skipped) {
 
 AURORA_TEST_CASE(pump_and_settle_stops_before_budget) {
 #ifdef AURORA_BACKEND_HEADLESS
-    Fixture fx;
+    Fixture const fx;
     auto tc = fx.controller();
 
     const int frames = tc.pump_and_settle(20);
@@ -101,7 +101,7 @@ AURORA_TEST_CASE(pump_and_settle_stops_before_budget) {
 
 AURORA_TEST_CASE(set_viewport_relayouts_tree) {
 #ifdef AURORA_BACKEND_HEADLESS
-    Fixture fx;
+    Fixture const fx;
     auto tc = fx.controller();
     AURORA_TEST_REQUIRE_TRUE(tc.pump().ok());
     AURORA_TEST_CHECK_NEAR(tc.root_node().bounds().size.width, static_cast<float>(AURORA_WIDTH), 0.5F);
@@ -123,7 +123,7 @@ AURORA_TEST_CASE(set_viewport_relayouts_tree) {
 
 AURORA_TEST_CASE(finders_locate_nodes_by_key_type_and_text) {
 #ifdef AURORA_BACKEND_HEADLESS
-    Fixture fx;
+    Fixture const fx;
     auto tc = fx.controller();
     AURORA_TEST_REQUIRE_TRUE(tc.pump().ok());
 
@@ -152,7 +152,7 @@ AURORA_TEST_CASE(finders_locate_nodes_by_key_type_and_text) {
 
 AURORA_TEST_CASE(tap_fires_on_click_and_enter_text_writes_into_input) {
 #ifdef AURORA_BACKEND_HEADLESS
-    Fixture fx;
+    Fixture const fx;
     auto tc = fx.controller();
     AURORA_TEST_REQUIRE_TRUE(tc.pump().ok());
 
@@ -176,7 +176,7 @@ AURORA_TEST_CASE(tap_fires_on_click_and_enter_text_writes_into_input) {
 
 AURORA_TEST_CASE(drag_establishes_text_selection) {
 #ifdef AURORA_BACKEND_HEADLESS
-    Fixture fx;
+    Fixture const fx;
     auto tc = fx.controller();
     AURORA_TEST_REQUIRE_TRUE(tc.pump().ok());
 
@@ -191,9 +191,9 @@ AURORA_TEST_CASE(drag_establishes_text_selection) {
 
 AURORA_TEST_CASE(interactions_reject_empty_node) {
 #ifdef AURORA_BACKEND_HEADLESS
-    Fixture fx;
+    Fixture const fx;
     auto tc = fx.controller();
-    Node empty;
+    Node const empty;
     AURORA_TEST_CHECK_FALSE(tc.tap(empty).ok());
     AURORA_TEST_CHECK_FALSE(tc.drag(empty, Point{.x = 1.0F, .y = 1.0F}).ok());
     AURORA_TEST_CHECK_FALSE(tc.enter_text(empty, "x").ok());
@@ -206,7 +206,7 @@ AURORA_TEST_CASE(interactions_reject_empty_node) {
 
 AURORA_TEST_CASE(expect_visible_passes_after_frame_and_fails_when_hidden) {
 #ifdef AURORA_BACKEND_HEADLESS
-    Fixture fx;
+    Fixture const fx;
     auto tc = fx.controller();
 
     auto msg = tc.find_by_key("msg");
@@ -217,7 +217,7 @@ AURORA_TEST_CASE(expect_visible_passes_after_frame_and_fails_when_hidden) {
     AURORA_TEST_REQUIRE_TRUE(tc.expect_visible(msg.at(0)).ok());
 
     // show=false 的节点不入绘制：可见性断言失败。
-    fx.msg->show.set(false);
+    fx.msg->set_show(false);
     AURORA_TEST_CHECK_FALSE(tc.expect_visible(msg.at(0)).ok());
 #else
     AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS is not enabled: TestController needs HeadlessSurface, not compiled");
@@ -226,7 +226,7 @@ AURORA_TEST_CASE(expect_visible_passes_after_frame_and_fails_when_hidden) {
 
 AURORA_TEST_CASE(expect_prop_compares_resolved_value) {
 #ifdef AURORA_BACKEND_HEADLESS
-    Fixture fx;
+    Fixture const fx;
     auto tc = fx.controller();
     AURORA_TEST_REQUIRE_TRUE(tc.pump().ok());
 

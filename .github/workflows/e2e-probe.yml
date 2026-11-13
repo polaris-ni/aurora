@@ -12,12 +12,14 @@
 #                    WGL 通用驱动无法建 GPU 上下文
 #   ubuntu-latest  : X11 ✓（35ms）、GLFW ✓（1245ms，llvmpipe 软件 GL；GLFW 源码构建
 #                    需补 wayland-scanner 等 Wayland 依赖）
-#   macos-latest   : GLFW ✗——无人值守会话无窗口系统
+#   macos-latest   : GLFW ✗——无人值守会话无窗口系统；AppKit 后端从未在该 runner 上
+#                    跑过一次，本轮起本 job 把 AppKit 编进来一并探（结论待本次实测）
 #
 # 平台 × 后端矩阵（沿用实测口径）：
 #   windows-latest : Win32（GDI）+ D3D11 + GLFW，Hidden 档
 #   ubuntu-latest  : X11 + GLFW（xvfb-run 虚拟显示）
-#   macos-latest   : GLFW（macOS runner 无人值守会话，验证结果供回归对照）
+#   macos-latest   : AppKit + GLFW（macOS runner 无人值守会话，验证结果供回归对照；
+#                    期望集仍为空，AppKit 是否可用以本 job 日志为准再决定是否进取望集）
 #
 # 构建配置显式 -DAURORA_ENABLE_DEBUG=ON：Surface::data() 读回在 Win32 家族 / X11 /
 # Wayland / wgpu 回退帧 / GLFW-GPU 上受该宏门控（Release AUTO 不注入即不可读回，
@@ -81,7 +83,7 @@ jobs:
       # 编译依赖与 backends 矩阵 linux 项同口径：GLFW 源码构建会探测 Wayland 头
       # （runner 预装环境已含），缺 wayland-scanner 会在 configure 期报错，故一并装
       - name: Install deps
-        run: sudo apt-get update -y && sudo apt-get install -y libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxext-dev libgl1-mesa-dev libwayland-dev wayland-protocols libxkbcommon-dev
+        run: sudo apt-get update -y && sudo apt-get install -y libx11-dev libxfixes-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxext-dev libgl1-mesa-dev libwayland-dev wayland-protocols libxkbcommon-dev
 
       - name: Configure
         run: cmake -S . -B build -G Ninja -DAURORA_ENABLE_DEBUG=ON -DAURORA_BACKEND_X11=ON -DAURORA_BACKEND_GLFW=ON
@@ -96,19 +98,77 @@ jobs:
         run: xvfb-run -a ./build/aurora_test_runner --run=etest_smoke_render --verbose
 
   probe-macos:
-    name: probe-macos (glfw)
+    name: probe-macos (appkit + glfw)
     runs-on: macos-latest
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
 
+      # `AURORA_BACKEND_MACOS=ON` 与本仓的 Apple 默认值同形（CHG 后端开关批次后 Apple 缺省即 ON），
+      # 显式写出来是为了让「AppKit 真实后端参与本次 e2e 装配」在作业面上可读、不被默认值漂移带走。
+      # AppKit 后端一旦编入，`auto_detect_surface()` 在 Apple 上就会选它，故 etest 的建窗路径从
+      # 「只剩 GLFW 一条腿」变成「先试 AppKit、GLFW 作对照」——这正是本 job 想要的覆盖面。
       - name: Configure
-        run: cmake -S . -B build -G Ninja -DAURORA_ENABLE_DEBUG=ON -DAURORA_BACKEND_GLFW=ON
+        run: cmake -S . -B build -G Ninja -DAURORA_ENABLE_DEBUG=ON -DAURORA_BACKEND_MACOS=ON -DAURORA_BACKEND_GLFW=ON -DAURORA_ENABLE_AUDIO=ON -DAURORA_ENABLE_IMAGE_JPEG=ON -DAURORA_ENABLE_IMAGE_WEBP=ON -DAURORA_ENABLE_IMAGE_PNG=ON -DAURORA_ENABLE_STORAGE_SQLITE=ON -DAURORA_ENABLE_COMPRESSION=ON
 
       - name: Build runner
         run: cmake --build build --target aurora_test_runner
 
-      # macOS runner 自带 GUI 会话，但 GLFW 无人值守建窗实测不可用（无窗口系统会话）——
-      # 期望集置空（不声明 AURORA_E2E_EXPECT）：全部用例走 skip 分支，本 job 只作回归对照。
+      # macOS runner 的 GLFW 无人值守建窗实测不可用（无窗口系统会话），AppKit 侧此前从未在该 runner 上
+      # 试过一次。期望集仍置空（不声明 AURORA_E2E_EXPECT）：后端兑现不了就走 skip 分支、本 job 只作
+      # 回归对照；一旦日志显示 AppKit 真实建窗 + 读回成功，再把 `macos` 写进期望集，让「兑现不了」
+      # 从静默跳过变成失败——判据必须来自实测，不来自猜测。
       - name: Probe real-window render + readback (Hidden)
         run: ./build/aurora_test_runner --run=etest_smoke_render --verbose
+
+      # 同口径把另外两枚真实后端用例拉起来跑一遍（多窗与系统输入面在 macOS 腿上的接线此前只在
+      # 本机探针验证过，CI 侧从未执行；期望集为空使它们在无窗口会话时如实 skip 而非假失败）。
+      - name: Probe multi-window and OS input (Hidden)
+        continue-on-error: true
+        run: |
+          ./build/aurora_test_runner --run=etest_multi_window --verbose
+          ./build/aurora_test_runner --run=etest_os_input --verbose
+
+      # 无障碍协议面探针：语义树 → MacOSAxBridge → AppKit NSAccessibility 的投影判据
+      # （角色/名称逐类命中、屏幕矩形非空 + 命中测试回指、press 动作往返后值重投影、桥的
+      # 惰性激活时机）。它同样需要图形会话——与真实建窗读回同一前置条件，故只在判据失败
+      # （退出码 1）时红灯；退出码 2（无窗口会话）按 runner 能力记账，不冒充库的缺陷。
+      # AX 客户端加强腿（真 IPC 读回）在 runner 上恒不可用：未授权客户端的属性是退化的。
+      - name: Build AX protocol probe
+        run: |
+          cmake -S . -B build -G Ninja -DAURORA_BUILD_VERIFY_TOOLS=ON
+          cmake --build build --target aurora_verify_macos_ax
+
+      - name: Probe AppKit accessibility projection
+        run: |
+          rc=0
+          ./build/aurora_verify_macos_ax || rc=$?
+          if [ "$rc" -eq 1 ]; then
+            echo "AX projection checks failed"
+            exit 1
+          fi
+          if [ "$rc" -ne 0 ]; then
+            echo "AX probe not runnable in this session (exit $rc): runner capability gap, recorded not failed"
+          fi
+
+      # OS 级输入注入探针：同进程 AppKit 事件队列驱动的整段管线（点击 → 派发/命中 → Checkbox
+      # 往返翻转 + 区域内像素变化；keyDown → characters → TextInput 上屏）。CGEvent 那一腿
+      # 须辅助功能授权，GitHub runner 无从授予，因此探针在 untrusted 环境里改跑「通道自我申报
+      # 不可用 + 裸投递确实一个事件都不送达」两条判据——它把最容易读成通过的形状固定下来。
+      # 与 AX 探针同一前置（需图形会话）：退出码 1 红灯，退出码 2 记 runner 能力缺口。
+      - name: Build OS-input probe
+        run: |
+          cmake -S . -B build -G Ninja -DAURORA_BUILD_VERIFY_TOOLS=ON
+          cmake --build build --target aurora_verify_macos_os_input
+
+      - name: Probe AppKit event-queue input injection
+        run: |
+          rc=0
+          ./build/aurora_verify_macos_os_input || rc=$?
+          if [ "$rc" -eq 1 ]; then
+            echo "OS-input checks failed"
+            exit 1
+          fi
+          if [ "$rc" -ne 0 ]; then
+            echo "OS-input probe not runnable in this session (exit $rc): runner capability gap, recorded not failed"
+          fi

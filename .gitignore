@@ -9,6 +9,9 @@
 # 编译/测试中间产物
 __pycache__/
 
+# 基准工具默认落盘目录（未设置 AURORA_BENCH_RESULT_DIR 时相对 cwd）
+bench-results/
+
 # CTest 在仓库根跑测试时自建的跟踪目录（Testing/Temporary/LastTest.log 等），
 # 属本机运行痕迹而非基线数据，与 build*/ 同类，不入库
 Testing/

@@ -273,7 +273,7 @@ auto register_core_widgets() -> void {
     reg_no_props<Provider<MediaQuery>>("MediaQueryProvider", MediaQuery{}, Node{});
     // Timer 持运行时回调（TickBuilder），与 Repeater/Canvas 同理不可从静态 JSON 重建；
     // 但注册为已知类型以便 API 描述（gen_api_tools）收录其自描述元数据。
-    reg_no_props<Timer>("Timer", std::chrono::seconds(1), [](const SignalView<int> &) -> Node { return Node{}; });
+    reg_no_props<Timer>("Timer", std::chrono::seconds(1), [](const ReadOnlyState<int> &) -> Node { return Node{}; });
     // BreakpointBuilder持运行时 builder 回调，注册供 API 描述收录。
     reg_no_props<BreakpointBuilder>("BreakpointBuilder");
     // Dismissible 持运行时手势 State 与消除回调，注册供 API 描述收录
@@ -428,7 +428,7 @@ auto is_container_type(const std::string &t) -> bool {
 /// @brief 布局公共属性的语义类型：仅补录 `serialize_props` 写出而 `describe()` 未收录的键。
 ///
 /// 十个已知键取控件侧**真实成员类型**——`Widget::width_` / `height_` 是 `Length`、`show` 是
-/// `Reactive<bool>`、基类 `overflow_` 序列化为字符串、滚动 `offset` 是 float、清单字段是
+/// `State<bool>`、基类 `overflow_` 序列化为字符串、滚动 `offset` 是 float、清单字段是
 /// `std::vector<std::string>`——与 `PropDescriptor::type` 同一词汇表，消费者无需再学一套表示。
 /// 未知键（未来新增的序列化键）按取值 JSON 类型派生、容器类归 `"Json"`，保证新键不会
 /// **静默掉出** schema（宁可给个保守类型，也不要让属性对 AI 隐身）。
@@ -509,15 +509,20 @@ auto component_schema(const std::string &name) -> Json {
         if (!pd.required) {
             entry.erase("required");  // 稀疏：仅必填项显式输出
         }
+        if (!pd.source) {
+            entry.erase("source");  // 稀疏：仅来源型行显式输出（值型 / 派生行缺键即 false）
+        }
         if (const auto *native = serialized.at(pd.name); native != nullptr) {
             entry.set("default", *native);  // 原生值（实测序列化）覆盖描述符显示串
-        } else {
+        } else if (pd.default_native.is_null()) {
             // 无原生默认值可依（主题角色色、运行态项等）：显示串是该属性唯一的默认信息。
             entry.erase("default");
             if (!pd.default_value.empty()) {
                 entry.set("default_expr", pd.default_value);
             }
         }
+        // 第三种情形不留分支：属性未表态 ⇒ 实测序列化里没有这个键，而该行回落点可静态求值，
+        // `descriptor_to_json` 已按回落点落好同型的原生默认值，此处保持它、不降级成字符串。
         table.push_back(std::move(entry));
     }
     for (const auto &e : serialized.entries()) {
@@ -561,6 +566,14 @@ auto component_schema(const std::string &name) -> Json {
     }
     if (!invariants.empty()) {
         w.set("invariants", std::move(invariants));
+    }
+    // 载荷声明按稀疏口径输出：只有 `Provider<T>` 系的载荷格非空（注入值既非属性键也无写件），
+    // 其余控件不留键 —— 与 `children_types` / `invariants` 同一「空即不发」的规则。
+    if (!desc.payload_type.empty()) {
+        Json payload = Json::object();
+        payload.set("type", desc.payload_type);
+        payload.set("channel", desc.payload_channel);
+        w.set("payload", std::move(payload));
     }
     return w;
 }

@@ -270,7 +270,7 @@ AURORA_TEST_CASE(unregister_only_touches_the_named_slot) {
     auto wv_b = std::make_shared<webview::WebView>();
     auto sink_a = std::make_unique<RecordSink>();
     auto sink_b = std::make_unique<RecordSink>();
-    RecordSink *raw_b = sink_b.get();
+    RecordSink *const raw_b = sink_b.get();
     const auto detach_seen_b = sink_b->detach_seen;  // 票据先取：b 注销后的核账凭它
     const std::size_t token_a = require_value(host.register_view(wv_a.get(), std::move(sink_a)));
     const std::size_t token_b = require_value(host.register_view(wv_b.get(), std::move(sink_b)));
@@ -339,7 +339,7 @@ AURORA_TEST_CASE(sync_geometry_dispatches_window_rect_at_nested_origin) {
     // 两级嵌套树：控件窗口原点 {20, 30}、尺寸 {320, 240}。缩放 2、CSD 内缩 {8, 4}
     // ⇒ 手算 x = (20+8)×2 = 56，y = (30+4)×2 = 68，w = 640，h = 480。
     // 若下发的是**局部**坐标（少加祖先偏移），x/y 会落到 16 / 8，本条即转红。
-    NestedTree f = laid_out_nested_tree(600.0F, 600.0F);
+    NestedTree const f = laid_out_nested_tree(600.0F, 600.0F);
     const Rect wb = require_value(f.wv->window_bounds());
     AURORA_TEST_CHECK_EQ(wb.origin.x, 20.0F);
     AURORA_TEST_CHECK_EQ(wb.origin.y, 30.0F);
@@ -365,13 +365,13 @@ AURORA_TEST_CASE(sync_geometry_dispatches_window_rect_at_nested_origin) {
 }
 
 AURORA_TEST_CASE(sync_geometry_skips_pure_paint_frames) {
-    NestedTree f = laid_out_nested_tree(600.0F, 600.0F);
+    NestedTree const f = laid_out_nested_tree(600.0F, 600.0F);
     webview::NativeViewHost host;
     const float scale = 1.0F;
     bind_host(host, scale, EdgeInsets{});
 
     auto sink = std::make_unique<RecordSink>();
-    RecordSink *raw = sink.get();
+    RecordSink *const raw = sink.get();
     (void)require_value(host.register_view(f.wv.get(), std::move(sink)));
 
     AURORA_TEST_CHECK_EQ(host.sync_geometry(false), 0U);  // 门控关闭：连 window_bounds() 都不查
@@ -380,7 +380,7 @@ AURORA_TEST_CASE(sync_geometry_skips_pure_paint_frames) {
 }
 
 AURORA_TEST_CASE(sync_geometry_dedups_unchanged_geometry_and_redispatches_on_change) {
-    NestedTree f = laid_out_nested_tree(600.0F, 600.0F);
+    NestedTree const f = laid_out_nested_tree(600.0F, 600.0F);
     float scale = 2.0F;
     EdgeInsets csd;
     webview::NativeViewHost host;
@@ -419,13 +419,13 @@ AURORA_TEST_CASE(sync_geometry_dedups_unchanged_geometry_and_redispatches_on_cha
 AURORA_TEST_CASE(sync_geometry_reports_visibility_only_on_transitions) {
     // 零尺寸盒（布局归零）⇒ 不可见；恢复尺寸 ⇒ 可见。可见性只在**翻转**时下发，
     // 连续不可见的帧不得重复上报（否则平台侧每帧都在改窗口样式）。
-    NestedTree f = laid_out_nested_tree(600.0F, 600.0F);
+    NestedTree const f = laid_out_nested_tree(600.0F, 600.0F);
     float scale = 1.0F;
     webview::NativeViewHost host;
     bind_host(host, scale, EdgeInsets{});
 
     auto sink = std::make_unique<RecordSink>();
-    RecordSink *raw = sink.get();
+    RecordSink *const raw = sink.get();
     (void)require_value(host.register_view(f.wv.get(), std::move(sink)));
 
     AURORA_TEST_CHECK_EQ(host.sync_geometry(true), 1U);
@@ -457,7 +457,7 @@ AURORA_TEST_CASE(snapshot_mode_view_gets_geometry_but_never_native_visibility) {
     // `show_natively = false`（快照模式的登记形态）：几何照常下发——页面布局尺寸与捕获
     // 像素的尺寸都由这块矩形决定，少发一次页面就按错尺寸重排；可见性则**恒不授予**，
     // 像素只能经 `capture` 出帧。若门控写漏，原生视图会盖在 Painter 内容之上。
-    NestedTree f = laid_out_nested_tree(600.0F, 600.0F);
+    NestedTree const f = laid_out_nested_tree(600.0F, 600.0F);
     webview::NativeViewHost host;
     const float scale = 2.0F;
     bind_host(host, scale, EdgeInsets{});
@@ -488,7 +488,7 @@ AURORA_TEST_CASE(view_of_returns_the_registered_sink_only_while_registered) {
 
     auto wv = std::make_shared<webview::WebView>();
     auto sink = std::make_unique<RecordSink>();
-    RecordSink *raw = sink.get();
+    RecordSink *const raw = sink.get();
     const std::size_t token = require_value(host.register_view(wv.get(), std::move(sink)));
     AURORA_TEST_CHECK_TRUE(host.view_of(token) == raw);
 

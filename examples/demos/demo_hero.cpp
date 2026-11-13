@@ -29,22 +29,22 @@ auto main() -> int {
     // 详情页：Hero("logo") 更大（绿），返回按钮 pop。
     auto make_detail = [host]() -> aurora::Node {
         aurora::Text lbl{"Aurora"};
-        lbl.modifier.set(aurora::Modifier{}.background(pal::AURORA_OK).size(160.0F, 120.0F));
+        lbl.set_modifier(aurora::Modifier{}.background(pal::AURORA_OK).size(160.0F, 120.0F));
         aurora::Hero logo{"logo", aurora::Node{std::move(lbl)}};
         auto btn = aurora::Button{"Back"};
         btn.set_on_click([host]() -> void { (void)host->pop(); });
-        return aurora::Column{aurora::ColumnProps{.children = {std::move(logo), gap(12.0F), std::move(btn)}}};
+        return aurora::Column({std::move(logo), gap(12.0F), std::move(btn)});
     };
 
     // 首页：Hero("logo") 较小（品红），按钮 push 到详情页。
     auto make_home = [host, make_detail, fade]() -> aurora::Node {
         aurora::Text lbl{"Aurora"};
-        lbl.modifier.set(aurora::Modifier{}.background(pal::AURORA_ACCENT).size(64.0F, 48.0F));
+        lbl.set_modifier(aurora::Modifier{}.background(pal::AURORA_ACCENT).size(64.0F, 48.0F));
         aurora::Hero logo{"logo", aurora::Node{std::move(lbl)}};
         auto btn = aurora::Button{"Go to detail"};
         btn.set_on_click(
             [host, make_detail, fade]() -> void { host->push(aurora::Route{make_detail(), "detail", fade}); });
-        return aurora::Column{aurora::ColumnProps{.children = {std::move(logo), gap(12.0F), std::move(btn)}}};
+        return aurora::Column({std::move(logo), gap(12.0F), std::move(btn)});
     };
 
     host->push(aurora::Route{make_home(), "home"});

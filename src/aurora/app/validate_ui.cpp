@@ -1,9 +1,5 @@
 #include "aurora/app/validate_ui.h"
 
-#include <algorithm>
-#include <set>
-#include <sstream>
-
 #include "aurora/icon/icon.h"
 #include "aurora/widget/serialization.h"
 #include "aurora/widget/widget.h"

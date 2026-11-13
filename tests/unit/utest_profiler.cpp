@@ -231,7 +231,7 @@ AURORA_TEST_CASE(frame_scope_manages_frame_protocol_and_counters) {
     // FrameScope 构造：开帧并清零当帧渲染计数器；析构：闭帧（帧序号推进）。
     RenderCounters::current().draw_calls = 9;
     {
-        aurora::FrameScope frame;
+        aurora::FrameScope const frame;
         AURORA_TEST_CHECK_EQ(RenderCounters::current().draw_calls, std::uint32_t{0});
         prof.begin_zone("in_frame");
         prof.end_zone();
@@ -249,7 +249,7 @@ AURORA_TEST_CASE(scoped_timer_is_raii_zone) {
     // ScopedTimer：构造进入 zone、析构离开 zone，与手动 begin/end 等价。
     prof.begin_frame();
     {
-        aurora::ScopedTimer timer{"raii_zone"};
+        aurora::ScopedTimer const timer{"raii_zone"};
         AURORA_TEST_CHECK_TRUE(prof.frame_zones().empty());  // 未闭合前不产生样本
     }
     prof.end_frame();

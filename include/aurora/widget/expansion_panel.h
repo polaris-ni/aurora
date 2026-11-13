@@ -5,10 +5,10 @@
 #include <string>
 #include <utility>
 
-#include "aurora/core/color.h"
 #include "aurora/core/font.h"
 #include "aurora/render/painter.h"
 #include "aurora/state/state.h"
+#include "aurora/theming/theme_scope.h"  // inherit_theme：折叠头配色取主题角色
 #include "aurora/widget/descriptor.h"
 #include "aurora/widget/widget.h"
 
@@ -85,7 +85,7 @@ class ExpansionPanel : public SingleChild {
 
     /// @brief 收集本控件的响应式信号供宿主订阅。
     /// @param out 输出参数，追加 expanded 状态信号视图。
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&expanded_); }
+    auto collect_signals(StateSink &out) -> void override { out.push(expanded_); }
 
     /// @brief 取得展开状态的响应式引用，可订阅其变化。
     /// @return 内部 State<bool> 的非 const 引用。
@@ -177,19 +177,20 @@ class ExpansionPanel : public SingleChild {
     }
 
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
+        const auto &roles = inherit_theme(ctx).roles;
         Font f;
         f.size_pt = 13.0F;
         // 标题头
         const Rect head{.origin = bounds.origin, .size = Size{.width = bounds.size.width, .height = header_height_}};
-        p.fill_rect(head, Color(246, 246, 248, 255));
-        p.draw_rect(head, Color(228, 228, 232, 255));
+        p.fill_rect(head, roles.surface_container_low);
+        p.draw_rect(head, roles.surface_container_high);
         // 展开箭头 + 标题
         const Rect arrow_box{.origin = Point{.x = head.origin.x + 10.0F, .y = head.origin.y + 10.0F},
                              .size = Size{.width = 16.0F, .height = header_height_ - 20.0F}};
-        p.draw_text(arrow_box, expanded_.get() ? "v" : ">", f, Color(100, 100, 105, 255));
+        p.draw_text(arrow_box, expanded_.get() ? "v" : ">", f, roles.on_surface_variant);
         const Rect title_box{.origin = Point{.x = head.origin.x + 30.0F, .y = head.origin.y + 10.0F},
                              .size = Size{.width = head.size.width - 40.0F, .height = header_height_ - 20.0F}};
-        p.draw_text(title_box, header_, f, Color(30, 30, 30, 255));
+        p.draw_text(title_box, header_, f, roles.on_surface);
         // 内容
         if (expanded_.get() && child_) {
             const Rect cb = child_.bounds();

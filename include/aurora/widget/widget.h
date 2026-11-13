@@ -25,9 +25,8 @@
 #include "aurora/modifier/modifier.h"
 #include "aurora/render/display_list.h"
 #include "aurora/render/painter.h"
-#include "aurora/state/effect.h"
-#include "aurora/state/reactive.h"
-#include "aurora/state/signal_view.h"
+#include "aurora/state/read_only_state.h"
+#include "aurora/state/subscription.h"
 #include "aurora/widget/descriptor.h"
 #include "aurora/widget/node.h"
 #include "aurora/widget/props_io.h"
@@ -42,6 +41,78 @@ inline constexpr std::size_t AURORA_DEFAULT_MAX_WIDGET_DEPTH = 64;
 class Painter;  // 前向声明（render 模块定义于 render/painter.h）
 
 class Widget;  // 前向声明（HitNode 以 std::weak_ptr<Widget> 作为成员；Widget 在下方定义）
+
+namespace detail {
+struct PropsLink;  // 前向声明（widget/props.h 定义；本类与 `PropsHost` 各以 friend 关系给它开放一条通道）
+
+/// @brief 属性链接槽：`Widget` 的基类子对象，只持有「指向本控件属性对象链接位」这一枚指针。
+///
+/// 为什么是「一枚指针 + 一个基类」，而不是手写 `Widget(Widget &&)`：控件本体有数十枚数据成员，
+/// 逐成员搬运既冗长又会在成员增删时静默漏项；而**默认生成的移动面必然先移动基类子对象**，于是把
+/// 「移动后把链接位的宿主指向新控件」这件事收进一个只含一枚指针的基类，`Widget` 与全部派生控件的
+/// 移动面就能一律保持 `= default`——零逐成员代码、零逐控件手写。
+///
+/// 次序是这个设计成立的前提：派生控件（`class Button : public LeafWidget, public ButtonProps`）的
+/// 隐式移动面按基类声明次序处理，先 `Widget`（连带本槽）、后 `ButtonProps`。所以本槽先把接管来的
+/// 链接位的宿主改成新控件，属性子对象随后把自己登记为新控件的槽值——两端各补一半，整控件移动与
+/// 移动赋值之后标脏、换源重订阅照常命中**新**宿主，而移动来源彻底脱钩（其写入不再标脏）。
+///
+/// 双向链接在两端各自析构时互解：本槽只把那条链接位的宿主置空，属性侧只把宿主的槽置空（且仅当槽
+/// 确实指向自己）。于是「把已绑定的属性对象切出宿主单独搬移」这条不支持面也不留悬垂——两种销毁
+/// 次序都只退化成不标脏。
+class PropsHost {
+  public:
+    /// @brief 默认构造：未接线（本控件还没有属性对象与之相连）。
+    PropsHost() = default;
+    /// @brief 禁止拷贝构造（拷贝控件本身已被 `Widget` 删除，此处不留第二条路）。
+    PropsHost(const PropsHost &) = delete;
+    /// @brief 禁止拷贝赋值（同拷贝构造：`Widget` 的拷贝面整体不存在）。
+    /// @return 该重载恒为 `= delete`，任何拷贝赋值尝试止于编译期。
+    auto operator=(const PropsHost &) -> PropsHost & = delete;
+    /// @brief 移动构造：把来源槽指向的链接位接到本控件名下，并摘空来源。
+    /// @param other 来源控件的槽。
+    PropsHost(PropsHost &&other) noexcept : props_link_(other.props_link_) {
+        other.props_link_ = nullptr;
+        take_over(other);
+    }
+    /// @brief 移动赋值：先与本槽原链接位脱钩，再接管来源（语义同移动构造）。
+    /// @param other 来源控件的槽。
+    /// @return 赋值后的自身引用。
+    auto operator=(PropsHost &&other) noexcept -> PropsHost & {
+        if (this != &other) {
+            drop();
+            props_link_ = other.props_link_;
+            other.props_link_ = nullptr;
+            take_over(other);
+        }
+        return *this;
+    }
+    /// @brief 析构：与本槽指向的链接位脱钩，属性对象比宿主活得久时不留悬垂槽。
+    ~PropsHost() { drop(); }
+
+  private:
+    // 槽的值只由三处写：`PropsLink` 的接线件（`bind` 与属性子对象移动面，见 widget/props.h）、本类的
+    // 移动面、以及本类的析构。控件本体与全部派生类取不到它，于是「宿主 ↔ 链接位」的双向关系不存在
+    // 第四只手，也就不可能有一侧悄悄改了另一侧不认的接线。
+    friend struct PropsLink;
+
+    /// @brief 接管 `other` 让过来的那条链接位：它确实还绑在 `other` 所属的控件上才改绑到本控件，
+    ///        否则本槽清零（已脱钩的链接、或已被切出宿主的属性对象认走到别处的链接，都不认）。
+    ///
+    /// 「不认」这半是必需的：两只控件争同一条链接时，先析构的那一边会把另一边的接线清掉。
+    /// @param source 让出链接位的来源槽（与本槽现为同一条链接）。
+    /// @note 定义在 `src/aurora/widget/widget.cpp`：这里要把基类子对象 `PropsHost *` 下行成 `Widget *`，
+    ///       而本类的定义点在 `Widget` 之前。该下行由构造保证——`PropsHost` 除作 `Widget` 的基类外
+    ///       没有第二种用途，故取 `static_cast` 而非 `dynamic_cast`（口径详见定义点上方注释）。
+    auto take_over(PropsHost &source) -> void;
+    /// @brief 与本槽指向的链接位脱钩（把它那侧的宿主指针置空），随后清零本槽。
+    /// @note 定义位置同 `take_over`：置空宿主指针需要 `PropsLink` 完整，而它定义在 widget/props.h。
+    auto drop() -> void;
+
+    PropsLink *props_link_ = nullptr;  ///< 指向本控件属性对象的链接位（未接线为空）
+};
+
+}  // namespace detail
 
 /// @brief 上报**焦点变化**到无障碍事件通道（`AccessibilityEventKind::FocusChanged`）。
 ///
@@ -147,7 +218,7 @@ struct HitNode {
 /// 修饰链在基类的 layout/paint/hit_test 中统一包裹，避免各 widget 重复 props。
 /// @note Thread: main-thread only
 /// @note Rebuildable: yes, via from_json
-class Widget : public std::enable_shared_from_this<Widget> {
+class Widget : public std::enable_shared_from_this<Widget>, public detail::PropsHost {
   public:
     /// @brief 虚析构：控件一律以基类指针（`shared_ptr<Widget>`）销毁，故析构函数必须为虚。
     ///
@@ -169,6 +240,9 @@ class Widget : public std::enable_shared_from_this<Widget> {
     ///
     /// Widget 通常由 `Node` 以 shared_ptr 就地构造、不做移动，被移动后的源对象随即析构，
     /// 故此共享在实践中不可观测；若将来出现「移动后仍使用源对象」的形态须显式改派 id。
+    ///
+    /// 属性链接位不在此处手写：基类 `detail::PropsHost` 自带移动面，默认实现会先移动它，于是
+    /// 「控件整体移动 / 移动赋值后 setter 仍命中标脏」零逐控件代码（详见该类的次序说明）。
     Widget(Widget &&) = default;
     /// @brief 移动赋值保留默认实现（语义同移动构造：运行时身份随成员一并搬移，不重新分配）。
     /// @return 赋值后的自身引用。
@@ -342,19 +416,64 @@ class Widget : public std::enable_shared_from_this<Widget> {
 
     /// @brief 收集本 widget 的响应式信号（供基类注册依赖）；子类覆写 push 自身信号。
     /// 默认实现为空：无信号叶控件无需再写空 override（子节点在自身 mount 时自行订阅）。
-    /// @param out 输出向量：本控件自身信号的 `SignalViewBase *` 依次 push 至尾部（裸指针，非拥有）。
-    virtual auto collect_signals(std::vector<SignalViewBase *> &out) -> void;
+    /// @param out 采集出口：本控件自身句柄经 `out.push(member_)` 依次登记（只登记来源身份，不附带属性标签）。
+    virtual auto collect_signals(StateSink &out) -> void;
 
     // ---- 通用属性 ----
 
-    // NOLINTBEGIN(*-non-private-member-variables-in-classes)
-    /// @brief 修饰链：本控件的 `Modifier` 节点序列（背景 / 边框 / 裁剪 / 变换 / 手势等）。
+    /// @brief 修饰链当前值（背景 / 边框 / 裁剪 / 变换 / 手势等节点序列）。
     ///
     /// 链上节点在 `layout` / `paint` / `hit_test` 入口按序包裹生效，控件自身无需重复处理；
-    /// 作为响应式信号被 `mount` 订阅，链变化即标脏布局与绘制。
-    Reactive<Modifier> modifier;  ///< 修饰链
-    Reactive<bool> show{true};  ///< 可见性（非结构性隐藏）
-    // NOLINTEND(*-non-private-member-variables-in-classes)
+    /// 已安装来源被 `mount` 订阅，链变化即标脏布局与绘制。展示属性换源走
+    /// `set_modifier(...)` / `set_modifier_source(...)`。
+    /// @return 当前修饰链的只读引用。
+    [[nodiscard]] auto modifier() const -> const Modifier & { return modifier_source_.get(); }
+
+    /// @brief 修饰链来源句柄（只读）。
+    /// @return 已安装的修饰链来源。
+    [[nodiscard]] auto modifier_source() const -> ReadOnlyState<Modifier> { return modifier_source_; }
+
+    /// @brief 换入常量修饰链（自有常量来源）：未挂载时只保存，挂载后调用会退订旧源并订阅新链。
+    /// @param chain 新的修饰链（移动进自有来源）。
+    /// @return 自身引用，便于链式配置。
+    auto set_modifier(Modifier chain) -> Widget & {
+        return set_modifier_source(ReadOnlyState<Modifier>{std::move(chain)});
+    }
+
+    /// @brief 替换修饰链来源（展示属性换源）。
+    /// @param source 新的修饰链来源；挂载后调用会重建订阅、标脏布局与绘制。
+    /// @return 自身引用，便于链式配置。
+    auto set_modifier_source(ReadOnlyState<Modifier> source) -> Widget & {
+        modifier_source_ = std::move(source);
+        mark_needs_layout();
+        mark_needs_paint();
+        resubscribe_signals();
+        return *this;
+    }
+
+    /// @brief 当前可见性（非结构性隐藏：隐藏时布局零盒、不绘制、不参与命中与焦点）。
+    /// @return true = 可见。
+    [[nodiscard]] auto show() const -> bool { return show_source_.get(); }
+
+    /// @brief 可见性来源句柄（只读）。
+    /// @return 已安装的可见性来源。
+    [[nodiscard]] auto show_source() const -> ReadOnlyState<bool> { return show_source_; }
+
+    /// @brief 换入常量可见性（自有常量来源）。
+    /// @param visible true = 可见。
+    /// @return 自身引用，便于链式配置。
+    auto set_show(bool visible) -> Widget & { return set_show_source(ReadOnlyState<bool>{visible}); }
+
+    /// @brief 替换可见性来源（展示属性换源）。
+    /// @param source 新的可见性来源；挂载后调用会重建订阅、标脏布局与绘制。
+    /// @return 自身引用，便于链式配置。
+    auto set_show_source(ReadOnlyState<bool> source) -> Widget & {
+        show_source_ = std::move(source);
+        mark_needs_layout();
+        mark_needs_paint();
+        resubscribe_signals();
+        return *this;
+    }
 
     /// @brief 显式宽度意图（specification/01-core.md §2.2 / 需求 SPEC.QUALITY.LAYOUT.ALGEBRA.001）：默认
     /// `auto`（按内容）。 用 `au::px(120)` / `au::fill()` / `au::percent(0.5f)` 等强类型设置；
@@ -452,7 +571,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// @return 是否允许在输入约束未变时复用上次布局得到的尺寸。
     ///        默认 true；与 `can_cache_display_list()` 对称：绘制每帧变动 → 禁 DL 缓存，
     ///        布局非纯函数 → 禁布局缓存。若 `on_layout` 含时间 / 状态依赖的副作用（首屏骨架→真实内容切换、入场动画、
-    ///        随外部状态重建子节点等“延期布局”），须覆盖为 false。否则布局缓存（AURORA_ENABLE_LAYOUT_CACHE）
+    ///        随外部状态重建子节点等“延期布局”），须覆盖为 false。否则布局缓存
     ///        在约束不变时直接复用缓存尺寸、完全跳过 `on_layout`，使延期逻辑永不触发——
     ///        表现为白屏 / 内容冻结（即 Path B 类 bug）。`mark_needs_layout()` 只能沿“显式标脏”
     ///        路径失效缓存；凡是靠时钟或帧驱动在 `on_paint`/`tick` 中触发重建的控件，必须以此开关
@@ -477,7 +596,6 @@ class Widget : public std::enable_shared_from_this<Widget> {
     ///        实现体委托 `mark_needs_paint_impl(false)`（propagated=false = 业务/状态直接触发）。
     auto mark_needs_paint() -> void { mark_needs_paint_impl(false); }
 
-#ifdef AURORA_ENABLE_DISPLAY_LIST
     /// @brief 使本控件 Display List 失效并沿布局父链向上传播：子树绘制命令被并入祖先 DL，
     ///        故任一后代内容变化时祖先须重录。已在失效链上则短路避免重复递归。
     auto invalidate_display_list_up() -> void {
@@ -496,7 +614,6 @@ class Widget : public std::enable_shared_from_this<Widget> {
             layout_parent_->invalidate_display_list_up();
         }
     }
-#endif
     /// @brief 子树级缓存失效：清本控件**及其全部后代**的布局缓存与 Display List 缓存。
     ///
     /// 脏标记只有向上通道（`mark_needs_layout` / `invalidate_display_list_up` 沿布局父链上溯祖先），
@@ -509,12 +626,8 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// @note 遍历经 `for_each_child`（const 签名）后安全去 const：该遍历的既有非 const 用法见
     ///       `form.h` 的 FormField 验证（同一约定，虚拟化容器只枚举已实体化子节点，未建者本无缓存可清）。
     auto invalidate_subtree_caches() -> void {
-#ifdef AURORA_ENABLE_LAYOUT_CACHE
         layout_cache_valid_ = false;
-#endif
-#ifdef AURORA_ENABLE_DISPLAY_LIST
         dl_valid_ = false;
-#endif
         for_each_child([this](const Widget &child) -> void {
             // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast): 见上文说明，遍历接口只给 const 视图
             const_cast<Widget &>(child).invalidate_subtree_caches();
@@ -567,8 +680,8 @@ class Widget : public std::enable_shared_from_this<Widget> {
 
     /// @brief 本控件是否作为点击目标消费指针事件（用于点击/长按互斥与冒泡停止）。
     /// 默认：修饰链含 Clickable 修饰即为点击目标；Button 等自带 on_click 的叶控件覆写返回 true。
-    /// @return 是否为点击目标：基类按 `modifier.get().has_clickable()` 判定。
-    [[nodiscard]] virtual auto wants_click() const -> bool { return modifier.get().has_clickable(); }
+    /// @return 是否为点击目标：基类按 `modifier().has_clickable()` 判定。
+    [[nodiscard]] virtual auto wants_click() const -> bool { return modifier().has_clickable(); }
 
     /// @brief 指针事件入口（specification/05-event-navigation.md §3）：在命中目标上调用。
     /// 仅在「先按下、再抬起」且未达长按阈值、未拖拽构成一次完整点击时触发 activate / Clickable 回调；
@@ -577,7 +690,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// 否则保持 false 交由派发器沿命中链向上冒泡给父级。
     /// @param e 鼠标事件（就地派发：实现读写其 `action` / `button` / `position` / `pointer_id` / `is_handled` 字段）。
     virtual auto on_pointer_event(MouseEvent &e) -> void {
-        const Modifier &mod = modifier.get();
+        const Modifier &mod = modifier();
         const bool consumes = wants_click() || mod.has_gesture() || mod.has_context_menu();
         switch (e.action) {
             case MouseAction::Press:
@@ -635,7 +748,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
     ///        不驱动 `Draggable`/`LongPress`/`Clickable`（这些手势由派发器按每个触点合成的 `MouseEvent` 驱动）。
     ///        子类可覆盖以处理多点原始流；务必调用修饰链以免 `touch()` 修饰器失效。
     /// @param e 原始多点触摸事件（就地传递，修饰链可回写其消费状态）。
-    virtual auto on_pointer_event(TouchEvent &e) -> void { modifier.get().on_pointer_event(e); }
+    virtual auto on_pointer_event(TouchEvent &e) -> void { modifier().on_pointer_event(e); }
 
     /// @brief 由 `Application::tick` 周期性调用的公开入口：驱动手势计时（长按阈值检测）。
     /// 内部委派给受保护虚函数 `tick_gestures`；本 widget 与子树经此统一入口递归计时。
@@ -1189,7 +1302,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
     virtual auto serialize_props(Json &props) const -> void {
         props.set("width", length_to_json(width_));
         props.set("height", length_to_json(height_));
-        props.set("show", Json{show.get()});
+        props.set("show", Json{show()});
         props.set("overflow", overflow_strategy_to_json(overflow_));
         // 未声明不输出：空串即「回落 Name 回退链」，写出空值会让结构快照误读为「名字已清空」。
         if (!explicit_label_.empty()) {
@@ -1216,7 +1329,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
             height_ = json_to_length(*v);
         }
         if (const auto *v = props.at("show"); v != nullptr) {
-            show.set(v->as_or<bool>(false));
+            set_show(v->as_or<bool>(false));
         }
         if (const auto *v = props.at("overflow"); v != nullptr) {
             overflow_strategy(json_to_overflow_strategy(*v));
@@ -1529,8 +1642,8 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// 容器类覆写以递归子树。由公开入口 `tick` 委派调用。
     /// @param now 本帧的单调时钟时刻，用于长按阈值与 Tooltip 延迟的计时基准。
     virtual auto tick_gestures(std::chrono::steady_clock::time_point now) -> void {
-        modifier.get().tick_long_press(now);  // 长按阈值计时：修饰链自持按下时刻，到点即触发长按回调
-        modifier.get().tick_tooltip(now);  // Tooltip 计时：悬停持续到延迟到点才出提示
+        modifier().tick_long_press(now);  // 长按阈值计时：修饰链自持按下时刻，到点即触发长按回调
+        modifier().tick_tooltip(now);  // Tooltip 计时：悬停持续到延迟到点才出提示
     }
 
     // NOLINTBEGIN(*-non-private-member-variables-in-classes)
@@ -1575,15 +1688,11 @@ class Widget : public std::enable_shared_from_this<Widget> {
     ///        与「引擎沿父链自动冒泡的传播」；直接调用为 false。
     auto mark_needs_layout_impl([[maybe_unused]] bool propagated) -> void {
         needs_layout_ = true;
-#ifdef AURORA_ENABLE_LAYOUT_CACHE
         layout_cache_valid_ = false;
         if ((layout_parent_ != nullptr) && !is_relayout_boundary()) {
             layout_parent_->mark_needs_layout_impl(true);
         }
-#endif
-#ifdef AURORA_ENABLE_DISPLAY_LIST
         invalidate_display_list_up();
-#endif
         request_frame(true);
 #ifdef AURORA_ENABLE_DEBUG
         debug::detail::record_dirty(debug::DirtyKind::Layout, type_name(), debug::current_debug_frame(), propagated);
@@ -1595,16 +1704,14 @@ class Widget : public std::enable_shared_from_this<Widget> {
     ///        `mark_needs_layout_impl`。
     auto mark_needs_paint_impl([[maybe_unused]] bool propagated) -> void {
         needs_paint_ = true;
-#ifdef AURORA_ENABLE_DISPLAY_LIST
         invalidate_display_list_up();
-#endif
         request_frame(false);
 #ifdef AURORA_ENABLE_DEBUG
         debug::detail::record_dirty(debug::DirtyKind::Paint, type_name(), debug::current_debug_frame(), propagated);
 #endif
     }
 
-    // ---- 布局缓存（AURORA_ENABLE_LAYOUT_CACHE）----
+    // ---- 布局缓存 ----
     // NOLINTBEGIN(*-non-private-member-variables-in-classes)
     /// @brief 布局缓存有效位：true 表示 `cached_size_` 对应 `cached_constraints_`，约束未变时可复用。
     bool layout_cache_valid_ = false;
@@ -1642,6 +1749,8 @@ class Widget : public std::enable_shared_from_this<Widget> {
 
     Length width_;  ///< 显式宽度意图（默认 WrapContent）
     Length height_;  ///< 显式高度意图（默认 WrapContent）
+    ReadOnlyState<Modifier> modifier_source_;  ///< 已安装的修饰链来源（构建期配置装入后唯一生效）
+    ReadOnlyState<bool> show_source_{true};  ///< 已安装的可见性来源（默认可见）
     OverflowStrategy overflow_ = OverflowStrategy::Visible;  ///< 溢出策略（默认 Visible）
     /// @brief 滚动视口内核：OverflowStrategy::Scroll 的 offset/step 状态与夹取数学，
     ///        与 Scroll 组件共享同一约定（见 scroll_viewport.h）。
@@ -1672,9 +1781,14 @@ class Widget : public std::enable_shared_from_this<Widget> {
     bool painted_focus_ring_ = false;
 
     // ---- 统一焦点环几何（绘制与脏区外扩共用这一份常量，见 Widget::paint_content）----
-    static constexpr float AURORA_FOCUS_RING_GAP = 2.0F;  ///< 环与自身边框/内容的最小间距（dp），不得压在边缘像素上
-    static constexpr float AURORA_FOCUS_RING_THICKNESS = 2.0F;  ///< 环宽（dp）
-    static constexpr float AURORA_FOCUS_RING_RADIUS = 4.0F;  ///< 环圆角（dp）：小于常见控件圆角，故不与边框弧线相交
+    static constexpr float AURORA_FOCUS_RING_GAP = 2.0F;  ///< 环间距令牌的默认值（dp），也是两枚外扩缓存的初值
+    static constexpr float AURORA_FOCUS_RING_THICKNESS = 2.0F;  ///< 环宽令牌的默认值（dp），也是两枚外扩缓存的初值
+    static constexpr float AURORA_FOCUS_RING_RADIUS = 4.0F;  ///< 环圆角（dp）：本批不新增圆角令牌，仍取常量
+
+    /// @brief 最近一次画环实际使用的外扩距离（dp）；初值 2 + 2 = 4，与改动前常量逐位相同。
+    float focus_ring_out_last_ = AURORA_FOCUS_RING_GAP + AURORA_FOCUS_RING_THICKNESS;
+    /// @brief 上上次画环使用的外扩距离（dp）；换主题那帧的脏区取两帧并集，见 `dirty_bounds()`。
+    float focus_ring_out_previous_ = AURORA_FOCUS_RING_GAP + AURORA_FOCUS_RING_THICKNESS;
 
 #ifdef AURORA_ENABLE_DEBUG
     /// @brief 调试叠层（repaint_highlight）用：本控件最近一次实际重绘（render_into 入口）所在的
@@ -1743,17 +1857,20 @@ class Widget : public std::enable_shared_from_this<Widget> {
 
     /// @brief 读取本控件本次标脏应覆盖的绝对（窗口逻辑 dp）盒 = 自身绘制盒 ∪ 画在盒外的装饰。
     ///
-    /// 基类统一焦点环画在自身盒**外** `AURORA_FOCUS_RING_GAP + AURORA_FOCUS_RING_THICKNESS` 处
-    /// （见 `Widget::paint_content`），而 `paint_bounds()` 只含自身盒：只按自身盒标脏会使环带落在
-    /// 脏区裁剪之外——获焦那帧环画不上屏，失焦那帧上一帧的环残留成「盒外一圈环色」。
+    /// 基类统一焦点环画在自身盒**外** `inset + width` 处（两枚值来自 `ControlMetrics`，由
+    /// `Widget::paint_content` 在绘制期读取后缓存），而 `paint_bounds()` 只含自身盒：只按自身盒标脏
+    /// 会使环带落在脏区裁剪之外——获焦那帧环画不上屏，失焦那帧上一帧的环残留成「盒外一圈环色」。
+    /// 换主题那帧取「上上帧缓存的外扩、最近一帧绘制所用外扩」的并集：环宽由小变大时只按旧值标脏
+    /// 会裁掉新增环带，由大变小时同理要把旧环带擦掉。窗口脏区收集与 `Scroll` 离屏缓冲两处读取方
+    /// 都调本入口，天然同源，不得只改一处。
     /// @return 本帧要画环（`focus_ring_shown()`）或上一帧画过环时，为 `paint_bounds()` 四边各外扩
-    ///         环带宽的盒；其余情况与 `paint_bounds()` 逐位相同。
+    ///         两帧环带宽并集的盒；其余情况与 `paint_bounds()` 逐位相同。
     [[nodiscard]] auto dirty_bounds() const -> Rect {
         const Rect box = paint_bounds_;
         if (!focus_ring_shown() && !painted_focus_ring_) {
             return box;
         }
-        constexpr float out = AURORA_FOCUS_RING_GAP + AURORA_FOCUS_RING_THICKNESS;
+        const float out = std::max(focus_ring_out_previous_, focus_ring_out_last_);
         return Rect{.origin = Point{.x = box.origin.x - out, .y = box.origin.y - out},
                     .size = Size{.width = box.size.width + (2.0F * out), .height = box.size.height + (2.0F * out)}};
     }
@@ -1766,16 +1883,17 @@ class Widget : public std::enable_shared_from_this<Widget> {
 #endif
 
   protected:
-    /// @brief 注册一个响应式信号：变化 → `on_signal_dirty()`。
-    /// @param sig 被跟踪的信号视图；Effect 首次 `run()` 时读取以登记依赖，此后其变化即标脏本控件。
-    /// @param effects 接收新建 `Effect` 的容器；其生命周期决定订阅生命周期（传 `effects_` 即随本 Widget 析构而退订）。
-    auto track(SignalViewBase &sig, std::vector<std::unique_ptr<Effect>> &effects) -> void {
-        auto e = std::make_unique<Effect>([this, &sig]() -> void {
-            sig.read();  // 在活跃 Effect 下登记依赖
-            on_signal_dirty();
-        });
-        e->run();
-        effects.push_back(std::move(e));
+    /// @brief 重新采集并重建本控件的响应式订阅。
+    ///
+    /// 供「挂载后换源」的入口调用：控件把某个展示属性的句柄换成另一来源后，
+    /// 旧订阅仍固定旧来源，必须重建一次才对新来源生效。未挂载时为空操作
+    /// （下次 `mount` 会重新采集）。
+    auto resubscribe_signals() -> void {
+        if (!mounted_) {
+            return;
+        }
+        signal_subscriptions_.clear();
+        wire_signals();
     }
 
     /// @brief 被跟踪信号变化时的标脏口径：默认标脏本控件（布局 + 绘制，向上溯达祖先缓存）。
@@ -1789,7 +1907,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
     }
 
     // NOLINTBEGIN(*-non-private-member-variables-in-classes)
-    std::vector<std::unique_ptr<Effect>> effects_;
+    std::vector<Subscription> signal_subscriptions_;  ///< 自身与子控件信号的订阅凭证（随控件析构/卸载退订）
     bool focusable_ = true;  ///< 宿主侧焦点否决位（默认未否决）；实际入 Tab 序还需 wants_focus()
     int tab_index_ = 0;  ///< Tab 序权重（越小越靠前）
     bool is_focused_ = false;  ///< 当前是否持有焦点
@@ -1805,6 +1923,15 @@ class Widget : public std::enable_shared_from_this<Widget> {
     // NOLINTEND(*-non-private-member-variables-in-classes)
 
   private:
+    // 属性机制层（widget/props.h）以本类的宿主链接位调用受保护的 `resubscribe_signals()`：
+    // 来源型属性换源后必须重建订阅，而那条通道只该给表驱动的属性面用。friend 而非把成员
+    // 升为 public / protected —— 前者不扩公共面，后者会让全部派生控件都能绕过换源契约。
+    // 同理，`bind` 接线与属性子对象移动时的自登记要写基类 `PropsHost` 的槽，也不经本类公共面。
+    friend struct detail::PropsLink;
+
+    /// @brief 采集本控件的全部信号并建立订阅（`mount` 与换源重建共用）。
+    auto wire_signals() -> void;
+
     /// @brief 分配下一个运行时身份（进程级原子自增，自 1 起；0 保留为无效）。
     [[nodiscard]] static auto next_runtime_id() -> std::uint64_t {
         static std::atomic<std::uint64_t> counter{0};  // NOLINT
@@ -1825,7 +1952,7 @@ class Widget : public std::enable_shared_from_this<Widget> {
     /// 上下文菜单、滚动视口、或认领方向键 / 激活键 / Tab 键。
     /// @return 上述任一输入语义命中时为 true；全部未命中为 false。
     [[nodiscard]] auto has_input_semantics() const -> bool {
-        const Modifier &mod = modifier.get();
+        const Modifier &mod = modifier();
         return wants_click() || mod.has_gesture() || mod.has_context_menu() || wants_scroll() ||
                wants_navigation_keys() || wants_activation_keys() || wants_tab_keys();
     }
@@ -1859,15 +1986,13 @@ class Widget : public std::enable_shared_from_this<Widget> {
     mutable std::uint64_t gpu_layer_raster_gen_ = 0;  ///< 层录制时的光栅状态世代
     mutable std::uint64_t gpu_layer_epoch_ = 0;  ///< 层录制时的层代际（消费端整体失效信号）
 
-#ifdef AURORA_ENABLE_DISPLAY_LIST
-    // ---- Display List 缓存（AURORA_ENABLE_DISPLAY_LIST）----
+    // ---- Display List 缓存 ----
     DisplayList display_list_;  ///< 本控件子树（含后代）的录制命令缓冲
     bool dl_valid_ = false;  ///< 缓存是否有效（内容未变且 bounds 未变）
     Rect last_paint_bounds_{};  ///< 上次录制时的绘制全局矩形（bounds 变化须重录）
     /// @brief 录制时的光栅状态世代（同 `paint_cache_raster_gen_`）：DL 的 DrawText 命令
     ///        固化了录制时的 AA 模式，世代不匹配即须重录，否则回放旧光栅。
     std::uint64_t dl_raster_gen_ = 0;
-#endif
 
   protected:
     /// @brief 请求下一帧重绘（不失效自身/祖先 Display List 缓存）。
@@ -1947,13 +2072,10 @@ class Container : public Widget {
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
         // child.bounds() 存的是“相对本容器内容区”的局部坐标；
         // 绘制前需叠加本容器内容区全局原点（bounds.origin），转为全局坐标。
-#ifdef AURORA_ENABLE_OCCLUSION_CULLING
         const Rect clip = p.clip_bounds();  // 当前有效裁剪（视口/圆角容器等）逻辑 dp 全局坐标
-#endif
         for (Node &child : children_) {
             const Rect cb = child.bounds();
             const auto global{Rect{.origin = bounds.origin + cb.origin, .size = cb.size}};
-#ifdef AURORA_ENABLE_OCCLUSION_CULLING
             // 遮挡剔除：子控件全局盒与裁剪区无交集则整棵子树跳过（保守外接矩形判定）。
             // ⚠️ 「坐标系重映射宿主」（如 `Popup` 按 `anchor_` 在**全局**坐标绘制内容，而自身在常规流中
             // 占零尺寸盒）必须放行：零尺寸盒与 clip 的 `intersects` 恒假，不放行则它整棵画不出来。
@@ -1961,7 +2083,6 @@ class Container : public Widget {
             if (!global.intersects(clip) && !child.widget().paints_outside_layout_box()) {
                 continue;
             }
-#endif
             child.widget().paint(p, global, ctx);
         }
     }
@@ -2111,8 +2232,8 @@ class Container : public Widget {
 
     /// @brief 默认收集子节点信号（遍历 `children_`）。
     /// 容器子类若有自身信号，覆写时先 push 自身信号再调用 `Container::collect_signals(out)`。
-    /// @param out 输出向量：按 `children_` 顺序递归追加容器子树各控件自身信号的 `SignalViewBase *`（裸指针，非拥有）。
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override;
+    /// @param out 采集出口：按 `children_` 顺序递归登记容器子树各控件自身的句柄。
+    auto collect_signals(StateSink &out) -> void override;
 
     /// @brief 便捷辅助：从扁平初始化列表接管子节点（供 Column/Row 等便捷构造复用，避免重复代码）。
     /// @param kids 子节点初始化列表：整体赋值覆盖既有 `children_`（非追加）。
@@ -2156,7 +2277,7 @@ class Container : public Widget {
     /// @return `children_` 中直接子节点的个数。
     [[nodiscard]] auto child_count() const -> size_t { return children_.size(); }
 
-    /// @brief 布局入口（AURORA_ENABLE_LAYOUT_CACHE）：先为所有子节点登记布局父节点，
+    /// @brief 布局入口（布局缓存）：先为所有子节点登记布局父节点，
     ///        再走基类布局（命中缓存时整体跳过子树，依赖父链保证安全）。
     /// @param c 父级下发的尺寸约束（透传给 `Widget::layout`）。
     /// @param ctx 构建上下文（透传给 `Widget::layout`）。
@@ -2335,7 +2456,7 @@ class SingleChild : public Widget {
         return child_view_;
     }
 
-    /// @brief 布局入口（AURORA_ENABLE_LAYOUT_CACHE）：为子节点登记布局父节点，再走基类布局。
+    /// @brief 布局入口（布局缓存）：为子节点登记布局父节点，再走基类布局。
     /// 空子节点（默认构造的 SingleChild）为合法状态：跳过登记，基类 on_layout 由派生类自守。
     /// @param c 父级下发的尺寸约束（透传给 `Widget::layout`）。
     /// @param ctx 构建上下文（透传给 `Widget::layout`）。

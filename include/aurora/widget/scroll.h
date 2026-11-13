@@ -10,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include "aurora/animation/animator.h"
 #include "aurora/app/scroll_storage.h"
 #include "aurora/core/accessibility.h"
 #include "aurora/core/transform.h"
@@ -20,23 +21,183 @@
 #include "aurora/render/font_engine.h"
 #include "aurora/render/painter.h"
 #include "aurora/state/state.h"
+#include "aurora/theming/theme_scope.h"  // inherit_theme
+#include "aurora/widget/descriptor.h"
+#include "aurora/widget/detail/scrollbar.h"
+#include "aurora/widget/props.h"
 #include "aurora/widget/props_io.h"
 #include "aurora/widget/scroll_viewport.h"
 #include "aurora/widget/widget.h"
 
 namespace aurora {
 
-/// @brief Scroll 属性（聚合）：单子滚动容器。
-struct ScrollProps {
-    Node child;  ///< 唯一内容子节点；空则容器无可滚内容（on_paint 直接返回）
-    float step = 16.0F;  ///< 每单位滚轮增量的滚动像素
-    float overscan = 1.0F;  ///< 缓冲上下各留 overscan 屏：离屏缓冲 = 视口高 ×(1+2×overscan)（滑动窗口）
-    /// @brief 滚动位置保存键（空 = 不参与）：控件重建后据 `app::ScrollStorage` 恢复滚动偏移。
-    ///        恢复延迟到**首次可滚动布局**；显式反序列化的 `offset` 优先于本键的恢复。
-    std::string restore_key;
-    /// @brief snap/paging 吸附（默认关闭）：每次滚轮收位后经短滑动吸附到条目对齐点；
-    ///        `paging = true` 时以视口高为一页。reduce-motion 下直落端点（不产生中间帧）。
-    ScrollSnap snap;
+/// @brief `Scroll` 的属性权威表：滚轮步长、离屏缓冲倍率、位置保存键与吸附三件套六行常量档；
+///        内容子节点与运行时滚动偏移都不入表。
+///
+/// 六行里只有 `overscan` 是**绘制档**：它决定离屏缓冲的逻辑高度，写入须触发重绘才能按新倍率重建缓冲。
+/// `step` 只在滚轮夹取时读取、`restore_key` 只决定偏移往哪个键写回、吸附三行只在收位裁决时读取，
+/// 四者都不改几何也不改像素，故无脏档。
+///
+/// 子节点不入表：它只能随构造移入（`Scroll(Node, ScrollProps)` 或 `Scroll{ Column{...} }`），
+/// 构造后换内容走容器自身的 `set_child`。运行时滚动偏移由交互产生、构造期无内容高度可夹取，
+/// 是序列化面上的表外键（读写经 `set_offset()` / `offset_y()`，不经属性行）。
+///
+/// @note Thread: main-thread only
+/// @note Side-effects: 写入经宿主链接位标脏；未挂载时是纯 DTO
+class ScrollProps : public AbstractProps<ScrollProps> {
+  public:
+    // ---- 权威表：参数顺序即 schema 顺序 ----
+
+    /// @brief 可空值件：每单位滚轮增量的滚动像素。只在滚轮夹取时读取 ⇒ 无脏档。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto step_row() {
+        return prop_row<&ScrollProps::step_>("step")
+            .fallback(&ScrollProps::step_default)
+            .note("Wheel scroll delta (px)");
+    }
+
+    /// @brief 可空值件：离屏缓冲上下各留几屏。决定缓冲逻辑高度 ⇒ 绘制档。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto overscan_row() {
+        return prop_row<&ScrollProps::overscan_>("overscan")
+            .paint()
+            .fallback(&ScrollProps::overscan_default)
+            .note("Off-screen buffer padding in viewport heights above and below (1.0 = 3 viewport-heights total)");
+    }
+
+    /// @brief 可空值件：滚动位置保存键（空 = 不参与恢复）。只决定偏移写回哪个键 ⇒ 无脏档。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto restore_key_row() {
+        return prop_row<&ScrollProps::restore_key_>("restore_key")
+            .fallback(&ScrollProps::restore_key_default)
+            .note("Scroll position save key (empty = excluded from restore)");
+    }
+
+    /// @brief 可空值件：吸附周期（dp）；<=0 关闭，`snap_paging` 为真时忽略 ⇒ 无脏档。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto snap_extent_row() {
+        return prop_row<&ScrollProps::snap_extent_>("snap_extent")
+            .fallback(&ScrollProps::snap_extent_default)
+            .bounds("0")
+            .note("Snap period (dp); <=0 disables, ignored when snap_paging=true");
+    }
+
+    /// @brief 可空值件：分页吸附（以视口高为一页）⇒ 无脏档。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto snap_paging_row() {
+        return prop_row<&ScrollProps::snap_paging_>("snap_paging")
+            .fallback(&ScrollProps::snap_paging_default)
+            .note("Paging mode: snap one viewport height per page");
+    }
+
+    /// @brief 可空值件：吸附对齐方位（Start/Center/End）⇒ 无脏档。
+    /// @return 本行的表行对象。
+    [[nodiscard]] static constexpr auto snap_alignment_row() {
+        return prop_row<&ScrollProps::snap_alignment_>("snap_alignment")
+            .fallback(&ScrollProps::snap_alignment_default)
+            .note("Snap alignment (Start/Center/End)");
+    }
+
+    /// @brief 权威表本体：本控件全部属性行的元组。
+    /// @return 按声明顺序排列的行元组（发射面与序列化面都遍历它）。
+    [[nodiscard]] static constexpr auto rows() {
+        return make_prop_rows(step_row(), overscan_row(), restore_key_row(), snap_extent_row(), snap_paging_row(),
+                              snap_alignment_row());
+    }
+
+    // ---- 读面：每行恰一件，六行皆常量档 ⇒ 全部无参 ----
+
+    /// @brief 当前生效的滚轮步长（每单位增量的滚动像素）。
+    /// @return 生效步长；未表态时为 16。
+    [[nodiscard]] auto step() const -> float { return stated(step_row()); }
+
+    /// @brief 当前生效的离屏缓冲倍率（视口高的倍数）。
+    /// @return 生效倍率；未表态时为 1（上下各一屏）。
+    [[nodiscard]] auto overscan() const -> float { return stated(overscan_row()); }
+
+    /// @brief 当前生效的滚动位置保存键。
+    /// @return 生效键名；未表态时为空串（不参与恢复）。
+    [[nodiscard]] auto restore_key() const -> std::string { return stated(restore_key_row()); }
+
+    /// @brief 当前生效的吸附周期（dp）。
+    /// @return 生效周期；未表态时为 0（关闭吸附）。
+    [[nodiscard]] auto snap_extent() const -> float { return stated(snap_extent_row()); }
+
+    /// @brief 当前是否启用分页吸附。
+    /// @return 未表态时为 false（不吸附）。
+    [[nodiscard]] auto snap_paging() const -> bool { return stated(snap_paging_row()); }
+
+    /// @brief 当前生效的吸附对齐方位。
+    /// @return 未表态时为 `ScrollSnapAlignment::Start`。
+    [[nodiscard]] auto snap_alignment() const -> ScrollSnapAlignment { return stated(snap_alignment_row()); }
+
+    // ---- 写面：实参一律裸 T；一次写入即「表态」，未表态才轮到回落点 ----
+
+    /// @brief 装入滚轮步长。
+    /// @param value 新的每单位增量像素；非正值由滚动路径的兜底夹取处理。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_step(float value) -> ScrollProps & { return assign(step_row(), value); }
+
+    /// @brief 装入离屏缓冲倍率。
+    /// @param value 视口高的倍数；0 表示不留上下缓冲。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_overscan(float value) -> ScrollProps & { return assign(overscan_row(), value); }
+
+    /// @brief 装入滚动位置保存键。
+    /// @param value 新键名；空串是「显式不参与恢复」，与「未表态」同值不同意。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_restore_key(const std::string &value) -> ScrollProps & { return assign(restore_key_row(), value); }
+
+    /// @brief 装入吸附周期（dp）。
+    /// @param value 新周期；<=0 关闭吸附。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_snap_extent(float value) -> ScrollProps & { return assign(snap_extent_row(), value); }
+
+    /// @brief 装入分页吸附开关（以视口高为一页）。
+    /// @param value 是否分页吸附。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_snap_paging(bool value) -> ScrollProps & { return assign(snap_paging_row(), value); }
+
+    /// @brief 装入吸附对齐方位。
+    /// @param value 对齐方位（Start/Center/End）。
+    /// @return 引用本属性对象，便于链式续写。
+    auto set_snap_alignment(ScrollSnapAlignment value) -> ScrollProps & { return assign(snap_alignment_row(), value); }
+
+    // ---- 回落点提供者：常量档的唯一基线（与迁移前的字段声明处默认值逐值相同） ----
+
+    /// @brief 滚轮步长回落基线。
+    /// @return 16.0F。
+    [[nodiscard]] static auto step_default() -> float { return 16.0F; }
+
+    /// @brief 离屏缓冲倍率回落基线。
+    /// @return 1.0F（上下各一屏）。
+    [[nodiscard]] static auto overscan_default() -> float { return 1.0F; }
+
+    /// @brief 保存键回落基线。
+    /// @return 空串（不参与滚动位置恢复）。
+    [[nodiscard]] static auto restore_key_default() -> std::string { return {}; }
+
+    /// @brief 吸附周期回落基线。
+    /// @return 0.0F（关闭吸附）。
+    [[nodiscard]] static auto snap_extent_default() -> float { return 0.0F; }
+
+    /// @brief 分页吸附回落基线。
+    /// @return false（不吸附）。
+    [[nodiscard]] static auto snap_paging_default() -> bool { return false; }
+
+    /// @brief 吸附对齐方位回落基线。
+    /// @return `ScrollSnapAlignment::Start`。
+    [[nodiscard]] static auto snap_alignment_default() -> ScrollSnapAlignment { return ScrollSnapAlignment::Start; }
+
+  private:
+    std::optional<float> step_;  ///< 滚轮步长表态位（px）
+    std::optional<float> overscan_;  ///< 离屏缓冲倍率表态位（视口高的倍数）
+    std::optional<std::string> restore_key_;  ///< 滚动位置保存键表态位
+    std::optional<float> snap_extent_;  ///< 吸附周期表态位（dp）
+    std::optional<bool> snap_paging_;  ///< 分页吸附表态位
+    std::optional<ScrollSnapAlignment> snap_alignment_;  ///< 吸附对齐方位表态位
+
+    friend class AbstractProps<ScrollProps>;
 };
 
 /// @brief 单子滚动容器：在固定视口内裁切内容，按滚轮增量垂直滚动。
@@ -69,28 +230,28 @@ struct ScrollProps {
 /// 写的是 `y = index * extent - offset`（视口坐标），命中链因此可直接照抄基类。
 /// 两类滚动容器不可互相参照实现。
 ///
-/// 采用**继承式双模 API**（specification/04-widget.md §2.5）：`ScrollProps` 字段即本控件公有字段，
-/// `step` 可直接赋值（`scroll.step = 16`）或以配置块构造
-/// `Scroll{ ScrollProps{.child = ..., .step = 16} }`。
+/// 属性面全部经 `ScrollProps` 的读写件访问（本类公有继承它，故 `scroll.set_step(24.0F)` 与
+/// `scroll.step()` 都直接可用）；内容子节点不入属性表，只能随构造移入：
+/// `Scroll(Node, ScrollProps)` 或 `Scroll{ Column{...} }`。
 /// @note Thread: main-thread only
 /// @note Rebuildable: yes, via from_json
 ///
 class Scroll : public Container, public ScrollProps {
   public:
-    /// @brief 默认构造：无内容子节点，属性取 `ScrollProps` 默认值（step=16、overscan=1、无保存键、不吸附）。
-    Scroll() = default;
-    /// @brief 以属性聚合构造（继承式双模 API 的配置块形态）。
-    /// @param props `ScrollProps` 属性块：`child` 非空时作为唯一内容子节点入 `children_`，
-    ///              `step`/`overscan`/`restore_key`/`snap` 逐字段覆盖本控件的同名公有字段。
-    explicit Scroll(ScrollProps props) {
-        if (props.child) {
-            children_.push_back(std::move(props.child));
+    /// @brief 默认构造：无内容子节点、六行未表态（生效值即回落点），并接线宿主。
+    Scroll() { bind(*this); }
+    /// @brief 子节点 + 配置块构造：内容子树随构造移入容器，属性接管后接线宿主。
+    /// @param child 唯一内容子节点；空节点时保持无内容（`on_paint` 直接返回）。
+    /// @param props 滚动属性对象；默认全未表态，生效值即各行回落点。
+    explicit Scroll(Node child, ScrollProps props = {}) : ScrollProps(std::move(props)) {
+        if (child) {
+            children_.push_back(std::move(child));
         }
-        step = props.step;
-        overscan = props.overscan;
-        restore_key = std::move(props.restore_key);
-        snap = props.snap;
+        bind(*this);
     }
+    /// @brief 以属性聚合构造（内容子树另经 `Scroll(Node, ScrollProps)` 交入）。
+    /// @param props 滚动属性对象，移动进本实例的 `ScrollProps` 基类子对象。
+    explicit Scroll(ScrollProps props) : ScrollProps(std::move(props)) { bind(*this); }
     /// @brief 便捷构造：扁平罗列子项，取首项为唯一子节点（Scroll{ Column{...} }）。
     /// @param kids 子项列表；只消费首项，其余静默忽略（本容器 children_policy = single）。
     Scroll(std::initializer_list<Node> kids) {
@@ -99,105 +260,47 @@ class Scroll : public Container, public ScrollProps {
         if (kids.begin() != kids.end()) {
             children_.push_back(*kids.begin());
         }
+        bind(*this);
     }
 
-    /// @brief 无响应式信号可收集：滚动偏移等运行状态为普通字段，不经 Effect 订阅刷新。
-    /// @param out 输出向量（未使用）；本控件不向依赖图登记任何 `SignalViewBase`。
-    auto collect_signals([[maybe_unused]] std::vector<SignalViewBase *> &out) -> void override {}
+    /// @brief 运行时可查询的默认属性值（属性表的单一事实来源）。
+    /// @return 一份缺省构造的 `ScrollProps`：六行未表态，生效值即该行回落点。
+    [[nodiscard]] static auto defaults() -> ScrollProps { return {}; }
+
+    /// @brief 登记需订阅的信号视图：本表六行皆为值形态，没有可登记的来源。
+    /// @param out 信号采集出口；本控件不向其写入任何信号。
+    auto collect_signals(StateSink &out) -> void override { collect_prop_sources(out); }
     /// @brief 类型名（序列化 / 诊断 / 语义树寻址用）。
     /// @return 固定 `"Scroll"`。
     [[nodiscard]] auto type_name() const -> const char * override { return "Scroll"; }
 
-    /// @brief 运行时自描述（规格附录 B）。
-    /// @return Scroll 的 WidgetDescriptor：`step`/`restore_key`/`snap_*` 属性表 + 通用
-    ///         `width`/`height`/`show`，无事件，children_policy = single，含一条构造示例。
+    /// @brief 运行时自描述（规格附录 B）：属性项全部由权威表发射，控件只补自己的事实。
+    /// @return 名为 "Scroll" 的描述表：`properties` 按 `rows()` 点名顺序，无事件，子策略 single。
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
-        return WidgetDescriptor{
-            .name = "Scroll",
-            .properties =
-                {
-                    {.name = "step",
-                     .type = "float",
-                     .default_value = "16.0",
-                     .required = false,
-                     .note = "Wheel scroll delta (px)"},
-                    {.name = "restore_key",
-                     .type = "string",
-                     .default_value = "",
-                     .required = false,
-                     .note = "Scroll position save key (empty = excluded from restore)"},
-                    {.name = "snap_extent",
-                     .type = "float",
-                     .default_value = "0.0",
-                     .required = false,
-                     .note = "Snap period (dp); <=0 disables, ignored when snap_paging=true",
-                     .json_type = "number",
-                     .enum_values = {},
-                     .min_value = "0"},
-                    {.name = "snap_paging",
-                     .type = "bool",
-                     .default_value = "false",
-                     .required = false,
-                     .note = "Paging mode: snap one viewport height per page",
-                     .json_type = "boolean",
-                     .enum_values = {},
-                     .min_value = ""},
-                    {.name = "snap_alignment",
-                     .type = "ScrollSnapAlignment",
-                     .default_value = "Start",
-                     .required = false,
-                     .note = "Snap alignment (Start/Center/End)",
-                     .json_type = "string",
-                     .enum_values = {"Start", "Center", "End"},
-                     .min_value = ""},
-                    {.name = "width", .type = "Length", .default_value = "auto", .required = false},
-                    {.name = "height", .type = "Length", .default_value = "auto", .required = false},
-                    {.name = "show", .type = "bool", .default_value = "true", .required = false},
-                },
-            .events = {},
-            .children_policy = "single",
-            .examples = {"au::Scroll{ au::Column{ au::Text(\"long content\") } }"},
-        };
+        auto descriptor = props_descriptor("Scroll");
+        descriptor.children_policy = "single";
+        descriptor.examples = {"au::Scroll{ au::Column{ au::Text(\"long content\") } }"};
+        return descriptor;
     }
     /// @brief 实例自描述：本控件无实例级差异，直接复用静态描述。
     /// @return `describe_static()` 的 WidgetDescriptor（属性表 / children_policy = single）。
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
     /// @brief 导出当前属性，含运行期滚动位置（AI-first 可观测）。
-    /// @param props 输出 JSON 对象（引用，就地写入）：先由基类补通用属性，再写 `step`、
-    ///              `offset`（= 当前 `offset_y_`，与 LazyList/GridView 同口径）、`restore_key`
-    ///              与 `snap_extent`/`snap_paging`/`snap_alignment` 三件套。
+    /// @param props 输出 JSON 对象（引用，就地写入）：先由基类补通用属性，再写已表态的属性行，
+    ///              最后追加 `offset`（= 当前 `offset_y_`，与 LazyList/GridView 同口径，非属性行）。
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
-        props.set("step", step);
-        props.set("offset", offset_y_);  // 运行时滚动位置（AI-first 可观测；与 LazyList/GridView 同口径）
-        props.set("restore_key", restore_key);
-        props.set("snap_extent", snap.extent);
-        props.set("snap_paging", Json{snap.paging});
-        props.set("snap_alignment", snap_alignment_to_json(snap.alignment));
+        props_serialize(props);
+        props.set("offset", offset_y_);  // 运行时滚动位置（AI-first 可观测；表外键，非属性行）
     }
-    /// @brief 从属性 JSON 回填：认得的键逐个赋值，未认得的键由基类/本函数忽略。
-    /// @param props 输入 JSON 对象：`step`、`restore_key`、`snap_extent`/`snap_paging`/
-    ///              `snap_alignment` 直接覆盖对应字段；`offset` 不立即生效——记入 `pending_offset_`
+    /// @brief 从属性 JSON 回填：已表态的属性行逐一还原，`offset` 延迟到首次可滚动布局时应用。
+    /// @param props 输入 JSON 对象：表内键按行写入；`offset` 不立即生效——记入 `pending_offset_`
     ///              并复位 `scroll_restored_`，待首次可滚动布局时由 `maybe_restore_scroll` 应用
     ///              （显式偏移优先于 `restore_key` 的存储值）。
     auto deserialize_props(const Json &props) -> void override {
         Widget::deserialize_props(props);
-        if (props.contains("step")) {
-            step = props.at("step")->as_or<float>(0.0F);
-        }
-        if (props.contains("restore_key")) {
-            restore_key = props.at("restore_key")->as_or<std::string>("");
-        }
-        if (props.contains("snap_extent")) {
-            snap.extent = props.at("snap_extent")->as_or<float>(0.0F);
-        }
-        if (props.contains("snap_paging")) {
-            snap.paging = props.at("snap_paging")->as_or<bool>(false);
-        }
-        if (props.contains("snap_alignment")) {
-            snap.alignment = json_to_snap_alignment(*props.at("snap_alignment"));
-        }
+        props_deserialize(props);
         if (props.contains("offset")) {
             // 显式偏移优先于 restore_key 恢复（见 maybe_restore_scroll）：记入 pending 待布局后应用。
             pending_offset_ = props.at("offset")->as_or<float>(0.0F);
@@ -284,10 +387,12 @@ class Scroll : public Container, public ScrollProps {
     auto on_scroll(ScrollEvent &e) -> void override {
         // clamp/符号约定走共享 ScrollViewport 内核（与 Widget 基类 Overflow::Scroll 一致）。
         const float before = offset_y_;
-        const float target = ScrollViewport::clamp_offset(offset_y_, e.delta_y, step, content_h_, viewport_h_);
+        const float unit = step();
+        const float target = ScrollViewport::clamp_offset(offset_y_, e.delta_y, unit, content_h_, viewport_h_);
         e.is_handled = true;
+        note_scrollbar_scroll();  // 浮层档：滚动后保持窗口，由帧首注入的 now 兑现
         // 余量回传（嵌套滚动协调）：端点被夹掉的部分上冒给更浅可滚动祖先。
-        e.remaining_y = ScrollViewport::remaining_offset(before, target, e.delta_y, step);
+        e.remaining_y = ScrollViewport::remaining_offset(before, target, e.delta_y, unit);
         if (target != offset_y_) {
             offset_y_ = target;
             // 仅请求重绘本视口、不触发子树缓存失效：滚动不改内容，只改下方 composite 平移量，
@@ -299,7 +404,7 @@ class Scroll : public Container, public ScrollProps {
             request_frame(false);
         }
         // snap/paging：收位后向条目对齐点短滑动收束（reduce-motion 下直落端点）。
-        if (snap.enabled(viewport_h_)) {
+        if (snap_config().enabled(viewport_h_)) {
             begin_snap_glide();
         }
     }
@@ -359,7 +464,8 @@ class Scroll : public Container, public ScrollProps {
         if (!down && !up) {
             return Container::perform_accessibility_action(req);
         }
-        const float unit = step > 0.0F ? step : 16.0F;
+        const float raw_step = step();
+        const float unit = raw_step > 0.0F ? raw_step : 16.0F;
         const float delta = (down ? -1.0F : 1.0F) * (viewport_h_ / unit);
         return scroll_by(delta);
     }
@@ -377,11 +483,12 @@ class Scroll : public Container, public ScrollProps {
     /// @param offset 期望偏移（可越界，内部按 `[0, 内容高 − 视口高]` 夹取）。
     /// @return 夹取后的目标与当前偏移不同（即发生移动）时为 true；未布局或已在目标处为 false。
     auto set_offset(float offset) -> bool {
-        const float target = ScrollViewport::clamp_offset(offset, 0.0F, step, content_h_, viewport_h_);
+        const float target = ScrollViewport::clamp_offset(offset, 0.0F, step(), content_h_, viewport_h_);
         if (target == offset_y_) {
             return false;
         }
         glide_.active = false;  // 外部程序化跳转：作废进行中的收位滑动
+        note_scrollbar_scroll();  // 滚动条翻页 / 拖拽 / 无障碍定位同样走保持窗口
         offset_y_ = target;
         scroll_restored_ = true;  // 外部程序化设置：视为已就位，不再被键恢复覆盖
         write_back_offset();
@@ -404,6 +511,7 @@ class Scroll : public Container, public ScrollProps {
         if (!animate || current_accessibility_settings().reduce_motion) {
             return set_offset(target);
         }
+        note_scrollbar_scroll();  // 程序化滑动同样刷新浮层档保持窗口
         scroll_restored_ = true;  // 同 set_offset：外部程序化设置视为已就位
         glide_.start(offset_y_, target);
         needs_gesture_tick_ = true;
@@ -413,11 +521,11 @@ class Scroll : public Container, public ScrollProps {
 
     /// @brief 滚动偏移只读信号（滚动驱动动画原语）：宿主以纯函数派生视差/进度/淡入淡出。
     ///        懒创建；偏移每次变化（滚轮/拖拽/滑动帧/程序化）写入。
-    /// @note Side-effects: reads state (registers reactive dependency in Effect scope)
-    /// @return 该偏移信号的只读视图引用（首次调用时按当前 `offset_y_` 懒建 `State<float>`）。
-    [[nodiscard]] auto offset_signal() -> SignalView<float> & {
+    /// @note Side-effects: reads state (registers reactive dependency in computed/effect scope)
+    /// @return 该偏移信号的只读句柄（首次调用时按当前 `offset_y_` 懒建来源）。
+    [[nodiscard]] auto offset_signal() -> ReadOnlyState<float> {
         if (!offset_state_) {
-            offset_state_ = std::make_shared<State<float>>(offset_y_);
+            offset_state_ = State<float>(offset_y_);
             published_offset_ = offset_y_;
         }
         return *offset_state_;
@@ -438,7 +546,9 @@ class Scroll : public Container, public ScrollProps {
     auto on_system_drag_auto_scroll(const std::optional<Point> &position) -> bool override {
         if (!position.has_value()) {
             drag_auto_scroll_.stop();
-            if (!glide_.active) {
+            // 收车路径没有帧首时刻：取 epoch 作保守下界，保持窗口 / 悬停 / 待兑现滚动在途时
+            // needs_frame_tick 恒真，帧计时留给下一次 tick_gestures(now) 按真实时刻裁决。
+            if (!glide_.active && !scrollbar_.needs_frame_tick(std::chrono::steady_clock::time_point{})) {
                 needs_gesture_tick_ = false;  // 无收位滑动在途：摘除帧计时，回到空闲节流
             }
             return true;
@@ -447,6 +557,39 @@ class Scroll : public Container, public ScrollProps {
         needs_gesture_tick_ = true;
         request_frame(false);
         return true;
+    }
+
+    /// @brief 悬停进出通知：浮层档据此定夺滚动条显隐，经典档恒可见、无需帧计时唤醒。
+    /// @param entered true = 指针进入本控件（命中链 diff 判定）；false = 离开。
+    auto on_hover_change(bool entered) -> void override {
+        Widget::on_hover_change(entered);
+        if (!scrollbar_.overlay) {
+            return;
+        }
+        scrollbar_.set_pointer_inside(entered);
+        needs_gesture_tick_ = true;
+        request_frame(false);
+    }
+
+    /// @brief 指针事件入口：条带内或拖拽在途时消费事件，新偏移交给既有 set_offset 路径。
+    /// @param e 鼠标事件；命中条时置 `is_handled` 且不再冒泡，未命中条时原样交基类。
+    auto on_pointer_event(MouseEvent &e) -> void override {
+        const bool was_hovered = scrollbar_.interaction.hovered;
+        const auto action = e.action == MouseAction::Press  ? detail::ScrollbarPointerAction::Press
+                            : e.action == MouseAction::Move ? detail::ScrollbarPointerAction::Move
+                                                            : detail::ScrollbarPointerAction::Release;
+        const auto result = scrollbar_.pointer(action, e.local_position);
+        if (result.handled) {
+            e.is_handled = true;
+            if (result.offset_changed) {
+                (void)set_offset(result.offset);
+            }
+        } else {
+            Widget::on_pointer_event(e);
+        }
+        if (was_hovered != scrollbar_.interaction.hovered) {
+            mark_needs_paint();  // 悬停加粗的进出帧须重绘条带
+        }
     }
 
   protected:
@@ -460,12 +603,33 @@ class Scroll : public Container, public ScrollProps {
             return (viewport_w_ > 0.0F) ? viewport_w_ : 1.0F;
         }();
 
-        Size content{.width = viewport_w, .height = 0.0F};
-        if (!children_.empty()) {
+        const Theme &theme = inherit_theme(ctx);
+        scrollbar_.configure(detail::ScrollbarAxis::Vertical,
+                             theme.conventions.scrollbar_mode == ScrollbarMode::Overlay,
+                             theme.controls.scrollbar_thickness);
+
+        // 满宽排一次、先判溢出，再决定是否为经典档的条收窄内容列。反过来先收窄会产生
+        // 假阳性条：满宽放得下、收窄后换行变多反而溢出，条凭空出现还把内容无谓收窄。
+        const auto measure = [this, &ctx](float width) -> Size {
+            if (children_.empty()) {
+                return Size{.width = width, .height = 0.0F};
+            }
             Constraints cc;
-            cc.min = Size{.width = viewport_w, .height = 0.0F};
-            cc.max = Size{.width = viewport_w, .height = Size::infinity().height};
-            content = children_[0].widget().layout(cc, ctx);
+            cc.min = Size{.width = width, .height = 0.0F};
+            cc.max = Size{.width = width, .height = Size::infinity().height};
+            return children_[0].widget().layout(cc, ctx);
+        };
+        Size content = measure(viewport_w);
+        const float vh = (c.max.height != Size::infinity().height) ? c.max.height : content.height;
+        const Size self_box{.width = viewport_w, .height = vh};
+        scrollbar_.refresh(content.height, vh, offset_y_, self_box);
+        const float band = scrollbar_.reserve_band();
+        if (band > 0.0F) {
+            // 最坏两次测量且只在真溢出时发生；条几何一律取重排后的最终内容高，
+            // 与 accessibility_scroll() 申报的 content 同源，不取测量中间值。
+            content = measure(std::max(1.0F, viewport_w - band));
+        }
+        if (!children_.empty()) {
             // 几何权威写入 Node::bounds_（内容坐标，见类注释「几何与命中契约」）：
             // 命中链按此盒下降并自行换算偏移。不写则内容子树停留在默认零盒，
             // 其内按钮/输入框一个都点不到，且命中链只剩本控件（点击被容器吞掉）。
@@ -477,11 +641,11 @@ class Scroll : public Container, public ScrollProps {
         }
         content_h_ = content.height;
         content_w_ = content.width;
+        scrollbar_.refresh(content_h_, vh, offset_y_, self_box);
         // 吸顶节点发现（布局帧一次，绘制帧 O(1) 短路）：树形变化必经布局，缓存不会漏新头部。
         sticky_nodes_.clear();
         collect_stickies(children_, 0.0F, sticky_nodes_);
 
-        const float vh = (c.max.height != Size::infinity().height) ? c.max.height : content.height;
         viewport_h_ = vh;
         viewport_w_ = viewport_w;
         // 内容脏由 on_descendant_dirty 结构式接收（后代 request_frame 沿布局父链上溯），
@@ -511,8 +675,9 @@ class Scroll : public Container, public ScrollProps {
         // 滑动窗口逻辑高（与 ensure_content_buffer 一致）：视口高 ×(1 + 2×overscan)，
         // 与内容总量解耦。必须用逻辑 dp（viewport_h_ 系列），不得取 content_->height()
         // （那是设备像素，scale≠1 时会把物理高误当逻辑高算入 max_origin/reanchor/clear/裁剪）。
-        const float buffer_h = viewport_h_ * (1.0F + (2.0F * overscan));
-        const float overscan_h = viewport_h_ * overscan;
+        const float scan = overscan();
+        const float buffer_h = viewport_h_ * (1.0F + (2.0F * scan));
+        const float overscan_h = viewport_h_ * scan;
         const float max_origin = std::max(0.0F, content_h_ - buffer_h);
         // 视口是否仍完全落在已录制的缓冲窗口 [origin, origin+buffer_h] 内（纯 blit 的前提）。
         const bool in_buffer =
@@ -654,6 +819,9 @@ class Scroll : public Container, public ScrollProps {
 
         paint_sticky_overlay(p, bounds, ctx);  // 吸顶覆盖层：blit 后重绘，不触发内容重录
 
+        scrollbar_.refresh(content_h_, viewport_h_, offset_y_, bounds.size);
+        paint_scrollbar(p, bounds, ctx);  // 条画在内容之后、容器自身盒内
+
         p.pop_clip();
         scrolling_ = false;  // 消费本帧滚动标记
     }
@@ -699,6 +867,12 @@ class Scroll : public Container, public ScrollProps {
     /// @return 命中内容的子树链；点在可视区外或无子节点时为空链。
     auto on_hit_test_chain(const Point &local, const Rect &bounds, const BuildContext &ctx)
         -> std::vector<HitNode> override {
+        // 条带命中即「本容器接管此点」：返回空后代链，基类因 `wants_scroll()` 把自身记入命中链。
+        // 不拦这一下，浮层档的轨道点击会穿过条带落到下面的内容子树。
+        scrollbar_.refresh(content_h_, viewport_h_, offset_y_, bounds.size);
+        if (scrollbar_.hit(local)) {
+            return {};
+        }
         if (children_.empty()) {
             return {};
         }
@@ -760,6 +934,11 @@ class Scroll : public Container, public ScrollProps {
         if (!viewport.contains(local)) {
             return false;
         }
+        // 与 on_hit_test_chain 同口径：条带区不申报后代覆盖，避免「闸认、自身不认」分叉。
+        // 该入口是 const，只读最近一次布局 / 绘制刷新的几何，不在此重算。
+        if (scrollbar_.hit(local)) {
+            return false;
+        }
         const Rect content_box = children_[0].bounds();
         const Point content_local{.x = local.x, .y = local.y + offset_y_};
         // 内容子树的祖先偏移：`ancestor_offset` + 内容盒原点。**刻意不扣 `offset_y_`**——
@@ -776,15 +955,22 @@ class Scroll : public Container, public ScrollProps {
         return children_[0]->covers_extra_hit_box(content_local - content_box.origin, ctx, content_offset);
     }
 
-    /// @brief 收位滑动逐帧推进（自驱动 tick，不占 Animator；同 Dismissible/ReorderableList 模式）。
+    /// @brief 收位滑动逐帧推进（自驱动 tick，不占 Animator；同 Dismissible/ReorderableList 模式。
+    ///        步长在本入口经 scaled_frame_dt 折算一次，ScrollGlide::tick 只吃折算值）。
     ///        滑动帧与滚轮帧同策略：仅平移 blit，不重录内容缓冲。
+    ///        滑动步长经 `scaled_frame_dt` 折算：应用内全局时间缩放与冻结对本控件生效，
+    ///        自动滚边段不在此列（速度型手感，见该函数的就地裁决）。
     /// @param now 本帧时刻（单调时钟），与上一滑动时刻求差推进收位滑动插值。
     auto tick_gestures(std::chrono::steady_clock::time_point now) -> void override {
         Container::tick_gestures(now);  // 子树手势照常计时
+        if (scrollbar_.tick(now)) {
+            mark_needs_paint();  // 浮层档显隐翻转：瞬时切换，同帧两次重绘像素一致
+        }
         if (drag_auto_scroll_.active) {
             tick_drag_auto_scroll(now);  // 拖入自动滚边：Over 态驱动、按帧推进
         }
-        if (!glide_.active && !drag_auto_scroll_.active) {
+        // 三者都空闲才摘除共用帧计时，滚动条不得单独掐掉在途的收位滑动或滚边。
+        if (!glide_.active && !drag_auto_scroll_.active && !scrollbar_.needs_frame_tick(now)) {
             needs_gesture_tick_ = false;  // 静止后摘除每帧计时，回到空闲节流
             return;
         }
@@ -794,13 +980,24 @@ class Scroll : public Container, public ScrollProps {
             // 盖回 0——两条驱动共用一次 tick，写段只归激活的那条。
             return;
         }
-        const double dt =
+        const double raw =
             glide_last_.has_value() ? std::chrono::duration<double>(now - *glide_last_).count() : (1.0 / 60.0);
         glide_last_ = now;
+        // 单一 dt 漏斗：应用内全局时间缩放在此折算，`ScrollGlide::tick` 只吃折算后的步长
+        // （它自己不再缩放——两层都乘会让倍率变成平方）。
+        const double dt = scaled_frame_dt(raw);
+        if (dt <= 0.0) {
+            // 冻结帧的空闲纪律：不推进、不写回、不标脏、不请求帧（否则「停着不动却满帧唤醒」）。
+            // 在途标志与 `glide_last_` 原样保留：解冻由 `Animator::take_rearm_request` 送一帧进来，
+            // 本函数照常走到这里续跑，冻结前进度不丢（锚点已逐帧刷新，深睡停摆的折算见
+            // `Animator::set_time_scale` 的就地取舍）。
+            return;
+        }
         float v = glide_.tick(dt);
         // 布局可能在滑动中改变内容/视口尺寸：目标随动夹取，防滑出可滚范围。
         v = std::clamp(v, 0.0F, std::max(0.0F, content_h_ - viewport_h_));
-        if (!glide_.active && !drag_auto_scroll_.active) {  // 本帧抵达终点且无滚边在途：摘除帧计时
+        // 本帧抵达终点、无滚边在途且滚动条保持窗口已到期：摘除帧计时。
+        if (!glide_.active && !drag_auto_scroll_.active && !scrollbar_.needs_frame_tick(now)) {
             glide_last_.reset();
             needs_gesture_tick_ = false;
         }
@@ -838,10 +1035,16 @@ class Scroll : public Container, public ScrollProps {
     }
 
   private:
+    /// @brief 把吸附三行拼成共享内核消费的 `ScrollSnap`。
+    /// @return 由 `snap_paging()` / `snap_extent()` / `snap_alignment()` 现拼的吸附配置。
+    [[nodiscard]] auto snap_config() const -> ScrollSnap {
+        return ScrollSnap{.paging = snap_paging(), .extent = snap_extent(), .alignment = snap_alignment()};
+    }
+
     /// @brief 启动向 snap 对齐点的收位滑动；reduce-motion 下直落端点
     ///        （对齐 `AnimationController::tick` 短路语义：状态与走完一致，只是无中间帧）。
     auto begin_snap_glide() -> void {
-        const float target = ScrollViewport::snap_target(offset_y_, content_h_, viewport_h_, snap);
+        const float target = ScrollViewport::snap_target(offset_y_, content_h_, viewport_h_, snap_config());
         if (target == offset_y_) {
             return;
         }
@@ -856,7 +1059,7 @@ class Scroll : public Container, public ScrollProps {
     }
 
     /// @brief 偏移信号写入（仅当宿主索取过 offset_signal() 且值确实变化）。
-    ///        用镜像值比较而非 `State::get()`——后者在 Effect 作用域会自订阅本控件。
+    ///        用镜像值比较而非 `State::get()`——后者在 effect 作用域会自订阅本控件。
     auto publish_offset() -> void {
         if (!offset_state_ || published_offset_ == offset_y_) {
             return;
@@ -868,7 +1071,7 @@ class Scroll : public Container, public ScrollProps {
     ScrollGlide glide_;  ///< snap 收位 / scroll_to 的短滑动时序
     DragAutoScroll drag_auto_scroll_;  ///< 拖入自动滚边状态（系统拖放 Over 态驱动，与收位滑动互不抢占）
     std::optional<std::chrono::steady_clock::time_point> glide_last_;  ///< 上一滑动帧时刻（墙钟差 = dt）
-    std::shared_ptr<State<float>> offset_state_;  ///< 懒创建的偏移信号（滚动驱动动画原语，经 offset_signal 暴露）
+    std::optional<State<float>> offset_state_;  ///< 懒创建的偏移来源（滚动驱动动画原语，经 offset_signal 暴露）
     float published_offset_ = 0.0F;  ///< 最近一次发布的偏移值（镜像，避免回读 get() 误订阅）
 
     /// @brief 内容子树中 `StickyHeader` 节点的发现缓存（on_layout 重建树时刷新；空 = 覆盖层零开销）。
@@ -928,7 +1131,7 @@ class Scroll : public Container, public ScrollProps {
             const_cast<Node *>(s.node)->widget().paint(
                 p,
                 Rect{.origin = Point{.x = bounds.origin.x, .y = bounds.origin.y + pin_y},
-                     .size = Size{.width = bounds.size.width, .height = h}},
+                     .size = Size{.width = content_w_ > 0.0F ? content_w_ : bounds.size.width, .height = h}},
                 ctx);
             stack_bottom = pin_y + h;
         }
@@ -937,7 +1140,7 @@ class Scroll : public Container, public ScrollProps {
     /// @brief 恢复路径专用：夹取 → 赋值 → 强制整块重录（不写回、不改归属标记）。
     /// @param raw 待恢复的原始偏移（显式反序列化的 `offset` 或 `ScrollStorage` 中的存储值）。
     auto apply_restored_offset(float raw) -> void {
-        const float target = ScrollViewport::clamp_offset(raw, 0.0F, step, content_h_, viewport_h_);
+        const float target = ScrollViewport::clamp_offset(raw, 0.0F, step(), content_h_, viewport_h_);
         if (target == offset_y_) {
             return;
         }
@@ -962,22 +1165,24 @@ class Scroll : public Container, public ScrollProps {
             apply_restored_offset(explicit_offset);
             return;
         }
-        if (restore_key.empty() || content_h_ <= viewport_h_) {
+        const std::string key = restore_key();
+        if (key.empty() || content_h_ <= viewport_h_) {
             return;
         }
         scroll_restored_ = true;
-        ScrollStorage::instance().claim(restore_key, this);
-        if (const auto stored = ScrollStorage::instance().read(restore_key); stored.has_value()) {
+        ScrollStorage::instance().claim(key, this);
+        if (const auto stored = ScrollStorage::instance().read(key); stored.has_value()) {
             apply_restored_offset(*stored);
         }
     }
 
     /// @brief 位置变化时写回注册表（**仅内存**：落盘由 App 经 `ScrollStorage::sync` + `Preferences::flush` 决定）。
     auto write_back_offset() const -> void {
-        if (restore_key.empty()) {
+        const std::string key = restore_key();
+        if (key.empty()) {
             return;
         }
-        ScrollStorage::instance().write(restore_key, offset_y_);
+        ScrollStorage::instance().write(key, offset_y_);
     }
 
     /// @brief 按需创建/复位滑动窗口离屏缓冲：逻辑尺寸 = 内容宽 × (视口高 ×(1 + 2×overscan))。
@@ -989,7 +1194,7 @@ class Scroll : public Container, public ScrollProps {
             return;
         }
         // 滑动窗口缓冲：高度 = 视口高 ×(1 + 2×overscan)，与内容总量解耦。
-        const float buffer_h = viewport_h_ * (1.0F + (2.0F * overscan));
+        const float buffer_h = viewport_h_ * (1.0F + (2.0F * overscan()));
         const float scale = ctx.scale_factor > 0.0F ? ctx.scale_factor : 1.0F;
         const int w = static_cast<int>(std::lround(content_w_));
         const int h = static_cast<int>(std::lround(buffer_h));
@@ -1005,6 +1210,35 @@ class Scroll : public Container, public ScrollProps {
         }
     }
 
+    /// @brief 在内容之后绘制滚动条：轨道凹槽 + 滑块，颜色只经两枚色角色取。
+    /// @param p 视口画笔。
+    /// @param bounds 本帧自身盒（条几何为局部坐标，须加其原点）。
+    /// @param ctx 构建上下文：读取 `scrollbar_thumb` / `scrollbar_track`。
+    auto paint_scrollbar(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void {
+        if (!scrollbar_.visible()) {
+            return;
+        }
+        const Theme &theme = inherit_theme(ctx);
+        const Rect track{.origin = bounds.origin + scrollbar_.geometry.track.origin,
+                         .size = scrollbar_.geometry.track.size};
+        const Rect thumb{.origin = bounds.origin + scrollbar_.paint_thumb().origin,
+                         .size = scrollbar_.paint_thumb().size};
+        const float radius = 0.5F * std::min(track.size.width, track.size.height);
+        p.fill_rounded_rect(track, radius, theme.roles.scrollbar_track);
+        p.fill_rounded_rect(thumb, radius, theme.roles.scrollbar_thumb);
+    }
+
+    /// @brief 滚动发生后登记浮层档保持窗口并唤醒一次帧计时；经典档零开销。
+    auto note_scrollbar_scroll() -> void {
+        if (!scrollbar_.overlay) {
+            return;
+        }
+        scrollbar_.note_scroll();
+        needs_gesture_tick_ = true;
+        request_frame(false);
+    }
+
+    detail::ScrollbarBinding scrollbar_;  ///< 滚动条几何、交互与显隐状态（四容器共用内核的接线层）。
     float offset_y_ = 0.0F;  ///< 当前滚动偏移（内容坐标下的视口顶位置；经 `offset` 属性对外可见）
     std::optional<float> pending_offset_;  ///< 显式反序列化的偏移（优先于 restore_key 恢复，布局后应用）
     bool scroll_restored_ = false;  ///< 是否已就位（恢复过一次 / 用户或外部程序化设置过）

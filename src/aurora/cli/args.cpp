@@ -1109,7 +1109,6 @@ auto find_command_path(const CommandSpec &root, const CommandSpec *target, std::
 /// @brief 按下标路径在 `root` 声明树中取节点。
 /// @param root 声明树根。
 /// @param command_path 子命令下标链；空即根节点。
-/// @param option_count 命中命令节点内的选项数；`command_path` 为空且需要取选项时才用。
 /// @return 命令节点；路径越界返回 nullptr。
 auto walk_command(const CommandSpec &root, const std::vector<std::size_t> &command_path) -> const CommandSpec * {
     const CommandSpec *node = &root;

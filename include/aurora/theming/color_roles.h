@@ -1,5 +1,9 @@
 #pragma once
 
+#include <array>
+#include <string_view>
+#include <utility>
+
 #include "aurora/core/color.h"
 
 namespace aurora {
@@ -9,6 +13,8 @@ namespace aurora {
 /// 取代旧的扁平字段（`background` / `primary` / `on_primary` / `text`）与 stringly 命名令牌表。
 /// 一个实例只持**一列**（亮或暗）；明暗双列由 `ColorRoles::light()` / `ColorRoles::dark()` 给出，
 /// 角色名一套、取值两列（对标 Material 3 color roles 与 Fluent 2 alias tokens 的 light/dark variants）。
+/// 高对比**不是第三列**：`with_high_contrast()` 从既有那一列派生，取值出处只有判据登记表
+/// `detail/contrast_audit.h` 一处，不存在另打一份手时常量的第二张配色表。
 ///
 /// 取值口径分两类：
 /// - **已消费角色**（`primary` / `on_primary` / `surface` / `on_surface` / `focus_ring` /
@@ -62,6 +68,73 @@ struct ColorRoles {
     Color focus_ring;  ///< 焦点环取极性色，与主色拉开（承接旧 `focus.ring` 令牌）。
     Color hover;  ///< 交互态悬停叠色（含 alpha）。
     Color pressed;  ///< 交互态按压叠色（含 alpha）。
+    Color scrollbar_thumb;  ///< 滚动条滑块（形状承载当前滚动位置，非文本档）。
+    Color scrollbar_track;  ///< 滚动条轨道凹槽（半透明叠层，登记为不适用）。
+
+    /// @brief 逐字段相等比较（四十项全等）；供主题解析、「风格档 ≡ 基线档」断言与快照的同值守卫。
+    /// @param other 比较对象。
+    /// @return 全部字段相等时为 true。
+    [[nodiscard]] auto operator==(const ColorRoles &other) const -> bool = default;
+
+    /// @brief 「成员指针 → 令牌短名」对照表（`AURORA_TOKENS.size()` 由列表推出，不手写枚数）。
+    ///
+    /// 短名即 `aurora_api.json` 的 `default_expr` 用名（沿用既有的 `theme.<角色>` 拼法，与 C++ 真路径
+    /// `roles.<角色>` 的前缀映射由本表登记，规则见 `codespec/specification/07-environment-modifier.md`
+    /// §5.1）；表与实际角色的一致性由令牌登记表门禁校验。
+    static constexpr auto AURORA_TOKENS = std::to_array<std::pair<Color ColorRoles::*, std::string_view>>({
+        {&ColorRoles::primary, "theme.primary"},
+        {&ColorRoles::on_primary, "theme.on_primary"},
+        {&ColorRoles::primary_container, "theme.primary_container"},
+        {&ColorRoles::on_primary_container, "theme.on_primary_container"},
+        {&ColorRoles::secondary, "theme.secondary"},
+        {&ColorRoles::on_secondary, "theme.on_secondary"},
+        {&ColorRoles::secondary_container, "theme.secondary_container"},
+        {&ColorRoles::on_secondary_container, "theme.on_secondary_container"},
+        {&ColorRoles::tertiary, "theme.tertiary"},
+        {&ColorRoles::on_tertiary, "theme.on_tertiary"},
+        {&ColorRoles::tertiary_container, "theme.tertiary_container"},
+        {&ColorRoles::on_tertiary_container, "theme.on_tertiary_container"},
+        {&ColorRoles::error, "theme.error"},
+        {&ColorRoles::on_error, "theme.on_error"},
+        {&ColorRoles::error_container, "theme.error_container"},
+        {&ColorRoles::on_error_container, "theme.on_error_container"},
+        {&ColorRoles::surface, "theme.surface"},
+        {&ColorRoles::surface_dim, "theme.surface_dim"},
+        {&ColorRoles::surface_bright, "theme.surface_bright"},
+        {&ColorRoles::surface_container_lowest, "theme.surface_container_lowest"},
+        {&ColorRoles::surface_container_low, "theme.surface_container_low"},
+        {&ColorRoles::surface_container, "theme.surface_container"},
+        {&ColorRoles::surface_container_high, "theme.surface_container_high"},
+        {&ColorRoles::surface_container_highest, "theme.surface_container_highest"},
+        {&ColorRoles::on_surface, "theme.on_surface"},
+        {&ColorRoles::on_surface_variant, "theme.on_surface_variant"},
+        {&ColorRoles::surface_variant, "theme.surface_variant"},
+        {&ColorRoles::outline, "theme.outline"},
+        {&ColorRoles::outline_variant, "theme.outline_variant"},
+        {&ColorRoles::inverse_surface, "theme.inverse_surface"},
+        {&ColorRoles::inverse_on_surface, "theme.inverse_on_surface"},
+        {&ColorRoles::inverse_primary, "theme.inverse_primary"},
+        {&ColorRoles::scrim, "theme.scrim"},
+        {&ColorRoles::shadow, "theme.shadow"},
+        {&ColorRoles::surface_tint, "theme.surface_tint"},
+        {&ColorRoles::focus_ring, "theme.focus_ring"},
+        {&ColorRoles::hover, "theme.hover"},
+        {&ColorRoles::pressed, "theme.pressed"},
+        {&ColorRoles::scrollbar_thumb, "theme.scrollbar_thumb"},
+        {&ColorRoles::scrollbar_track, "theme.scrollbar_track"},
+    });
+
+    /// @brief 反查一枚色角色的令牌短名（编译期与运行期同形，零分配）。
+    /// @param member 本结构体的成员指针；传空指针不命中。
+    /// @return 命中时为形如 `theme.primary` 的短名；未登记时为空串（调用方须判空）。
+    [[nodiscard]] static constexpr auto token_name(Color ColorRoles::*member) noexcept -> std::string_view {
+        for (const auto &[ptr, name] : AURORA_TOKENS) {
+            if (ptr == member) {
+                return name;
+            }
+        }
+        return {};
+    }
 
     /// @brief 亮色档色角色全集。
     /// @return 与现行 `Theme::light()` 观感一致（已消费角色）、其余取 M3 标准中性 / 占位的角色组。
@@ -109,6 +182,9 @@ struct ColorRoles {
             .focus_ring = Color{0x00, 0x00, 0x00},
             .hover = Color{0, 0, 0, 32},
             .pressed = Color{0, 0, 0, 56},
+            // 滚动条：滑块取中性灰（白底约 5.1:1），轨道是调用点按固定 alpha 合成的凹槽。
+            .scrollbar_thumb = Color{0x6E, 0x6E, 0x6E},
+            .scrollbar_track = Color{0, 0, 0, 20},
         };
     }
 
@@ -158,8 +234,29 @@ struct ColorRoles {
             .focus_ring = Color{0xFF, 0xFF, 0xFF},
             .hover = Color{255, 255, 255, 32},
             .pressed = Color{255, 255, 255, 56},
+            // 滚动条：滑块取中性灰（#202124 底约 5.7:1），轨道是调用点按固定 alpha 合成的凹槽。
+            .scrollbar_thumb = Color{0x9A, 0x9A, 0x9A},
+            .scrollbar_track = Color{255, 255, 255, 20},
         };
     }
+
+    /// @brief 高对比派生列：按判据登记表 `detail::AURORA_CONTRAST_AUDITS` 整族调 tone，让每一行都
+    ///        达到它自己的档位下限——本库对 `AccessibilitySettings::high_contrast` 的唯一响应通道。
+    ///
+    /// 派生只改**相对亮度**、不重新配色：把线性 RGB 等比缩放到目标亮度（仅当目标越出色域壳时才
+    /// 向白点收敛），故观感是「同一套配色的强对比版」。可动端优先取底色、其次取前景——前景标签
+    /// 一动即换观感；当某底色为满足它自己的档位而必须移动时，压在它上面的前景标签在同一步内被
+    /// 修复（只在登记表里作前景的角色不会连带破坏其他行，修复因此不级联）。纯底色（只作背景出现
+    /// 者，`surface` 族等）恒不动：高对比语义下页面地不得移位。
+    ///
+    /// 判据表是唯一规则来源：本函数、`check_theme_contrast` 门禁与 `utest_theme_roles` 读同一张表、
+    /// 同一份 `aurora::contrast_ratio`，不存在第二套对比度口径。档位下限就地再乘一点余量，避免
+    /// 8 位量化把 4.4998 这类值压到线下。
+    ///
+    /// @return 逐行达标的副本；本已全达标的列返回逐字段相等的副本（不扰动，默认档 golden 因此不变）。
+    /// @note Thread: thread-safe (pure value type)
+    /// @note Side-effects: none
+    [[nodiscard]] auto with_high_contrast() const -> ColorRoles;
 };
 
 }  // namespace aurora

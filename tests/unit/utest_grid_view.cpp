@@ -3,23 +3,29 @@
 /// 测试说明: 覆盖 GridView——默认不变量、非法 count/列数/格高钳制降级、行数向上取整与内容高、
 /// 视口填充与单元格整形、按需构建仅可见行（含末行不满格）、滚动偏移钳制与滚轮步进、
 /// 单元格网格落位、序列化与自描述、反序列化回填标量属性（含非法值降级、显式偏移优先于按键恢复）、
-/// snap/paging 逐帧收位、reduce-motion 直落、offset_signal 发布
+/// snap/paging 逐帧收位、reduce-motion 直落、offset_signal 发布、
+/// 应用内全局时间缩放的 GridView 消费点（到位帧数按倍率折半且终值不变 / 冻结段零重绘请求且解冻续跑）
 ///
 /// 行窗口与偏移的换算按 `item_extent = 96` 的整行推进（滚轮步进 40 为控件内部常量）。
 
 #include <chrono>
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "aurora/animation/animator.h"
 #include "aurora/app/scroll_storage.h"
 #include "aurora/core/accessibility.h"
 #include "aurora/layout/layout_engine.h"
+#include "aurora/theming/theme.h"
+#include "aurora/widget/detail/scrollbar.h"
 #include "aurora/widget/grid_view.h"
 #include "framework/aurora_test.h"
 #include "framework/json_access.h"
+#include "support/animation_fixture.h"
 
 namespace aurora::test_cases::utest_grid_view {
 
@@ -90,6 +96,79 @@ auto wheel(GridView &grid, float delta_y) -> ScrollEvent {
     return e;
 }
 
+/// @brief 缩放 / 冻结判据的固定帧步长：62500µs = 1/16 秒（二进制精确，跨倍率帧数可整除推导）。
+constexpr auto AURORA_SCALE_FRAME_STEP = std::chrono::microseconds(62500);
+
+/// @brief 按固定帧步长推进一帧（假想帧钟，不读墙钟）——收位滑动的逐帧入口。
+template <typename WidgetT>
+auto pump_scaled_frame(WidgetT &w) -> void {
+    frame_clock() += AURORA_SCALE_FRAME_STEP;
+    w.tick(frame_clock());
+}
+
+/// @brief 按固定帧步长推进到收位滑动结束（`is_gliding()` 转假），返回真正喂进去的帧数。
+/// @tparam WidgetT 被驱动的控件类型（须有 `tick(time_point)` 与 `is_gliding()`）。
+/// @param w 目标控件。
+/// @param budget 帧预算上限（防呆：正常路径 1–3 帧，超预算即记账失败）。
+/// @return 到位用掉的帧数；超预算时返回 `budget + 1`（并已就地记一次失败）。
+template <typename WidgetT>
+auto pump_until_glide_ends(WidgetT &w, int budget = 32) -> int {
+    for (int n = 1; n <= budget; ++n) {
+        pump_scaled_frame(w);
+        if (!w.is_gliding()) {
+            return n;
+        }
+    }
+    AURORA_TEST_FAIL("snap glide never finished within the frame budget");
+    return budget + 1;
+}
+
+/// @brief 到位帧数的推导模型（倍率只乘**一层**）：`ScrollGlide` 累计满 0.15 秒即刻位，每帧步长 1/16 秒。
+///
+/// 1x / 2x / 4x 依次为 3 / 2 / 1 帧（0.0625、0.125、0.1875 越线）。若消费点与 `scaled_frame_dt`
+/// 两层都乘，倍率变成平方：2x 档每帧 0.25 秒 ⇒ 只需 1 帧，与下表的 2 帧不符。
+/// @param scale `Animator::set_time_scale` 的倍率（调用方须传正值）。
+/// @return 从滑动起步（elapsed 已归零）到收位所需的固定步长帧数。
+constexpr auto expected_glide_frames(double scale) -> int {
+    constexpr double frame_seconds = 1.0 / 16.0;  // 与 `AURORA_SCALE_FRAME_STEP` 同值的秒数
+    constexpr double duration_seconds = 0.15;  // `ScrollGlide::default_duration_s()`
+    double elapsed = 0.0;
+    for (int n = 1; n <= 64; ++n) {
+        elapsed += frame_seconds * scale;
+        if (elapsed >= duration_seconds) {
+            return n;
+        }
+    }
+    return 0;
+}
+
+/// @brief 重绘请求计数器：作用域内把控件的 `on_dirty` 换成计数回调，出作用域还原原回调。
+///
+/// `Widget::request_frame` 一定会调用挂在控件自身的 `on_dirty`（即便 `layout_parent_` 为空），
+/// 所以它是「本段里请求了多少帧重绘」的直接观测量——判据 11(b) 的「冻结不空转」就落在这个计数上。
+class ScopedDirtyCounter final {
+  public:
+    /// @brief 接上计数回调并保存此前挂在 `on_dirty` 上的回调（通常为空）。
+    /// @param w 观察目标控件（非拥有引用，须比本对象存活更久）。
+    explicit ScopedDirtyCounter(Widget &w) : widget_(w), saved_(std::move(w.on_dirty)) {
+        w.on_dirty = [this](bool /*layout*/) -> void { ++requests_; };
+    }
+    ScopedDirtyCounter(const ScopedDirtyCounter &) = delete;
+    auto operator=(const ScopedDirtyCounter &) -> ScopedDirtyCounter & = delete;
+    ScopedDirtyCounter(ScopedDirtyCounter &&) = delete;
+    auto operator=(ScopedDirtyCounter &&) -> ScopedDirtyCounter & = delete;
+    ~ScopedDirtyCounter() { widget_.on_dirty = std::move(saved_); }
+
+    /// @brief 本作用域内累计的重绘请求数。
+    /// @return `on_dirty` 被调用的次数。
+    [[nodiscard]] auto count() const -> int { return requests_; }
+
+  private:
+    Widget &widget_;
+    std::function<void(bool)> saved_;
+    int requests_ = 0;
+};
+
 /// @brief reduce-motion 守卫：作用域内开启，离开时复原进程级设置（单例，测试须自清）。
 class ReduceMotionGuard final {
   public:
@@ -111,7 +190,7 @@ class ReduceMotionGuard final {
 }  // namespace
 
 AURORA_TEST_CASE(default_grid_view_invariants) {
-    GridView grid;
+    GridView const grid;
     AURORA_TEST_CHECK_EQ(std::string{grid.type_name()}, "GridView");
     AURORA_TEST_CHECK_EQ(grid.count(), 0);
     AURORA_TEST_CHECK_EQ(grid.columns(), 1);
@@ -124,33 +203,33 @@ AURORA_TEST_CASE(default_grid_view_invariants) {
 
 AURORA_TEST_CASE(ctor_degrades_invalid_arguments) {
     // 非正列数降级为 1（经 Diagnostics::degraded 上报）。
-    GridView zero_columns{9, 0, {}, 96.0F};
+    GridView const zero_columns{9, 0, {}, 96.0F};
     AURORA_TEST_CHECK_EQ(zero_columns.columns(), 1);
 
     // 非正格高降级为 96。
-    GridView bad_extent{9, 3, {}, -1.0F};
+    GridView const bad_extent{9, 3, {}, -1.0F};
     AURORA_TEST_CHECK_NEAR(bad_extent.cell_extent(), 96.0F, 1e-4F);
 
     // 负 count 钳为 0。
-    GridView negative{-2, 3, {}, 96.0F};
+    GridView const negative{-2, 3, {}, 96.0F};
     AURORA_TEST_CHECK_EQ(negative.count(), 0);
 
-    GridView normal{30, 3, {}, 96.0F};
+    GridView const normal{30, 3, {}, 96.0F};
     AURORA_TEST_CHECK_EQ(normal.count(), 30);
     AURORA_TEST_CHECK_EQ(normal.columns(), 3);
     AURORA_TEST_CHECK_NEAR(normal.cell_extent(), 96.0F, 1e-4F);
 }
 
 AURORA_TEST_CASE(row_count_rounds_up_and_content_height) {
-    GridView full{30, 3, {}, 96.0F};
+    GridView const full{30, 3, {}, 96.0F};
     AURORA_TEST_CHECK_EQ(full.row_count(), 10);
     AURORA_TEST_CHECK_NEAR(full.content_height(), 960.0F, 1e-4F);
 
-    GridView remainder{10, 3, {}, 96.0F};
+    GridView const remainder{10, 3, {}, 96.0F};
     AURORA_TEST_CHECK_EQ(remainder.row_count(), 4);  // ceil(10 / 3)
     AURORA_TEST_CHECK_NEAR(remainder.content_height(), 384.0F, 1e-4F);
 
-    GridView exact{9, 3, {}, 96.0F};
+    GridView const exact{9, 3, {}, 96.0F};
     AURORA_TEST_CHECK_EQ(exact.row_count(), 3);
     AURORA_TEST_CHECK_NEAR(exact.content_height(), 288.0F, 1e-4F);
 }
@@ -162,10 +241,12 @@ AURORA_TEST_CASE(layout_fills_viewport_and_sizes_cells) {
     LayoutEngine::layout(grid, bounded(300.0F, 300.0F));
     AURORA_TEST_CHECK_NEAR(grid.size().width, 300.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(grid.size().height, 300.0F, 1e-4F);
-    // 单元格被格约束（min == max = 视口宽/列数 × 格高）强制整形。
-    AURORA_TEST_CHECK_NEAR(rec.items.at(0)->size().width, 100.0F, 1e-4F);
+    // 单元格被格约束强制整形；默认主题为经典档，溢出时总宽先扣滚动条带宽再按列数均分。
+    const float band = Theme::light().controls.scrollbar_thickness + (2.0F * detail::AURORA_SCROLLBAR_INSET);
+    const float cell_w = (300.0F - band) / 3.0F;
+    AURORA_TEST_CHECK_NEAR(rec.items.at(0)->size().width, cell_w, 1e-4F);
     AURORA_TEST_CHECK_NEAR(rec.items.at(0)->size().height, 96.0F, 1e-4F);
-    AURORA_TEST_CHECK_NEAR(rec.items.at(11)->size().width, 100.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(rec.items.at(11)->size().width, cell_w, 1e-4F);
 }
 
 AURORA_TEST_CASE(virtualization_builds_visible_rows_only) {
@@ -242,18 +323,20 @@ AURORA_TEST_CASE(cell_positions_follow_grid) {
     p.begin(300, 300);
     grid.paint(p, Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 300.0F, .height = 300.0F}},
                BuildContext{});
-    // 索引 → (行, 列)：0 → (0,0)，2 → (0,2)，5 → (1,2)；列宽 100，格高 96。
+    // 索引 → (行, 列)：0 → (0,0)，2 → (0,2)，5 → (1,2)；格高 96，列宽按收缩后的总宽均分。
+    const float band = Theme::light().controls.scrollbar_thickness + (2.0F * detail::AURORA_SCROLLBAR_INSET);
+    const float cell_w = (300.0F - band) / 3.0F;
     AURORA_TEST_CHECK_NEAR(rec.items.at(0)->paint_bounds().origin.x, 0.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(rec.items.at(0)->paint_bounds().origin.y, 0.0F, 1e-4F);
-    AURORA_TEST_CHECK_NEAR(rec.items.at(2)->paint_bounds().origin.x, 200.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(rec.items.at(2)->paint_bounds().origin.x, 2.0F * cell_w, 1e-4F);
     AURORA_TEST_CHECK_NEAR(rec.items.at(2)->paint_bounds().origin.y, 0.0F, 1e-4F);
-    AURORA_TEST_CHECK_NEAR(rec.items.at(5)->paint_bounds().origin.x, 200.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(rec.items.at(5)->paint_bounds().origin.x, 2.0F * cell_w, 1e-4F);
     AURORA_TEST_CHECK_NEAR(rec.items.at(5)->paint_bounds().origin.y, 96.0F, 1e-4F);
-    AURORA_TEST_CHECK_NEAR(rec.items.at(5)->paint_bounds().size.width, 100.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(rec.items.at(5)->paint_bounds().size.width, cell_w, 1e-4F);
 }
 
 AURORA_TEST_CASE(serialize_and_describe) {
-    GridView src{9, 2, {}, 80.0F};
+    GridView const src{9, 2, {}, 80.0F};
     Json props = Json::object();
     src.serialize_props(props);
     AURORA_TEST_CHECK_EQ(require_field<int>(props, "count"), 9);
@@ -403,7 +486,7 @@ AURORA_TEST_CASE(snap_paging_pages_by_viewport_height) {
 }
 
 AURORA_TEST_CASE(reduce_motion_snaps_and_jumps_without_intermediate_frames) {
-    ReduceMotionGuard guard;
+    ReduceMotionGuard const guard;
     GridView grid{30, 3, {}, 96.0F};
     grid.set_snap(ScrollSnap{.extent = 192.0F});
     LayoutEngine::layout(grid, bounded(300.0F, 300.0F));
@@ -421,7 +504,7 @@ AURORA_TEST_CASE(offset_signal_follows_programmatic_and_glide_frames) {
     GridView grid{30, 3, {}, 96.0F};
     LayoutEngine::layout(grid, bounded(300.0F, 300.0F));
 
-    SignalView<float> &offset = grid.offset_signal();  // 懒创建：初值取当前偏移
+    const ReadOnlyState<float> offset = grid.offset_signal();  // 懒创建：初值取当前偏移
     AURORA_TEST_CHECK_NEAR(offset.get(), 0.0F, 1e-4F);
 
     grid.set_scroll_offset(100.0F);
@@ -447,8 +530,89 @@ AURORA_TEST_CASE(snap_properties_are_serialized) {
 
     // 吸附开关的可观测性：本控件以 set_snap 接线（builder 属运行时回调，from_json 不重建条目）。
     AURORA_TEST_CHECK_TRUE(src.snap().enabled(300.0F));
-    GridView off{9, 3, {}, 96.0F};
+    GridView const off{9, 3, {}, 96.0F};
     AURORA_TEST_CHECK_FALSE(off.snap().enabled(300.0F));
+}
+
+// ---- 应用内全局时间缩放：ScrollGlide 的 GridView 消费点（判据 9 / 10 / 11(b)）----
+
+// @brief 判据 9/10（GridView 行）：收位滑动的到位帧数按倍率折半、终值逐位不变（倍率只乘一层）。
+AURORA_TEST_CASE(grid_view_glide_frame_count_follows_time_scale) {
+    // 推导同 utest_scroll：帧步长 1/16 秒（二进制精确）、`ScrollGlide` 缺省 0.15 秒 ⇒ 1x/2x/4x = 3/2/1 帧。
+    // 首帧的裸步长是「锚点未置」时的 1/60 兜底值，与后续帧不等长会污染取整，故每档先喂一帧兑现它，
+    // 再在途重定向（`scroll_to` 的 `start` 归零 elapsed、保留锚点），计数段内每帧便恰为固定步长。
+    Animator anim;
+    const testing::ScopedCurrentAnimator current{anim};
+    GridView grid{30, 3, {}, 96.0F};  // 10 行 × 96 = 内容 960 / 视口 300 ⇒ 可滚 [0, 660]
+    LayoutEngine::layout(grid, bounded(300.0F, 300.0F));
+    AURORA_TEST_REQUIRE_EQ(grid.max_scroll_offset(), 660.0F);
+
+    // 同一棵树、同一目标，只换倍率：复位 → 起滑动 → 兑现兜底帧 → 重定向 → 计数到位帧。
+    auto frames_at = [&grid, &anim](double scale) -> int {
+        anim.set_time_scale(scale);
+        grid.scroll_to(300.0F, false);  // 即时复位（同时作废在途滑动）
+        AURORA_TEST_CHECK(grid.scroll_to(660.0F));
+        pump_scaled_frame(grid);
+        AURORA_TEST_CHECK(grid.scroll_to(660.0F));  // 在途重定向：elapsed 归零、锚点已就位
+        return pump_until_glide_ends(grid);
+    };
+
+    const int n_1x = frames_at(1.0);
+    const float end_1x = grid.scroll_offset();
+    const int n_2x = frames_at(2.0);
+    const float end_2x = grid.scroll_offset();
+    const int n_4x = frames_at(4.0);
+    const float end_4x = grid.scroll_offset();
+
+    AURORA_TEST_CHECK_EQ(n_1x, expected_glide_frames(1.0));
+    AURORA_TEST_CHECK_EQ(n_2x, expected_glide_frames(2.0));
+    AURORA_TEST_CHECK_EQ(n_4x, expected_glide_frames(4.0));
+    AURORA_TEST_CHECK_EQ(n_1x, 3);
+    // 判据 9：帧数恰为 1x 档的一半。双层缩放（倍率平方）会让 2x 档每帧吃 0.25 秒 ⇒ 一帧到位，
+    // 与这里的 2 帧冲突即转红——2x 档正是抓出「两层都乘」的那一档。
+    AURORA_TEST_CHECK_EQ(n_2x, (n_1x + 1) / 2);
+    AURORA_TEST_CHECK_EQ(n_4x, (n_1x + 3) / 4);
+    AURORA_TEST_CHECK(end_1x == end_2x && end_2x == end_4x);  // 只改步长、不改终值
+    AURORA_TEST_CHECK_FALSE(grid.is_gliding());
+    AURORA_TEST_CHECK_EQ(end_1x, 660.0F);  // 落位即夹取到的可滚末端
+
+    anim.set_time_scale(1.0);  // 倍率还原后行为与原先一致（判据 9 的无残留半句）
+    grid.scroll_to(300.0F, false);
+    AURORA_TEST_CHECK(grid.scroll_to(660.0F));
+    pump_scaled_frame(grid);
+    AURORA_TEST_CHECK(grid.scroll_to(660.0F));
+    AURORA_TEST_CHECK_EQ(pump_until_glide_ends(grid), n_1x);
+}
+
+// @brief 判据 11(b) + 8 的 0.0 档（GridView 行）：冻结段不推进、零重绘请求，解冻按剩余帧数续跑到同一终值。
+AURORA_TEST_CASE(grid_view_glide_freeze_holds_progress_and_emits_no_redraw) {
+    Animator anim;
+    const testing::ScopedCurrentAnimator current{anim};
+    GridView grid{30, 3, {}, 96.0F};  // 可滚 [0, 660]
+    LayoutEngine::layout(grid, bounded(300.0F, 300.0F));
+
+    AURORA_TEST_CHECK(grid.scroll_to(660.0F));
+    pump_scaled_frame(grid);  // 兑现首帧的 1/60 兜底步长
+    AURORA_TEST_CHECK(grid.scroll_to(660.0F));  // 在途重定向 ⇒ 其后每帧恰为 1/16 秒
+    pump_scaled_frame(grid);  // 推进一帧：elapsed = 1/16 秒
+    AURORA_TEST_REQUIRE_TRUE(grid.is_gliding());
+    const float frozen_from = grid.scroll_offset();
+
+    anim.set_time_scale(0.0);
+    AURORA_TEST_CHECK_EQ(anim.time_scale(), 0.0);
+    ScopedDirtyCounter const dirty{grid};
+    for (int i = 0; i < 8; ++i) {
+        pump_scaled_frame(grid);
+    }
+    AURORA_TEST_CHECK_EQ(grid.scroll_offset(), frozen_from);  // 冻结段一步都不挪
+    AURORA_TEST_CHECK_TRUE(grid.is_gliding());  // 在途标志按实现保留（不该被摘除）
+    AURORA_TEST_CHECK_EQ(dirty.count(), 0);  // 判据 11(b)：停着不动也不满帧唤醒（行窗口不重建）
+
+    anim.set_time_scale(1.0);  // 解冻重武装：进度不丢，剩余 2 帧（0.125 → 0.1875 越线）收位
+    AURORA_TEST_CHECK_EQ(pump_until_glide_ends(grid), 2);
+    AURORA_TEST_CHECK_GT(dirty.count(), 0);  // 对照：冻结段的 0 不是「回调没接线」
+    AURORA_TEST_CHECK_FALSE(grid.is_gliding());
+    AURORA_TEST_CHECK_EQ(grid.scroll_offset(), 660.0F);  // 与不冻结路径的终值逐位一致
 }
 
 }  // namespace aurora::test_cases::utest_grid_view

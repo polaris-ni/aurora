@@ -24,19 +24,14 @@ auto main() -> int {
     auto palette = std::make_shared<au::CommandPalette>();
     auto status = std::make_shared<au::Text>("No command executed yet.");
 
-    au::Node content = au::Column{
-        au::ColumnProps{
-            .children =
-                {
-                    GradientTitle{"Command Palette"},
-                    gap(12),
-                    au::Text{"Ctrl+K opens the palette; Ctrl+H / Ctrl+T run commands directly."},
-                    au::Text{"Type to filter, Up/Down to move, Enter to run, Esc to close."},
-                    gap(16),
-                    Card{au::Node{status}},
-                },
-        },
-    };
+    au::Node content = au::Column({
+        GradientTitle{"Command Palette"},
+        gap(12),
+        au::Text{"Ctrl+K opens the palette; Ctrl+H / Ctrl+T run commands directly."},
+        au::Text{"Type to filter, Up/Down to move, Enter to run, Esc to close."},
+        gap(16),
+        Card{au::Node{status}},
+    });
 
     // 面板铺满窗口（遮罩覆盖全屏）：栈 + Expand 让根按窗口约束撑开。
     auto stack = std::make_shared<au::Stack>(std::vector<au::Node>{std::move(content), au::Node{palette}});

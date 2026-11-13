@@ -1,7 +1,7 @@
 #pragma once
 
 /// @brief 引擎替身安装口。
-/// @file net/detail/engine_override.h
+/// @file engine_override.h
 ///
 /// **仅供测试设施使用，不占公共 API 预算。**存在理由：`Engine` 把「什么时候执行、什么时候到期」
 /// 藏进接口之后，而自带引擎的到期时刻由真实单调时钟决定——超时、取消、竞速交错这三类判据因此

@@ -1,7 +1,7 @@
 # 序列化、检查器与工具链（serialization / inspector / tooling / log）
 
 > 覆盖 `widget/serialization.h`、`widget/codegen.h`、`widget/yaml.h`、`widget/inspect.h`、`inspector/`、`core/log.h`、`core/json.h`（JSON 值容器，契约见 [`01-core.md`](01-core.md) §9）、`debug/`、仓库私有 `tests/support/test_helpers.h` 与 `tools/`。
-> 本文件是 UI 树线格式、差分补丁、代码生成、运行时检查、MCP / CLI / LSP 工具链与日志通道的**唯一权威**。
+> 本文件是 UI 树线格式、差分补丁、代码生成、运行时检查、MCP / CLI / LSP 工具链、日志通道与**运行时性能测量口径**的**唯一权威**；`manual-test/17-perf.md` 只保留人工执行记录，`tools/check/perf_gates.json` 只保留阈值，两者都不是口径来源。
 > `WidgetDescriptor` / `PropDescriptor` 结构见 [`04-widget.md`](04-widget.md) §2.1；`Result` 与 `Error` 见 [`01-core.md`](01-core.md) §3。
 
 ---
@@ -155,28 +155,28 @@ enum class CodeStyle : std::uint8_t { Fluent, StepByStep, DesignatedInit };   //
 
 | 枚举值 | 生成形态 |
 |:---|:---|
-| `Fluent`（默认） | 扁平容器 + `au::Type(au::TypeProps{ … })` 叶形式（多子容器直接罗列子项） |
-| `StepByStep` | `auto w = au::Type(au::TypeProps{}); w.prop = val;` 分步赋值形式 |
-| `DesignatedInit` | 统一 `au::Type(au::TypeProps{ .子节点槽, .prop = val })` 指定初始化器形式（仅 `*Props` 聚合支持） |
+| `Fluent`（默认） | 链式构造表达式：叶控件 `au::Type(au::TypeProps().set_key(值)…)`，子节点是构造首参的容器 `au::Column({子项}, au::ColumnProps()…)`，不在名单内的类型 `au::Type{子项}` / `au::Type{}` |
+| `StepByStep` | `auto w = au::Type{…}; w.set_key(值);`（或 `w.key = 值;`）分步赋值形式，唯一**完整**承载全部落点的风格 |
+| `DesignatedInit` | **`Fluent` 的逐字节别名**，不另开发射路径。指定初始化器要求 `*Props` 的公有同名成员，而属性迁到链式形态后 18 型字段一律私有（`au::ButtonProps{ .label = "OK" }` 编译红）、其余 58 型不在发射名单内（属性按能力边界省略，见下表）—— 没有一条产物再发设计符。枚值保留只为 CLI `--style di` / MCP / Inspector 的 `style=2` 不破约，`itest_to_code` 逐字节钉住两风格同产物 |
 
-**风格能力表**（三种风格共享同一条属性发射管线，差别只在「能否承载某一类落点」）：
+**风格能力表**（`Fluent` 与 `DesignatedInit` 是同一条构造表达式管线的两个名字，`StepByStep` 另走语句管线；差别只在「能否承载某一类落点」）：
 
 | 属性类别 | Fluent / DesignatedInit | StepByStep |
 |:---|:---|:---|
-| `*Props` 聚合的顶层同名成员（16 个公开继承的类型） | ✅ 进指定初始化器 | ✅ `w.key = 值` |
-| 基类属性（`width`/`height`/`show`/非 Text 的 `overflow`/a11y 三键） | ❌ 聚合无同名成员，一律省略 | ✅ 链式 setter / 公有成员 / `set_*()` |
-| 嵌套路径（`font.size_pt`、`flex.main_axis`） | ❌ GCC 的 C++ 指定初始化器不支持嵌套设计符 | ✅ `w.font.size_pt = 14.0f;` |
-| setter-only 落点（`TextInput` 样式组、`Stack.fit`、`TitleBar.height`…） | ❌ protected 字段不能在类外赋值 | ✅ `w.set_corner_radius(4.0f);` |
-| 改名成员（`Text` 的 `color` → `text_color`） | ✅ 按登记的落点发射 | ✅ 同左 |
+| 链式形态 `*Props` 的自有属性（`props_chain_writers` 的 18 型，字段私有、公共面只有 `set_<键>`） | ✅ 发 `au::Type(au::TypeProps().set_key(值)…)`；子节点是构造首参的容器发 `au::Column({子项}, au::ColumnProps()…)` | ✅ `w.set_key(值)` |
+| 不在链式写件名单内的类型（其余 58 型）的自有属性 | ❌ 没有能装入属性的构造入口，只发 `au::T{}` / `au::T{子项}`（臆造 `au::StackProps` 会编译失败） | ❌ 字段是 protected + 访问器，同名赋值编译不过，故**未登记落点的键一律省略并告警** |
+| 基类属性（`width`/`height`/`show`/非 Text 的 `overflow`/a11y 三键） | ❌ 不是 `*Props` 成员，构造表达式无从安放，一律省略 | ✅ 链式 setter / 公有成员 / `set_*()` |
+| 嵌套成员路径（成员为结构体、需逐子键写入的落点） | ❌ 构造表达式承载不了「逐子键写入」这件事 | ✅ `w.成员.子键 = 值;` |
+| setter-only 落点（`Stack.fit`、`Skeleton` 的色 / 高亮 / 时长三键、`TitleBar` 的四键…） | ❌ 落点所属类型都在 18 型之外，表达式片段里没有这种调用 | ✅ `w.set_duration(1.5);` |
 
 ### 2.5.1 发射管线：一切落点须可核对
 
 `emit_props` 的每个键都要先经 **「类型自描述 + 落点登记表」** 换算成真实写入路径，才决定发射还是省略：
 
-1. **取值形态分派**（`emit_prop_value`）：`bool` / `int` / `float` / `double` / `string` / `LocalizedString`（字符串形态命中 string 分支）/ `Color`（`[r,g,b,a]`）/ `Length`（`["px",N]`、`["percent",N]`、`{"value","unit"}` 旧格式、`"auto"`/`"fill"`，以及 schema `props` 表 `default` 里那种**裸数字**——按 px 语义包成 `au::px(N)`，因为 `Length` 不可由 `float` 隐式转换）/ `EdgeInsets` / 枚举（含 `font_weight`、`text_decoration` 专用分支）。产物一律 `au::` 限定，使代码在任意命名空间可编译。
+1. **取值形态分派**（`emit_prop_value`）：`bool` / `int` / `float` / `double` / `string` / `LocalizedString`（字符串形态命中 string 分支）/ `Color`（`[r,g,b,a]`）/ `Length`（`["px",N]`、`["percent",N]`、`{"value","unit"}` 旧格式、`"auto"`/`"fill"`，以及 schema `props` 表 `default` 里那种**裸数字**——按 px 语义包成 `au::px(N)`，因为 `Length` 不可由 `float` 隐式转换）/ `EdgeInsets` / 枚举（含 `font_weight`、`text_decoration` 专用分支）。产物一律 `au::` 限定，使代码在任意命名空间可编译；控件类不在 `aurora` 直属时（在册 76 型只有 `WebView`，真身 `aurora::webview::WebView`），`au::` 之后还要带同一段子命名空间，类名、`*Props` 聚合名与自描述给出的枚举名共用这一枚前缀（`cpp_namespace`）—— 漏掉任一处都不是「少发一条属性」，而是产出一个不存在的名字。
 2. **枚举还原优先走自描述**（`descriptor_enum_expression`）：`props[].type` 给 C++ 枚举类型名、`props[].enum` 给合法取值名，取值按列表**忽略大小写规范化**（`"center"` → `au::TextAlign::Center`）。这消掉了旧登记表的两类错误：同名键跨类型的歧义（`fit`/`orientation`）与大小写不符声明的取值（`au::Orientation::horizontal`）。列表里没有该取值时保留原样输出，交由产物编译体检暴露。取值名不是合法标识符时（`FontWeight` 的 `"400"`，落点 `Font::weight` 本就是 int）不拼枚举项名。自描述未给取值集的类型仍回落 `enum_type_for_key` 键名登记表。
-3. **声明序**：指定初始化器必须按 `*Props` 的成员**声明序**书写（乱序 GCC 直接报 `designator order … does not match declaration order`），而快照 JSON 的键是字典序，故发射前按 `props` 表的数组下标（即声明序）稳定排序；子节点槽排最前。StepByStep 无此约束，但沿用同一顺序便于两风格逐行对照。
-4. **落点换算**：`prop_target` 登记表给出「键 → 成员路径 / 嵌套路径 / setter 名」，未登记时默认为同名成员；基类键走 `base_target`。`no_write_path` 显式登记「确认无写入通道」的键（`Scroll.offset`/`LazyRow.offset` 是运行态、`Image.image_width`/`image_height` 是解码派生值、`Skeleton.width`/`height` 需成对的 `set_size()`），`is_base_key` 则处理**同名遮蔽**：`Text` 的 `overflow`、`Skeleton` 的 `width`/`height`、`TitleBar` 的 `height` 都是控件自己的键（`serialize_props` 覆写了基类写入），不得按基类 `Length`/`OverflowStrategy` 发射。
+3. **表序**：链式写件续在同一个 `TProps()` 之后，形态本身**没有**顺序约束（曾有的是指定初始化器的「乱序 GCC 直接报 `designator order … does not match declaration order`」，该判据随指定初始化器一并退出）。发射前仍按 `props` 表的数组下标（即权威表的点名序）稳定排序，为的是产物与 schema、描述符逐行可对照 —— 快照 JSON 的键是字典序，不排就会漂。StepByStep 的语句序无约束，沿用同一顺序便于两风格逐行对照。
+4. **落点换算**：链式形态的 18 型不进登记表 —— 词根与序列化键同名，落点直接由键名推出 `set_<键>`（这是读面词根规则在发射侧的兑现）。其余键查 `prop_target` 登记表得「成员路径 / 嵌套路径 / setter 名」，基类键走 `base_target`。**表外键的查表默认（同名直接赋值）只是回退值**，两条发射路径都在取落点之前把它滤掉（表达式问 `expressible`、语句问 `statement_assignable`），所以当前没有产物走到赋值那一支；它保留是给「登记表新增一档落点」留的默认，不是「同名公有成员可直写」的承诺。`no_write_path` 显式登记「确认无写入通道」的键（`Scroll.offset`/`LazyRow.offset` 是运行态、`Image.image_width`/`image_height` 是解码派生值、`Skeleton.width`/`height` 需成对的 `set_size()`），`is_base_key` 则处理**同名遮蔽**：`Text` 的 `overflow`、`Skeleton` 的 `width`/`height`、`TitleBar` 的 `height` 都是控件自己的键（`serialize_props` 覆写了基类写入），不得按基类 `Length`/`OverflowStrategy` 发射。
 
 ### 2.5.2 能力边界：宁缺不伪
 
@@ -184,12 +184,22 @@ enum class CodeStyle : std::uint8_t { Fluent, StepByStep, DesignatedInit };   //
 
 - **类型没有通用构造入口**（`is_bespoke_ctor`，21 项）：位置参数构造（`Badge(count, child)`、`Drawer(content, panel, side, width)`、`Splitter`、`TabBar`、`PageView`、`Show`、`Timer`、`VideoPlayer`…）、类模板需实参（`Provider`/`Repeater`/`ReorderableList` 及其三个 `*Provider` 别名）、不在 `aurora` 命名空间下（`BreakpointBuilder`）、或子项本就惰性构建（`LazyRow`，`children_policy = "virtual"`）。对它们只生成空构造，**告警丢弃子节点**——硬编位置参数实参等于臆造 API。
 - **连空构造都不存在**（`is_unconstructible`，8 项：`BreakpointBuilder`/`Hero`/`LocaleProvider`/`MediaQueryProvider`/`Provider`/`ReorderableList`/`Repeater`/`ThemeProvider`）：产物按真实类型名发射 `au::T{}` 并告警点名「须手工补构造实参」，不改写成别的控件（替换比报错更难发现）。
-- **字段为 protected 且未登记 setter** 的类型（`Slider`/`Checkbox`/`Chip`/`Popup`…）：StepByStep 省略该属性并告警。全量类型体检（73 类型 × 550 条默认属性）中，StepByStep 发射 342 条、告警省略 208 条；把 208 条补齐需要逐类型登记真实 setter，属可选增强，不影响产物可编译性。
+- **字段为 protected 且未登记 setter** 的类型（`Slider`/`Checkbox`/`Chip`/`Popup`…）：StepByStep 省略该属性并告警。全量类型体检（73 类型 × 550 条默认属性，**属性面批量迁移前的读数，本批未重跑**）中，StepByStep 发射 342 条、告警省略 208 条；把 208 条补齐需要逐类型登记真实 setter，属可选增强，不影响产物可编译性。
 - **取值形态无法还原**（如枚举属性给了数字、或命中 `Image`/`FlexWeight`/`Flex`/`Json` 这 4 类无专用分支的形态）：告警省略，不再静默。
 
-多子扁平容器（`Column` / `Row` / `Stack` / `Grid` / `Scroll` / `Card`）走免 `Props` 包裹的罗列形式。
+表达式风格的构造形由 `emit_node` 决定，**每条分支都必须是可编译的真实构造**（在册 76 型的实测落点见末列）：
 
-**产物可编译性的验证口径**：`tests/integration/itest_to_code.cpp`（26 例）锁形态；「73 类型 × 3 风格」全量矩阵与真实 UI 树 fixture（`tests/fixtures/ai_compat/`）逐条 `g++ -fsyntax-only` 体检锁可编译性——当前矩阵为 fluent 65/73、di 65/73、step 65/73，缺的 8 项恰是上述 `is_unconstructible` 名单；真实 fixture 的 11 棵树 × 3 风格产物 33/33 全通过。矩阵须按**每类型一座独立 TU**编译：把 73 份产物拼进单座大 TU（省时但）会被 GCC 的级联报错污染——一处失败即波及后续命名空间，实测把 65/73 误报成 50/73、18/73，归属不可信。
+| 分支 | 判据 | 发射形态 | 落点 |
+|:---|:---|:---|---:|
+| 1 | 不在链式写件名单内（`!props_chain_writers`，即无聚合的 58 型） | `au::T{}` / `au::T{ 子项 }` | 58 型 |
+| 2 | 有链式写件、本节点无子节点 | `au::T(au::TProps().set_x(…))` | 13 型 |
+| 3 | 子节点是构造首参的容器（`kids_first_ctor`：`Column`/`Row`/`Grid`） | `au::T({ 子项 }, au::TProps().set_x(…))`，无属性时免 `Props` 形参 | 3 型 |
+| 3b | 子节点是构造首参的单子容器（`single_child_first_ctor`：`Scroll`/`PullToRefresh`） | `au::T(子节点, au::TProps().set_x(…))`，无属性时 `au::T(子节点)` | 2 型 |
+| 4 | 有子节点却两者皆非 | 告警丢弃子节点，只发 `au::T(au::TProps()…)` | 0 型 |
+
+本表曾有第六条「免 `Props` 包裹的多子扁平容器」（判据 `is_flat_container`，名单 `Column`/`Row`/`Stack`/`Grid`/`Scroll`/`Card`）与第七条「`*Props` 里仍带 `.children` 成员的聚合容器」兜底发射 `.children = { 子项 }`。两档现都已删除：前者的六型里四型改走 3/3b、`Stack` 走 1、`Card` 在库里根本没有这个类型；后者的产物在字段私有化之后编译红。分支 4 因此是**给「新增容器却忘了登记构造槽」预留的守卫**，不是当前任何一种控件的形态。
+
+**产物可编译性的验证口径**：`tests/integration/itest_to_code.cpp`（30 例）锁形态，其中「DesignatedInit 与 Fluent 逐字节相同」「子节点槽守卫产物仍可编译」两例钉住本节上面的别名裁决与分支 4，「带子命名空间的类型落在自己的子命名空间里」一例钉住 `cpp_namespace` 的三处拼名。另有全量「类型 × 3 风格」产物逐条 `g++ -fsyntax-only` 体检与真实 UI 树 fixture（`tests/fixtures/ai_compat/`）锁可编译性 —— **该矩阵的名单与读数取自属性面批量迁移之前（73 型 × 3 风格：fluent 65/73、di 65/73、step 65/73，缺的 8 项恰是 `is_unconstructible` 名单；fixture 11 棵树 × 3 风格产物 33/33 全通过），本批未重跑**，schema 现为 76 型，故三个数字都是过期读数，只作方法留档；迁移后 `di` 档与 `fluent` 档由同一条发射路径产出，逐字节相同属构造上的事实（由 `itest_to_code` 的样本断言背书），不是重跑矩阵的实测。矩阵须按**每类型一座独立 TU**编译：把全部产物拼进单座大 TU（省时但）会被 GCC 的级联报错污染——一处失败即波及后续命名空间，实测把 65/73 误报成 50/73、18/73，归属不可信。
 
 ```cpp
 std::string code = au::serialization::to_code(json, au::serialization::CodeStyle::Fluent);
@@ -326,7 +336,7 @@ server.stop();        // 停止并 join 工作线程
 | POST | `/api/patch` | **最小属性补丁**：请求体为 JSON **数组**，每项 `{path, value}`，`path` 形如 `/1/content`（最后一段是属性名，其余为索引路径，根为空）。一次请求批量回写，交由 `Inspector::apply_patch`；非数组返回 400，属性写失败返回 400 并带原因。**只覆盖属性**，结构性增删无法表达（见 `trees_differ_structurally`） |
 | GET | `/api/components` | 全部已注册组件 schema 列表 |
 | GET | `/api/yaml` | 当前 widget 树的 YAML 格式字符串 |
-| POST | `/api/to_code` | UI 树 → C++ 代码。请求体可含 `style` 参数：`0`=Fluent、`1`=StepByStep、`2`=DesignatedInit；`style` 存在但非整数返回 400，越界整数回退 Fluent |
+| POST | `/api/to_code` | UI 树 → C++ 代码。请求体可含 `style` 参数：`0`=Fluent、`1`=StepByStep、`2`=DesignatedInit（`0` 的别名，产物逐字节相同，见 §2.5）；`style` 存在但非整数返回 400，越界整数回退 Fluent |
 | POST | `/api/input/{click\|scroll\|drag\|text\|pointer}` | 交互模拟：以 `path` 命中的控件为派发根与坐标原点合成事件，经 `EventDispatcher` 走真实命中测试 + 冒泡派发。请求体须为对象且 `path` 为字符串（空串=树根）；`scroll`/`drag` 另取数值 `dx`/`dy`（缺省 0；drag 为目标中心起算的拖拽位移），`text` 另取字符串 `text`，`pointer` 另取字符串 `phase`（`press`\|`move`\|`release`，必填）与可选数值 `x`/`y`（控件本地 dp，缺省为该控件中心）——单步派发一个指针动作，供调用方自行合成跨子区域的连续拖拽。前四种为**目标式**（指针取控件中心），`pointer` 为**坐标式**。经主线程 marshal 执行，成功返回 `{status:"ok", action, widget_path}`；路径不存在 404、目标存在但不可派发 400、字段类型不符 400、方法非 POST 405 |
 | GET | `/api/find` | 按 key/type/text 定位控件：`?key=<Node::set_id 标识>&type=<type_name>&text=<文本>`，至少给一个参数（否则 400），多参数 AND。返回 `{matches:[{path, type, id}], count}`——`path` 为索引路径（根为空串），与 `/api/widget/{path}`、`/api/input/*` 同口径，可直接喂给寻址端点；`text` 比对文本类属性启发式（`content\|text\|label\|value\|hint\|placeholder`，与 `TestController::find_by_text` 同源）。遍历走 `child_nodes()` 原存储 const 引用（不构造 `Node` 副本，活树安全）；虚拟化容器（不覆写 `child_nodes()`）的子树不可见（与 `find_node_by_path` 同限：宁可少报、不可错报）。零命中回 200 + 空 `matches`（非错误，由调用方裁决）；方法非 GET 回 405。query 值一律先按 RFC 3986 百分号解码再比对（`%20` → 空格、UTF-8 字节序列 → 中文标签，`+` 保持字面量），故含空格/非 ASCII 的 `label` 可直接经 URL 编码定位；畸形百分号（`%zz`、尾部孤立 `%`）按字面量保留，不升级成错误响应 |
 | GET | `/api/network` | 进程级网络活动快照（`InspectorJson` 面呈现、最新在前）。查询参数：`limit`（0 = 全部，非负整数）、`host`（精确、ASCII 大小写不敏感、空串 400）、`status`（整数 0..65535）；**先过滤再取 `limit`**，`limit` 不影响 `dropped` / `truncated`。非法参数 400；返回 `{available, count, dropped, truncated, entries}`；Release 回 `{available:false, reason:"AURORA_ENABLE_DEBUG not enabled"}`（200） |
@@ -336,7 +346,7 @@ server.stop();        // 停止并 join 工作线程
 
 ### 5.2 调试端点
 
-以下端点需先 `set_surface_getter`（除纯 JSON 状态类外）；所有 Surface / 树 / 全局状态读取经**主线程 marshal**（`marshal_get<T>` 复用 `aurora::detail::main_poster`，无事件循环时直接执行）后返回，与 `Surface` 的 main-thread-only 约束一致。
+以下端点需先 `set_surface_getter`（除纯 JSON 状态类外）；所有 Surface / 树 / 全局状态读取经**主线程 marshal**（`marshal_opt` / `marshal_json` 经进程级唯一队列 `MainQueue::try_post` 入队、阻塞等待值班循环执行）后返回，与 `Surface` 的 main-thread-only 约束一致。**无在岗循环时 `try_post` 拒入队、端点回 HTTP 503**（不做跨线程直读，也不静默就地执行）。
 
 | 方法 | 路径 | 返回 | 说明 |
 |:---|:---|:---|:---|
@@ -495,7 +505,7 @@ aurora_cli validate <tree.json>               # 校验 UI 树 JSON，输出诊�
 aurora_cli snapshot <tree.json> [-w W] [-h H] # 输出逻辑快照 JSON
 aurora_cli render <tree.json> [-w W] [-h H] [-o out.png]  # 离屏渲染为 PNG
 aurora_cli preview <tree.json> [-w W] [-h H]  # 快速预览 UI（启动临时窗口；无显示后端回退无头渲染一帧退出）
-aurora_cli to-code <tree.json> [--style fluent|step|di]   # UI 树 → C++ 代码
+aurora_cli to-code <tree.json> [--style fluent|step|di]   # UI 树 → C++ 代码（di 是 fluent 的逐字节别名，见 §2.5）
 aurora_cli to-yaml <tree.json>                            # UI 树 → YAML 格式
 aurora_cli schema                             # 输出运行时重建的 API 骨架（非仓库内 aurora_api.json）
 aurora_cli --help    (-h 仅根层)               # 显示用法帮助（每一层都可用，如 `render --help`）
@@ -508,19 +518,21 @@ aurora_cli --version (-V)                      # 显示版本号
 
 ### 7.3 LSP（`aurora_lsp`）
 
-stdio JSON-RPC 2.0 语言服务，对 `au::<Type>Props{ .prop = ... }` 等声明式写法提供 completion / hover / diagnostics / codeAction 四件套。
+stdio JSON-RPC 2.0 语言服务，对 `au::<Type>(au::<Type>Props().set_<key>(...))` 这类链式声明式写法提供 completion / hover / diagnostics / codeAction 四件套。
 
 | LSP 方法 | 说明 |
 |:---|:---|
 | `initialize` / `initialized` / `shutdown` / `exit` | 生命周期 |
 | `textDocument/didOpen` · `didChange` · `didClose` | 文档同步；`didOpen` / `didChange` 后发布 `textDocument/publishDiagnostics` |
-| `textDocument/completion` | `au::` 后补类型 / 枚举；`XxxProps{` 内 `.` 后补属性（显示默认值 / 必填 / 文档）；枚举属性 `=` 后补枚举值 |
-| `textDocument/hover` | `au::Type` 组件概要（属性数 / 事件 / 示例）；`.prop` 类型 / 默认值 / 必填 / 文档 |
-| `textDocument/codeAction` | 为缺失必填属性生成「补全缺失必填属性」快速修复（在 `}` 前插入 `.prop = <default>`） |
+| `textDocument/completion` | `au::` 后补类型 / 枚举；`XxxProps()` 链的 `.` 后补 `set_<key>()` 写件（显示默认值 / 必填 / 文档；匹配同时接受裸键与写件名，输入 `lab` 也能命中 `set_label`）；枚举属性的写件实参内补枚举值 |
+| `textDocument/hover` | `au::Type` 组件概要（属性数 / 事件 / 示例）；`set_<key>` 的类型 / 默认值 / 必填 / 文档 |
+| `textDocument/codeAction` | 为缺失必填属性生成「补全缺失必填属性」快速修复（在链尾插入 `.set_<key>(<default>)`）；为花括号属性块生成整块改写为链式的迁移修复（该类型没有 `Props` 聚合时不提供改写） |
 
-`publishDiagnostics` 报告：未知组件类型、未知属性、非法枚举值、缺失必填属性（warning）。
+`publishDiagnostics` 报告：未知组件类型、未知属性写件、非法枚举值、缺失必填属性（warning，只对闭合的构造实参报）、花括号属性块（error，一个块一条而不是逐键一条）。
 
 **schema 来源**：库 live API（`describe_component` + `known_enums`），**不读取 `aurora_api.json` 文件**，始终与代码同步。
+
+**能力位来源**：链式名单、基类键分流与属性写件落点同源取 `include/aurora/widget/codegen.h` 的 `props_chain_writers` / `is_base_key` / `expressible` / `prop_target` / `cpp_class` / `cpp_props`，经唯一链接库的桥 `tools/include/lsp_live_schema.h` 取用（其上是三层不依赖库的 `lsp_schema.h` / `lsp_document.h` / `lsp_features.h`）。补全插出的写件名与代码生成器发射的落点因此是同一枚字符串，两份名单手抄必然漂移，而漂移的表现是「补出来的代码编译不过」。
 
 ### 7.4 工具可执行与自定义目标
 
@@ -541,6 +553,8 @@ stdio JSON-RPC 2.0 语言服务，对 `au::<Type>Props{ .prop = ... }` 等声明
 | `bench_scroll` | `tools/bench/bench_scroll.cpp` | 滚动基准（确定性滚动序列；`app` 场景为自包含应用形态负载，`synthetic` 为对照组，`lazy` / `grid` 为隔离场景） |
 | `bench_win32_present` | `tools/bench/bench_win32_present.cpp` | Win32 上屏诊断基准（无 Win32 后端时跳过） |
 | `bench_idle_cpu` | `tools/bench/bench_idle_cpu.cpp` | 空闲 CPU 基准（无 Win32 后端时跳过） |
+| `bench_theme` | `tools/bench/bench_theme.cpp` | 主题读面基准（Headless 下才可运行；同一棵树跑「整值拷贝 / 按引用 / 不读」三形态 × 字体族名三档——小串内的 Material 基线档、注入的越界长族名档、以及缺省配置下窗口每帧注入的本机平台族名档，输出一帧内主题解析次数、每次解析的堆分配与纳秒、换肤一帧耗时；非 CTest 断言） |
+| `bench_gpu` | `tools/bench/bench_gpu.cpp` | GPU 离屏基准（CPU 对照两形态恒在；wgpu 后端编入时追加四形态，未编入如实标注跳过，非 CTest 断言） |
 
 **自定义目标**
 
@@ -549,9 +563,15 @@ stdio JSON-RPC 2.0 语言服务，对 `au::<Type>Props{ .prop = ... }` 等声明
 | `generate_error_codes` | 触发 `gen_error_codes` 重跑（errors.toml 变更时）。产物先落 `<build>/_gen_error_codes_stage/`，经 clang-format（配置以 `file:<仓库根绝对路径>` 钉死，口径见 `BUILD_OPTIONS.md` §4.7）折行后 `copy_if_different` 回源码树；生成器四个路径参数一律必需，缺省即拒绝执行，以免绕过折行步骤直写版控文件 |
 | `aurora_api_json` | 运行 `gen_api_tools` 直写 `aurora_api.json`，随后 `gen_debug_api` 再合并 `debug` 段（单跑即得完整文件） |
 | `gen_debug_api_json` | 仅刷新 `aurora_api.json` 的 `debug` 段 |
-| `perf_gates` | 本机时间类门槛校验（`tools/check/check_perf_gates.ps1`，仅 Windows，不进 CI） |
+| `perf_gates` | 本机时间类门槛**趋势对照**（`tools/check/check_perf_gates.ps1`，仅 Windows，不进 CI）。判定口径：计入项**取不到读数即失败**（显示 `FAIL(no data)`、退出码 1），只作信息项的 G-9~G-11 未给 PROFILING 构建时记 `n/a` 且不计入；`bench_scroll` 的读数按 CSV **表头列名**定位（历史上写死下标取到的是 p95，门槛被放松一个百分位）。空表一律不判通过。独立进程三次取最小值只作趋势对照，**不是统计判定来源**；统计判定由本节的夜间同机交错对照承担 |
 
 > AI 兼容性批量验证**不是** cmake 目标，而是 CTest 集成用例 `itest_ai_compat`（`tests/integration/itest_ai_compat.cpp`）：遍历 `tests/fixtures/ai_compat/` 下的 JSON fixture，无 LLM 调用；`valid_*` 期望通过、`error_*` 期望报错、`interact_*` 为「静态树 → TestController 交互 → 状态断言」回归脚本（`itest_ai_compat.cpp` 中段消费）。运行：`ctest -R itest_ai_compat`。
+
+**运行时性能测量与持续看护（权威口径）**：六个基准工具每次运行都落盘一份结构化结果文件（契约在 `tools/include/bench_result.h`，编解码复用 `include/aurora/core/json.h`），字段含契约版本、运行元数据（提交、构建指纹、编译器、构建类型、后端、测试环境、场景、重复序号与交错种子）、读数段与可信度结论；原有标准输出一字不变。采样不可信、后端不可用或场景跳过时仍落盘带原因码的结果，判数据缺失而非通过。结果默认写在 `bench-results/`，可由 `AURORA_BENCH_RESULT_DIR` 改向。
+
+阈值与读数是两类数据：`tools/check/perf_gates.json` 仍是 G-1 至 G-14 的唯一阈值登记册，本机 `tools/check/check_perf_gates.ps1` 与 `tests/unit/utest_scroll.cpp` 两个读取方及三次取最小值口径都不变；`tools/check/perf_baselines.json` 才是入库的跨提交趋势读数，按测试环境、构建口径、后端与场景分桶，只允许由显式写入动作更新。`tools/check/bench_compare.py` 是零依赖统计判定载体：同一份代码两臂同码对照标定噪声预算，每臂有效重复不少于九次，交错顺序由显式种子决定，相对变化同时超过噪声预算与最小可检出变化后经双样本秩检验与多重比较校正给出「通过 / 回归 / 噪声不足 / 数据缺失」四种结论；小样本无并列值走精确秩分布、否则走带并列与连续性校正的正态近似，因为正态近似在九对九完全分离时给出的 p 值经数百指标同族校正后不再显著，判定会恒为通过；入库基线只作趋势，同次双构建交错对照才作回归判定，任一侧缺失即判数据缺失，不回退静态阈值。九次重复的分辨率有限：同族校正后只有近乎完全分离的差异才会被判红，因此回归告警不等于「没有退化」。
+
+`tools/check/bench_nightly.py` 驱动 `.github/workflows/nightly-bench.yml` 的独立夜间作业：同一运行器内构建父提交与当前提交两套产物，先跑同码标定再跑交错对照，机器可读报告与作业摘要上传为产物；跳过或不可信读数单独列为覆盖缺口，不混入有效读数。该作业不进持续集成测试注册、不进 `tools/check/declared_gates.txt` 现役声明清单，时间类超阈值只产生告警，不改变拉取请求状态与既有作业通过失败语义；计数类确定性判据仍由既有单元测试硬红守护。量化需求见 `SPEC.PERF.RUNTIME.FRAME-BUDGET.001`，运行配方见 `GUIDELINE.md` §14，下游恒开帧监控门面见 `include/aurora/perf/frame_monitor.h`。
 
 #### 7.4.1 空闲 / 叠加层刷新实测基线与复现
 
@@ -608,7 +628,7 @@ stdio JSON-RPC 2.0 语言服务，对 `au::<Type>Props{ .prop = ... }` 等声明
 4. 结束进程后读回输出文件：统计 `idle` 计数的逐秒增量与 `(stale)` 出现的行数。
 5. 确认该载具进程已退出，避免占用目标导致下一次重编报占用错误。
 
-> 上述数字为单次实测（Windows / Win32 软件后端），与机型、构建配置强相关；引用时必须连同口径一起复述。**尚未纳入 CI 门禁**：时间类门槛历史上只作本地趋势对照（见 `tools/check/perf_gates.json` 的 `source` 字段），若要新增门槛，需先固定载具、采样窗口与判定阈值。另：叠加层空闲场景的自动覆盖由 `tests/integration/itest_perf_overlay_refresh.cpp` 承担（原人工用例 TC-PERF-008 随载具退役移除）。
+> 上述数字为单次实测（Windows / Win32 软件后端），与机型、构建配置强相关；引用时必须连同口径一起复述，**不得作为跨机器绝对阈值**。时间类门槛的权威判定已收口到本节的统一结果契约与夜间同机交错对照：本机 `perf_gates` 保留为趋势对照入口，阈值仍以 `tools/check/perf_gates.json` 为唯一登记册，两个既有读取方不动。另：叠加层空闲场景的自动覆盖由 `tests/integration/itest_perf_overlay_refresh.cpp` 承担（原人工用例 TC-PERF-008 随载具退役移除）。
 
 ### 7.4.2 构建期词表生成（`gen_i18n`）与 golden 门禁
 
@@ -651,6 +671,16 @@ gen_i18n --emit-builtin <out.hpp> <builtin.json>
 
 > 与 C++ 侧的分工：`tests/integration/itest_i18n_pipeline.cpp` 验「生成件能被 `MessageCatalog` 正确载入并解析」，本门禁验「生成件本身没漂移」。两条都要跑，缺一条就是半边失控。
 
+### 7.4.3 现役门禁声明的注册核对（`check_declared_gates`）
+
+文档与 CI 注释把某个 CTest 名写成「逐位比对、一票否决」时，此前没有任何门禁核对这个名字是不是真的注册过。`cmake/AuroraTests.cmake` 按 `tests/*.cpp` 的文件 stem GLOB 注册，源文件不存在即零验证；`check_codespec_xref` 的 R4 只校验带扩展名且含路径分隔符的反引号 token（裸名当符号提及跳过），`check_test_registry.py` 比对的是 runner 用例表与源码宏、完全不读文档。于是「声明为现役」到「CTest 真实注册」之间是空的。
+
+**门禁 `check_declared_gates`**（`tools/check/check_declared_gates.py <build-dir>`）以本构建目录的 `CTestTestfile.cmake`（含 `subdirs()` 递归）为注册真值，逐项核对 `tools/check/declared_gates.txt` 里**显式审定**的现役声明名；分片 runner 注册的 `<stem>_s<N>` 亦算 `<stem>` 命中。四类硬失败：清单解析为空、注册集合解析为空、任一声明名未注册、同一名字同时进清单与豁免表。`tools/check/declared_gates_exemptions.txt` 逐条写明命名示例 / 历史退场 / 提案待建 / 正则误抓的理由；豁免名哪天真的注册了只打印清理提示、不判红。
+
+> 为什么不做「扫文档裸名自动判」：全量审计 21 个未注册名里只有 1 个是真幽灵，其余 20 个是命名示例、已随源退场的历史引用、提案里的待建名与 `check_color` 一类属性名，自动判误报率过高。生成器依赖型门禁（`check_api_schema_sync` 等）在 Emscripten 交叉构建下按 `AuroraTests.cmake` 的口径不注册，故**不进声明清单**，否则会把本来绿的交叉构建判红。
+
+配套实物 `tests/unit/utest_simd_parity.cpp` 直接包含 `painter_simd.inl` 拿同源内联定义，对五组「标量黄金 ↔ SSE2 ↔ AVX2」三元组以同一份确定性输入逐字节比对，扫描线两组按 SIMD 返回值裁剪向量段、再按生产分发形态用标量补齐尾部后比整行；`AURORA_ENABLE_SIMD=OFF` 或非 x86 档五例在**用例体内** `AURORA_TEST_SKIP`，声明不被 `#ifdef` 摘掉，`registry_integrity` 不漂移。
+
 ### 7.5 真机验收探针（`tools/verify/`）
 探针证明的是**无头 CI 无法证明**的平台接线：单元测试只能断言到「平台中立层」（快照 / diff / 偏移映射 / 动作路由），而「平台回调是否真的到达、平台侧对象是否真的可查」只能建真实窗口、在真实桌面会话里验收。全部由 `cmake/AuroraVerify.cmake` 定义、`AURORA_BUILD_VERIFY_TOOLS` 门控、**不进 CTest**（会创建真实窗口 / 读取屏幕状态，非确定且干扰用户桌面）。
 
@@ -660,12 +690,20 @@ gen_i18n --emit-builtin <out.hpp> <builtin.json>
 | `aurora_verify_wayland_cursor` | `WaylandSurface::set_cursor` 是否真的把该形状的光标位图**提交给了合成器**（客户端主题光标三步：`wl_cursor_theme_load` → cursor `wl_surface` attach 主题自有 `wl_buffer` → `wl_pointer_set_cursor`） | **本端提交事实读回**（`WaylandSurface::cursor_state()`：主题命中名 / 位图尺寸 / 热点 / `wl_buffer` 身份 / 提交次数）——Wayland 协议**没有**客户端可达的「屏幕当前光标」查询，故「合成器画出来了」由 `--interactive` 人工目视段负责；实测（WSLg Weston + Adwaita）自动段 9 条 `[PASS]`：11/11 形状命中名逐字等于 `cursor_rfc_name`、位图均 24x24、11 个互异 `wl_buffer`、`wait` 动画 60 帧取首帧、同形状重复下发幂等（14→14） |
 | `aurora_verify_win32_ua` | Win32 UIA 无障碍桥与 Windows 的接缝：根对象能否应答、语义树能否 `Navigate`、必需属性是否有值、各 pattern 能否 QueryInterface 到 | **COM UIA 客户端**（`CUIAutomation8`，与 NVDA / Narrator 同路径）`ElementFromHandle` 取根 → 控件视图遍历器先序下钻 → 逐节点读属性与 pattern 并与期望表比对；`FrameworkId == "Aurora"` 区分桥投影元素与 UIA 默认 HWND provider 合成的非客户区 |
 | `aurora_verify_atspi` | Linux AT-SPI2 桥与真实 a11y 总线的接缝：`Socket.Embed` 握手、树可见性、状态集 / 动作 / 几何 / 文本读回、`DoAction` 回灌宿主（`on_click` 真实执行）、**事件推送段**（客户端注册 7 类精确事件监听，父进程按时间表做声明式变更：标题/输入值/ReorderableList 收缩再增长/播报，断言 `focus:`、`state-changed:focused`、`property-change:accessible-{value,name}`、`children-changed:{add,remove}`、`announcement` 全部被动收到） | **libatspi 客户端**（探针内起 `python3-gi` 子进程，与 Orca 同路径）从桌面树按 app/frame/button/entry/static 逐检查项断言并打印 `RES|pass/fail`；实测（WSLg）Wayland 与 X11 两路 20/20 ALL PASS。运行需 `GI_TYPELIB_PATH`/`PYTHONPATH` 指向解包好的 gir 仓库（见源文件头注释） |
+| `aurora_verify_linux_double_click` | Linux `os_double_click_ms()` 是否真经 GLib GSettings 跟随系统双击速度：独立经 dlopen 再读 `org.gnome.desktop.peripherals.mouse` → `double-click` 作交叉见证，与库返回值比对；缺 GLib / 无会话 / schema 未装时断言优雅回退 `AURORA_DEFAULT_CLICK_WINDOW_MS`；`gsettings` CLI 作第二见证（仅 WARN） | **独立 GLib GSettings 读回**（`g_settings_new`/`g_settings_get_int` 经 `libgio-2.0`/`libgobject-2.0` dlopen，与库内 `click_config.cpp` 同机制、独立调用栈）+ `gsettings` CLI 取值对照；纯函数探针，不建窗口、不依赖任何后端 |
+| `aurora_verify_windows_double_click` | Windows `os_double_click_ms()` 是否真经 `GetDoubleClickTime()` 跟随系统双击速度：再调一遍 `GetDoubleClickTime()` 作交叉见证，与库返回值比对；极罕见地返回 0 时仅 WARN 提示 | **独立 `GetDoubleClickTime()` 读回**（与库内 `click_config.cpp` Windows 分支同机制、独立调用栈）；纯函数探针，不建窗口、不依赖任何后端 |
+
+| `aurora_verify_macos_double_click` | macOS `os_double_click_ms()` 是否真经 AppKit `+[NSEvent doubleClickInterval]` 取系统双击速度：探针以**自带算式**（秒 × 1000、四舍五入、亚毫秒夹 1、非正 / 非有限回退常量）独立折算后与库返回值比对，并要求 AppKit 秒值 ∈ (0, 10]；另核对 `EventDispatcher` / `TouchDispatcher` 的 `click_window_ms` **初值**与该返回值一致。**本机实测取证边界（如实登记）**：出厂读数 0.5s 与库级回退常量同为 500ms，该等值判据此刻不具区分力，探针显式记 WARN；且写入候选用户默认键（`NSGlobalDomain` 的 `com.apple.mouse.doubleClickInterval`、`com.apple.AppleMultitouchMouse` 的 `MouseButtonDivision`）、`NSUserDefaults` 与参数域都**不**改动该读数，故「跟随滑杆」无法做成自动判据，改由 `--interactive` 段现场挪滑杆并按秒轮询取证（观察不到变化即 PENDING、退出码 3，不冒充已验收） | **独立 AppKit 读回 + 探针自带折算**（与库内 `src/aurora/event/detail/macos_click_config.{h,cpp}` 同口径、不同实现——刻意不 include 那枚纯函数头，否则库被改坏时见证跟着坏）；纯读数探针，不建窗口、不依赖任何后端。**实测（macOS 26.7.2）自动段 5/5 PASS + 1 条 WARN** |
+
+| `aurora_verify_macos_ax` | macOS AppKit 无障碍桥（`MacOSAxBridge` / `AuroraAxElement`）与系统协议面的接缝：桥的**惰性激活时机**（首次查询前为空、查询后成树）、语义树逐类投影（角色 + 名称含兄弟标签回退）、屏幕几何非空、`accessibilityHitTest:` 回指被点控件、`accessibilityValue` 有值、`accessibilityPerformPress` 被接受且动作往返后值**重投影**翻转 | **AppKit 协议面直读**（探针经内核 `e2e::open(Backend::MacOS)` 建窗，从 `contentView` 向下转型递归 `accessibilityChildren` 取投影，与 VoiceOver 走同一套 `NSAccessibility` 协议方法）；同一进程内的 `AXUIElement` 客户端加强腿（`e2e::ax_collect`）仅在 TCC「辅助功能」授权后执行，未授权时打印 `SKIP` 行。**实测（macOS 26.7.2 + 真窗口会话）18/18 通过，投影 12 元素** |
+
+| `aurora_verify_macos_os_input` | macOS 的 OS 级输入注入两条腿：**同进程 AppKit 事件队列注入**驱动的整段管线——点击 → `sendEvent:` → 内容视图 → Surface 翻译 → 派发/命中 → Checkbox **往返两次**翻转、且新帧在语义盒区域内确有像素变化；点击 TextInput 获焦 → 合成 `keyDown` 的 `characters:` 上屏并经 `on_changed` 回读实值。**CGEvent 加强腿的自我申报**——未授权时 `e2e::cg_click` 带原因回不可用，且裸 `CGEventPostToPid` 实测一个事件都不送达（状态纹丝不动、API 不报错），把「什么都没发生」这一最易读成通过的形状固定成判据 | **AppKit 队列注入**（经 `e2e::open(Backend::MacOS)` 建 `Normal` 档窗口——OS 输入不打进隐藏窗口是本层硬前提；目标矩形取 AppKit 协议面的 `accessibilityFrame`，经 `convertRectFromScreen:` 折算成 `NSEvent.locationInWindow`）；已持有 TCC「辅助功能」授权时改跑 `e2e::cg_click` 真注入，未授权打印 `SKIP` 行。**实测（macOS 26.7.2 + 真窗口会话）20/20 通过**（连跑十轮同数）；注入前须先落一枚无 widget 角落的 priming 点击——`NSView` 默认 `acceptsFirstMouse:` 为 NO，未激活窗口的首个 `mouseDown:` 被 AppKit 用作「点击获焦」不转发给视图，实测无铺垫时十轮里两三次首点丢失 |
 
 各探针的验收范围、逐项期望与退出码语义写在对应源文件头注释内（`tools/verify/*.cpp|.mm`）；真机验收须在**对应平台**手工执行。
 
 **静态分析可见性**：这些探针（含 `inspector/inspector_server.cpp`）此前只被 CI 的构建作业编译、不进任何静态分析口径。lint 门禁扩面后，`AURORA_BUILD_VERIFY_TOOLS=ON` 进了主 Linux 遍的 configure，平台专属探针（`tools/verify/{win32_*,wasapi_audio}_live_probe.cpp` 等）另由 `lint-windows` / `lint-macos` 在各自平台的编译库里按 token 定向覆盖——覆盖面与边界见 [`BUILD_OPTIONS.md`](../BUILD_OPTIONS.md) §4.5。
 
-**探针与 E2E 驱动内核（§8.2）的分工**：探针手写的「建窗 / 帧推进 / 像素读回」与内核能力**行为重叠**时，建窗升级为经内核 `e2e::open`（统一 RAII 与失败翻译），探针只保留平台专属判据、断言与退出码；手写段本身即判据本体的保持原样。已升级：`win32_wgpu` / `x11_wgpu`（建窗经 `e2e::open(Backend::Wgpu)`，`WindowSpec` 显式 `Normal` 可见性保持探针窗口可见；WgpuRhi 离屏直驱段是探针核心目的——验证 wgpu 光栅化路径本身，且其读回基底是 RHI 离屏 FBO 而非内核的 `Surface::data()`，保留手写）、`glfw_gpu_features`（建窗经 `open(Backend::Glfw, gpu=true)`；`max_fps=0` 不再显式设置——该字段只作用于 `Application::run` 帧预算，不影响直驱 `present_root` 循环）、`win32_cursor`（Win32/D3D11/Wgpu 三路宿主建窗统一经内核，设备不可用判定由 `open` 失败翻译 + 具体类型 `is_available()` 承担）。保持原样（逐项裁定）：`wayland_wgpu`——内核 `WindowSpec` 无法表达「`WaylandOptions` + `RendererPreference::GpuWgpu` 直达」宿主路由组合；`glfw_cursor`——窗口是裸 `GLFWwindow`，建窗方式与映射镜像同为判据本体（验证 GLFW 环境能力而非 aurora 接线）；`win32_ime`——走正规 `Application` 路径（真实消息泵与焦点序是判据前提），内核 `Session` 无 `Application` 语义；`win32_ua`——建窗带 `RendererPreference::GpuD3D11` 路由，内核无法表达；`wasm_*`——内核 `Backend` 枚举无 Wasm 后端；`wasapi_audio` / `alsa_audio` / `wasm_audio` 为纯音频设备探针、`macos_cursor` 无 aurora 建窗段，天然无重叠；`x11_cursor` / `wayland_cursor` / `x11_ime` / `wayland_ime` / `atspi` 的手写建窗仅为具体类型 `Surface` 的 2–3 行构造（探针自带的不可用判定与降级语义与之等价，平台判据——XFIXES 读回 / 提交事实读回 / IME 状态机 / DBus 协议面——才是本体），经内核建窗后仍须向下转型回具体类型，无行为收益。
+**探针与 E2E 驱动内核（§8.2）的分工**：探针手写的「建窗 / 帧推进 / 像素读回」与内核能力**行为重叠**时，建窗升级为经内核 `e2e::open`（统一 RAII 与失败翻译），探针只保留平台专属判据、断言与退出码；手写段本身即判据本体的保持原样。已升级：`win32_wgpu` / `x11_wgpu`（建窗经 `e2e::open(Backend::Wgpu)`，`WindowSpec` 显式 `Normal` 可见性保持探针窗口可见；WgpuRhi 离屏直驱段是探针核心目的——验证 wgpu 光栅化路径本身，且其读回基底是 RHI 离屏 FBO 而非内核的 `Surface::data()`，保留手写）、`glfw_gpu_features`（建窗经 `open(Backend::Glfw, gpu=true)`；`max_fps=0` 不再显式设置——该字段只作用于 `Application::run` 帧预算，不影响直驱 `present_root` 循环）、`win32_cursor`（Win32/D3D11/Wgpu 三路宿主建窗统一经内核，设备不可用判定由 `open` 失败翻译 + 具体类型 `is_available()` 承担）、`macos_ax`（建窗经 `e2e::open(Backend::MacOS)`，`NoActivate` 可见性使探针窗口不夺前台；无窗口会话由 `open` 失败翻译为退出码 2）、`macos_os_input`（建窗经 `e2e::open(Backend::MacOS)`，`Normal` 可见性是本层硬前提——OS 输入不打进隐藏窗口；无窗口会话同样由 `open` 失败翻译为退出码 2）。保持原样（逐项裁定）：`wayland_wgpu`——内核 `WindowSpec` 无法表达「`WaylandOptions` + `RendererPreference::GpuWgpu` 直达」宿主路由组合；`glfw_cursor`——窗口是裸 `GLFWwindow`，建窗方式与映射镜像同为判据本体（验证 GLFW 环境能力而非 aurora 接线）；`win32_ime`——走正规 `Application` 路径（真实消息泵与焦点序是判据前提），内核 `Session` 无 `Application` 语义；`win32_ua`——建窗带 `RendererPreference::GpuD3D11` 路由，内核无法表达；`wasm_*`——内核 `Backend` 枚举无 Wasm 后端；`wasapi_audio` / `alsa_audio` / `wasm_audio` 为纯音频设备探针、`macos_cursor` 无 aurora 建窗段，天然无重叠；`x11_cursor` / `wayland_cursor` / `x11_ime` / `wayland_ime` / `atspi` 的手写建窗仅为具体类型 `Surface` 的 2–3 行构造（探针自带的不可用判定与降级语义与之等价，平台判据——XFIXES 读回 / 提交事实读回 / IME 状态机 / DBus 协议面——才是本体），经内核建窗后仍须向下转型回具体类型，无行为收益。
 
 **由后台进程执行时的物理前提**（不是软件缺陷，探针按退出码如实申报而非假通过）：凡判据落在「屏幕上真实显示的指针/光标」上的探针（`aurora_verify_win32_cursor`，以及各探针的 `--interactive` 人工段），要求**已解锁且处于活动状态的交互桌面**——探针会把被测窗口置顶（`HWND_TOPMOST`）并依次试摆「屏幕中心 → 四角内侧」共 5 个落点（同处置顶带内他人窗口可长期压住中心点，`SetForegroundWindow` 又受前台锁约束），多次不中才以退出码 3 报出「期望落点 / 实际指针位置 / 该点上的窗口类名 / 试过的落点数」现场证据后终止（远程桌面会话隔离、锁屏时的 `LockScreenBackstopFrame` 同理）。纯逻辑/句柄类判据（如 GLFW 探针自动段：`glfwCreateStandardCursor` 句柄互异计数）不受此约束，可在任意会话内跑通。
 
@@ -742,7 +780,7 @@ mip 链、区域效果 compute vs 片元两路——后者经 `set_compute_effec
 | 建窗 | `e2e::open(WindowSpec)` 经类型安全的 `create_window(XxxOptions)` 工厂；**不静默降级**——请求的后端未编译或初始化失败即失败。「跳过还是失败」是测试侧策略，落在 `tests/e2e/e2e_expect.h`（`AURORA_E2E_EXPECT` 期望集），内核不裁决 |
 | 窗口可见性 | `WindowSpec::visibility` 默认 `Hidden`（与公共 `WindowOptions::visibility` 的默认 `Normal` 刻意不同）：E2E 默认不把窗口推入用户视野；三档语义与各宿主落地见 [`specification/03-layout-render.md`](03-layout-render.md) §8.3 与 [`specification/06-app-platform.md`](06-app-platform.md) §3.3 |
 | 帧推进 | 帧序复用 `TestController` 已验证的既有序列（泵平台事件 → `Widget::tick` 手势计时 → `Animator::tick` → `Scheduler::tick` → `Window::present_root`）：内核自持 `Animator` / `Scheduler` 并经其 `set_current` 挂为进程内当前实例，使 mount 期注册的动画与定时任务可被逐帧推进。**不新增任何公共单帧 API**（`Application::step_frame()` 保持 `private`） |
-| 收敛与超时 | `pump_until_settled(max_frames)` 以「`Window::is_idle_frame()` 且无运行中动画」收敛；预算内未收敛返回 `RuntimeAsyncTimeout`，消息含已推进帧数、最后脏区状态、idle 帧状态与活跃动画数（可直接作为失败原因）。注意：**自驱动手势滑动**（`Scroll` 收位滑动等，不占 `Animator`）不在此判据覆盖内，其收敛协议见下文交互流往返层 |
+| 收敛与超时 | `pump_until_settled(max_frames)` 以「`Window::is_idle_frame()` 且无运行中动画」收敛；预算内未收敛返回 `RuntimeAsyncTimeout`，消息含已推进帧数、最后脏区状态、idle 帧状态与活跃动画数（可直接作为失败原因）。注意：**自驱动手势滑动**（`Scroll` 收位滑动等，不占 `Animator`，只吃 `scaled_frame_dt` 折算后的步长）不在此判据覆盖内，其收敛协议见下文交互流往返层 |
 | 像素读回 | `capture_frame(const Surface &)` = `Surface::data()` + `Surface::framebuffer_size()` 组合，返回帧缓冲**物理像素**的 RGBA 帧；**未新增 `Surface` 公共读回虚方法**。`data()` 为 `nullptr`（后端未覆写读回，或该后端的读回受 `AURORA_ENABLE_DEBUG` 门控且未生效）时返回 `GeneralNotSupported`，消息沿用 `save_snapshot` 既有的 "framebuffer capture unavailable"；不返回空帧、不伪造内容 |
 | 查询面 | `collect_preorder` / `find_by_key` / `find_by_type` / `find_by_text` / `read_prop` 全部建立在**公共自描述通道**上（`Node::id()` / `Widget::type_name()` / `Widget::serialize_props` / `Widget::child_nodes()`），**不依赖 `TestController`**——后者整头受 `AURORA_BACKEND_HEADLESS` 门控（无头后端恒编入，该宏恒真，但查询面不建立在它之上是设计纪律：查询能力的成立不系于任何一个后端宏） |
 | 语义快照 | `Session::semantic_snapshot()` 返回统一语义快照（`a11y::TreeSnapshot`：先序扁平 + `parent_id` + `by_id`，形状与 `widget/a11y_diff.h` 一致），`find_semantic_node()` 按角色（可选名称）先序取首个命中、`semantic_role_name()` 供报告可读名。快照与平台桥**同源**（同一 `build_accessibility_tree`，含 Name 回退链与 labelled_by 解析）——对快照成立的断言，平台桥投影也应成立；未建窗 / 未挂根返回 `GeneralInvalidArgument`，与 `read_pixels` 漏检口径一致 |
@@ -755,8 +793,9 @@ mip 链、区域效果 compute vs 片元两路——后者经 `set_compute_effec
 E2E 的 CI 期望集（`AURORA_E2E_EXPECT`）须按平台声明：`windows-latest` 上 Win32 与 D3D11 可用，
 GLFW 不可用（VM 无 OpenGL 3.3，WGL 通用驱动无法建 GPU 上下文）；`ubuntu-latest` + `xvfb-run` 上
 X11 与 GLFW 可用（llvmpipe 软件 GL 可建 3.3 上下文；GLFW 源码构建需 `wayland-scanner` 等
-Wayland 依赖）；`macos-latest` 无人值守会话无窗口系统，全部后端不可用（期望集留空 = 全部
-skipped by policy，编译与注册面仍被覆盖）。Wayland（CI 无 compositor）与 wgpu（默认不编译）不进
+Wayland 依赖）；`macos-latest` 无人值守会话无窗口系统，GLFW 腿不可用；AppKit 腿在该
+runner 上尚未实测过真实建窗，按「不声明未实测后端」同样留空（期望集留空 = 全部 skipped by policy，
+编译与注册面仍被覆盖）。Wayland（CI 无 compositor）与 wgpu（默认不编译）不进
 CI 默认范围，由真机或本地会话 opt-in。另有两点硬约束：CI 的 E2E 步骤必须以
 `AURORA_ENABLE_DEBUG=ON` 或 Debug 配置构建（部分后端读回受该宏门控，宏未注入时读回一律按
 「能力不可用」记账）；期望集内环境不可用即 FAIL_FATAL 红灯，因此期望集声明的是「该环境必须
@@ -770,10 +809,15 @@ CI 默认范围，由真机或本地会话 opt-in。另有两点硬约束：CI �
 |:---|:---|:---|:---|
 | core 的 linux ×3 与 windows Release ×2（`windows-msvc` / `windows-mingw`） | 纯 Headless（X11/GLFW/D3D11 等默认 OFF） | 空 | 无真实后端编译进来，E2E 全部 skipped by policy（编译与注册面由内核自测覆盖）；空集是声明的事实而非疏漏 |
 | core 的 windows Debug ×2（`windows-msvc-debug` / `windows-llvm`） | Win32 默认编译，Debug 下 DEBUG 宏生效 | `win32` | Win32 读回受 `AURORA_ENABLE_DEBUG` 门控——Release 型作业（DEBUG=AUTO→OFF）若声明期望必误红，win32 的 E2E 运行覆盖由 Debug 型作业承担 |
-| core / backends 的 macos | MacOS/GLFW 编译 | 空 | 无人值守会话无窗口系统（探针实测），全部 skipped by policy |
+| core / backends 的 macos | MacOS/GLFW 编译，且 Apple 侧能力开关全开（音频 / 三枚图片解码 / SQLite / 压缩 / WebView 门面 / Tracing，backends 腿另带 DEBUG 与 VERIFY_TOOLS） | 空 | GLFW 在无人值守会话无窗口系统（探针实测）；AppKit 腿在该 runner 上**从未实测**，按「宁可留空也不声明未实测的后端」不进取望集——全部 skipped by policy，编译与注册面仍被覆盖 |
 | backends `linux-x11-wayland-glfw` | X11+GLFW+Wayland + 显式 `-DAURORA_ENABLE_DEBUG=ON` | `x11,glfw` | Release 作业须显式 DEBUG=ON 使 X11 读回可用；xvfb + llvmpipe 实测可建 GLX 3.3 上下文（GLFW 可跑）；Wayland 无 compositor 不期望 |
 | backends `windows-d3d11-glfw` | D3D11+GLFW + 显式 DEBUG=ON（Win32 随平台默认编译） | `win32,d3d11` | DEBUG=ON 使 Win32 读回可用；D3D11 读回无条件可用；GLFW 在该 runner 无 GL 环境实测不可建窗，不期望 |
 | asan / coverage | 纯 Headless 默认面 | —（ctest 带 `-LE e2e` 排除） | 无真实后端可跑、全 skip 无信息量，排除以省 ctest 时间；coverage 聚合目标内置的 ctest 同口径排除 |
+| tsan | 纯 Headless 默认面，C/C++ 全量插入 `-fsanitize=thread` | —（`-R` 定点四例，不跑 E2E） | 竞态定点红线，只跑四个网络用例；不装配网络能力公共前缀，避免扩大插桩面与第三方噪声 |
+
+**线程消毒定点判据**（`tools/check/tsan_gate.sh`，作业 4t）：判定必须同时看 ctest 退出码与 `TSAN_OPTIONS` 的 `log_path` 落盘报告正文，任一非零即红。三条假绿陷阱须同时防住——① data race 是 `WARNING` 级，不令断言失败却令进程退出码非零，只看 `[ RUN ]/[ OK ]` 会误判成测试逻辑挂了；② TSan 默认写 stderr，而 ctest 不回显通过用例的输出，`--output-log` 里命中数恒为零，不用 `log_path` 落盘就是零报告假绿；③ `halt_on_error=1` 也不保证非零退出。另两条纪律：每轮开头先清 `report.*` 残留，否则上轮报告被重复计数；`TSAN_OPTIONS` 绝不可含 `exitcode=0`——那是把红洗成绿的开关，只出现在变异自证里。`ignore_noninstrumented_modules=1` 用于抑制第三方未插桩库（glib / gio / dconf）内部噪声，实测该开关不掩盖本库竞态。项目无对应 CMake 开关，注入参数见 [`BUILD_OPTIONS.md`](../BUILD_OPTIONS.md) §4。
+
+**覆盖引导模糊测试短跑判据**（`tools/check/fuzz_gate.sh`，独立 `.github/workflows/fuzz.yml`）：五个正式目标覆盖 URI list 往返、JSON 的 DOM 与 SAX 出口、HTTP 响应头与分块装配、WebSocket 解帧、内置 BMP 解码，各跑九十秒、输入长度上限四千零九十六字节；语料只入初始种子，每轮复制进临时目录，避免演化单元写回仓库。判定次序是**先让有效性自证转红**：`fuzz_effectiveness` 故意含一处有符号溢出与一处越界读，必须产生崩溃输入与消毒报告，否则说明 `UBSAN_OPTIONS=halt_on_error=1` 或插桩没接上，其余五个目标的零发现全部无效、作业整体失败。随后每个正式目标同时看退出码、崩溃输入文件、日志中的消毒报告正文与 `Done N runs` 正常收尾行；缺收尾行本身就是红信号（崩溃路径不打印它），通过用例的输出不会自动回显到作业日志，故日志须落盘后逐条 grep。每轮开头先清上轮残留。零发现只对内存错误与未定义行为成立，语义类缺陷（如合法解析出危险路径）不在此覆盖内；BMP 目标在头部校验即拒绝绝大多数输入，边覆盖显著偏低，其零发现置信度须打折。PNG / GIF / WebP 与 JPEG 走第三方解码器，归版本治理而非本仓模糊测试。
 
 另三条边界结论：wgpu（`AURORA_BACKEND_GPU_WGPU`，需 Rust 工具链与真机 GPU）不进任何 CI 默认作业，
 由真机探针（§7.5）与本地会话 opt-in；wasm 作业的 E2E 在 CMake 层即排除（`AURORA_BUILD_E2E` 在
@@ -965,7 +1009,8 @@ Emscripten 下强制不纳入）；install-consumer 作业只验证 `find_packag
   静态场景，交互动画推进语义由交互流往返层覆盖。
 
 **无障碍语义通道层**（`tests/e2e/etest_a11y_semantics.cpp`）：像素冒烟证明「画得出」，本层证明
-「说得出」——控件树的无障碍语义经真实窗口上屏链路**到达平台**。六后端矩阵 × 两用例，与矩阵套件
+「说得出」——控件树的无障碍语义经真实窗口上屏链路**到达平台**。七后端矩阵 × 两用例（`Backend::MacOS`
+随内核枚举补入后进入矩阵），与矩阵套件
 通用纪律（fixture 类名唯一、`AURORA_E2E_EXPECT` 记账）一致。要点与实测口径：
 
 - 统一期望表：进程内快照与平台通道投影**共用同一张期望表**（同源语义树，断言同词汇）。五类控件
@@ -979,40 +1024,78 @@ Emscripten 下强制不纳入）；install-consumer 作业只验证 `find_packag
   `FrameworkId=="Aurora"` 的库自有投影（排除系统在同一层合成的非客户区元素）；Linux 经 AT-SPI
   子进程客户端（`tools/include/e2e/atspi_client.h`：python3-gi 枚举桌面树找 FRAME==窗口标题，
   输出 `NODE|role|name` 行；客户端可用性以 python3-gi 探测，无会话总线是合法永久降级）；
-  macOS AX 通道未实现（已知缺口，skip 桩）。通道内的角色/名称/pattern/几何断言与快照用例同表。
+  macOS 分两级（`tools/include/e2e/macos_ax_client.h`）：**默认证据在 AppKit 协议面**——探针
+  `aurora_verify_macos_ax` 从 `contentView` 递归 `accessibilityChildren` 读投影、`accessibilityHitTest:`
+  回指、`accessibilityPerformPress` 往返，与 VoiceOver 同径，本 etest 用例在未授权时按策略 skip 并在
+  skip 原因里点名该探针；**加强腿 `e2e::ax_collect`** 用 `AXUIElementCreateApplication(getpid())` 走真
+  AX IPC，只在 `AXIsProcessTrusted()` 为真（系统设置 → 隐私与安全性 → 辅助功能）时执行。分级的前提是
+  本机实测（macOS 26.7.2、SIP 开、TCC 不可脚本化）：未授权时跨进程查询恒返 `-25211`
+  `kAXErrorAPIDisabled`，同进程查询虽返 `kAXErrorSuccess` 但属性**退化**（逐元素 role 均为
+  `AXApplication`、name 为进程名、`kAXDescriptionAttribute` 返 -25205、`kAXIdentifierAttribute` 返
+  -25212）——拿它当默认证据只会得到「查询成功但读不到语义」的假绿。通道内的角色/名称/pattern/几何断言
+  与快照用例同表。
 - 库层修复回写（`WM_GETOBJECT` 激活回归）：`win32_host.cpp` 的根请求比较此前写作
   `std::cmp_not_equal(static_cast<DWORD>(lParam), UiaRootObjectId)`——混合符号安全比较按**数学值**
   判等，`0xFFFFFFE7` 与 `-25` 永不命中，内置桥无法经 `WM_GETOBJECT` 激活（真机探针时代的
   「两侧都截断到 DWORD」惯例被后续类型安全改写静默破坏；当时无 etest 覆盖故未发现）。恢复两侧
   截断比较（UIA 协议本身即 `(DWORD)lParam == (DWORD)id`）后，UIA 返回完整 Aurora 投影。
-- 平台客户端实现口径：`uia_client.h` / `atspi_client.h` 位于 `tools/include/e2e/`，与探针、etest
-  共用；UIA 侧属性读取走 `GetCurrentPropertyValueEx(..., TRUE)`（不因属性缺失抛错）、树遍历按
+- 平台客户端实现口径：`uia_client.h` / `atspi_client.h` / `macos_ax_client.h` 位于 `tools/include/e2e/`，
+  与探针、etest 共用；UIA 侧属性读取走 `GetCurrentPropertyValueEx(..., TRUE)`（不因属性缺失抛错）、树遍历按
   深度/总量封顶逐层 `Release`；MinGW 的 `uiautomation.h` 是 stub（常量为 `#define`、无
-  `UIA_PROPERTY_ID` 类型别名），接口形参按 int 收敛。
+  `UIA_PROPERTY_ID` 类型别名），接口形参按 int 收敛；AX 侧 `CFTypeRef` 由 RAII `CfHolder` 统一释放、
+  整轮采集跑在专用 worker 线程（`AXUIElementCopyAttributeValue` 在目标 App 无响应时会阻塞调用线程，
+  放主线程会卡死事件泵），主线程只按 `wait_events` 推进窗口事件并做有界 join，超时原因带 `AXError` 名
+  与实际观察到的 FRAME 标题返回。
 
 **OS 级输入注入通道层**（`tests/e2e/etest_os_input.cpp`，真机增强层）：交互流往返层证明「框架内
 模拟输入走通命中与派发」，本层证明「**真实 OS 输入** → 窗口过程 → Aurora 事件管线」整段接线
 （前半段是模拟注入覆盖不到的）。内核通道在 `tools/include/e2e/os_input.h`，与 harness 同纪律
 （只依赖公共头、无测试框架宏）。要点与实测口径：
 
-- 平台通道三分：Windows `SendInput`（全局注入——移动真实光标后投递给光标所在窗口，最接近真人
+- 平台通道四分：Windows `SendInput`（全局注入——移动真实光标后投递给光标所在窗口，最接近真人
   操作的全链路）与 `PostMessage`（定向投递——不经光标/焦点系统直达窗口过程，管线接线可单独取证；
   文本走逐字符 `WM_CHAR`，与 `aurora_verify_win32_ime_live` 探针同款）；Linux XTest（经 X 服务器
   合成真实输入事件，`dlopen` libX11/libXtst 免构建依赖，与 `aurora_verify_x11_ime_live` 探针同款；
   键盘焦点铺垫用 `XSetInputFocus`——无窗口管理器时点击不自动夺焦，等价 WM 的 click-to-focus）；
-  WASM 经 CDP `Input.dispatch*` 由浏览器外部驱动（`tools/verify/wasm_input_cdp_drive.mjs`，真实
-  浏览器 opt-in）。覆盖面与 a11y 通道同口径：win32/d3d11 共用 Win32Host 输入管线（以 win32 为
-  代表）、x11；GLFW 不暴露原生句柄（`native_handle()` 为基类空实现）、Wayland 无 XTest 等价物、
-  macOS 通道未实现，均为已知缺口。
+  macOS `CGEvent`（`e2e::cg_click` / `e2e::cg_text`，经 `kCGHIDEventTap` 投真实输入流，字符腿用
+  `CGEventKeyboardSetUnicodeString` 挂 Unicode 载荷、免键位表）；WASM 经 CDP `Input.dispatch*`
+  由浏览器外部驱动（`tools/verify/wasm_input_cdp_drive.mjs`，真实浏览器 opt-in）。覆盖面与 a11y
+  通道同口径：win32/d3d11 共用 Win32Host 输入管线（以 win32 为代表）、x11、macos（以 AppKit
+  后端为代表）；GLFW 不暴露原生句柄（`native_handle()` 为基类空实现）、Wayland 无 XTest 等价物，
+  均为已知缺口。
+- **macOS 分两级，且 CGEvent 只是加强腿**（实测口径，决定了实现形态）：未持有 TCC「辅助功能」
+  授权时 `CGEventPost(kCGSessionEventTap / kCGHIDEventTap)` 与 `CGEventPostToPid(getpid(), …)`
+  **两条路一个事件都不送达**——AppKit 侧连 `addLocalMonitorForEventsMatchingMask:` 都收不到，
+  控件状态与像素毫无变化，而投递侧不报任何错（`CGEventPostToPid` 无返回值、`CGEventPost` 恒
+  success）；把应用激活、把窗口做成 key 后结论不变，即不是命中测试打偏而是事件根本没进进程。
+  「什么都没发生 + 没有错误」是最容易被读成通过的形状，故 `cg_input_channel_available()`（=
+  `AXIsProcessTrusted()`）为假时用例一律带原因记 skip，**绝不拿静默无效判绿**（SIP 环境下授权
+  无法脚本授予：`tccutil` 只能重置不能写入）。默认证据改由 `aurora_verify_macos_os_input` 探针
+  在**同进程 AppKit 事件队列**上取证：`[NSApp postEvent:]` → `nextEventMatchingMask:` →
+  `sendEvent:` → 内容视图 `mouseDown:` / `keyDown:` → Surface 翻译 → 派发 / 命中 / 手势状态机 →
+  控件翻转并落进新帧像素。该腿与 Win32 的 `post_click` 同侧（投递侧绕过 OS 输入流，管线后半段
+  单独取证）；`os_input.h` 是纯 C++ 编译面，ObjC++ 消息发送语法与 ARC 落不进去，故这一腿只在
+  `.mm` 探针里——与 a11y 通道的「协议面探针 + 已授权客户端加强腿」完全同构。
+- **macOS 队列注入须先落一枚 priming 点击**（实测前提，非优化）：`NSView` 默认
+  `acceptsFirstMouse:` 为 NO，窗口未取得激活态时 AppKit 把落在本进程的第一次 `mouseDown:` 用作
+  「点击获焦」而**不转发给视图**——无铺垫时同一份判据十轮里两三次首点丢失，失败集合恒为「首点
+  未翻 + 次点翻到了 + 终态非未选中」，即少一次转发而非管线断裂。故 `aurora_verify_macos_os_input`
+  在两条腿之前先向无 widget 的角落投一次点击，并把「该点击不得改变勾选状态」自身列为判据；加铺垫
+  后连跑十轮 20/20 同数。另记两条反直觉前提：**key 态与前台态都不是本腿的前提**——该探针全程
+  `app_active=0 window_key=0 visible=1`（经命令行启动的二进制不是前台应用），队列路径按事件自带
+  的 `windowNumber:` 派发，与 key 态无关，故这些状态只打印供判读、不立为判据。
 - **opt-in 门控**：环境变量 `AURORA_E2E_OS_INPUT`（置 `1`/`on`/`yes`/`true` 方启用，大小写不敏感）。
   未置位时用例为 skip 桩，在默认 `ctest` 中天然不参与并行。SendInput 是全局注入、无法定向窗口，
   多窗口并存必然串台——既有模型「进程隔离 + 资源虚拟化」隔离的是资源，全局输入是无法虚拟化的
   **共享设备**，故该用例组须以独立 ctest 调用按 stem 独占执行（`ctest -L e2e -R etest_os_input`），
   **不使用 `RUN_SERIAL` 属性**（TEST-R7 禁止）。
 - **no_interactive_desktop 拒绝语义**：锁定屏幕/安全桌面/服务会话等非交互桌面（Windows 侧
-  `OpenInputDesktop` 打不开输入桌面）与无 X 显示（`DISPLAY` 未设）环境下，注入通道以明确原因
-  skip，不静默失败、不挂起、不误判通过（`os_input.h` 的 `interactive_desktop()`）。实测该探测
-  覆盖不到全部锁屏形态，须与下条落点守卫两道门互补。
+  `OpenInputDesktop` 打不开输入桌面）、无 X 显示（`DISPLAY` 未设）与无 WindowServer 主显示面
+  （macOS 无头 / SSH 无 Aqua 会话登录时 `CGMainDisplayID()` 为 0 或显示框为空）环境下，注入通道
+  以明确原因 skip，不静默失败、不挂起、不误判通过（`os_input.h` 的 `interactive_desktop()`）。
+  macOS 侧把「有没有显示面」与「有没有授权」**分成两道门**：前者归本探测，后者归
+  `cg_input_channel_available()`——两件事的原因与解法都不同，合成一道会把「有屏无授权」误报成
+  「无屏」。实测本探测覆盖不到全部锁屏形态，须与下条落点守卫两道门互补。
 - **SendInput 落点守卫**（`os_input.h` 的 `sendinput_landing_check`）：全局注入投给光标所在窗口，
   故注入前先 best-effort 抬升目标（`BringWindowToTop` → `SetForegroundWindow`，仍被盖时升
   `TOPMOST`），再用 `WindowFromPoint` 复核屏幕落点命中的**根窗口**仍是目标；不过即带原因拒绝，
@@ -1022,15 +1105,38 @@ Emscripten 下强制不纳入）；install-consumer 作业只验证 `find_packag
   `LockScreenBackstopFrame` 盖住一切，`SendInput` 不报错而是被静默吞掉（旁路守卫的对照实验里
   同坐标的 Checkbox 纹丝不动）——这类环境由落点守卫兜底；同坐标的 `post_click` 用例照常通过，
   正是「坐标没错、投递没到」的判别对照。守卫的放行分支须在真实可交互桌面（未锁屏）上取证。
+  macOS 的 CGEvent 腿**没有等价守卫**，口径如实写明：抬升只能做到 `Surface::raise()` +
+  `Surface::focus_window()`（对应 Win32 的 `BringWindowToTop` / `SetForegroundWindow`），而按屏幕点
+  复核命中需要读**客户区**原点——纯 C++ 侧拿不到（见下条坐标口径），`CGWindowListCopyWindowInfo`
+  另需「屏幕录制」这枚独立 TCC 权限。因此该腿只在已授权、且调用方确认刚抬升过目标时成立，环境
+  竞争（别的窗口压在落点上）会以「状态未翻转」的真实失败暴露，不静默跳过。
 - **窗口策略固定 `Normal`**：OS 输入投递到完全隐藏的窗口在 Win32 上语义不成立（SendInput 投给
   光标所在窗口，隐藏窗口不在命中路径）——本层用例不得改用 `Hidden` 档。
+- **本层用例不得调用 `Surface::set_event_handler`**：该槽是宿主的派发接线本身，写入即**覆盖**
+  `WindowHost` 为surface 装上的分发器（实测 macOS 腿：装上计数 handler 后事件仍被出队、窗口
+  存活、monitor 也看得到，但控件状态纹丝不动——派发落空）。要读派发结果一律用外部可读的实值：
+  语义快照（`Session::semantic_snapshot`）与帧像素（`Session::read_pixels`）。
 - 断言形态与交互流层一致：注入后断言**控件状态**（共享 `State` / 语义快照）与**渲染像素**
   （注入前后帧在控件区域有差异）；坐标换算为「语义盒（窗口绝对 dp）中心 × `scale_factor` =
-  客户区物理像素」，与宿主 `on_mouse` 的 px/scale 换算互逆。
+  客户区物理像素」，与宿主 `on_mouse` 的 px/scale 换算互逆。全局落点还得再加一次「客户区原点 →
+  屏幕原点」：Windows 走 `ClientToScreen`、X11 走 `XTranslateCoordinates`，两者都以客户区为原点；
+  macOS 的 `Surface::position()` 交回的是**窗口外框**原点（含标题栏）折算到左上原点的物理像素，
+  库面没有客户区原点的读点，故 etest 侧无法为 macos 腿算出正确的屏幕点——指针通道的屏幕坐标
+  折算由 `.mm` 探针经 AppKit 协议面（`accessibilityFrame` + `convertRectFromScreen:`）完成，
+  etest 的 macos 用例因此只跑不需要几何的键盘通道。
 - 库层接线修复（harness）：`Session` 由此改以 `WindowHost` 持有窗口并 `attach_surface()` 接上
   派发通道——此前 harness 直接持有裸 `Window`，surface 的 event handler 无人设置，真实 OS 输入
   经窗口过程上抛后**派发落空**（进程内模拟注入 `Inspector::simulate_*` 不经该通道，故既有测试
   全部无感）。渲染仍走 `Session::present_root` 原路径，既有用例行为零变更。
+
+### 8.3 供应链台账的两枚静态门禁
+
+`third_party/` 全部以整树源码 vendored，仓库无包管理清单，包管理器与依赖更新机器人的 C++ 生态都看不到这些依赖。版本事实因此必须由仓库自己表达并自我核对。
+
+- **版本唯一真值源**是 `codespec/third_party_versions.json`，覆盖 `third_party/` 全部顶层项，每条记录名称、版本、权威源文件、解析正则、上游仓库、许可与 `version_kind`。无标准发布号的两项（`wgpu-native` 以 `Cargo.lock` 的 wgpu-core 版本、`webview2` 以 SDK 内嵌目标浏览器版本）标为 `proxy` 并写明原因，不与上游发布号比较；三段宏拼接的版本（FreeType、GLFW）用 `compose` 规则表达；跟固定版本线的库（mbedTLS 3.6 LTS、Wuffs 0.3、libwebp 1）用 `version_line` 限定上游比对范围。根目录许可台账只承担用途与许可全文索引，版本号改以清单为准。
+- **`check_third_party_versions`**（实现 `tools/check/check_third_party_versions.py`）逐条以声明正则从 vendored 源码解析版本并比对，另交叉核对 `cmake/AuroraImageCodecs.cmake` 的 libjpeg-turbo 镜像。硬失败项：清单缺失 / 无法解析 / 零条目、字段为空、名字重复、源文件不存在、正则 0 命中或多命中、版本漂移、以及**覆盖守卫**——清单与 `third_party/` 顶层项须双向齐备，新增库漏登即红灯。诊断全 ASCII。升级依赖的正确顺序是「先换源码 → 改清单 → 跑门禁」，清单不是可随手抄改的文档。
+- **`check_workflow_yaml`**（实现 `tools/check/check_workflow_yaml.py`）把 `.github/workflows/ci.yml` 里只写在注释中的折叠标量纪律变成强制判据：只检查 `env:` 下折叠（`>` / `>-`）标量的 `#` 行与含 `#` 的值，因为这些值会经 `${{ env.* }}` 折成单行 shell 命令；`run: |` 字面块内的 `#` 是传给 bash 的合法 shell 注释，不受影响。另做不依赖第三方解析库的结构自检（顶层键、`jobs:` 存在、tab 缩进、重复键、零命中守卫），PyYAML 可用时追加 `safe_load` 全解析。两枚门禁都在 `cmake/AuroraTests.cmake` 的静态门禁段注册，并列入 `tools/check/declared_gates.txt` 受 `check_declared_gates` 守护。
+- **用途边界**：`tools/sca/generate_sbom.py` 把清单转成 CycloneDX 物料清单（确定性字节、proxy 以属性保留）；`tools/sca/report_upstream.py` 按周向上游发布接口出「当前 / 上游最新 / 状态」表格，供人工复核，过滤预发布、按版本线限定、把不可读显式标为 `unavailable` 而非「无漏洞」。上游报告是人工复核输入，**不是自动漏洞裁决**：OSV 对这些 C++ 库按包名 + 版本查询连已知含漏洞的旧版本都返回零命中（库内以 Git 提交范围记录，无包版本映射）。周期性编排见 `.github/workflows/sca.yml`，它不修改 `ci.yml` 的全量矩阵。
 
 ---
 
@@ -1067,7 +1173,8 @@ Emscripten 下强制不纳入）；install-consumer 作业只验证 `find_packag
 **验收标准：**
 
 - 运行时错误以**值语义**返回 `au::Result<T>`（内含 `au::Error`），**不抛异常**；错误对象自带定位与建议，使 AI 能在一次迭代内读到「哪里错了 + 怎么改」。
-- `Error` 字段：`code`（冻结对外 slug）/ `message` / `suggestion` / `docs` / `where`（`file:line`）/ `hint`，外加表驱动元数据 `code_enum` / `severity` / `category` / `retryable`。
+- `Error` 字段：`code`（冻结对外 slug）/ `message` / `suggestion` / `docs` / `where`（`file:line`）/ `hint`，外加表驱动元数据 `code_enum` / `severity` / `domain`（`ErrorDomain`，子系统归属）/ `kind`（`ErrorKind`，故障性质）/ `retryable`。
+- `Platform` 域的桌面外壳集成（文档输出 / 打印会话 / URL 方案 / 文件关联 / 登录项）按「机制缺位」与「本次未落地」两分：前者是 `*-unsupported`（kind `unsupported`，`retryable = false`），后者是 `*-failed`（kind `io`，message 带平台明因）。能力位为 false 与 `Result` 失败是两层口径，不得互相顶替；逐码语义见 `ERROR_CATALOG.md`。
 - **机器可解析形态由 `Error::to_json()` 提供**：`{ "code", "message", "suggestion"?, "docs"?, "where"?, "hint"? }`，可选字段仅非空时输出。本库只产出修复**建议**，不自动修改用户代码。
 - 渲染前的整树静态检查走 `au::validate(const Node& root, int max_depth = 64) -> Result<bool>`；UI 树 JSON 校验走 `au::validate_ui_tree_json()`（MCP `validate_ui` 工具）。
 - **两条输出流分工**：诊断日志走 `AURORA_LOG_*`；CLI 的 JSON 诊断结果 / usage、LSP 线协议帧等「程序产品」输出走 `AURORA_LOG_RAW`，两者互不污染，保证下游管道可直接解析。
@@ -1126,7 +1233,7 @@ std::string dump = au::dump_tree_json(root).dump();
   "events": ["on_click"],
   "children_policy": "none",
   "examples": [
-    "au::Button(au::ButtonProps{ .label = \"Submit\" }).set_on_click(handle_submit)"
+    "au::Button(au::ButtonProps().set_label(\"Submit\")).set_on_click(handle_submit)"
   ]
 }
 ```
@@ -1136,6 +1243,7 @@ std::string dump = au::dump_tree_json(root).dump();
 - 格式为 JSON Schema / OpenAPI 风格接口描述。
 - 不仅包含函数签名，还要包含**类型约束、默认值、组件组合规则**。
 - Schema 从代码**自动生成**（`gen_api_tools`），保证与实现同步。
+- **上面的片段是早期示意，真实产物按 `widgets` 数组（76 型）与一批顶层非条目块组织**，实际消费方须以 `aurora_api.json` 为准。顶层除 `library` / `language` / `include` / `alias` / `widgets` / `enums` / `error_codes` / `debug` / `state_patterns` / `layout_rules` 外另有两枚**一次性常量规则块**：`theme_tokens` 登记五组主题令牌的逐组 `{owner, field, prefix, type, tokens, count}`（69 枚短名，口径见 [`07-environment-modifier.md`](07-environment-modifier.md) §5.1），`accessor_rules` 登记「表键词根 → 访问器名与签名」的 15 条规则（读件两形互斥、值写件与换源写件同名重载、已退役名字清单与其适用面），使消费方**不读头文件也能推全公共名**。两枚块与逐键的 `source` 布尔位、provider 条目的 `payload`（`{type, channel}`，`ThemeProvider` / `LocaleProvider` / `MediaQueryProvider` 三枚）同属「代码是唯一天，块只登记规则与集合」这一类；它们登记进 `check_api_schema_sync` 的非条目白名单，一致性由 `check_theme_token_registry`（表 ↔ 字段双向）与 `check_no_theme_display_literals`（源码不得手抄令牌显示串）判定。**两块目前尚无消费端**——MCP / CLI / LSP 仍只读 `widgets` 与 `enums`，接线随后续批。
 
 **验收标准：** `aurora_api.json` 覆盖全部已注册控件；新增 / 删除 widget 或类型后重跑生成器即可同步，无手工维护项。
 
@@ -1164,14 +1272,13 @@ std::string yaml2 = au::serialization::to_yaml(json_value);     // Json → YAML
 
 ```cpp
 int main() {
-    auto root = au::Column(au::ColumnProps{
-        .gap = 8,
-        .children = {
+    auto root = au::Column(
+        {
             std::move(au::Text("Button Examples").font_size(20).bold()),
-            au::Button(au::ButtonProps{ .label = "Primary" }),
-            std::move(au::Button(au::ButtonProps{ .label = "Disabled" }).set_enabled(false)),
+            au::Button(au::ButtonProps().set_label("Primary")),
+            std::move(au::Button(au::ButtonProps().set_label("Disabled").set_enabled(false))),
         },
-    });
+        au::ColumnProps().set_gap(8.0F));
     root.modifier = au::Modifier{}.padding(20);
     auto win_res = au::create_window(au::Win32Options{ .title = "Button Example" });
     au::Application app{ au::Scene{ std::move(root) },
@@ -1196,7 +1303,7 @@ int main() {
 
 - **MCP Server（`aurora_mcp`）**：stdio JSON-RPC 2.0，暴露 24 个 MCP tools（清单见 §7.1；含 `live_*` 五枚、`list_network_activity` / `describe_network_request` 两枚网络工具）。
 - **CLI（`aurora_cli`）**：子命令 `components` / `describe` / `search` / `validate` / `snapshot` / `render` / `preview` / `to-code` / `to-yaml` / `schema`，以及全局选项 `--help`（`-h`）/ `--version`（`-V`）。
-- **LSP（`aurora_lsp`）**：stdio JSON-RPC 2.0 语言服务，对声明式写法提供 completion / hover / diagnostics / codeAction 四件套，消费库 live API（`describe_component` + `known_enums`），无需读取 `aurora_api.json` 文件，始终与代码同步。
+- **LSP（`aurora_lsp`）**：stdio JSON-RPC 2.0 语言服务，对链式声明式写法（`au::<Type>(au::<Type>Props().set_<key>(...))`）提供 completion / hover / diagnostics / codeAction 四件套，消费库 live API（`describe_component` + `known_enums`）并经 `tools/include/lsp_live_schema.h` 同源取 `codegen.h` 的链式名单与写件落点，无需读取 `aurora_api.json` 文件，始终与代码同步。
 
 **验收标准：** AI Agent 可仅凭工具链完成「发现控件 → 校验树 → 渲染快照 → 生成代码」全链路，无需读取源码。
 

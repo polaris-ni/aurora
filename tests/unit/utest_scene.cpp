@@ -49,7 +49,7 @@ AURORA_TEST_CASE(scene_holds_root_widget) {
 }
 
 AURORA_TEST_CASE(serialize_leaf_json_shape) {
-    Scene scene{Node{std::make_shared<Text>("solo")}};
+    Scene const scene{Node{std::make_shared<Text>("solo")}};
 
     const std::string out = scene.serialize();
     // 叶子节点：type + size，无 children 键。
@@ -63,7 +63,7 @@ AURORA_TEST_CASE(serialize_nested_tree_lists_children_in_order) {
     auto row = std::make_shared<Row>();
     row->add(box(10.0F, 10.0F));
     row->add(box(20.0F, 10.0F));
-    Scene scene{Node{row}};
+    Scene const scene{Node{row}};
 
     const std::string out = scene.serialize();
     // 根为 Row，两个 Text 子项按注册顺序出现。
@@ -76,7 +76,7 @@ AURORA_TEST_CASE(serialize_nested_tree_lists_children_in_order) {
     inner->add(box(8.0F, 8.0F));
     auto outer = std::make_shared<Column>();
     outer->add(Node{inner});
-    Scene nested{Node{outer}};
+    Scene const nested{Node{outer}};
 
     const std::string nested_out = nested.serialize();
     const auto pos_column = nested_out.find(R"("type":"Column")");
@@ -95,7 +95,7 @@ AURORA_TEST_CASE(serialize_reflects_layout_sizes) {
     Scene scene{Node{row}};
 
     // 布局前：尺寸均为占位 0。
-    std::string before = scene.serialize();
+    std::string const before = scene.serialize();
     AURORA_TEST_CHECK_NE(before.find(R"("size":[0.0,0.0])"), std::string::npos);
 
     // 布局后：根与子项的快照尺寸同步为实测值（Min 主轴下 Row 收缩到子项 10x20）。
@@ -106,7 +106,7 @@ AURORA_TEST_CASE(serialize_reflects_layout_sizes) {
 }
 
 AURORA_TEST_CASE(serialize_empty_container_has_no_children_key) {
-    Scene scene{Node{std::make_shared<Row>()}};
+    Scene const scene{Node{std::make_shared<Row>()}};
 
     const std::string out = scene.serialize();
     AURORA_TEST_CHECK_TRUE(out.starts_with(R"({"type":"Row")"));

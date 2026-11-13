@@ -160,7 +160,7 @@ struct VideoResult {
 /// @brief 视频场景：预生成 N 帧唯一内容，计时回放（含 begin/replay/end 全帧路径）。
 auto bench_video(bool streaming) -> VideoResult {
     const std::vector<Image> frames = make_video_frames();
-    testing::FakeGl fake;
+    testing::FakeGl const fake;
     rhi::GpuGlRhi rhi_obj(fake.fn);
     rhi::RhiFrameSink &sink = rhi_obj;
     if (!rhi_obj.valid()) {
@@ -226,17 +226,17 @@ struct LayerResult {
     std::vector<Node> rows;
     rows.reserve(AURORA_GRID_ROWS);
     for (int r = 0; r < AURORA_GRID_ROWS; ++r) {
-        RowProps rp;
-        rp.children.reserve(AURORA_GRID_COLS);
+        std::vector<Node> rp;
+        rp.reserve(AURORA_GRID_COLS);
         for (int c = 0; c < AURORA_GRID_COLS; ++c) {
             const auto idx = static_cast<unsigned>((r * AURORA_GRID_COLS) + c);
             const auto hue = static_cast<std::uint8_t>((idx * 37U) % 256U);
-            rp.children.emplace_back(std::make_shared<BenchBox>(40.0F, 24.0F, Color{hue, 120, 200, 255}));
+            rp.emplace_back(std::make_shared<BenchBox>(40.0F, 24.0F, Color{hue, 120, 200, 255}));
         }
         rows.emplace_back(std::make_shared<Row>(std::move(rp)));
     }
-    ColumnProps cp;
-    cp.children = std::move(rows);
+    std::vector<Node> cp;
+    cp = std::move(rows);
     auto root = std::make_shared<Column>(std::move(cp));
     constexpr BuildContext ctx;
     root->mount(ctx);
@@ -262,7 +262,7 @@ auto bench_layer(bool cache_layer) -> LayerResult {
     // 一帧完整路径：修饰链更新（旋转角递进）→ 重录 DL → GPU 回放。
     const Modifier base_modifier = cache_layer ? Modifier{}.cache_layer() : Modifier{};
     auto run_frame = [&](int frame) {
-        root->modifier.set(base_modifier.rotate(static_cast<float>(frame) * 6.0F));
+        root->set_modifier(base_modifier.rotate(static_cast<float>(frame) * 6.0F));
         DisplayList dl;
         Painter p;
         p.begin(AURORA_SCENE_W, AURORA_SCENE_H);
@@ -402,7 +402,7 @@ auto bench_layer_wgpu(bool cache_layer) -> WgpuFrameCost {
     const Modifier base_modifier = cache_layer ? Modifier{}.cache_layer() : Modifier{};
     return time_batch(*gpu, AURORA_SCENE_W, AURORA_SCENE_H, AURORA_SCENE_WARMUP, AURORA_SCENE_FRAMES,
                       [&](int frame, DisplayList &dl) {
-                          root->modifier.set(base_modifier.rotate(static_cast<float>(frame) * 6.0F));
+                          root->set_modifier(base_modifier.rotate(static_cast<float>(frame) * 6.0F));
                           Painter p;
                           p.begin(AURORA_SCENE_W, AURORA_SCENE_H);
                           p.record(dl);
@@ -666,6 +666,9 @@ auto run() -> void {
     AURORA_LOG_RAW("bench", "## Scenarios 3/4/5/6: not compiled (`AURORA_BACKEND_GPU_WGPU=OFF`)\n\n");
 #endif
 
+    process_result().metric("layer_baseline_steady_ms", base.steady_ms_per_frame);
+    process_result().metric("layer_cached_steady_ms", cached.steady_ms_per_frame);
+    process_result().metric("layer_speedup", layer_speedup, "ratio");
     AURORA_LOG_RAW("bench", AURORA_BENCH_DISCLAIMER, "\n");
 }
 
@@ -676,6 +679,7 @@ auto run() -> void {
 // 入口不吞异常：基准程序的失败即未捕获异常 → terminate，与各 demo 入口同口径（场景数值自报，无需 try/catch）。
 // NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
+    aurora::bench::process_result().identify("bench_gpu", "streaming-layer-cache");
     aurora::bench::run();
-    return 0;
+    return aurora::bench::finalize_process("bench_gpu", "streaming-layer-cache") ? 0 : 1;
 }

@@ -11,34 +11,40 @@ auto main() -> int {
     au::Node root = au::Column{
         GradientTitle{"Text widget"},
         gap(12),
-        au::Text{au::TextProps{.content = au::LocalizedString{"Default 14pt text"}, .text_color = pal::AURORA_TEXT}},
-        au::Text{au::TextProps{.content = au::LocalizedString{"Bold 22pt blue"},
-                               .font = au::Font{.size_pt = 22.0F, .weight = 700},
-                               .text_color = pal::AURORA_PRIMARY}},
-        au::Text{au::TextProps{.content = au::LocalizedString{"Muted 16pt"},
-                               .font = au::Font{.size_pt = 16.0F},
-                               .text_color = pal::AURORA_MUTED}},
-        au::Text{au::TextProps{.content = au::LocalizedString{"Accent 18pt"},
-                               .font = au::Font{.size_pt = 18.0F},
-                               .text_color = pal::AURORA_ACCENT}},
+        au::Text{au::TextProps().set_content(au::LocalizedString{"Default 14pt text"}).set_color(pal::AURORA_TEXT)},
+        au::Text{au::TextProps()
+                     .set_content(au::LocalizedString{"Bold 22pt blue"})
+                     .set_font_size(22.0F)
+                     .set_font_weight(700)
+                     .set_color(pal::AURORA_PRIMARY)},
+        au::Text{au::TextProps()
+                     .set_content(au::LocalizedString{"Muted 16pt"})
+                     .set_font_size(16.0F)
+                     .set_color(pal::AURORA_MUTED)},
+        au::Text{au::TextProps()
+                     .set_content(au::LocalizedString{"Accent 18pt"})
+                     .set_font_size(18.0F)
+                     .set_color(pal::AURORA_ACCENT)},
         gap(8),
-        au::Text{au::TextProps{
-            .content =
-                au::LocalizedString{"Letter spacing 4dp · word spacing 8dp (consistent with cursor/selection/hit)"},
-            .font = au::Font{.size_pt = 16.0F},
-            .text_color = pal::AURORA_TEXT,
-            .letter_spacing = 4.0F,
-            .word_spacing = 8.0F}},
-        au::Text{au::TextProps{.content = au::LocalizedString{"Italic (FontStyle::Italic)"},
-                               .font = au::Font{.size_pt = 16.0F},
-                               .text_color = pal::AURORA_ACCENT,
-                               .font_style = au::FontStyle::Italic}},
+        au::Text{au::TextProps()
+                     .set_content(au::LocalizedString{
+                         "Letter spacing 4dp · word spacing 8dp (consistent with cursor/selection/hit)"})
+                     .set_font_size(16.0F)
+                     .set_color(pal::AURORA_TEXT)
+                     .set_letter_spacing(4.0F)
+                     .set_word_spacing(8.0F)},
+        au::Text{au::TextProps()
+                     .set_content(au::LocalizedString{"Italic (FontStyle::Italic)"})
+                     .set_font_size(16.0F)
+                     .set_color(pal::AURORA_ACCENT)
+                     .set_font_style(au::FontStyle::Italic)},
         gap(8),
-        au::Text{au::TextProps{.content = k_para,
-                               .font = au::Font{.size_pt = 15.0F},
-                               .text_color = pal::AURORA_TEXT,
-                               .text_align = au::TextAlign::Justify,
-                               .soft_wrap = true}},
+        au::Text{au::TextProps()
+                     .set_content(k_para)
+                     .set_font_size(15.0F)
+                     .set_color(pal::AURORA_TEXT)
+                     .set_text_align(au::TextAlign::Justify)
+                     .set_soft_wrap(true)},
     };
     return run_demo(Card{std::move(root)}, "Text · Aurora Demo", 520.0F, 460.0F);
 }

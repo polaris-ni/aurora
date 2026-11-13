@@ -1,7 +1,7 @@
 /// 测试类型: integration
 /// 目标单元: include/aurora/core/enums.h
 /// 测试说明: 守护工具链共享枚举登记表 tools/include/known_enums.h——编译期锚点引用真实枚举成员、
-///           登记表结构与历史错值不复发、库自描述的每个非基础属性类型都有登记键
+///           登记表结构与历史错值不复发、库自描述的每个可枚举属性类型都有登记键
 /// 覆盖说明: 登记表被 gen_api / aurora_mcp / aurora_cli / aurora_lsp 四端消费，漂移即补全失效
 
 #include <algorithm>
@@ -43,6 +43,9 @@ namespace {
            static_cast<int>(au::Orientation::Vertical) + static_cast<int>(au::SplitterOrientation::Horizontal) +
            static_cast<int>(au::ToastPosition::Top) + static_cast<int>(au::LegendPosition::Right) +
            static_cast<int>(aurora::net::AddressFamily::LocalPath) +
+           static_cast<int>(aurora::net::ConnectivityChangeCause::StalenessMarked) +
+           static_cast<int>(aurora::net::ConnectivitySource::LinkFiles) +
+           static_cast<int>(aurora::net::NetworkState::Offline) +
            static_cast<int>(aurora::net::LengthByteOrder::Little) + static_cast<int>(aurora::net::ProxyKind::Socks5) +
            static_cast<int>(aurora::net::ShutdownMode::Both) + static_cast<int>(aurora::net::TlsVersion::Tls13) +
            static_cast<int>(aurora::net::WsMessageKind::Binary) + static_cast<int>(aurora::net::http::Method::Delete) +
@@ -54,16 +57,31 @@ namespace {
            static_cast<int>(aurora::net::ExportSurface::InspectorJson) +
            static_cast<int>(aurora::net::FieldClass::Secret) +
            static_cast<int>(aurora::net::http::HttpStage::BodyDone) + static_cast<int>(aurora::ResourcePhase::Failed) +
-           static_cast<int>(aurora::StreamPolicy::Replace) + static_cast<int>(au::webview::WebViewMode::Snapshot);
+           static_cast<int>(aurora::StreamPolicy::Replace) + static_cast<int>(au::webview::WebViewMode::Snapshot) +
+           static_cast<int>(au::ThemeStyle::Kde) + static_cast<int>(au::ThemeStyle::MacOs) +
+           static_cast<int>(au::DesktopEnvironment::Other) + static_cast<int>(au::DesktopEnvironment::Gnome) +
+           static_cast<int>(au::ColorScheme::Unspecified) + static_cast<int>(au::ColorScheme::Dark);
 }
 
-/// @brief 属性类型是否属于「不需要枚举登记」的基础 / 容器类型。
-auto is_primitive_type(const std::string &t) -> bool {
-    static const std::vector<std::string> BASE = {"float",      "int",   "bool",   "string",
-                                                  "double",     "Color", "Length", "LocalizedString",
-                                                  "EdgeInsets", "Json",  "any",    "std::string"};
-    for (const auto &b : BASE) {
+/// @brief 属性类型是否属于「不参与枚举登记」的一类：标量 / 容器 / 值对象结构体。
+/// @note 登记表 `tools/include/known_enums.h` 的键必须能列出成员名（工具链据此做补全与校验），
+///       值对象只有字段而非成员名，进表即让 LSP / MCP 建议出编译不过的取值，故按类别豁免。
+///       新增裸结构体属性会让覆盖率用例转红，由作者显式把类型名补进 VALUE 一档 ——
+///       这是刻意的 fail-safe（漏登记会响），不是豁免通道。
+auto is_non_enumerable_type(const std::string &t) -> bool {
+    // 标量与以标量 / 字符串承载的类型；`Json` 是「值原样透传」属性的历史写法。
+    static const std::vector<std::string> SCALAR = {"float",  "int",  "bool", "string",
+                                                    "double", "Json", "any",  "std::string"};
+    // 值对象结构体：有字段、无成员名，序列化面自成一体。
+    static const std::vector<std::string> VALUE = {"Color",      "Length",        "LocalizedString",
+                                                   "EdgeInsets", "ChartAxisSpec", "ChartLegendSpec"};
+    for (const auto &b : SCALAR) {
         if (t == b) {
+            return true;
+        }
+    }
+    for (const auto &v : VALUE) {
+        if (t == v) {
             return true;
         }
     }
@@ -128,6 +146,26 @@ AURORA_TEST_CASE(known_enums_historical_wrong_values_do_not_return) {
     AURORA_TEST_CHECK(has_value(reg.at("CrossAxisAlignment"), "Baseline"));
 }
 
+AURORA_TEST_CASE(theme_axes_are_both_enumerable) {
+    // 两轴正交模型在代码生成面上的钉子：风格轴与明暗轴必须同时可枚举，且风格轴里不含明暗位。
+    const auto reg = aurora::tools::known_enums();
+    AURORA_TEST_REQUIRE(reg.count("ThemeStyle") == 1);
+    AURORA_TEST_REQUIRE(reg.count("DesktopEnvironment") == 1);
+    AURORA_TEST_REQUIRE(reg.count("ColorScheme") == 1);
+
+    AURORA_TEST_CHECK(static_cast<int>(reg.at("ThemeStyle").size()) == 5);
+    AURORA_TEST_CHECK(has_value(reg.at("ThemeStyle"), "MacOs"));  // 拼写随 PlatformKind::MacOs
+    AURORA_TEST_CHECK(!has_value(reg.at("ThemeStyle"), "MacOS"));
+    AURORA_TEST_CHECK(!has_value(reg.at("ThemeStyle"), "Unknown"));  // 无证据回落 Material，不设不可用档
+    for (const auto &v : reg.at("ThemeStyle")) {
+        AURORA_TEST_CHECK_MSG(v.find("Dark") == std::string::npos, "style axis must not carry a brightness bit");
+        AURORA_TEST_CHECK_MSG(v.find("Light") == std::string::npos, "style axis must not carry a brightness bit");
+    }
+    // 明暗三态不塌：Unspecified 必须在登记值里，否则 AI 侧无法表达「本层不表态」。
+    AURORA_TEST_CHECK(static_cast<int>(reg.at("ColorScheme").size()) == 3);
+    AURORA_TEST_CHECK(has_value(reg.at("ColorScheme"), "Unspecified"));
+}
+
 AURORA_TEST_CASE(known_enums_cover_all_enum_typed_props) {
     register_core_widgets();
     const auto reg = aurora::tools::known_enums();
@@ -147,7 +185,7 @@ AURORA_TEST_CASE(known_enums_cover_all_enum_typed_props) {
                 continue;
             }
             const auto t = descriptor.at("type")->as_or<std::string>("");
-            if (t.empty() || is_primitive_type(t)) {
+            if (t.empty() || is_non_enumerable_type(t)) {
                 continue;
             }
             ++checked;

@@ -4,7 +4,7 @@
 namespace {
 class EnvReadout : public au::LeafWidget {
   public:
-    void collect_signals(std::vector<au::SignalViewBase *> & /*out*/) override {}
+    void collect_signals(au::StateSink & /*out*/) override {}
     [[nodiscard]] auto type_name() const -> const char * override { return "EnvReadout"; }
     [[nodiscard]] auto describe() const -> au::WidgetDescriptor override {
         return au::WidgetDescriptor{.name = "EnvReadout", .children_policy = "none"};

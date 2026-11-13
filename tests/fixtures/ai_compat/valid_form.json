@@ -10,7 +10,9 @@
     },
     {
       "type": "TextInput",
-      "props": {}
+      "props": {
+        "value": ""
+      }
     },
     {
       "type": "Text",
@@ -20,7 +22,9 @@
     },
     {
       "type": "TextInput",
-      "props": {}
+      "props": {
+        "value": ""
+      }
     },
     {
       "type": "Button",

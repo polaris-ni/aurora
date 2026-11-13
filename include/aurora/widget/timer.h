@@ -14,16 +14,16 @@ namespace aurora {
 /// @brief 组件级定时任务控件（控制流 Widget，声明式、响应式为主 + 可选回调）。
 ///
 /// 包裹一棵子树，挂载时向运行中的应用级 `Scheduler`（`Scheduler::current()`）注册周期任务；
-/// 每次 tick 自增内部 `State<int>`（经 `ticks()` 暴露为 `SignalView<int>`）驱动子 UI 自动重绘，
+/// 每次 tick 自增内部 `State<int>`（经 `ticks()` 暴露为 `ReadOnlyState<int>`）驱动子 UI 自动重绘，
 /// 并可选调用 `on_tick(int)` 回调处理命令式副作用。卸载/销毁时自动 `cancel()` 句柄。
 ///
 /// 跨框架对照：`setTimeout` / `setInterval`（JS）、`Timer.periodic`（Flutter）、`Disposable`/`Handler`（Android）。
 ///
 /// 用法：
 /// @code
-/// // 响应式：时钟每秒刷新（子 UI 经 ticks() 绑定）
-/// au::Timer(std::chrono::seconds(1), [](const au::SignalView<int> &tick) {
-/// return au::Text(au::Computed<std::string>{ [&] { return "tick: " + std::to_string(tick.get()); } });
+/// // 响应式：时钟每秒刷新（子 UI 经只读句柄派生）
+/// au::Timer(std::chrono::seconds(1), [](au::ReadOnlyState<int> tick) {
+/// return au::Text(au::computed([tick] { return "tick: " + std::to_string(tick.get()); }));
 /// });
 ///
 /// // 命令式：可选 on_tick 回调
@@ -35,21 +35,21 @@ namespace aurora {
 ///
 class Timer : public SingleChild {
   public:
-    /// @brief tick 构建器回调类型：接收 tick 计数信号、返回子树。
-    /// @param SignalView 回调入参类型：const SignalView<int> &，即本控件的 tick 计数信号。
-    using TickBuilder = std::function<Node(const SignalView<int> &)>;
+    /// @brief tick 构建器回调类型：接收 tick 计数只读句柄、返回子树。
+    /// @param ReadOnlyState 回调入参类型：按值交接的 tick 计数只读句柄。
+    using TickBuilder = std::function<Node(ReadOnlyState<int>)>;
 
     /// @brief 默认构造：无周期（默认 duration）、无回调，tick 计数初始为 0。
-    Timer() : tick_(std::make_shared<State<int>>(0)) {}
+    Timer() = default;
 
     /// @brief 构造周期定时控件。
     /// @param period   tick 周期（按 `std::chrono::steady_clock`）。
-    /// @param builder  子 UI 构造器：接收 `ticks()` 信号，构建一次、内部经响应式绑定刷新。
+    /// @param builder  子 UI 构造器：接收 `ticks()` 只读句柄，构建一次、内部经响应式派生刷新。
     /// @param on_tick  可选命令式回调，每次 tick 携带计数（从 1 开始）。
     Timer(std::chrono::steady_clock::duration period, const TickBuilder &builder, std::function<void(int)> on_tick = {})
-        : SingleChild(Node{}), period_(period), on_tick_(std::move(on_tick)), tick_(std::make_shared<State<int>>(0)) {
+        : SingleChild(Node{}), period_(period), on_tick_(std::move(on_tick)) {
         if (builder) {
-            child_ = builder(*tick_);
+            child_ = builder(ticks());
         }
     }
 
@@ -67,9 +67,9 @@ class Timer : public SingleChild {
     /// @return 按赋值签名返回自身引用。
     auto operator=(Timer &&) -> Timer & = default;
 
-    /// @brief tick 计数信号（从注册后首次 tick 起为 1,2,3…）；子 UI 经其响应式绑定刷新。
-    /// @return 内部 tick_ 信号的引用视图。
-    [[nodiscard]] auto ticks() const -> const SignalView<int> & { return *tick_; }
+    /// @brief tick 计数信号（从注册后首次 tick 起为 1,2,3…）；子 UI 经其响应式派生刷新。
+    /// @return 内部 tick 来源的只读句柄（按值交接，复制共享同一来源）。
+    [[nodiscard]] auto ticks() const -> ReadOnlyState<int> { return tick_; }
 
     /// @brief 类型名，供序列化与运行时自描述使用。
     /// @return C 字符串 "Timer"。
@@ -95,8 +95,8 @@ class Timer : public SingleChild {
                 },
             .examples =
                 {
-                    "au::Timer(1s, [](const au::SignalView<int>& t){ return au::Text(au::Computed<std::string>{ [&]{ "
-                    "return std::to_string(t.get()); } }); });",
+                    "au::Timer(1s, [](au::ReadOnlyState<int> t){ return au::Text(au::computed([t]{ "
+                    "return std::to_string(t.get()); })); });",
                     "au::Timer(1s, au::Timer::child([]{ return au::Text(\"tick\"); }), [](int n){ poll(n); });",
                 },
         };
@@ -105,9 +105,9 @@ class Timer : public SingleChild {
     /// @return Timer 的控件描述符。
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
-    /// @brief 收集本控件的可订阅信号视图：收录内部 tick 计数信号。
-    /// @param out 输出参数，收录本控件持有的 SignalViewBase 指针。
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(tick_.get()); }
+    /// @brief 收集本控件的可订阅信号：收录内部 tick 计数来源。
+    /// @param out 输出参数，收录本控件持有的读写句柄。
+    auto collect_signals(StateSink &out) -> void override { out.push(tick_); }
 
   protected:
     auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
@@ -117,8 +117,8 @@ class Timer : public SingleChild {
     auto on_mount(const BuildContext &ctx) -> void override {
         if (Scheduler *s = Scheduler::current()) {
             handle_ = s->set_interval(period_, [this]() -> void {
-                const int n = tick_->get() + 1;
-                tick_->set(n);
+                const int n = tick_.get() + 1;
+                tick_.set(n);
                 if (on_tick_) {
                     on_tick_(n);
                 }
@@ -149,7 +149,7 @@ class Timer : public SingleChild {
   private:
     std::chrono::steady_clock::duration period_{};
     std::function<void(int)> on_tick_;
-    std::shared_ptr<State<int>> tick_;  ///< 内部 tick 计数（响应式驱动子 UI）。
+    State<int> tick_{0};  ///< 内部 tick 计数（响应式驱动子 UI）。
     TimerHandle handle_;  ///< 注册到 Scheduler 的句柄，析构时取消。
 };
 

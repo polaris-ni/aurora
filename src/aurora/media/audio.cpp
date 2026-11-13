@@ -22,6 +22,7 @@
 #include <utility>
 
 #include "audio_alsa.h"
+#include "audio_coreaudio.h"
 #include "audio_wasapi.h"
 #include "audio_webaudio.h"
 #include "aurora/core/log.h"
@@ -417,7 +418,7 @@ auto AudioBufferSourceNode::set_buffer(std::shared_ptr<const AudioBuffer> buffer
             ErrorCode::AudioBufferInvalid,
             ErrorParams{{"reason", buffer == nullptr ? "null buffer" : "invalid sample_rate/channels/samples"}});
     }
-    std::scoped_lock lock(buffer_mutex_);
+    std::scoped_lock const lock(buffer_mutex_);
     buffer_ = std::move(buffer);
     return Result<void>{};
 }
@@ -441,7 +442,7 @@ auto AudioBufferSourceNode::stop() -> void {
 auto AudioBufferSourceNode::process(const AudioRenderContext &p) -> void {
     std::shared_ptr<const AudioBuffer> buf;
     {
-        std::scoped_lock lock(buffer_mutex_);
+        std::scoped_lock const lock(buffer_mutex_);
         buf = buffer_;
     }
     if (buf == nullptr || !buf->valid() || !started_.load(std::memory_order_acquire) ||
@@ -592,7 +593,7 @@ auto AnalyserNode::set_smoothing_time_constant(float v) -> void {
 auto AnalyserNode::process(const AudioRenderContext &p) -> void {
     const std::size_t total = static_cast<std::size_t>(p.frames) * 2U;
     std::copy_n(in_bus_.data(), total, out_bus_.data());  // 直通
-    std::scoped_lock lock(mutex_);
+    std::scoped_lock const lock(mutex_);
     const int n = fft_size_.load(std::memory_order_acquire);
     if (std::cmp_not_equal(time_ring_.size(), n)) {
         // fft_size 变更（或首块）：重建环/窗/工作缓冲；频域快照按 min_db 起平滑（数块收敛）
@@ -692,7 +693,7 @@ auto AnalyserNode::run_fft_locked() -> void {
 }
 
 auto AnalyserNode::get_float_frequency_data(std::span<float> out) const -> void {
-    std::scoped_lock lock(mutex_);
+    std::scoped_lock const lock(mutex_);
     const float lo = min_db_.load(std::memory_order_acquire);
     const float hi = max_db_.load(std::memory_order_acquire);
     const std::size_t count = std::min(out.size(), spectrum_db_.size());
@@ -702,7 +703,7 @@ auto AnalyserNode::get_float_frequency_data(std::span<float> out) const -> void 
 }
 
 auto AnalyserNode::get_byte_frequency_data(std::span<std::uint8_t> out) const -> void {
-    std::scoped_lock lock(mutex_);
+    std::scoped_lock const lock(mutex_);
     const float lo = min_db_.load(std::memory_order_acquire);
     const float hi = max_db_.load(std::memory_order_acquire);
     const float range = std::max(hi - lo, 1.0F);
@@ -714,7 +715,7 @@ auto AnalyserNode::get_byte_frequency_data(std::span<std::uint8_t> out) const ->
 }
 
 auto AnalyserNode::get_byte_time_data(std::span<std::uint8_t> out) -> void {
-    std::scoped_lock lock(mutex_);
+    std::scoped_lock const lock(mutex_);
     const std::size_t count = std::min(out.size(), time_bytes_.size());
     std::copy_n(time_bytes_.data(), count, out.begin());
 }
@@ -747,12 +748,12 @@ auto AudioRecordingDestinationNode::start() -> Result<void> {
 auto AudioRecordingDestinationNode::stop() -> void { recording_.store(false, std::memory_order_release); }
 
 auto AudioRecordingDestinationNode::recording() const -> std::vector<float> {
-    std::scoped_lock lock(data_mutex_);
+    std::scoped_lock const lock(data_mutex_);
     return data_;
 }
 
 auto AudioRecordingDestinationNode::recorded_frames() const -> std::size_t {
-    std::scoped_lock lock(data_mutex_);
+    std::scoped_lock const lock(data_mutex_);
     return data_.size() / 2U;
 }
 
@@ -761,7 +762,7 @@ auto AudioRecordingDestinationNode::recorded_frames() const -> std::size_t {
 auto AudioRecordingDestinationNode::process(const AudioRenderContext &p) -> void {
     const std::size_t total = static_cast<std::size_t>(p.frames) * 2U;
     if (recording_.load(std::memory_order_acquire)) {
-        std::scoped_lock lock(data_mutex_);
+        std::scoped_lock const lock(data_mutex_);
         data_.insert(data_.end(), in_bus_.data(), in_bus_.data() + total);
     }
     std::copy_n(in_bus_.data(), total, out_bus_.data());  // 直通
@@ -835,13 +836,16 @@ auto AudioRecordingDestinationNode::save_wav(const std::string &path) const -> R
 
 namespace {
 
-// 默认设备后端工厂：浏览器走 Web Audio（AudioContext + 主线程推样），Linux 开启
-// AURORA_ENABLE_AUDIO_ALSA 时构造 AlsaDeviceBackend，其余平台构造 WasapiDeviceBackend
-// ——三者宏关闭时 .cpp 体均为 disabled 桩（start 恒 false），AudioContext 随即静默
-// 降级；真实实现见 audio_webaudio.cpp / audio_alsa.cpp / audio_wasapi.cpp。
+// 默认设备后端工厂：浏览器走 Web Audio（AudioContext + 主线程推样），macOS 走
+// CoreAudio（AudioQueue 默认输出设备），Linux 开启 AURORA_ENABLE_AUDIO_ALSA 时构造
+// AlsaDeviceBackend，其余平台构造 WasapiDeviceBackend——四者宏关闭时 .cpp 体均为
+// disabled 桩（start 恒 false），AudioContext 随即静默降级；真实实现见
+// audio_webaudio.cpp / audio_coreaudio.cpp / audio_alsa.cpp / audio_wasapi.cpp。
 auto create_default_device_backend() -> std::unique_ptr<AudioDeviceBackend> {
 #ifdef AURORA_PLATFORM_WASM
     return std::make_unique<WebAudioDeviceBackend>();
+#elif defined(AURORA_ENABLE_AUDIO_COREAUDIO)
+    return std::make_unique<CoreAudioDeviceBackend>();
 #elif defined(AURORA_ENABLE_AUDIO_ALSA)
     return std::make_unique<AlsaDeviceBackend>();
 #else
@@ -849,11 +853,13 @@ auto create_default_device_backend() -> std::unique_ptr<AudioDeviceBackend> {
 #endif
 }
 
-// 默认采集后端工厂：与设备后端同口径（WebAudio/ALSA/WASAPI 按平台择路）——disabled 桩
-// start 恒 false → create_microphone_source 显式报错，录制不静默降级。
+// 默认采集后端工厂：与设备后端同口径（WebAudio/CoreAudio/ALSA/WASAPI 按平台择路）——
+// disabled 桩 start 恒 false → create_microphone_source 显式报错，录制不静默降级。
 [[maybe_unused]] auto create_default_capture_backend() -> std::unique_ptr<AudioCaptureBackend> {
 #ifdef AURORA_PLATFORM_WASM
     return std::make_unique<WebAudioCaptureBackend>();  // 采集未接线（见 audio_webaudio.h 申报）
+#elif defined(AURORA_ENABLE_AUDIO_COREAUDIO)
+    return std::make_unique<CoreAudioCaptureBackend>();  // 需宿主声明 NSMicrophoneUsageDescription（见同名头）
 #elif defined(AURORA_ENABLE_AUDIO_ALSA)
     return std::make_unique<AlsaCaptureBackend>();
 #else
@@ -907,7 +913,7 @@ auto AudioContext::would_cycle(const AudioNode *src, AudioNode *dst) const -> bo
     // 小图（UI 速率校验）：visited 用线性表即可
     std::vector<AudioNode *> visited;
     while (!stack.empty()) {
-        AudioNode *n = stack.back();
+        AudioNode *const n = stack.back();
         stack.pop_back();
         if (n == src) {
             return true;
@@ -1034,14 +1040,14 @@ auto AudioContext::rebuild_topo() -> void {
         }
     }
     while (!ready.empty()) {
-        AudioNode *n = ready.back();
+        AudioNode *const n = ready.back();
         ready.pop_back();
         topo_.push_back(n);
         const auto it = adj_.find(n);
         if (it == adj_.end()) {
             continue;
         }
-        for (AudioNode *c : it->second.consumers) {
+        for (AudioNode *const c : it->second.consumers) {
             if (--indegree[c] == 0) {
                 ready.push_back(c);
             }

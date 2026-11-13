@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- macOS 最近文档探针的包壳：NSDocumentController 只对已签名的 .app 包记录最近文档，
+     故 CMake 构建后把探针封装进 AuroraMacOSRecentProbe.app 并 ad-hoc 签名。 -->
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>com.aurora.verify.macos-recent-documents</string>
+    <key>CFBundleName</key>
+    <string>AuroraMacOSRecentProbe</string>
+    <key>CFBundleDisplayName</key>
+    <string>Aurora macOS Recent Documents Probe</string>
+    <key>CFBundleExecutable</key>
+    <string>aurora_verify_macos_recent_documents</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>10.15</string>
+</dict>
+</plist>

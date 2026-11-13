@@ -20,12 +20,16 @@
 #include <functional>
 #include <limits>
 #include <memory>
+#include <utility>
 #include <vector>
 
 #include "aurora/environment/build_context.h"
+#include "aurora/environment/environment.h"
 #include "aurora/event/event.h"
 #include "aurora/layout/layout_engine.h"
 #include "aurora/render/painter.h"
+#include "aurora/theming/theme.h"
+#include "aurora/theming/theme_scope.h"
 #include "aurora/widget/drawer.h"
 #include "aurora/widget/widget.h"
 #include "framework/aurora_test.h"
@@ -38,12 +42,23 @@ auto bounded(float w, float h) -> Constraints {
     return Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = w, .height = h}};
 }
 
+/// @brief 造一个注入指定主题的构建上下文（根级环境，无父指针）。
+/// @param t 注入的主题取值。
+/// @return holder + ctx；二者须在同一作用域内使用（BuildContext 只供当帧读取）。
+auto themed_ctx(const Theme &t) -> std::pair<std::shared_ptr<Environment>, BuildContext> {
+    auto env = std::make_shared<Environment>();
+    env->set_local(t);
+    BuildContext ctx;
+    ctx.env = env.get();
+    return {std::move(env), ctx};
+}
+
 class LeafProbe final : public Widget {
   public:
     int mounts = 0;
     int unmounts = 0;
     [[nodiscard]] auto type_name() const -> const char * override { return "LeafProbe"; }
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { (void)out; }
+    auto collect_signals(StateSink &out) -> void override { (void)out; }
 
   protected:
     auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
@@ -178,9 +193,9 @@ AURORA_TEST_CASE(progress_dialog_api_surface) {
     AURORA_TEST_CHECK_EQ(def.is_open(), false);
     AURORA_TEST_CHECK_EQ(def.progress(), -1.0F);
     AURORA_TEST_CHECK_EQ(def.message(), "");
-    std::vector<SignalViewBase *> sigs;
+    StateSink sigs;
     def.collect_signals(sigs);
-    AURORA_TEST_CHECK_EQ(sigs.size(), 1U);  // 仅 progress_
+    AURORA_TEST_CHECK_EQ(sigs.sources().size(), 1U);  // 仅 progress_
     (void)def.describe();
 
     // 聚合构造 + 取值 setter + 进度归一。
@@ -289,15 +304,15 @@ AURORA_TEST_CASE(page_view_api_surface) {
     AURORA_TEST_CHECK_EQ(pv.page_count(), 3U);
     AURORA_TEST_CHECK_EQ(pv.current_page(), 2);  // 夹到 size-1
     AURORA_TEST_CHECK_EQ(pv.wants_click(), true);
-    std::vector<SignalViewBase *> psigs;
+    StateSink psigs;
     pv.collect_signals(psigs);
-    AURORA_TEST_CHECK_EQ(psigs.size(), 1U);  // 仅 current_
+    AURORA_TEST_CHECK_EQ(psigs.sources().size(), 1U);  // 仅 current_
     (void)pv.describe();
 
-    PageView under{std::vector<Node>{Node{a}, Node{b}, Node{c}}, -5};
+    PageView const under{std::vector<Node>{Node{a}, Node{b}, Node{c}}, -5};
     AURORA_TEST_CHECK_EQ(under.current_page(), 0);  // 负 → 夹到 0
 
-    PageView empty{std::vector<Node>{}, 9};
+    PageView const empty{std::vector<Node>{}, 9};
     AURORA_TEST_CHECK_EQ(empty.page_count(), 0U);
     AURORA_TEST_CHECK_EQ(empty.current_page(), 0);
 }
@@ -467,13 +482,13 @@ AURORA_TEST_CASE(drawer_hit_test_branches) {
     // 关闭且空：无命中。
     Drawer closed{Node{}, Node{}};
     LayoutEngine::layout(closed, bounded(800.0F, 600.0F));
-    Widget *none = closed.hit_test(Point{.x = 400.0F, .y = 300.0F},
-                                   Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = closed.size()}, ctx);
+    Widget *const none = closed.hit_test(Point{.x = 400.0F, .y = 300.0F},
+                                         Rect{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = closed.size()}, ctx);
     AURORA_TEST_CHECK_EQ(none, nullptr);
 }
 
 AURORA_TEST_CASE(progress_dialog_layout_paint_hit_test) {
-    BuildContext ctx;
+    BuildContext const ctx;
     Painter p;
     constexpr Rect box{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 400.0F, .height = 300.0F}};
 
@@ -558,6 +573,60 @@ AURORA_TEST_CASE(page_view_layout_paint_hit_test) {
                          ctx);
     AURORA_TEST_CHECK_EQ(fb.size().width, 320.0F);
     AURORA_TEST_CHECK_EQ(fb.size().height, 240.0F);
+}
+
+AURORA_TEST_CASE(theme_blind_surfaces_paint_with_theme_roles) {
+    // Drawer 面板与 ProgressDialog 提示框都曾把底色写死；改读主题角色后，同一探针像素在明暗两档下
+    // 必须各自等于该档的 `roles.surface`，且两档互不相等——判的是「读了主题」而不是「恰好写白」。
+    // 每档各用一枚新控件：显示列表缓存只认盒与光栅世代，同一实例二绘会直接回放上一档的命令。
+    const auto [env_l, light] = themed_ctx(Theme::light());
+    const auto [env_d, dark] = themed_ctx(Theme::dark());
+    constexpr Rect box{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 800.0F, .height = 600.0F}};
+    const auto make_drawer = [] {
+        return Drawer{Node{std::make_shared<LeafProbe>()}, Node{std::make_shared<LeafProbe>()}, DrawerSide::Left,
+                      240.0F};
+    };
+
+    // Drawer：面板宽 240，取面板内、子节点不落墨处。
+    Drawer light_drawer = make_drawer();
+    light_drawer.set_open(true);
+    LayoutEngine::layout(light_drawer, bounded(800.0F, 600.0F), light);
+    Painter lp;
+    lp.begin(800, 600);
+    light_drawer.paint(lp, box, light);
+    Drawer dark_drawer = make_drawer();
+    dark_drawer.set_open(true);
+    LayoutEngine::layout(dark_drawer, bounded(800.0F, 600.0F), dark);
+    Painter dp;
+    dp.begin(800, 600);
+    dark_drawer.paint(dp, box, dark);
+    const Color light_panel = lp.get_pixel(120, 300);
+    const Color dark_panel = dp.get_pixel(120, 300);
+    AURORA_TEST_CHECK(light_panel == inherit_theme(light).roles.surface);
+    AURORA_TEST_CHECK(dark_panel == inherit_theme(dark).roles.surface);
+    AURORA_TEST_CHECK(light_panel != dark_panel);
+
+    // ProgressDialog：盒 320x120 居中于 400x300，取盒内、文字上方的左上角内衬。
+    constexpr Rect small{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 400.0F, .height = 300.0F}};
+    ProgressDialog light_dialog{"working", true};
+    light_dialog.show();
+    light_dialog.set_progress(0.5F);
+    LayoutEngine::layout(light_dialog, bounded(400.0F, 300.0F), light);
+    Painter lq;
+    lq.begin(400, 300);
+    light_dialog.paint(lq, small, light);
+    ProgressDialog dark_dialog{"working", true};
+    dark_dialog.show();
+    dark_dialog.set_progress(0.5F);
+    LayoutEngine::layout(dark_dialog, bounded(400.0F, 300.0F), dark);
+    Painter dq;
+    dq.begin(400, 300);
+    dark_dialog.paint(dq, small, dark);
+    const Color light_box = lq.get_pixel(42, 92);
+    const Color dark_box = dq.get_pixel(42, 92);
+    AURORA_TEST_CHECK(light_box == inherit_theme(light).roles.surface);
+    AURORA_TEST_CHECK(dark_box == inherit_theme(dark).roles.surface);
+    AURORA_TEST_CHECK(light_box != dark_box);
 }
 
 }  // namespace aurora::test_cases::utest_drawer

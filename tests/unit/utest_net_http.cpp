@@ -53,7 +53,7 @@ using aurora::testing::require_value;
 /// @return 请求头部文本。
 [[nodiscard]] auto head_text(const Request &request) -> std::string {
     const auto rendered = request.render_head();
-    AURORA_TEST_REQUIRE_MSG(bool(rendered), rendered ? std::string{} : rendered.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(rendered), rendered ? std::string{} : rendered.error().message);
     return rendered.value();
 }
 
@@ -125,7 +125,7 @@ class ScriptedSource final : public BodySource {
 /// @return 失败码；序列化成功时即致命失败。
 [[nodiscard]] auto render_error_code(const Request &request) -> aurora::ErrorCode {
     const auto rendered = request.render_head();
-    AURORA_TEST_REQUIRE_MSG(!bool(rendered), rendered ? std::string{"expected failure"} : std::string{});
+    AURORA_TEST_REQUIRE_MSG(!static_cast<bool>(rendered), rendered ? std::string{"expected failure"} : std::string{});
     return rendered.error().code_enum;
 }
 
@@ -223,18 +223,18 @@ AURORA_TEST_CASE(method_text_and_parse_are_inverse) {
         const auto text = aurora::net::http::method_text(method);
         AURORA_TEST_CHECK_TRUE(!text.empty());
         const auto parsed = aurora::net::http::method_from_text(text);
-        AURORA_TEST_REQUIRE(bool(parsed));
+        AURORA_TEST_REQUIRE(static_cast<bool>(parsed));
         AURORA_TEST_CHECK_EQ(parsed.value(), method);
     }
 
     // 大小写敏感：HTTP 方法是区分大小写的令牌，小写拼写不得被「善意地」当成对应方法。
     const auto lower = aurora::net::http::method_from_text("get");
-    AURORA_TEST_REQUIRE_FALSE(bool(lower));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(lower));
     AURORA_TEST_CHECK_EQ(lower.error().code_enum, aurora::ErrorCode::HttpRequestInvalid);
 
     // 自定义方法本批次不提供：未知拼写报错而不是接受下来让 Content-Length 的取舍失据。
     const auto unknown = aurora::net::http::method_from_text("PROPFIND");
-    AURORA_TEST_REQUIRE_FALSE(bool(unknown));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(unknown));
     AURORA_TEST_CHECK_EQ(unknown.error().code_enum, aurora::ErrorCode::HttpRequestInvalid);
 }
 
@@ -248,7 +248,7 @@ AURORA_TEST_CASE(factory_parses_url_and_defers_error_to_render) {
     const auto bad = Request::post("http://[::1");
     AURORA_TEST_CHECK_TRUE(!bad.url().has_value());
     const auto rendered = bad.render_head();
-    AURORA_TEST_REQUIRE_FALSE(bool(rendered));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(rendered));
     AURORA_TEST_CHECK_EQ(rendered.error().code_enum, aurora::ErrorCode::NetUrlInvalid);
 }
 
@@ -307,7 +307,7 @@ AURORA_TEST_CASE(response_value_accessors) {
     AURORA_TEST_CHECK_EQ(response.body().size(), std::size_t{2});
     // 无 charset 的 Content-Type（application/json）按 UTF-8 缺省解码；text() 现返回 Result。
     const auto text = response.text();
-    AURORA_TEST_REQUIRE(bool(text));
+    AURORA_TEST_REQUIRE(static_cast<bool>(text));
     AURORA_TEST_CHECK_EQ(text.value(), "AB");
 }
 
@@ -317,13 +317,13 @@ AURORA_TEST_CASE(response_text_decodes_by_charset) {
     utf8.set("Content-Type", "text/plain; charset=UTF-8");
     const Response with_bom{200, "OK", utf8, std::vector<char>{'\xEF', '\xBB', '\xBF', 'A', 'B'}};
     const auto bom = with_bom.text();
-    AURORA_TEST_REQUIRE(bool(bom));
+    AURORA_TEST_REQUIRE(static_cast<bool>(bom));
     AURORA_TEST_CHECK_EQ(bom.value(), "AB");
 
     // 非法 UTF-8 序列不报错也不替换：字节原样抵达（§12「绝不静默替换非法序列」）。
     const Response raw_illegal{200, "OK", utf8, std::vector<char>{'\xFF', 'X'}};
     const auto illegal = raw_illegal.text();
-    AURORA_TEST_REQUIRE(bool(illegal));
+    AURORA_TEST_REQUIRE(static_cast<bool>(illegal));
     const std::string expected_illegal{'\xFF', 'X'};
     AURORA_TEST_CHECK_EQ(illegal.value(), expected_illegal);
 
@@ -332,7 +332,7 @@ AURORA_TEST_CASE(response_text_decodes_by_charset) {
     latin.set("Content-Type", "text/html; charset=iso-8859-1");
     const Response l1{200, "OK", latin, std::vector<char>{'\xE9'}};
     const auto l1_text = l1.text();
-    AURORA_TEST_REQUIRE(bool(l1_text));
+    AURORA_TEST_REQUIRE(static_cast<bool>(l1_text));
     AURORA_TEST_CHECK_EQ(l1_text.value(), "\xC3\xA9");
 
     // charset 令牌大小写不敏感、可带双引号、可省连字符：latin1 / "latin1" 都能识别。
@@ -340,13 +340,13 @@ AURORA_TEST_CASE(response_text_decodes_by_charset) {
     quoted.set("Content-Type", "text/plain; charset=\"latin1\"");
     const Response q{200, "OK", quoted, std::vector<char>{'\xE9'}};
     const auto quoted_text = q.text();
-    AURORA_TEST_REQUIRE(bool(quoted_text));
+    AURORA_TEST_REQUIRE(static_cast<bool>(quoted_text));
     AURORA_TEST_CHECK_EQ(quoted_text.value(), "\xC3\xA9");
 
     // 无 Content-Type：按 UTF-8 缺省。
     const Response no_ct{200, "OK", Headers{}, std::vector<char>{'A', 'B'}};
     const auto no_ct_text = no_ct.text();
-    AURORA_TEST_REQUIRE(bool(no_ct_text));
+    AURORA_TEST_REQUIRE(static_cast<bool>(no_ct_text));
     AURORA_TEST_CHECK_EQ(no_ct_text.value(), "AB");
 
     // 不支持的 charset：报 http-charset-unsupported，原始字节仍可经 body() 取回。
@@ -354,7 +354,7 @@ AURORA_TEST_CASE(response_text_decodes_by_charset) {
     gbk.set("Content-Type", "text/plain; charset=gbk");
     const Response chinese{200, "OK", gbk, std::vector<char>{'\xC4', '\xE3'}};
     const auto failed = chinese.text();
-    AURORA_TEST_REQUIRE_FALSE(bool(failed));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(failed));
     AURORA_TEST_CHECK_EQ(failed.error().code_enum, aurora::ErrorCode::HttpCharsetUnsupported);
     AURORA_TEST_CHECK_EQ(chinese.body().size(), std::size_t{2});
 }
@@ -543,7 +543,7 @@ AURORA_TEST_CASE(content_range_parses_the_three_forms) {
         Headers headers;
         headers.set("Content-Range", bogus);
         const Response response{206, "Partial Content", headers, {}};
-        AURORA_TEST_CHECK_TRUE(!bool(response.content_range()));
+        AURORA_TEST_CHECK_TRUE(!static_cast<bool>(response.content_range()));
         AURORA_TEST_CHECK_TRUE(response.is_partial());  // 判定只看状态码，不被字段的可解性牵着走
     }
 

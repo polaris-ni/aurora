@@ -145,8 +145,12 @@ AURORA_TEST_CASE(a_dropped_temporary_node_keeps_the_layout_parent_chain_intact) 
 AURORA_TEST_CASE(removing_a_child_clears_its_layout_parent_and_the_old_widget_stays_usable) {
     auto probe = std::make_shared<DirtyProbe>();
     probe->install_counters();
-    auto col = std::make_shared<Column>(ColumnProps{.children = {Node{probe}}});
+    auto col = std::make_shared<Column>(std::vector<Node>{Node{probe}});
     drive_layout(*col);
+    // 首次布局会补挂新子树（`adopt_children` 的既有路径），挂载期的信号接线会给探针自身标几次脏；
+    // 本用例只关心摘除**之后**那一次标脏，故清零计数后再断绝对值。
+    probe->self_dirty = 0;
+    probe->reached_probe = 0;
 
     AURORA_TEST_REQUIRE(probe->layout_parent() == col.get());
     AURORA_TEST_REQUIRE(col->remove_child(probe.get()));
@@ -168,8 +172,10 @@ AURORA_TEST_CASE(parent_destruction_clears_the_layout_parent_of_a_still_alive_ch
     auto probe = std::make_shared<DirtyProbe>();
     probe->install_counters();
     {
-        auto col = std::make_shared<Column>(ColumnProps{.children = {Node{probe}}});
+        auto col = std::make_shared<Column>(std::vector<Node>{Node{probe}});
         drive_layout(*col);
+        probe->self_dirty = 0;  // 同上：清零首帧挂载期的自标脏，只断父亡后的那一次
+        probe->reached_probe = 0;
         AURORA_TEST_REQUIRE(probe->layout_parent() == col.get());
     }  // 父容器析构；probe 被局部 shared_ptr 持有，继续存活
 
@@ -247,7 +253,7 @@ class ProbeSingleChild final : public SingleChild {
 
 // 判据①上半：容器连同其子控件一起销毁（Column 路径）时，**不得**产生 detach 告警。
 AURORA_TEST_CASE(normal_container_teardown_emits_no_detach_warning) {
-    LogCapture capture;
+    LogCapture const capture;
     {
         auto col = std::make_shared<Column>();
         col->set_children({Node{DirtyProbe{}}});
@@ -260,7 +266,7 @@ AURORA_TEST_CASE(normal_container_teardown_emits_no_detach_warning) {
 // use_count 基线为 2/3 而非 1——本例钉住「自身持有份数」判别在 SingleChild 上同样静默，
 // 防止实现退化成硬编码 `use_count()==1`（那会让本例转红）。
 AURORA_TEST_CASE(normal_single_child_teardown_emits_no_detach_warning) {
-    LogCapture capture;
+    LogCapture const capture;
     {
         auto sc = std::make_shared<ProbeSingleChild>(Node{DirtyProbe{}});
         drive_layout(*sc);
@@ -270,7 +276,7 @@ AURORA_TEST_CASE(normal_single_child_teardown_emits_no_detach_warning) {
 
 // 判据①下半：子件确实活在容器之外被摘走（Column + 外部持有后 remove_child）时，**必须**告警。
 AURORA_TEST_CASE(detaching_an_externally_held_child_emits_detach_warning) {
-    LogCapture capture;
+    LogCapture const capture;
     auto probe = std::make_shared<DirtyProbe>();
     auto col = std::make_shared<Column>();
     col->set_children({Node{probe}});
@@ -282,7 +288,7 @@ AURORA_TEST_CASE(detaching_an_externally_held_child_emits_detach_warning) {
 
 // 判据①下半（SingleChild 换子路径）：adopt_children 换子时若旧子仍被外部持有，须告警。
 AURORA_TEST_CASE(replacing_an_externally_held_child_emits_detach_warning) {
-    LogCapture capture;
+    LogCapture const capture;
     auto probe = std::make_shared<DirtyProbe>();
     auto col = std::make_shared<Column>();
     col->set_children({Node{probe}});
@@ -293,7 +299,7 @@ AURORA_TEST_CASE(replacing_an_externally_held_child_emits_detach_warning) {
 
 // 判据③：告警正文含被摘控件的类型名，且不再残留 printf 占位符 `%s`。
 AURORA_TEST_CASE(detach_warning_message_embeds_the_child_type_name_without_placeholder) {
-    LogCapture capture;
+    LogCapture const capture;
     auto probe = std::make_shared<DirtyProbe>();
     auto col = std::make_shared<Column>();
     col->set_children({Node{probe}});

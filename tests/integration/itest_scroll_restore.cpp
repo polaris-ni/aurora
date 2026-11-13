@@ -133,7 +133,7 @@ AURORA_TEST_CASE(all_scroll_controls_restore_their_key) {
     storage.write("k.grid", 96.0F);
 
     Scroll scroll;
-    scroll.restore_key = "k.scroll";
+    scroll.set_restore_key("k.scroll");
     scroll.add(Node{std::make_shared<FixedBox>(100.0F, 400.0F)});
     LayoutEngine::layout(scroll, bounded(100.0F, 100.0F));
     AURORA_TEST_CHECK_NEAR(scroll.offset_y(), 100.0F, 1e-4F);
@@ -144,7 +144,7 @@ AURORA_TEST_CASE(all_scroll_controls_restore_their_key) {
     AURORA_TEST_CHECK_NEAR(list.scroll_offset(), 80.0F, 1e-4F);
 
     LazyRow row{50, make_item_builder(), 96.0F};
-    row.restore_key = "k.row";
+    row.set_restore_key("k.row");
     LayoutEngine::layout(row, bounded(200.0F, 96.0F));
     AURORA_TEST_CHECK_NEAR(row.scroll_offset(), 96.0F, 1e-4F);
 
@@ -156,7 +156,7 @@ AURORA_TEST_CASE(all_scroll_controls_restore_their_key) {
     // 越界值被各自的可滚动范围夹取（不产生越界偏移）。
     storage.write("k.row", 1.0e6F);
     LazyRow clamped{50, make_item_builder(), 96.0F};
-    clamped.restore_key = "k.row";
+    clamped.set_restore_key("k.row");
     LayoutEngine::layout(clamped, bounded(200.0F, 96.0F));
     AURORA_TEST_CHECK_NEAR(clamped.scroll_offset(), clamped.max_scroll_offset(), 1e-3F);
     reset_storage();

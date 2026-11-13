@@ -197,7 +197,7 @@ AURORA_TEST_CASE(close_window_requests_reap_at_frame_end) {
 }
 
 AURORA_TEST_CASE(headless_host_never_owns_a_surface) {
-    Application app{make_scene("headless"), 320, 240};
+    Application const app{make_scene("headless"), 320, 240};
     WindowHost *const host = app.windows().front();
 
     AURORA_TEST_CHECK_FALSE(host->has_window());

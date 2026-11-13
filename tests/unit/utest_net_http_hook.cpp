@@ -144,7 +144,7 @@ auto allow_test_cleartext(Client &client) -> void {
                                 .satisfied,
                             label);
     const auto outer = task.result();
-    AURORA_TEST_REQUIRE_MSG(bool(outer), outer ? std::string{} : outer.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(outer), outer ? std::string{} : outer.error().message);
     return outer.value();
 }
 
@@ -155,7 +155,7 @@ auto allow_test_cleartext(Client &client) -> void {
                             "open_stream done", [&task] { return task.is_done(); }, std::chrono::milliseconds{3000})
                             .satisfied);
     const auto outer = task.result();
-    AURORA_TEST_REQUIRE_MSG(bool(outer), outer ? std::string{} : outer.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(outer), outer ? std::string{} : outer.error().message);
     return outer.value();
 }
 
@@ -166,7 +166,7 @@ auto allow_test_cleartext(Client &client) -> void {
                             "open_sse done", [&task] { return task.is_done(); }, std::chrono::milliseconds{3000})
                             .satisfied);
     const auto outer = task.result();
-    AURORA_TEST_REQUIRE_MSG(bool(outer), outer ? std::string{} : outer.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(outer), outer ? std::string{} : outer.error().message);
     return outer.value();
 }
 
@@ -178,7 +178,7 @@ auto allow_test_cleartext(Client &client) -> void {
             "connect_websocket done", [&task] { return task.is_done(); }, std::chrono::milliseconds{3000})
             .satisfied);
     auto outer = task.result();
-    AURORA_TEST_REQUIRE_MSG(bool(outer), outer ? std::string{} : outer.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(outer), outer ? std::string{} : outer.error().message);
     return Result<WebSocket>{std::move(outer.value())};
 }
 
@@ -698,7 +698,7 @@ AURORA_TEST_CASE(a_copied_client_shares_the_registered_hook) {
     const Client copied = client;  // 拷贝的 `Client` 共用同一条链（与缓存表、连接池同一格局）
 
     const auto delivered = send_and_drive(copied, Request::get(loopback_url(peer.port())).request_id("rid-shared"));
-    AURORA_TEST_REQUIRE_MSG(bool(delivered), delivered ? std::string{} : delivered.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(delivered), delivered ? std::string{} : delivered.error().message);
 
     AURORA_TEST_CHECK_EQ(hook->before_calls(), 1);
     AURORA_TEST_REQUIRE(await_filed(filed, guard, 1));
@@ -757,7 +757,7 @@ AURORA_TEST_CASE(a_policy_refused_target_is_never_offered_to_the_hooks) {
     const auto handle = client.use(hook);
 
     const auto refused = send_and_drive(client, Request::get(loopback_url(peer.port())));
-    AURORA_TEST_REQUIRE_FALSE(bool(refused));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(refused));
     AURORA_TEST_CHECK_EQ(refused.error().code_enum, ErrorCode::NetPolicyViolated);
     AURORA_TEST_CHECK_EQ(hook->before_calls(), 0);
     AURORA_TEST_CHECK_EQ(hook->after_calls(), 0);
@@ -806,7 +806,7 @@ AURORA_TEST_CASE(a_hook_cannot_touch_a_reserved_header_on_the_send_leg) {
         "Proxy-Authorization",
     };
 
-    for (std::string_view reserved : table) {
+    for (std::string_view const reserved : table) {
         for (const auto &shape : shapes) {
             const std::string written = shape.recase ? recased(reserved) : std::string{reserved};
             auto hook = std::make_shared<ScriptHook>("reserved");
@@ -824,7 +824,7 @@ AURORA_TEST_CASE(a_hook_cannot_touch_a_reserved_header_on_the_send_leg) {
 
             const std::string scene = std::string{reserved} + " / " + shape.label;
             const auto refused = send_and_drive(client, request, {}, scene);
-            AURORA_TEST_REQUIRE_MSG(!bool(refused), scene);
+            AURORA_TEST_REQUIRE_MSG(!static_cast<bool>(refused), scene);
             AURORA_TEST_CHECK_EQ(refused.error().code_enum, ErrorCode::HttpRequestInvalid);
             // detail 点名钩子序号、腿与规范拼写；值与目标文本一概不许出现。
             AURORA_TEST_CHECK_TRUE(contains(refused.error().message, "hook #0"));
@@ -846,7 +846,7 @@ AURORA_TEST_CASE(a_hook_cannot_touch_a_reserved_header_on_the_send_leg) {
     const auto kept = client.use(bystander);
     const auto delivered =
         send_and_drive(client, Request::get(loopback_url(talker.port())).range(ByteRange::between(0, 9)));
-    AURORA_TEST_CHECK_TRUE(bool(delivered));
+    AURORA_TEST_CHECK_TRUE(static_cast<bool>(delivered));
     AURORA_TEST_CHECK_EQ(bystander->before_calls(), 1);
 }
 
@@ -869,7 +869,7 @@ AURORA_TEST_CASE(the_upgrade_leg_reserves_the_four_handshake_fields) {
         hook->header_writes.push_back(FieldWrite{.name = std::string{name}, .value = "hook-value"});
         const auto handle = client.use(hook);
         const auto refused = connect_and_drive(client, Request::get(ws_url(upgrade_peer.port())), sink);
-        AURORA_TEST_REQUIRE_MSG(!bool(refused), std::string{name});
+        AURORA_TEST_REQUIRE_MSG(!static_cast<bool>(refused), std::string{name});
         AURORA_TEST_CHECK_EQ(refused.error().code_enum, ErrorCode::HttpRequestInvalid);
         AURORA_TEST_CHECK_TRUE(contains(refused.error().message, "websocket leg"));
         AURORA_TEST_CHECK_TRUE(
@@ -885,7 +885,7 @@ AURORA_TEST_CASE(the_upgrade_leg_reserves_the_four_handshake_fields) {
     on_send->header_writes.push_back(FieldWrite{.name = "Sec-WebSocket-Protocol", .value = "chat"});
     const auto handle = client.use(on_send);
     const auto delivered = send_and_drive(client, Request::get(loopback_url(plain.port())));
-    AURORA_TEST_REQUIRE_MSG(bool(delivered), delivered ? std::string{} : delivered.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(delivered), delivered ? std::string{} : delivered.error().message);
     AURORA_TEST_CHECK_EQ(on_send->before_calls(), 1);
 }
 
@@ -904,7 +904,7 @@ AURORA_TEST_CASE(a_hook_cannot_replace_the_chain_identifier) {
     const auto handle = client.use(hook);
 
     const auto refused = send_and_drive(client, Request::get(loopback_url(peer.port())).request_id("caller-id"));
-    AURORA_TEST_REQUIRE_FALSE(bool(refused));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(refused));
     AURORA_TEST_CHECK_EQ(refused.error().code_enum, ErrorCode::HttpRequestInvalid);
     AURORA_TEST_CHECK_TRUE(contains(refused.error().message, "modified the reserved header 'X-Request-Id'"));
     AURORA_TEST_CHECK_FALSE(contains(refused.error().message, "hook-id"));
@@ -932,7 +932,7 @@ AURORA_TEST_CASE(the_identifier_is_one_value_across_both_views_the_record_and_th
 
     const auto delivered =
         send_and_drive(client, Request::get(loopback_url(peer.port(), "/identity")).request_id("rid-one-value"));
-    AURORA_TEST_REQUIRE_MSG(bool(delivered), delivered ? std::string{} : delivered.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(delivered), delivered ? std::string{} : delivered.error().message);
 
     const auto calls = hook->calls();
     const auto answers = hook->answers();
@@ -968,12 +968,12 @@ AURORA_TEST_CASE(an_added_header_is_the_only_difference_on_the_wire) {
     const std::string url = loopback_url(peer.port(), "/diff");
 
     const auto bare = send_and_drive(client, Request::get(url).request_id("rid-diff"));
-    AURORA_TEST_REQUIRE_MSG(bool(bare), bare ? std::string{} : bare.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(bare), bare ? std::string{} : bare.error().message);
     auto hook = std::make_shared<ScriptHook>("one-line");
     hook->header_writes.push_back(FieldWrite{.name = "X-Api-Key", .value = "k"});
     const auto handle = client.use(hook);
     const auto armed = send_and_drive(client, Request::get(url).request_id("rid-diff"));
-    AURORA_TEST_REQUIRE_MSG(bool(armed), armed ? std::string{} : armed.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(armed), armed ? std::string{} : armed.error().message);
 
     AURORA_TEST_REQUIRE(await_filed(filed, guard, 2));
     const std::string first = filed_request(filed, guard, 0);
@@ -998,11 +998,11 @@ AURORA_TEST_CASE(a_no_op_hook_leaves_the_wire_bytes_untouched) {
     const std::string url = loopback_url(peer.port(), "/no-op");
 
     const auto bare = send_and_drive(client, Request::get(url).request_id("rid-noop"));
-    AURORA_TEST_REQUIRE_MSG(bool(bare), bare ? std::string{} : bare.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(bare), bare ? std::string{} : bare.error().message);
     auto hook = std::make_shared<ScriptHook>("nothing");
     const auto handle = client.use(hook);  // 挂了钩子但一个字都不写
     const auto armed = send_and_drive(client, Request::get(url).request_id("rid-noop"));
-    AURORA_TEST_REQUIRE_MSG(bool(armed), armed ? std::string{} : armed.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(armed), armed ? std::string{} : armed.error().message);
 
     AURORA_TEST_CHECK_EQ(hook->before_calls(), 1);
     AURORA_TEST_CHECK_EQ(hook->after_calls(), 1);
@@ -1030,7 +1030,7 @@ AURORA_TEST_CASE(hooks_run_in_registration_order_and_later_writes_win) {
     const auto second_handle = client.use(second);
 
     const auto delivered = send_and_drive(client, Request::get(loopback_url(peer.port())).request_id("rid-order"));
-    AURORA_TEST_REQUIRE_MSG(bool(delivered), delivered ? std::string{} : delivered.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(delivered), delivered ? std::string{} : delivered.error().message);
 
     AURORA_TEST_CHECK_EQ(first->before_calls(), 1);
     AURORA_TEST_CHECK_EQ(second->before_calls(), 1);
@@ -1072,7 +1072,7 @@ AURORA_TEST_CASE(a_hook_touched_header_does_not_cross_the_origin_boundary) {
                                                       .request_id("rid-cross")
                                                       .header("X-Caller", "caller-value")
                                                       .header("Authorization", "Bearer caller"));
-    AURORA_TEST_REQUIRE_MSG(bool(delivered), delivered ? std::string{} : delivered.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(delivered), delivered ? std::string{} : delivered.error().message);
 
     AURORA_TEST_CHECK_EQ(hook->before_calls(), 1);  // 一次逻辑交换只问一次，重定向不重问
     AURORA_TEST_REQUIRE(await_filed(origin_filed, origin_guard, 1));
@@ -1104,7 +1104,7 @@ AURORA_TEST_CASE(a_same_origin_redirect_keeps_the_hook_touched_header) {
 
     const auto delivered =
         send_and_drive(client, Request::get(loopback_url(peer.port(), "/here")).request_id("rid-same-origin"));
-    AURORA_TEST_REQUIRE_MSG(bool(delivered), delivered ? std::string{} : delivered.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(delivered), delivered ? std::string{} : delivered.error().message);
 
     AURORA_TEST_CHECK_EQ(hook->before_calls(), 1);
     AURORA_TEST_REQUIRE(await_filed(filed, guard, 2));
@@ -1129,11 +1129,11 @@ AURORA_TEST_CASE(a_hook_touched_header_is_part_of_the_cache_key) {
     tenant_a->header_writes.push_back(FieldWrite{.name = "X-Tenant", .value = "a"});
     auto handle = client.use(tenant_a);
     const auto primed = send_and_drive(client, Request::get(url).request_id("rid-tenant-a"));
-    AURORA_TEST_REQUIRE_MSG(bool(primed), primed ? std::string{} : primed.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(primed), primed ? std::string{} : primed.error().message);
     AURORA_TEST_CHECK_EQ(peer.accepts(), 1);
 
     const auto reused = send_and_drive(client, Request::get(url).request_id("rid-tenant-a"));
-    AURORA_TEST_REQUIRE_MSG(bool(reused), reused ? std::string{} : reused.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(reused), reused ? std::string{} : reused.error().message);
     AURORA_TEST_CHECK(reused.value().from_cache());
     AURORA_TEST_CHECK_EQ(peer.accepts(), 1);  // 同租户第二次一条都不发
 
@@ -1142,13 +1142,13 @@ AURORA_TEST_CASE(a_hook_touched_header_is_part_of_the_cache_key) {
     tenant_b->header_writes.push_back(FieldWrite{.name = "X-Tenant", .value = "b"});
     handle = client.use(tenant_b);
     const auto other = send_and_drive(client, Request::get(url).request_id("rid-tenant-b"));
-    AURORA_TEST_REQUIRE_MSG(bool(other), other ? std::string{} : other.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(other), other ? std::string{} : other.error().message);
     AURORA_TEST_CHECK_FALSE(other.value().from_cache());
     AURORA_TEST_CHECK_EQ(peer.accepts(), 2);  // 换租户绝不读回别人的副本
 
     handle.clear();
     const auto bare = send_and_drive(client, Request::get(url).request_id("rid-bare"));
-    AURORA_TEST_REQUIRE_MSG(bool(bare), bare ? std::string{} : bare.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(bare), bare ? std::string{} : bare.error().message);
     AURORA_TEST_CHECK_FALSE(bare.value().from_cache());
     AURORA_TEST_CHECK_EQ(peer.accepts(), 3);  // 条目带着变体名，无触点的裸请求不够覆盖资格
 
@@ -1156,11 +1156,11 @@ AURORA_TEST_CASE(a_hook_touched_header_is_part_of_the_cache_key) {
     const std::string cred_url = loopback_url(peer.port(), "/cred");
     const auto first_credential =
         send_and_drive(client, Request::get(cred_url).request_id("rid-cred").header("Authorization", "Bearer one"));
-    AURORA_TEST_REQUIRE_MSG(bool(first_credential),
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(first_credential),
                             first_credential ? std::string{} : first_credential.error().message);
     const auto other_credential =
         send_and_drive(client, Request::get(cred_url).request_id("rid-cred").header("Authorization", "Bearer two"));
-    AURORA_TEST_REQUIRE_MSG(bool(other_credential),
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(other_credential),
                             other_credential ? std::string{} : other_credential.error().message);
     AURORA_TEST_CHECK_FALSE(other_credential.value().from_cache());
     AURORA_TEST_CHECK_EQ(peer.accepts(), 5);
@@ -1181,7 +1181,7 @@ AURORA_TEST_CASE(a_short_circuit_response_is_delivered_without_touching_the_wire
     auto handle = client.use(hook);
 
     const auto delivered = send_and_drive(client, Request::get(loopback_url(peer.port())).request_id("rid-mock"));
-    AURORA_TEST_REQUIRE_MSG(bool(delivered), delivered ? std::string{} : delivered.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(delivered), delivered ? std::string{} : delivered.error().message);
     AURORA_TEST_CHECK_EQ(delivered.value().status(), std::uint16_t{201});
     AURORA_TEST_CHECK_EQ(body_text(delivered.value()), "mock");
     AURORA_TEST_CHECK_FALSE(delivered.value().from_cache());  // 短路不是缓存命中
@@ -1194,7 +1194,7 @@ AURORA_TEST_CASE(a_short_circuit_response_is_delivered_without_touching_the_wire
 
     handle.clear();
     const auto after_clear = send_and_drive(client, Request::get(loopback_url(peer.port())).request_id("rid-mock-2"));
-    AURORA_TEST_REQUIRE_MSG(bool(after_clear), after_clear ? std::string{} : after_clear.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(after_clear), after_clear ? std::string{} : after_clear.error().message);
     AURORA_TEST_CHECK_EQ(peer.accepts(), 1);  // 注销之后同一条 URL 照常上线
     AURORA_TEST_CHECK_EQ(body_text(after_clear.value()), "real");
 }
@@ -1222,7 +1222,7 @@ AURORA_TEST_CASE(a_short_circuit_skips_cache_redirect_and_decompression) {
     Request request = Request::get(loopback_url(peer.port(), "/terminal")).request_id("rid-terminal");
     request.on_progress([&progress_calls](const aurora::net::http::Progress &) -> void { ++progress_calls; });
     const auto delivered = send_and_drive(client, request);
-    AURORA_TEST_REQUIRE_MSG(bool(delivered), delivered ? std::string{} : delivered.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(delivered), delivered ? std::string{} : delivered.error().message);
     // 原样交出：状态码不判重定向、宣告的编码不去还原、不查也不写表、一次进度都不发。
     AURORA_TEST_CHECK_EQ(delivered.value().status(), std::uint16_t{302});
     AURORA_TEST_CHECK_EQ(body_text(delivered.value()), "not-gzip-bytes");
@@ -1233,7 +1233,7 @@ AURORA_TEST_CASE(a_short_circuit_skips_cache_redirect_and_decompression) {
     handle.clear();
     const auto later =
         send_and_drive(client, Request::get(loopback_url(peer.port(), "/terminal")).request_id("rid-later"));
-    AURORA_TEST_REQUIRE_MSG(bool(later), later ? std::string{} : later.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(later), later ? std::string{} : later.error().message);
     AURORA_TEST_CHECK_FALSE(later.value().from_cache());
     AURORA_TEST_CHECK_EQ(later.value().status(), std::uint16_t{200});
     AURORA_TEST_CHECK_EQ(peer.accepts(), 1);  // 短路那次没进表，同一条 URL 照样触网
@@ -1255,7 +1255,7 @@ AURORA_TEST_CASE(a_short_circuit_can_carry_a_failure) {
     const auto handle = client.use(hook);
 
     const auto delivered = send_and_drive(client, Request::get(loopback_url(peer.port())).request_id("rid-failing"));
-    AURORA_TEST_REQUIRE_FALSE(bool(delivered));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(delivered));
     AURORA_TEST_CHECK_EQ(delivered.error().code_enum, ErrorCode::NetConnectFailed);
     AURORA_TEST_CHECK_EQ(hook->before_calls(), 1);
     AURORA_TEST_CHECK_EQ(hook->after_calls(), 0);  // 失败交付不收摊问
@@ -1277,7 +1277,7 @@ AURORA_TEST_CASE(a_hook_may_not_forge_a_cache_hit) {
     const auto handle = client.use(hook);
 
     const auto refused = send_and_drive(client, Request::get(loopback_url(peer.port())).request_id("rid-forge"));
-    AURORA_TEST_REQUIRE_FALSE(bool(refused));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(refused));
     AURORA_TEST_CHECK_EQ(refused.error().code_enum, ErrorCode::HttpRequestInvalid);
     AURORA_TEST_CHECK_TRUE(contains(refused.error().message, "may not forge a cache hit"));
     AURORA_TEST_CHECK_FALSE(contains(refused.error().message, "127.0.0.1"));
@@ -1303,7 +1303,7 @@ AURORA_TEST_CASE(cancelling_from_a_request_hook_beats_the_short_circuit) {
 
     const auto refused =
         send_and_drive(client, Request::get(loopback_url(peer.port())).request_id("rid-cancel"), Cancellation{token});
-    AURORA_TEST_REQUIRE_FALSE(bool(refused));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(refused));
     AURORA_TEST_CHECK_EQ(refused.error().code_enum, ErrorCode::NetCancelled);
     AURORA_TEST_CHECK_EQ(hook->before_calls(), 1);
     AURORA_TEST_CHECK_EQ(hook->after_calls(), 0);  // 短路值作废，收摊问一概不问
@@ -1327,7 +1327,7 @@ AURORA_TEST_CASE(an_already_cancelled_token_never_reaches_the_hooks) {
     Cancellation token;
     token.cancel();
     const auto refused = send_and_drive(client, Request::get(loopback_url(peer.port())), std::move(token));
-    AURORA_TEST_REQUIRE_FALSE(bool(refused));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(refused));
     AURORA_TEST_CHECK_EQ(refused.error().code_enum, ErrorCode::NetCancelled);
     AURORA_TEST_CHECK_EQ(hook->before_calls(), 0);  // 取消先于一切判定，钩子也不问
     AURORA_TEST_CHECK_EQ(peer.accepts(), 0);
@@ -1349,7 +1349,7 @@ AURORA_TEST_CASE(a_short_circuit_on_the_stream_leg_is_refused_not_ignored) {
 
     CountingSink sink;
     const auto refused = open_and_drive(client, Request::get(loopback_url(peer.port())), sink);
-    AURORA_TEST_REQUIRE_FALSE(bool(refused));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(refused));
     AURORA_TEST_CHECK_EQ(refused.error().code_enum, ErrorCode::HttpRequestInvalid);
     // 如实被拒而不是悄悄忽略：静默放过会让宿主的替身「以为 mock 了，实际打到了真网」。
     AURORA_TEST_CHECK_TRUE(
@@ -1377,7 +1377,7 @@ AURORA_TEST_CASE(a_short_circuit_on_the_subscription_leg_ends_the_subscription) 
     CountingSseSink sink;
     const auto refused =
         subscribe_and_drive(client, Request::get(loopback_url(peer.port())).sse(immediate_reconnect(3)), sink);
-    AURORA_TEST_REQUIRE_FALSE(bool(refused));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(refused));
     AURORA_TEST_CHECK_EQ(refused.error().code_enum, ErrorCode::HttpRequestInvalid);
     AURORA_TEST_CHECK_TRUE(contains(refused.error().message, "server-sent-events leg returned a short-circuit"));
     AURORA_TEST_CHECK_EQ(peer.accepts(), 0);  // 本地拒绝不重连：一次都不触网，也没有第二条流
@@ -1402,7 +1402,7 @@ AURORA_TEST_CASE(a_short_circuit_on_the_upgrade_leg_ends_the_handshake) {
 
     CountingWsSink sink;
     const auto refused = connect_and_drive(client, Request::get(ws_url(peer.port())), sink);
-    AURORA_TEST_REQUIRE_FALSE(bool(refused));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(refused));
     AURORA_TEST_CHECK_EQ(refused.error().code_enum, ErrorCode::HttpRequestInvalid);
     AURORA_TEST_CHECK_TRUE(contains(refused.error().message, "websocket leg returned a short-circuit"));
     AURORA_TEST_CHECK_EQ(peer.accepts(), 0);
@@ -1429,7 +1429,7 @@ AURORA_TEST_CASE(a_subscription_asks_the_request_hook_once_per_connection) {
     CountingSseSink sink;
     const auto outcome =
         subscribe_and_drive(client, Request::get(loopback_url(peer.port())).sse(immediate_reconnect(1)), sink);
-    AURORA_TEST_REQUIRE_MSG(bool(outcome), outcome ? std::string{} : outcome.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(outcome), outcome ? std::string{} : outcome.error().message);
 
     AURORA_TEST_CHECK_EQ(sink.opens, 2);
     AURORA_TEST_CHECK_EQ(hook->before_calls(), 2);  // 每次（重）连各问一次起手问
@@ -1462,7 +1462,7 @@ AURORA_TEST_CASE(the_streaming_legs_never_ask_for_a_response) {
         AURORA_TEST_REQUIRE(stream_peer.valid());
         CountingSink sink;
         const auto streamed = open_and_drive(client, Request::get(loopback_url(stream_peer.port())), sink);
-        AURORA_TEST_REQUIRE_MSG(bool(streamed), streamed ? std::string{} : streamed.error().message);
+        AURORA_TEST_REQUIRE_MSG(static_cast<bool>(streamed), streamed ? std::string{} : streamed.error().message);
         AURORA_TEST_CHECK_EQ(sink.heads, 1);
         AURORA_TEST_CHECK_EQ(hook->before_calls(), 1);
         AURORA_TEST_CHECK_EQ(hook->after_calls(), 0);
@@ -1477,7 +1477,7 @@ AURORA_TEST_CASE(the_streaming_legs_never_ask_for_a_response) {
         CountingSseSink sink;
         const auto subscribed =
             subscribe_and_drive(client, Request::get(loopback_url(sse_peer.port())).sse(single_stream()), sink);
-        AURORA_TEST_REQUIRE_MSG(bool(subscribed), subscribed ? std::string{} : subscribed.error().message);
+        AURORA_TEST_REQUIRE_MSG(static_cast<bool>(subscribed), subscribed ? std::string{} : subscribed.error().message);
         AURORA_TEST_CHECK_EQ(sink.opens, 1);
         AURORA_TEST_CHECK_EQ(hook->after_calls(), 0);
         const auto calls = hook->calls();
@@ -1495,7 +1495,7 @@ AURORA_TEST_CASE(the_streaming_legs_never_ask_for_a_response) {
         const auto handle = client.use(hook);
         CountingWsSink sink;
         const auto connected = connect_and_drive(client, Request::get(ws_url(ws_peer.port())), sink);
-        AURORA_TEST_REQUIRE_MSG(bool(connected), connected ? std::string{} : connected.error().message);
+        AURORA_TEST_REQUIRE_MSG(static_cast<bool>(connected), connected ? std::string{} : connected.error().message);
         AURORA_TEST_CHECK_EQ(hook->after_calls(), 0);
         const auto calls = hook->calls();
         AURORA_TEST_REQUIRE_EQ(calls.size(), std::size_t{3});
@@ -1524,28 +1524,28 @@ AURORA_TEST_CASE(the_response_hook_is_asked_once_per_delivered_response) {
     const auto handle = client.use(hook);
 
     const auto delivered = send_and_drive(client, Request::get(loopback_url(wire.port())).request_id("rid-wire"));
-    AURORA_TEST_REQUIRE_MSG(bool(delivered), delivered ? std::string{} : delivered.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(delivered), delivered ? std::string{} : delivered.error().message);
     AURORA_TEST_CHECK_EQ(hook->after_calls(), 1);  // 线上交付：一次
 
     const auto cached = send_and_drive(client, Request::get(loopback_url(stale.port(), "/c")).request_id("rid-cache"));
-    AURORA_TEST_REQUIRE_MSG(bool(cached), cached ? std::string{} : cached.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(cached), cached ? std::string{} : cached.error().message);
     const auto again = send_and_drive(client, Request::get(loopback_url(stale.port(), "/c")).request_id("rid-cache"));
-    AURORA_TEST_REQUIRE_MSG(bool(again), again ? std::string{} : again.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(again), again ? std::string{} : again.error().message);
     AURORA_TEST_CHECK(again.value().from_cache());
     AURORA_TEST_CHECK_EQ(hook->after_calls(), 3);  // 取回 + 新鲜副本：各一次
 
     const auto not_found = send_and_drive(client, Request::get(loopback_url(missing.port())).request_id("rid-404"));
-    AURORA_TEST_REQUIRE_MSG(bool(not_found), not_found ? std::string{} : not_found.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(not_found), not_found ? std::string{} : not_found.error().message);
     AURORA_TEST_CHECK_EQ(not_found.value().status(), std::uint16_t{404});
     AURORA_TEST_CHECK_EQ(hook->after_calls(), 4);  // 非 2xx 是对端说的事实，不是本库的失败
 
     const auto failed = send_and_drive(client, Request::get(loopback_url(unreachable)).request_id("rid-fail"));
-    AURORA_TEST_REQUIRE_FALSE(bool(failed));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(failed));
     AURORA_TEST_CHECK_EQ(hook->after_calls(), 4);  // 一次都没交出应答
 
     Client strict;  // 缺省策略：拒绝回环明文
     const auto refused = send_and_drive(strict, Request::get(loopback_url(wire.port())));
-    AURORA_TEST_REQUIRE_FALSE(bool(refused));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(refused));
     AURORA_TEST_CHECK_EQ(refused.error().code_enum, ErrorCode::NetPolicyViolated);
     AURORA_TEST_CHECK_EQ(hook->after_calls(), 4);  // 起手就被闸拦下，两问都不问
     const auto calls = hook->calls();
@@ -1575,7 +1575,7 @@ AURORA_TEST_CASE(the_settled_view_is_the_logical_request_the_hooks_wrote) {
     const auto delivered = send_and_drive(client, Request::get(loopback_url(origin.port(), "/origin"))
                                                       .request_id("rid-settling")
                                                       .header("X-Caller", "caller-value"));
-    AURORA_TEST_REQUIRE_MSG(bool(delivered), delivered ? std::string{} : delivered.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(delivered), delivered ? std::string{} : delivered.error().message);
 
     const auto answers = hook->answers();
     AURORA_TEST_REQUIRE_EQ(answers.size(), std::size_t{1});
@@ -1598,7 +1598,7 @@ AURORA_TEST_CASE(a_hook_that_throws_after_the_response_does_not_undo_the_deliver
 #ifdef AURORA_PLATFORM_WASM
     AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
 #endif
-    CapturedLogger capture;
+    CapturedLogger const capture;
     const aurora::test::net::HostDriven host;
     ScriptedPeer peer(reply_after_reading(1, service_ok()));
     AURORA_TEST_REQUIRE(peer.valid());
@@ -1614,7 +1614,7 @@ AURORA_TEST_CASE(a_hook_that_throws_after_the_response_does_not_undo_the_deliver
 
     const auto delivered =
         send_and_drive(client, Request::get(loopback_url(peer.port())).request_id("rid-after-throw"));
-    AURORA_TEST_REQUIRE_MSG(bool(delivered), delivered ? std::string{} : delivered.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(delivered), delivered ? std::string{} : delivered.error().message);
     AURORA_TEST_CHECK_EQ(delivered.value().status(), std::uint16_t{200});
     AURORA_TEST_CHECK_EQ(throwing->after_calls(), 1);
     AURORA_TEST_CHECK_EQ(follower->after_calls(), 1);  // 链上其余各枚照常问
@@ -1628,7 +1628,7 @@ AURORA_TEST_CASE(a_hook_that_throws_before_the_request_refuses_the_exchange) {
 #ifdef AURORA_PLATFORM_WASM
     AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
 #endif
-    CapturedLogger capture;
+    CapturedLogger const capture;
     const aurora::test::net::HostDriven host;
     ScriptedPeer peer(silent());
     AURORA_TEST_REQUIRE(peer.valid());
@@ -1642,7 +1642,7 @@ AURORA_TEST_CASE(a_hook_that_throws_before_the_request_refuses_the_exchange) {
     const auto follower_handle = client.use(follower);
 
     const auto refused = send_and_drive(client, Request::get(loopback_url(peer.port())).request_id("rid-before-throw"));
-    AURORA_TEST_REQUIRE_FALSE(bool(refused));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(refused));
     AURORA_TEST_CHECK_EQ(refused.error().code_enum, ErrorCode::HttpRequestInvalid);
     AURORA_TEST_CHECK_TRUE(contains(refused.error().message, "hook #0 on the send leg threw from before_request"));
     AURORA_TEST_CHECK_FALSE(contains(refused.error().message, throwing->before_sentinel_text));
@@ -1657,7 +1657,7 @@ AURORA_TEST_CASE(a_nested_exchange_from_a_request_hook_does_not_reask_that_hook)
 #ifdef AURORA_PLATFORM_WASM
     AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
 #endif
-    CapturedLogger capture;
+    CapturedLogger const capture;
     const aurora::test::net::HostDriven host;
     ScriptedPeer outer(reply_after_reading(1, service_ok("", "outer")));
     AURORA_TEST_REQUIRE(outer.valid());
@@ -1672,12 +1672,12 @@ AURORA_TEST_CASE(a_nested_exchange_from_a_request_hook_does_not_reask_that_hook)
     hook->on_before = [&client, &nested_url](Headers &) -> void {
         // 协程体在调用那一刻就跑起手，钩子链也在首个 `co_await` 之前——嵌套交换的链正是在这里同步展开的。
         const auto nested = send_and_drive(client, Request::get(nested_url).request_id("rid-nested"));
-        AURORA_TEST_CHECK_TRUE(bool(nested));
+        AURORA_TEST_CHECK_TRUE(static_cast<bool>(nested));
     };
     const auto handle = client.use(hook);
 
     const auto delivered = send_and_drive(client, Request::get(loopback_url(outer.port())).request_id("rid-outer"));
-    AURORA_TEST_REQUIRE_MSG(bool(delivered), delivered ? std::string{} : delivered.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(delivered), delivered ? std::string{} : delivered.error().message);
 
     AURORA_TEST_CHECK_EQ(body_text(delivered.value()), "outer");
     AURORA_TEST_CHECK_EQ(hook->before_calls(), 1);  // 嵌套那一次被递归闸跳过，本枚只被问一次
@@ -1693,7 +1693,7 @@ AURORA_TEST_CASE(a_nested_exchange_from_a_response_hook_does_not_reask_that_hook
 #ifdef AURORA_PLATFORM_WASM
     AURORA_TEST_SKIP("the browser runtime has no BSD socket semantics; aurora::net is not built for wasm");
 #endif
-    CapturedLogger capture;
+    CapturedLogger const capture;
     const aurora::test::net::HostDriven host;
     ScriptedPeer outer(reply_after_reading(1, service_ok("", "outer")));
     AURORA_TEST_REQUIRE(outer.valid());
@@ -1706,13 +1706,13 @@ AURORA_TEST_CASE(a_nested_exchange_from_a_response_hook_does_not_reask_that_hook
     const std::string nested_url = loopback_url(inner_peer.port(), "/nested");
     hook->on_after = [&client, &nested_url]() -> void {
         const auto nested = send_and_drive(client, Request::get(nested_url).request_id("rid-nested-after"));
-        AURORA_TEST_CHECK_TRUE(bool(nested));
+        AURORA_TEST_CHECK_TRUE(static_cast<bool>(nested));
     };
     const auto handle = client.use(hook);
 
     const auto delivered =
         send_and_drive(client, Request::get(loopback_url(outer.port())).request_id("rid-outer-after"));
-    AURORA_TEST_REQUIRE_MSG(bool(delivered), delivered ? std::string{} : delivered.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(delivered), delivered ? std::string{} : delivered.error().message);
 
     AURORA_TEST_CHECK_EQ(hook->before_calls(), 1);
     AURORA_TEST_CHECK_EQ(hook->after_calls(), 1);
@@ -1750,7 +1750,7 @@ AURORA_TEST_CASE(deregistering_another_hook_mid_exchange_does_not_cut_it_out) {
 
     const auto delivered =
         send_and_drive(client, Request::get(loopback_url(peer.port(), "/snapshot")).request_id("rid-snapshot"));
-    AURORA_TEST_REQUIRE_MSG(bool(delivered), delivered ? std::string{} : delivered.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(delivered), delivered ? std::string{} : delivered.error().message);
     AURORA_TEST_CHECK_EQ(second->before_calls(), 1);
     AURORA_TEST_CHECK_EQ(second->after_calls(), 1);
     AURORA_TEST_REQUIRE(await_filed(filed, guard, 1));
@@ -1760,7 +1760,7 @@ AURORA_TEST_CASE(deregistering_another_hook_mid_exchange_does_not_cut_it_out) {
 
     const auto later =
         send_and_drive(client, Request::get(loopback_url(peer.port(), "/snapshot")).request_id("rid-after-clear"));
-    AURORA_TEST_REQUIRE_MSG(bool(later), later ? std::string{} : later.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(later), later ? std::string{} : later.error().message);
     AURORA_TEST_CHECK_EQ(second->before_calls(), 1);  // 第二条交换起它不在链上了
     AURORA_TEST_CHECK_EQ(first->before_calls(), 2);
 }
@@ -1790,12 +1790,12 @@ AURORA_TEST_CASE(a_hook_registered_during_an_exchange_is_not_applied_to_it) {
 
     const auto delivered =
         send_and_drive(client, Request::get(loopback_url(peer.port(), "/register")).request_id("rid-register"));
-    AURORA_TEST_REQUIRE_MSG(bool(delivered), delivered ? std::string{} : delivered.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(delivered), delivered ? std::string{} : delivered.error().message);
     AURORA_TEST_CHECK_EQ(late->before_calls(), 0);  // 本次交换看的是起手那一刻的快照
 
     const auto later =
         send_and_drive(client, Request::get(loopback_url(peer.port(), "/register")).request_id("rid-register-2"));
-    AURORA_TEST_REQUIRE_MSG(bool(later), later ? std::string{} : later.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(later), later ? std::string{} : later.error().message);
     AURORA_TEST_CHECK_EQ(late->before_calls(), 1);
     AURORA_TEST_REQUIRE(await_filed(filed, guard, 2));
     AURORA_TEST_CHECK_FALSE(contains(filed_request(filed, guard, 0), "x-late"));
@@ -1820,7 +1820,7 @@ AURORA_TEST_CASE(the_same_hook_instance_registered_twice_is_asked_twice) {
     const auto second_handle = client.use(hook);  // 登记是「两次登记」而不是「同一枚去重」
 
     const auto delivered = send_and_drive(client, Request::get(loopback_url(peer.port())).request_id("rid-twice"));
-    AURORA_TEST_REQUIRE_MSG(bool(delivered), delivered ? std::string{} : delivered.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(delivered), delivered ? std::string{} : delivered.error().message);
     AURORA_TEST_CHECK_EQ(hook->before_calls(), 2);
     AURORA_TEST_CHECK_EQ(hook->after_calls(), 2);
     AURORA_TEST_REQUIRE(await_filed(filed, guard, 1));
@@ -1843,7 +1843,7 @@ AURORA_TEST_CASE(a_null_hook_is_an_empty_registration) {
     const auto real_handle = client.use(hook);
 
     const auto delivered = send_and_drive(client, Request::get(loopback_url(peer.port())).request_id("rid-null"));
-    AURORA_TEST_REQUIRE_MSG(bool(delivered), delivered ? std::string{} : delivered.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(delivered), delivered ? std::string{} : delivered.error().message);
     AURORA_TEST_CHECK_EQ(hook->before_calls(), 1);  // 链上只有那一枚真钩子
 }
 
@@ -1875,13 +1875,13 @@ AURORA_TEST_CASE(moving_a_handle_transfers_the_deregistration) {
     target = std::move(source);  // 被移走的句柄析构即空操作：注销权只有一份
 
     const auto delivered = send_and_drive(client, Request::get(loopback_url(peer.port())).request_id("rid-move"));
-    AURORA_TEST_REQUIRE_MSG(bool(delivered), delivered ? std::string{} : delivered.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(delivered), delivered ? std::string{} : delivered.error().message);
     AURORA_TEST_CHECK_EQ(hook->before_calls(), 1);
 
     target.clear();
     target.clear();  // 重复注销幂等
     const auto later = send_and_drive(client, Request::get(loopback_url(peer.port())).request_id("rid-move-2"));
-    AURORA_TEST_REQUIRE_MSG(bool(later), later ? std::string{} : later.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(later), later ? std::string{} : later.error().message);
     AURORA_TEST_CHECK_EQ(hook->before_calls(), 1);
     AURORA_TEST_CHECK_EQ(peer.accepts(), 2);
 }
@@ -1907,13 +1907,13 @@ AURORA_TEST_CASE(clearing_a_handle_inside_its_own_callback_only_affects_the_next
 
     const auto delivered =
         send_and_drive(client, Request::get(loopback_url(peer.port(), "/self")).request_id("rid-self"));
-    AURORA_TEST_REQUIRE_MSG(bool(delivered), delivered ? std::string{} : delivered.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(delivered), delivered ? std::string{} : delivered.error().message);
     AURORA_TEST_CHECK_EQ(hook->before_calls(), 1);
     AURORA_TEST_CHECK_EQ(hook->after_calls(), 1);  // 本次交换的收摊前缀已经取到
 
     const auto later =
         send_and_drive(client, Request::get(loopback_url(peer.port(), "/self")).request_id("rid-self-2"));
-    AURORA_TEST_REQUIRE_MSG(bool(later), later ? std::string{} : later.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(later), later ? std::string{} : later.error().message);
     AURORA_TEST_CHECK_EQ(hook->before_calls(), 1);  // 下一条交换不再问它
     AURORA_TEST_CHECK_EQ(peer.accepts(), 2);
 }
@@ -1935,22 +1935,22 @@ AURORA_TEST_CASE(a_short_circuit_delivery_is_distinguishable_in_the_activity_rec
     client.cache(CacheOptions{.enabled = true});
 
     const auto wired = send_and_drive(client, Request::get(loopback_url(wire_peer.port(), "/w")).request_id("rid-w"));
-    AURORA_TEST_REQUIRE_MSG(bool(wired), wired ? std::string{} : wired.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(wired), wired ? std::string{} : wired.error().message);
 
     const auto cached = send_and_drive(client, Request::get(loopback_url(cache_peer.port(), "/c")).request_id("rid-c"));
-    AURORA_TEST_REQUIRE_MSG(bool(cached), cached ? std::string{} : cached.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(cached), cached ? std::string{} : cached.error().message);
     const auto hit = send_and_drive(client, Request::get(loopback_url(cache_peer.port(), "/c")).request_id("rid-c"));
-    AURORA_TEST_REQUIRE_MSG(bool(hit), hit ? std::string{} : hit.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(hit), hit ? std::string{} : hit.error().message);
 
     Client strict;  // 缺省策略挡下回环明文：一次本地拒绝
     const auto refused = send_and_drive(strict, Request::get(loopback_url(wire_peer.port(), "/r")).request_id("rid-r"));
-    AURORA_TEST_REQUIRE_FALSE(bool(refused));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(refused));
 
     auto hook = std::make_shared<ScriptHook>("recorded-mock");
     hook->hook_delivery = mock_delivery(200, "mock");
     const auto handle = client.use(hook);
     const auto mocked = send_and_drive(client, Request::get(loopback_url(wire_peer.port(), "/m")).request_id("rid-m"));
-    AURORA_TEST_REQUIRE_MSG(bool(mocked), mocked ? std::string{} : mocked.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(mocked), mocked ? std::string{} : mocked.error().message);
 
     const HttpActivityEntry cache_hit = entry_for("rid-c");  // 同一标识的最新一跳即命中那一笔
     const HttpActivityEntry short_circuit = entry_for("rid-m");
@@ -2005,7 +2005,7 @@ AURORA_TEST_CASE(the_authenticator_answers_override_a_hook_written_credential) {
 
     const auto delivered =
         send_and_drive(client, Request::get(loopback_url(peer.port(), "/auth")).request_id("rid-auth-hook"));
-    AURORA_TEST_REQUIRE_MSG(bool(delivered), delivered ? std::string{} : delivered.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(delivered), delivered ? std::string{} : delivered.error().message);
     AURORA_TEST_CHECK_EQ(delivered.value().status(), std::uint16_t{200});
 
     AURORA_TEST_CHECK_EQ(hook->before_calls(), 1);  // 凭据重跑不重问钩子：一次逻辑交换只问一次

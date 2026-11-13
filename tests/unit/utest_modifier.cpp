@@ -107,7 +107,7 @@ AURORA_TEST_CASE(transform_info_offset_accumulates_translation) {
 
 AURORA_TEST_CASE(transform_info_align_translates_to_child_origin) {
     // Align 的 translation 依赖 child_size（需先经 layout 记录）。
-    Modifier m = Modifier{}.align(Alignment::Center);
+    Modifier const m = Modifier{}.align(Alignment::Center);
     const Constraints c{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = 100.0F, .height = 80.0F}};
     AURORA_TEST_REQUIRE_EQ(m.nodes().size(), 1U);
     (void)m.nodes()[0]->layout(c, [](const Constraints &) -> Size { return size_of(50.0F, 20.0F); });
@@ -316,7 +316,7 @@ AURORA_TEST_CASE(context_menu_pipeline_open_items_and_position) {
 AURORA_TEST_CASE(on_pointer_event_reaches_touch_listener) {
     int seen = 0;
     const Modifier m = Modifier{}.touch([&seen](const TouchEvent &) -> void { ++seen; });
-    TouchEvent e;
+    TouchEvent const e;
     m.on_pointer_event(e);
     m.on_pointer_event(e);
     AURORA_TEST_CHECK_EQ(seen, 2);

@@ -68,10 +68,10 @@ AURORA_TEST_CASE(menu_item_click_callback_counted) {
 }
 
 AURORA_TEST_CASE(tray_context_menu_roundtrip) {
-#ifdef AURORA_PLATFORM_WINDOWS
+#if defined(AURORA_PLATFORM_WINDOWS) || defined(AURORA_PLATFORM_MACOS)
     AURORA_TEST_SKIP(
-        "the Windows SystemTray registers a real tray icon (Shell_NotifyIcon) in its constructor; "
-        "unit tests do not touch it");
+        "native tray backends register a real icon in the constructor "
+        "(Windows Shell_NotifyIcon / macOS NSStatusItem); unit tests do not touch them");
 #else
     SystemTray tray("utest-tray");
     AURORA_TEST_CHECK_TRUE(tray.context_menu_items().empty());
@@ -94,10 +94,10 @@ AURORA_TEST_CASE(tray_context_menu_roundtrip) {
 }
 
 AURORA_TEST_CASE(tray_balloon_message_recorded) {
-#ifdef AURORA_PLATFORM_WINDOWS
+#if defined(AURORA_PLATFORM_WINDOWS) || defined(AURORA_PLATFORM_MACOS)
     AURORA_TEST_SKIP(
-        "the Windows SystemTray registers a real tray icon (Shell_NotifyIcon) in its constructor; "
-        "unit tests do not touch it");
+        "native tray backends register a real icon in the constructor "
+        "(Windows Shell_NotifyIcon / macOS NSStatusItem); unit tests do not touch them");
 #else
     SystemTray tray("utest-tray");
     AURORA_TEST_CHECK_TRUE(tray.last_balloon_message().empty());
@@ -113,10 +113,10 @@ AURORA_TEST_CASE(tray_balloon_message_recorded) {
 }
 
 AURORA_TEST_CASE(tray_move_preserves_state) {
-#ifdef AURORA_PLATFORM_WINDOWS
+#if defined(AURORA_PLATFORM_WINDOWS) || defined(AURORA_PLATFORM_MACOS)
     AURORA_TEST_SKIP(
-        "the Windows SystemTray registers a real tray icon (Shell_NotifyIcon) in its constructor; "
-        "unit tests do not touch it");
+        "native tray backends register a real icon in the constructor "
+        "(Windows Shell_NotifyIcon / macOS NSStatusItem); unit tests do not touch them");
 #else
     SystemTray tray("utest-tray");
     tray.set_title("renamed");

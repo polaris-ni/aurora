@@ -33,7 +33,7 @@
 两点与用例可执行性相关的载体事实：
 
 - 载体在 `set_source` 之后显式调用 `play()`，且 `TintedVideoPlayer` 覆写 `on_playback_tick`，在「播到末尾自停」这一跳上 `seek(0)` 后重新 `play()`。库内 **没有** 视频 `loop` 属性（音频侧 `Clip::set_loop` 才有），循环语义由消费侧实现（见 `specification/03-layout-render.md` §9.2）；正因如此，2 秒周期可持续重复，TC-MEDIA-004 与 TC-MEDIA-005 不必挤在单次播放窗口内取样。
-- 载体经 `run_demo` 承载，其帧回调每帧驱动 `Widget::tick` 并以「本帧是否发生渲染」决定等待时长；`Window::run` 本身不含这一跳（见 `specification/06-app-platform.md`）。
+- 载体经 `run_demo` 承载，其帧循环由 `Application` 统一驱动（每帧推进 `Widget::tick` 并以「本帧是否发生渲染」决定等待时长），`Window` 本身不再自带帧循环（见 `specification/06-app-platform.md` §3.1）。
 
 ### 1.3 执行环境
 

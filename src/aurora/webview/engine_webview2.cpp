@@ -108,6 +108,12 @@ struct WebView2State {
     // 就绪前到达的几何 / 可见性：宿主去重后不会重发，必须在此暂存、就绪时补送。
     std::optional<NativeViewRect> pending_rect;
     std::optional<bool> pending_visible;
+    // 宿主授予的可见性意图（缺省不可见，见 on_controller_ready 的压平说明）。
+    bool visible = false;
+    // 宿主最近一次下发的真实矩形：捕获期视图被临时停放到屏外，结束后据此回位。
+    std::optional<NativeViewRect> last_rect;
+    // 捕获期临时授予可见的在途计数：>0 表示视图正被停放在屏外产帧，真实几何暂缓下发。
+    int capture_primes = 0;
     // 就绪前到达的命令进入排队，就绪后 flush。
     std::optional<std::string> pending_url;
     std::optional<std::string> pending_html;
@@ -347,6 +353,9 @@ class ScriptCompletedHandler final : public ComHandler<ICoreWebView2ExecuteScrip
 /// 截图，故这个量级已远宽于真实耗时——它只为兜住「永不」，不是给慢回调设的期限。
 constexpr auto AURORA_WEBVIEW2_CAPTURE_TIMEOUT = std::chrono::seconds(15);
 
+/// 捕获期把视图停放到父客户区之外时的横向余量（物理像素），保证右边界也落在客户区左侧。
+constexpr int AURORA_WEBVIEW2_PARK_MARGIN = 64;
+
 /// 在途异步捕获。
 ///
 /// `NativeViewSink::capture` 的契约是「捕获失败或尚未就绪时 `done` 必须仍被调用且携空图，
@@ -369,10 +378,52 @@ struct PendingCapture {
     return table;
 }
 
+/// 捕获期屏外停放矩形：尺寸不变，左边界整体挪到父客户区之外。
+///
+/// 快照模式的原生视图按契约恒不可见（`IsVisible=FALSE`），而 WebView2 在不可见时停止合成，
+/// `CapturePreview` 便可能返回 S_OK 却永不回调。捕获前把视图挪到屏外再授予可见性，合成器
+/// 随之产帧；父窗口对子窗口的客户区裁剪保证它不出现在界面上。
+[[nodiscard]] auto parked_rect(const NativeViewRect &rect) -> NativeViewRect {
+    return NativeViewRect{
+        .x = -rect.width - AURORA_WEBVIEW2_PARK_MARGIN, .y = rect.y, .width = rect.width, .height = rect.height};
+}
+
+/// 捕获前临时授予可见性并停放到屏外；无可停放几何时返回 false（维持原捕获路径）。
+auto prime_capture(const std::shared_ptr<WebView2State> &st) -> bool {
+    if (st->visible || !st->last_rect || !st->last_rect->has_area() || st->controller == nullptr) {
+        return false;
+    }
+    ++st->capture_primes;
+    const NativeViewRect parked = parked_rect(*st->last_rect);
+    st->controller->put_Bounds(
+        RECT{.left = parked.x, .top = parked.y, .right = parked.x + parked.width, .bottom = parked.y + parked.height});
+    st->controller->put_IsVisible(TRUE);
+    return true;
+}
+
+/// 还原捕获期的临时可见性 / 停放几何（最后一次在途捕获结束时调用）。
+auto finish_capture_prime(const std::shared_ptr<WebView2State> &st) -> void {
+    if (st->capture_primes <= 0) {
+        return;
+    }
+    if (--st->capture_primes > 0 || st->controller == nullptr) {
+        return;  // 仍有在途捕获需要保持停放
+    }
+    // 先隐藏再回位：反过来会在真实位置闪现一帧。
+    st->controller->put_IsVisible(st->visible ? TRUE : FALSE);
+    if (st->last_rect) {
+        const NativeViewRect &r = *st->last_rect;
+        st->controller->put_Bounds(RECT{.left = r.x, .top = r.y, .right = r.x + r.width, .bottom = r.y + r.height});
+    }
+}
+
 /// 兑现一枚在途捕获（空图）；已由对方兑现者跳过。
 auto settle_pending_capture(PendingCapture &pc) -> void {
     if (pc.settled->exchange(true)) {
         return;  // 完成回调已先到
+    }
+    if (const std::shared_ptr<WebView2State> st = pc.state.lock()) {
+        finish_capture_prime(st);
     }
     if (pc.done) {
         pc.done(Image{});
@@ -390,6 +441,7 @@ class CaptureCompletedHandler final : public ComHandler<ICoreWebView2CapturePrev
         if (settled_->exchange(true)) {
             return S_OK;  // 已由超时兜底兑现空图：不得再回调一次
         }
+        finish_capture_prime(state_);  // 先撤销临时可见性 / 停放，再交付图像
         Image img;
         if (!state_->detached && stream_ != nullptr) {
             LARGE_INTEGER zero{};
@@ -562,9 +614,13 @@ class WebView2Sink final : public WebViewSink {
         if (state_->detached) {
             return;
         }
+        state_->last_rect = rect;  // 记账：捕获期停放结束后据此回位
         if (state_->controller == nullptr) {
             state_->pending_rect = rect;  // 宿主按「变化才下发」去重，不会重发 ⇒ 必须暂存
             return;
+        }
+        if (state_->capture_primes > 0) {
+            return;  // 捕获期视图正停在屏外，真实矩形待捕获结束统一回位
         }
         const RECT r{.left = rect.x, .top = rect.y, .right = rect.x + rect.width, .bottom = rect.y + rect.height};
         state_->controller->put_Bounds(r);
@@ -573,9 +629,13 @@ class WebView2Sink final : public WebViewSink {
         if (state_->detached) {
             return;
         }
+        state_->visible = visible;
         if (state_->controller == nullptr) {
             state_->pending_visible = visible;  // 同上（可见性按翻转边沿下发，更不会重发）
             return;
+        }
+        if (state_->capture_primes > 0) {
+            return;  // 捕获期临时可见中；捕获结束按 state_->visible 还原
         }
         state_->controller->put_IsVisible(visible ? TRUE : FALSE);
     }
@@ -601,6 +661,9 @@ class WebView2Sink final : public WebViewSink {
             return;
         }
         auto settled = std::make_shared<std::atomic<bool>>(false);
+        // 快照模式视图恒不可见：捕获前先临时可见并停到屏外，否则 WebView2 不产帧、
+        // `CapturePreview` 可能返回 S_OK 却永不回调。完成 / 超时由 finish_capture_prime 还原。
+        prime_capture(state_);
         auto *h = new CaptureCompletedHandler(state_, stream, done, settled);
         const HRESULT hr =
             state_->webview->CapturePreview(COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG, stream.Get(), h);

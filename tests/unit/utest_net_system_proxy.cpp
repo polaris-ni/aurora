@@ -81,7 +81,7 @@ AURORA_TEST_CASE(pac_and_wpad_are_reported_instead_of_dropped) {
     sys::SystemProxySnapshot with_pac;
     with_pac.pac_url = "http://ad.internal/proxy.pac";
     const auto pac = sys::system_proxy_from_snapshot(with_pac);
-    AURORA_TEST_REQUIRE_FALSE(bool(pac));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(pac));
     AURORA_TEST_CHECK_EQ(pac.error().code_enum, ErrorCode::NetProxyUnsupported);
     // 诊断文本要指得出是哪个脚本：运维要知道「这台机器靠 PAC 决定路由」这件事本身。
     AURORA_TEST_CHECK_TRUE(pac.error().message.find("proxy.pac") != std::string::npos);
@@ -89,7 +89,7 @@ AURORA_TEST_CASE(pac_and_wpad_are_reported_instead_of_dropped) {
     sys::SystemProxySnapshot with_wpad;
     with_wpad.auto_detect = true;
     const auto wpad = sys::system_proxy_from_snapshot(with_wpad);
-    AURORA_TEST_REQUIRE_FALSE(bool(wpad));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(wpad));
     AURORA_TEST_CHECK_EQ(wpad.error().code_enum, ErrorCode::NetProxyUnsupported);
 
     // 两条判据都先于「手工代理是否存在」：PAC 与手工项并存时同样不能假装手工项就是全部意图。
@@ -98,14 +98,14 @@ AURORA_TEST_CASE(pac_and_wpad_are_reported_instead_of_dropped) {
         snapshot.pac_url = "http://ad/internal.pac";
         return snapshot;
     }());
-    AURORA_TEST_REQUIRE_FALSE(bool(both));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(both));
     AURORA_TEST_CHECK_EQ(both.error().code_enum, ErrorCode::NetProxyUnsupported);
 }
 
 AURORA_TEST_CASE(absent_manual_proxy_is_a_successful_empty_set) {
     const sys::SystemProxySnapshot none;
     const auto empty = sys::system_proxy_from_snapshot(none);
-    AURORA_TEST_REQUIRE(bool(empty));
+    AURORA_TEST_REQUIRE(static_cast<bool>(empty));
     const auto target = empty.value().for_target("api.example.com", 443, true);
     AURORA_TEST_CHECK_TRUE(target.is_direct());
 
@@ -115,14 +115,14 @@ AURORA_TEST_CASE(absent_manual_proxy_is_a_successful_empty_set) {
         snapshot.bypass_list = "10.0.0.0/8, .internal";
         return snapshot;
     }());
-    AURORA_TEST_REQUIRE(bool(bypass_only));
+    AURORA_TEST_REQUIRE(static_cast<bool>(bypass_only));
     AURORA_TEST_CHECK_TRUE(bypass_only.value().exceptions.matches("host.internal", 80));
 }
 
 AURORA_TEST_CASE(server_list_fills_slots_by_scheme_token) {
     const auto parsed = sys::system_proxy_from_snapshot(
         manual("http=plain.internal:3128; HTTPS=secure.internal:8443; socks5=gw.internal:1080", "*.lab.internal"));
-    AURORA_TEST_REQUIRE(bool(parsed));
+    AURORA_TEST_REQUIRE(static_cast<bool>(parsed));
     const ProxyEnvironment &env = parsed.value();
 
     const auto &http = require_value(env.http);
@@ -151,7 +151,7 @@ AURORA_TEST_CASE(bare_entry_and_skipped_protocols) {
     // 裸项（无 `=`）归 `all` 槽；`ftp=` / `gopher=` 略过——本库不发起这两类连接，它们不影响判定。
     const auto parsed =
         sys::system_proxy_from_snapshot(manual("ftp=ftp.internal:21, bare.internal:3128, gopher=go:70"));
-    AURORA_TEST_REQUIRE(bool(parsed));
+    AURORA_TEST_REQUIRE(static_cast<bool>(parsed));
     AURORA_TEST_CHECK_TRUE(!parsed.value().http.has_value());
     AURORA_TEST_CHECK_TRUE(!parsed.value().https.has_value());
     const auto &all = require_value(parsed.value().all);
@@ -160,7 +160,7 @@ AURORA_TEST_CASE(bare_entry_and_skipped_protocols) {
 
     // 缺省端口与配置侧同口径：CONNECT 80、SOCKS5 1080。
     const auto defaulted = sys::system_proxy_from_snapshot(manual("http=proxy.internal"));
-    AURORA_TEST_REQUIRE(bool(defaulted));
+    AURORA_TEST_REQUIRE(static_cast<bool>(defaulted));
     AURORA_TEST_CHECK_EQ(require_value(defaulted.value().http).port(), static_cast<std::uint16_t>(80));
 }
 
@@ -192,7 +192,7 @@ AURORA_TEST_CASE(ambiguous_and_malformed_entries_fail_loud) {
              Probe{.servers = "proxy bad host", .expected = ErrorCode::NetProxyConfigInvalid, .needle = "entry #1"},
          }) {
         const auto rejected = sys::system_proxy_from_snapshot(manual(probe.servers));
-        AURORA_TEST_REQUIRE_FALSE(bool(rejected));
+        AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(rejected));
         AURORA_TEST_CHECK_EQ(rejected.error().code_enum, probe.expected);
         AURORA_TEST_CHECK_TRUE(rejected.error().message.find(probe.needle) != std::string::npos);
     }
@@ -201,13 +201,13 @@ AURORA_TEST_CASE(ambiguous_and_malformed_entries_fail_loud) {
     sys::SystemProxySnapshot enabled;
     enabled.manual_enabled = true;
     const auto missing = sys::system_proxy_from_snapshot(enabled);
-    AURORA_TEST_REQUIRE_FALSE(bool(missing));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(missing));
     AURORA_TEST_CHECK_EQ(missing.error().code_enum, ErrorCode::NetProxyConfigInvalid);
 }
 
 AURORA_TEST_CASE(system_exception_tokens_are_modeled) {
     const auto parsed = sys::system_proxy_from_snapshot(manual("proxy.internal:3128", "<local>, <-LOOPBACK>, .corp"));
-    AURORA_TEST_REQUIRE(bool(parsed));
+    AURORA_TEST_REQUIRE(static_cast<bool>(parsed));
     const NoProxy &list = parsed.value().exceptions;
 
     // `<local>`：无限定域主机名例外；带点的主机与数字字面量都不算。
@@ -230,7 +230,7 @@ AURORA_TEST_CASE(from_system_uses_the_hook_and_names_a_missing_channel) {
         return std::optional<sys::SystemProxySnapshot>{manual("hooked.internal:3128")};
     });
     const auto hooked = ProxyEnvironment::from_system();
-    AURORA_TEST_REQUIRE(bool(hooked));
+    AURORA_TEST_REQUIRE(static_cast<bool>(hooked));
     AURORA_TEST_CHECK_EQ(require_value(hooked.value().all).host(), "hooked.internal");
 
     // 钩子里的畸形快照按原码上抛，不在这里二次折算：换算层的判据只有一处。
@@ -238,14 +238,14 @@ AURORA_TEST_CASE(from_system_uses_the_hook_and_names_a_missing_channel) {
         return std::optional<sys::SystemProxySnapshot>{manual("smb=file.internal")};
     });
     const auto malformed = ProxyEnvironment::from_system();
-    AURORA_TEST_REQUIRE_FALSE(bool(malformed));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(malformed));
     AURORA_TEST_CHECK_EQ(malformed.error().code_enum, ErrorCode::NetProxyConfigInvalid);
 
     // 空快照 = 本腿没有系统代理通道，报 `net-platform-unavailable` 而不是回空集合。
     sys::set_system_proxy_hook(
         []() -> Result<std::optional<sys::SystemProxySnapshot>> { return std::optional<sys::SystemProxySnapshot>{}; });
     const auto unavailable = ProxyEnvironment::from_system();
-    AURORA_TEST_REQUIRE_FALSE(bool(unavailable));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(unavailable));
     AURORA_TEST_CHECK_EQ(unavailable.error().code_enum, ErrorCode::NetPlatformUnavailable);
 }
 
@@ -260,12 +260,12 @@ AURORA_TEST_CASE(environment_takes_over_before_the_system_is_asked) {
     // 设过任一代理变量 = 接管：系统腿连问都不问，合并只会让「设了却没生效」更难归因。
     const auto taken =
         ProxyEnvironment::from_environment_or_system(make_reader({{"HTTP_PROXY", "http://env.internal:8080"}}));
-    AURORA_TEST_REQUIRE(bool(taken));
+    AURORA_TEST_REQUIRE(static_cast<bool>(taken));
     AURORA_TEST_CHECK_EQ(require_value(taken.value().http).host(), "env.internal");
     AURORA_TEST_CHECK_EQ(system_calls, 0);
 
     const auto merged = ProxyEnvironment::from_environment_or_system(make_reader({}));
-    AURORA_TEST_REQUIRE(bool(merged));
+    AURORA_TEST_REQUIRE(static_cast<bool>(merged));
     AURORA_TEST_CHECK_EQ(require_value(merged.value().all).host(), "system.internal");
     AURORA_TEST_CHECK_EQ(system_calls, 1);
 
@@ -274,11 +274,11 @@ AURORA_TEST_CASE(environment_takes_over_before_the_system_is_asked) {
         []() -> Result<std::optional<sys::SystemProxySnapshot>> { return std::optional<sys::SystemProxySnapshot>{}; });
     const auto env_only =
         ProxyEnvironment::from_environment_or_system(make_reader({{"ALL_PROXY", "socks5://only:1080"}}));
-    AURORA_TEST_REQUIRE(bool(env_only));
+    AURORA_TEST_REQUIRE(static_cast<bool>(env_only));
     AURORA_TEST_CHECK_EQ(require_value(env_only.value().all).host(), "only");
 
     const auto nothing = ProxyEnvironment::from_environment_or_system(make_reader({}));
-    AURORA_TEST_REQUIRE(bool(nothing));
+    AURORA_TEST_REQUIRE(static_cast<bool>(nothing));
     AURORA_TEST_CHECK_TRUE(nothing.value().for_target("api.example.com", 443, true).is_direct());
 
     // 通道在而读失败：原样上抛，绝不退化成「按环境变量算了」。
@@ -286,7 +286,7 @@ AURORA_TEST_CASE(environment_takes_over_before_the_system_is_asked) {
         return make_error(ErrorCode::NetProxyConfigUnreadable, "detail=system proxy: registry access denied");
     });
     const auto refused = ProxyEnvironment::from_environment_or_system(make_reader({}));
-    AURORA_TEST_REQUIRE_FALSE(bool(refused));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(refused));
     AURORA_TEST_CHECK_EQ(refused.error().code_enum, ErrorCode::NetProxyConfigUnreadable);
 }
 

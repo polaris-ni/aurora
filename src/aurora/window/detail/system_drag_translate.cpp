@@ -5,7 +5,6 @@
 
 #include "system_drag_translate.h"
 
-#include <algorithm>
 #include <array>
 #include <unordered_set>
 #include <utility>

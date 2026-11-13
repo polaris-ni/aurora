@@ -11,15 +11,15 @@ auto main() -> int {
     const aurora::Platform p = aurora::platform();
     aurora::Text line1{"au::App() demo"};
     aurora::Text line2{"surface: " + std::to_string(static_cast<int>(p.surface))};
-    line1.modifier.set(aurora::Modifier{}.size(240.0F, 28.0F));
-    line2.modifier.set(aurora::Modifier{}.size(240.0F, 28.0F));
+    line1.set_modifier(aurora::Modifier{}.size(240.0F, 28.0F));
+    line2.set_modifier(aurora::Modifier{}.size(240.0F, 28.0F));
 
-    auto root = aurora::Column{aurora::ColumnProps{.children = {
-                                                       std::move(line1),
-                                                       gap(12.0F),
-                                                       std::move(line2),
-                                                   }}};
-    aurora::Node tree{std::move(root)};  // 单一宿主：inspector 与 App 各持一份共享句柄
+    auto root = aurora::Column({
+        std::move(line1),
+        gap(12.0F),
+        std::move(line2),
+    });
+    aurora::Node const tree{std::move(root)};  // 单一宿主：inspector 与 App 各持一份共享句柄
 
 #ifdef AURORA_BUILD_INSPECTOR_SERVER
     // 无人值守取证通道（opt-in：未设 AURORA_INSPECTOR_PORT 时完全静默，不影响本载体

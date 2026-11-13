@@ -74,3 +74,9 @@
 ## 落码次序
 
 仅改 `src/aurora/app/application.cpp` 内部一枚函数 + `include/aurora/window/surface.h` 一枚虚函数与各后端覆写，与 CHG-032 / CHG-034 的文件重叠仅在 `application.cpp` 的不同函数段。新 vtable 槽按 ABI 面处理：**先改 `surface.h` 并全量重编**，再落后端覆写与用例。建议次序：CHG-031 → **CHG-033** → CHG-032 → CHG-034。
+
+## 实施记录与偏离（落码期回写）
+
+1. **macOS 腿已随窗口壳实写落地**（上方「不做 macOS 落地」只反映提案期状态）：`MacOSSurface::set_size` / `set_position` / `position()` / `set_window_mode` 均按 `NSWindow` 实写；模式切换按目标态组合 `zoom:` / `miniaturize:` / `toggleFullScreen:`，先上报目标档、AppKit 异步过渡完成后由委托按真实态校正；`minimize()` / `toggle_maximize()` / `set_fullscreen()` 同源转发。
+2. **验收边界（如实申报）**：`tools/verify/macos_surface_live_probe.mm` 覆盖 `set_size` 同步生效与下一帧按新尺寸重建、`set_position` 物理像素往返、`display_id` 与 `list_displays` 同 id 空间；窗口模式三档（最小化 / 最大化 / 全屏）属真机交互项，探针未逐档覆盖——不以编译通过冒充真机验收。
+3. **位置尺寸在 macOS 上不再 no-op**：上方「不做 macOS 落地」与第 60 条「Linux 上 no-op」并存；macOS 三方法已实写，Linux 的 X11 / Wayland `set_size` / `set_position` 缺口维持提案原文（确实未修）。

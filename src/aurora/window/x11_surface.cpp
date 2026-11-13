@@ -4,14 +4,16 @@
 
 // AT-SPI 头必须先于 Xlib（与首行 x11_surface.h 同理）：`AtspiPropValue::Kind::None`
 // 会被 Xlib 的 `#define None 0L` 污染，且本头不可在 #undef None 之后再包含。
-#include "aurora/window/detail/atspi_bridge.h"
 
 // 修饰键折算头同属这一组：`mods_from_x11_state` 内部以 `ModifierKey::None` 起手，
 // 在 Xlib 之后首次解析该头时 `None` 仍是对象宏，会被展开成 `ModifierKey::0L` 并报
 // `expected unqualified-id before numeric constant`。文件末尾的 `#undef None` 救不了它——
 // 那句在本头**之后**才执行；其余 aurora 头之所以无恙，只因它们早被首行的头链解析过
 // （头文件 guard 生效、宏尚未定义）。故本头必须与 atspi_bridge.h 同组前置。
+#include "aurora/app/detail/clipboard_backend.h"  // 富格式剪贴板后端单槽（变更回调经 fire_change 派发）
+#include "aurora/window/detail/atspi_bridge.h"
 #include "aurora/window/detail/csd_decoration.h"  // 跨后端共享 CSD 策略/命中/绘制层
+#include "aurora/window/detail/x11_clipboard.h"  // CLIPBOARD Selection 桥（同属「先于 Xlib」组：本头不引 Xlib）
 #include "aurora/window/detail/x11_drag.h"  // Xdnd 双向桥（同属「先于 Xlib」组：内部用 ModifierKey::None）
 #include "aurora/window/detail/x11_modifiers.h"
 
@@ -81,14 +83,36 @@ auto mask_shift(unsigned long mask, int fallback) -> int {
     return static_cast<int>(s);
 }
 
+/// @brief 读取根窗口 `RESOURCE_MANAGER` 属性原文（Xft.dpi 所在）；缺失/非 STRING 返回空串。
+///
+/// 刻意不用 `XResourceManagerString`：该函数把首次读到的值缓存在 `Display` 上，实测在
+/// `PropertyNotify` 已处理、属性已被改写之后仍返回旧串（本机 libX11 1.8 实测），
+/// 无法支撑运行时缩放上报。`XGetWindowProperty` 每次直达服务器，故是唯一可靠读法。
+auto read_resource_manager(Display *dpy) -> std::string {
+    Atom actual_type = 0;
+    int actual_format = 0;
+    unsigned long nitems = 0;
+    unsigned long bytes_after = 0;
+    unsigned char *prop = nullptr;
+    // RESOURCE_MANAGER 是根窗口属性；只接受 STRING（XA_STRING）类型，其余视为无声明。
+    const Status ok = XGetWindowProperty(dpy, DefaultRootWindow(dpy), XA_RESOURCE_MANAGER, 0L, 100000L, False,
+                                         XA_STRING, &actual_type, &actual_format, &nitems, &bytes_after, &prop);
+    std::string text;
+    if (ok == Success && actual_type == XA_STRING && actual_format == 8 && prop != nullptr) {
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+        text.assign(reinterpret_cast<const char *>(prop), nitems);
+    }
+    if (prop != nullptr) {
+        XFree(prop);
+    }
+    return text;
+}
+
 /// @brief 解析 X 资源 `Xft.dpi` 得像素密度（dpi/96）；无声明/异常值回退 1.0。
 /// Wayland 会话下 XWayland 会按桌面缩放同步该资源（GNOME/KDE 均如此）。
 auto detect_scale(Display *dpy) -> float {
-    const char *rm = XResourceManagerString(dpy);
-    if (rm == nullptr) {
-        return 1.0F;
-    }
-    const char *p = std::strstr(rm, "Xft.dpi:");
+    const std::string rm = read_resource_manager(dpy);
+    const char *p = std::strstr(rm.c_str(), "Xft.dpi:");
     if (p == nullptr) {
         return 1.0F;
     }
@@ -206,6 +230,11 @@ struct X11Surface::Impl {
     /// 持有者只能是本 Impl：桥在析构里要撤 `XdndAware` 并收摊在途会话，故必须先于 X 资源销毁
     /// （析构次序见 `~X11Surface`）。
     std::unique_ptr<detail::X11DragBridge> drag;
+    /// @brief CLIPBOARD 剪贴板桥（富格式 / 惰性要约 / 变更监听）；install 失败即为 nullptr。
+    ///
+    /// 与 Xdnd 并列、共用同一 X 连接与客户窗口：协议状态机见 `detail::X11ClipboardBridge`。
+    /// 只承载富格式与 `text/plain` 的 `set_payload` 入口；`set_text` / `get_text` 等仍走 xsel。
+    std::unique_ptr<detail::X11ClipboardBridge> clipboard;
 
     auto apply_title(const std::string &title) -> void;
     auto ensure_image(int w, int h) -> bool;
@@ -597,6 +626,10 @@ X11Surface::X11Surface(int w, int h, const std::string &title, const WindowStyle
                  ExposureMask | KeyPressMask | KeyReleaseMask | ButtonPressMask | ButtonReleaseMask |
                      PointerMotionMask | StructureNotifyMask | FocusChangeMask | EnterWindowMask | LeaveWindowMask |
                      PropertyChangeMask);
+    // DPI 变化探测：X11 没有标准「DPI 改变」事件，唯一可靠信号是根窗口 RESOURCE_MANAGER
+    // （Xft.dpi 所在）属性的 PropertyNotify。事件掩码按客户端连接独立计，故对根窗口再选一次
+    // PropertyChangeMask 不影响其他 X 客户端（多窗口共享同一连接时也幂等）。
+    XSelectInput(d.dpy, RootWindow(d.dpy, screen), PropertyChangeMask);
     // 关闭协议（点「×」经 ClientMessage 通知而非直接断链）。
     d.wm_delete = XInternAtom(d.dpy, "WM_DELETE_WINDOW", 0);
     XSetWMProtocols(d.dpy, d.win, &d.wm_delete, 1);
@@ -701,6 +734,14 @@ X11Surface::X11Surface(int w, int h, const std::string &title, const WindowStyle
         d.drag.reset();
         AURORA_LOG_WARN("window", "X11Surface: Xdnd bridge install failed; system drag unavailable.");
     }
+    // CLIPBOARD 剪贴板桥：install 失败即本窗口不参与富格式剪贴板（不谎报已有通路）。
+    d.clipboard = std::make_unique<detail::X11ClipboardBridge>(
+        d.dpy, static_cast<unsigned long>(d.win),
+        detail::X11ClipboardBridge::Hooks{.on_change = []() -> void { clipboard::detail::fire_change(); }});
+    if (!d.clipboard->install()) {
+        d.clipboard.reset();
+        AURORA_LOG_WARN("window", "X11Surface: clipboard bridge install failed; rich clipboard unavailable.");
+    }
     d.size = Size{.width = static_cast<float>(w), .height = static_cast<float>(h)};  // NOLINT(*-narrowing-conversions)
 }
 
@@ -712,7 +753,8 @@ X11Surface::~X11Surface() {
     window_mode_handler_ = nullptr;
     present_request_ = nullptr;
     d.composition_caret_provider = nullptr;  // 捕获宿主 this 的回调：销毁前解绑（同 Win32 桥纪律）
-    d.drag.reset();  // 先收摊 Xdnd（撤 XdndAware + 在途会话按 Cancelled 兑现），再销毁 X 资源
+    d.clipboard.reset();  // 先撤剪贴板桥（放弃 CLIPBOARD 选择权 + 撤进程级后端表），再收摊 Xdnd
+    d.drag.reset();  // 收摊 Xdnd（撤 XdndAware + 在途会话按 Cancelled 兑现），再销毁 X 资源
     if (d.ximage != nullptr) {
         d.ximage->data = nullptr;  // 缓冲由 vector 持有，不得让 XDestroyImage free
         XDestroyImage(d.ximage);
@@ -978,6 +1020,48 @@ auto X11Surface::present() -> Result<bool> {
 
 auto X11Surface::size() const -> Size { return impl_->size; }
 
+auto X11Surface::position() const -> Point {
+    const Impl &d = *impl_;
+    if (d.dpy == nullptr || d.win == 0) {
+        return Point{};
+    }
+    // 客户区左上角在根窗口坐标系的位置：对 reparenting WM，x/y 相对父窗口（WM 框架）的歧义
+    // 由 XTranslateCoordinates 消解，与 ConfigureNotify 里刷新 origin_x/origin_y 同一口径。
+    ::Window child = 0;
+    int rx = 0;
+    int ry = 0;
+    if (XTranslateCoordinates(d.dpy, d.win, DefaultRootWindow(d.dpy), 0, 0, &rx, &ry, &child) == False) {
+        return Point{};
+    }
+    return Point{.x = static_cast<float>(rx), .y = static_cast<float>(ry)};
+}
+
+auto X11Surface::set_position(Point p) -> void {
+    Impl &d = *impl_;
+    if (d.dpy == nullptr || d.win == 0 || d.window_gone) {
+        return;
+    }
+    // 位置是**屏幕物理像素**（与 GLFW / Win32 同口径，几何快照直接下发，不做 scale 换算）。
+    XMoveWindow(d.dpy, d.win, static_cast<int>(std::lround(p.x)), static_cast<int>(std::lround(p.y)));
+    XFlush(d.dpy);
+}
+
+auto X11Surface::set_size(Size s) -> void {
+    Impl &d = *impl_;
+    if (d.dpy == nullptr || d.win == 0 || d.window_gone) {
+        return;
+    }
+    // 入参是**逻辑 dp**（与 GLFW 同口径）：必须复用本后端唯一 scale 真值点换算为物理像素，
+    // 否则 ≠100% DPI 下窗口会比请求的 dp 小一个 scale 倍（与建窗路径 XCreateSimpleWindow 同源）。
+    const int pw = std::max(1, static_cast<int>(std::lround(s.width * d.scale)));
+    const int ph = std::max(1, static_cast<int>(std::lround(s.height * d.scale)));
+    XResizeWindow(d.dpy, d.win, static_cast<unsigned int>(pw), static_cast<unsigned int>(ph));
+    XFlush(d.dpy);
+    // 同步逻辑尺寸缓存：几何恢复在首帧之前下发，若等 ConfigureNotify 才更新，首帧会按旧尺寸
+    // 布局（差一帧错位）。ConfigureNotify 稍后到达时按「物理 / scale」重算，二者同口径。
+    d.size = Size{.width = static_cast<float>(pw) / d.scale, .height = static_cast<float>(ph) / d.scale};
+}
+
 auto X11Surface::frame_count() const -> int { return impl_->presented; }
 
 auto X11Surface::scale_factor() const -> float { return impl_->scale; }
@@ -1012,6 +1096,28 @@ auto X11Surface::set_window_mode(WindowMode m) -> void {
             XIconifyWindow(d.dpy, d.win, DefaultScreen(d.dpy));
             break;
     }
+}
+
+auto X11Surface::set_fullscreen(bool on) -> void {
+    // X11 全屏经 EWMH `_NET_WM_STATE_FULLSCREEN` 原子交给 WM 接管，进出屏的几何还原也由 WM 完成；
+    // `set_window_mode(FullScreen)` 已发该原子，这里仅作语义化转发，幂等由 set_window_mode 保证。
+    set_window_mode(on ? WindowMode::FullScreen : WindowMode::Normal);
+}
+
+auto X11Surface::minimize() -> void {
+    // 与 set_window_mode(Minimized) 同源：XIconifyWindow 经 WM 收走窗口（unmap + 任务栏留痕）。
+    // 还原腿依赖 OS（任务栏点击 / WM 还原），本库不另存最小化意图。
+    set_window_mode(WindowMode::Minimized);
+}
+
+auto X11Surface::toggle_maximize() -> void {
+    Impl &d = *impl_;
+    if (d.dpy == nullptr) {
+        return;
+    }
+    // 与 CSD 钮 csd_toggle_maximize 同口径：按本地 mode 快照算目标态（Normal <-> Maximized）。
+    // 直算目标态而非「读当前再补一次翻转」——异步 WM 下后者的次序不可靠；幂等由 set_window_mode 保证。
+    set_window_mode(d.mode == WindowMode::Maximized ? WindowMode::Normal : WindowMode::Maximized);
 }
 
 auto X11Surface::set_present_dirty(const std::vector<Rect> &device_rects) -> void {
@@ -1199,6 +1305,10 @@ auto X11Surface::poll_platform_events() -> void {
         XNextEvent(d.dpy, &ev);
         if (XFilterEvent(&ev, AURORA_X_NONE) != 0) {
             continue;  // 输入法预编辑消费（如拼音候选期间的按键）
+        }
+        // XFIXES 的 selection owner 通知走独立事件基址：由剪贴板桥统一识别，表层不碰其细节。
+        if (d.clipboard != nullptr && d.clipboard->on_x_event(&ev)) {
+            continue;
         }
         // NOLINTBEGIN(*-pro-type-union-access)
         switch (ev.type) {
@@ -1473,6 +1583,36 @@ auto X11Surface::poll_platform_events() -> void {
                 update_state();
                 break;
             case PropertyNotify:
+                // 根窗口 RESOURCE_MANAGER（Xft.dpi 所在）变化 = 系统 DPI / 缩放变更的唯一可靠
+                // 信号（X11 没有标准 DPI 事件）。只在该属性变化时重读，避免每帧解析资源串。
+                if (ev.xproperty.atom == XA_RESOURCE_MANAGER) {
+                    const float next = detect_scale(d.dpy);
+                    if (next != d.scale) {
+                        d.scale = next;
+                        // 物理窗口尺寸不变，逻辑尺寸按新 scale 重算（与 ConfigureNotify 同口径）：
+                        // 不更新会让下一帧用新 scale 渲染却按旧逻辑尺寸布局。
+                        ::Window root_ret = 0;
+                        int xr = 0;
+                        int yr = 0;
+                        unsigned int cw = 0;
+                        unsigned int ch = 0;
+                        unsigned int bw = 0;
+                        unsigned int depth = 0;
+                        if (XGetGeometry(d.dpy, d.win, &root_ret, &xr, &yr, &cw, &ch, &bw, &depth) != 0 && cw > 0 &&
+                            ch > 0) {
+                            // NOLINTBEGIN(*-narrowing-conversions)
+                            d.size = Size{.width = static_cast<float>(cw) / d.scale,
+                                          .height = static_cast<float>(ch) / d.scale};
+                            // NOLINTEND(*-narrowing-conversions)
+                        }
+                        // 先换算再上报（与 Wayland / GLFW 同序）：`on_scale_changed` 会立刻
+                        // force_full_redraw()，上报滞后一帧会让该帧继续按旧 scale 渲染。
+                        notify_scale_change(d.scale);
+                        if (present_request_) {
+                            present_request_();
+                        }
+                    }
+                }
                 // EWMH 几何态变化（最小化/最大化/全屏由 WM 改 _NET_WM_STATE 属性通告）。
                 if (ev.xproperty.atom == d.net_wm_state) {
                     const WindowMode want = d.query_mode();
@@ -1488,11 +1628,21 @@ auto X11Surface::poll_platform_events() -> void {
                     d.drag->on_property_notify(static_cast<unsigned long>(ev.xproperty.window), ev.xproperty.atom,
                                                ev.xproperty.state);
                 }
+                // 剪贴板：INCR 收块（读入）与发块（写出）同样按窗口 + 属性过滤，
+                // 两桥各认自己的 atom / 请求方映射，共用一条转发不冲突。
+                if (d.clipboard != nullptr) {
+                    d.clipboard->on_property_notify(static_cast<unsigned long>(ev.xproperty.window), ev.xproperty.atom,
+                                                    ev.xproperty.state);
+                }
                 break;
             case SelectionNotify:
                 // Xdnd：selection round-trip 的到达面（拖入取数的唯一通路）。
                 if (d.drag != nullptr) {
                     d.drag->on_selection_notify(ev.xselection.selection, ev.xselection.target, ev.xselection.property);
+                }
+                if (d.clipboard != nullptr) {
+                    d.clipboard->on_selection_notify(ev.xselection.selection, ev.xselection.target,
+                                                     ev.xselection.property);
                 }
                 break;
             case SelectionRequest:
@@ -1501,6 +1651,17 @@ auto X11Surface::poll_platform_events() -> void {
                     d.drag->on_selection_request(ev.xselectionrequest.requestor, ev.xselectionrequest.selection,
                                                  ev.xselectionrequest.target, ev.xselectionrequest.property,
                                                  ev.xselectionrequest.time);
+                }
+                if (d.clipboard != nullptr) {
+                    d.clipboard->on_selection_request(ev.xselectionrequest.requestor, ev.xselectionrequest.selection,
+                                                      ev.xselectionrequest.target, ev.xselectionrequest.property,
+                                                      ev.xselectionrequest.time);
+                }
+                break;
+            case SelectionClear:
+                // 剪贴板：本进程的 CLIPBOARD 所有权被夺 → 清本地数据并触发所有权丢失。
+                if (d.clipboard != nullptr) {
+                    d.clipboard->on_selection_clear(ev.xselectionclear.selection, ev.xselectionclear.time);
                 }
                 break;
             case ClientMessage:

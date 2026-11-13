@@ -89,6 +89,17 @@ class X11Surface final : public Surface {
     /// @brief 窗口当前逻辑尺寸（转发 Impl 缓存的窗口几何）。
     /// @return 窗口尺寸（设备无关像素）。
     [[nodiscard]] auto size() const -> Size override;
+    /// @brief 窗口客户区左上角的屏幕位置（`XTranslateCoordinates` → 根窗口，物理像素）。
+    /// @return 屏幕坐标（物理像素）；未连接或窗口已销毁时返回 (0,0)。
+    [[nodiscard]] auto position() const -> Point override;
+    /// @brief 程序化移动窗口到屏幕坐标（`XMoveWindow`，物理像素，与 GLFW / Win32 同口径）。
+    /// @param p 目标客户区左上角坐标（物理像素，几何快照直接下发，不做 scale 换算）。
+    auto set_position(Point p) -> void override;
+    /// @brief 程序化设置窗口客户区尺寸（`XResizeWindow`，逻辑 dp → 物理像素经本后端唯一 scale 真值点换算）。
+    /// 服务端装饰（SSD）下即客户区尺寸，WM 另行加框；客户端装饰（CSD）下窗口矩形即内容矩形。
+    /// 与 GLFW 同口径接收逻辑 dp（几何恢复按当前 `scale_factor` 折回后下发）。
+    /// @param s 目标客户区尺寸（设备无关像素）。
+    auto set_size(Size s) -> void override;
     /// @brief 已呈现帧数：每次 `present()` 真正 `XPutImage` 上屏自增（与 Win32 同口径）。
     /// @return 迄今真正上屏的帧数。
     [[nodiscard]] auto frame_count() const -> int override;
@@ -96,6 +107,8 @@ class X11Surface final : public Surface {
     /// @return 底色 RGBA（245,245,247,255，与通用默认一致）。
     [[nodiscard]] auto clear_color() const -> Color override { return Color{245, 245, 247, 255}; }
     /// @brief 像素密度：解析 X 资源 `Xft.dpi`（dpi/96），无声明时 1.0。
+    /// 运行期根窗口 `RESOURCE_MANAGER`（`PropertyNotify`）变化后重读并上报
+    /// `set_scale_change_handler` 注册的回调，使跨屏 / 系统缩放切换后 UI 自动跟随。
     /// @return DPI 缩放因子，1.0 表示无缩放。
     [[nodiscard]] auto scale_factor() const -> float override;
     /// @brief 是否已收到关闭窗口请求：`ClientMessage(WM_DELETE_WINDOW)` 置位。
@@ -105,6 +118,23 @@ class X11Surface final : public Surface {
     /// （取代 CSD 钮的 TOGGLE 切换语义）；`Minimized` 走 `XIconifyWindow`。
     /// @param m 目标几何态。
     auto set_window_mode(WindowMode m) -> void override;
+    /// @brief 程序化设置全屏：转发 `set_window_mode(FullScreen / Normal)`。
+    ///
+    /// X11 的 `FullScreen` 经 EWMH `_NET_WM_STATE_FULLSCREEN` 原子交给 WM 接管（含进出全屏的
+    /// 几何还原），`set_fullscreen` 与 `set_window_mode(FullScreen)` 同源，幂等。
+    /// @param on true 进入全屏，false 还原到进入前几何（由 WM 完成）。
+    auto set_fullscreen(bool on) -> void override;
+    /// @brief 程序化最小化：转发 `set_window_mode(Minimized)`（`XIconifyWindow` 经 WM 收走窗口）。
+    ///
+    /// 与 CSD 最小化钮同源；幂等由 WM 受理态保证。还原腿依赖 OS（任务栏/WM 还原），本库不另存
+    /// 最小化意图——`set_window_mode(Normal)` / `toggle_maximize()` 落到 WM 的「去 iconic」请求。
+    auto minimize() -> void override;
+    /// @brief 程序化切换最大化：按当前 `d.mode` 调 `set/unset_maximized`（EWMH
+    ///        `_NET_WM_STATE_MAXIMIZED_*` 原子目标态请求，与 CSD 钮 `csd_toggle_maximize` 同源）。
+    ///
+    /// 直算目标态（Normal <-> Maximized），不做「读当前再补一次翻转」——异步 WM 下后者次序不可靠。
+    /// 幂等由 `set_window_mode` 保证。
+    auto toggle_maximize() -> void override;
     /// @brief 撤销本后端的关闭请求（关闭闸门否决时调用）：`WM_DELETE_WINDOW` 与 CSD 关闭钮
     ///        置的位可清（ICCCM 语义下客户端本就可以不销毁窗口）；`DestroyNotify` 置的位
     ///        **拒绝清**（XID 已失效，清位会造出收不掉的僵尸宿主并触发 BadWindow）。

@@ -10,7 +10,6 @@
 #include <functional>
 #include <memory>
 #include <string>
-#include <vector>
 
 #include "demo_common.h"
 
@@ -18,7 +17,7 @@ namespace {
 
 /// @brief 生成一个点击即执行 fn 的按钮节点（免写 Node{} 包裹）。
 auto action_button(const char *label, std::function<void()> fn) -> au::Node {
-    au::Button button{au::ButtonProps{.label = label}};
+    au::Button button{au::ButtonProps().set_label(label)};
     button.on_click = std::move(fn);
     return au::Node{std::move(button)};
 }
@@ -77,22 +76,21 @@ auto main() -> int {
         AURORA_LOG_INFO("demo", "[tray] activated");
     });
 
-    au::Node root = au::Column{au::ColumnProps{
-        .children = {
-            GradientTitle{"System tray"},
-            gap(8),
-            au::Text{au::TextProps{.content = au::Reactive{last_msg}}},
-            gap(8),
-            action_button("Show balloon",
-                          [&tray, &show_balloon]() -> void { show_balloon(tray, "Balloon from the window"); }),
-            gap(8),
-            action_button("Hide tray icon", [&tray]() -> void { tray.hide(); }),
-            gap(8),
-            action_button("Show tray icon", [&tray]() -> void { tray.show(); }),
-            gap(12),
-            au::Text{"Left-click the tray icon to fire on_activate; "
-                     "right-click it for the context menu."},
-        }}};
+    au::Node root = au::Column({
+        GradientTitle{"System tray"},
+        gap(8),
+        au::Text{au::TextProps().set_content(*last_msg)},
+        gap(8),
+        action_button("Show balloon",
+                      [&tray, &show_balloon]() -> void { show_balloon(tray, "Balloon from the window"); }),
+        gap(8),
+        action_button("Hide tray icon", [&tray]() -> void { tray.hide(); }),
+        gap(8),
+        action_button("Show tray icon", [&tray]() -> void { tray.show(); }),
+        gap(12),
+        au::Text{"Left-click the tray icon to fire on_activate; "
+                 "right-click it for the context menu."},
+    });
     app.scene().root_node() = std::move(root);
     app.focus().set_root(&app.scene().root());
 

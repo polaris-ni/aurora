@@ -37,7 +37,7 @@ auto select_line0(Text &t, float width) -> void {
 }  // namespace
 
 AURORA_TEST_CASE(text_paint_alignment_and_selection) {
-    BuildContext ctx;
+    BuildContext const ctx;
     Painter p;
     const Rect box{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 160.0F, .height = 120.0F}};
     const float width = 160.0F;
@@ -70,7 +70,7 @@ AURORA_TEST_CASE(text_paint_alignment_and_selection) {
 }
 
 AURORA_TEST_CASE(text_paint_background_color) {
-    BuildContext ctx;
+    BuildContext const ctx;
     Painter p;
     const Rect box{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 200.0F, .height = 60.0F}};
     Text t{"highlighted"};
@@ -80,7 +80,7 @@ AURORA_TEST_CASE(text_paint_background_color) {
 }
 
 AURORA_TEST_CASE(text_paint_justify_multiline) {
-    BuildContext ctx;
+    BuildContext const ctx;
     Painter p;
     const Rect box{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 200.0F, .height = 120.0F}};
     Text t{"one two three four five six seven eight nine ten"};
@@ -90,7 +90,7 @@ AURORA_TEST_CASE(text_paint_justify_multiline) {
 }
 
 AURORA_TEST_CASE(text_paint_justify_single_word_fallback) {
-    BuildContext ctx;
+    BuildContext const ctx;
     Painter p;
     const Rect box{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 60.0F, .height = 120.0F}};
     // 无空格长串在窄盒内折成多行，每行仅 1 个「词」→ 走 justify 单行兜底分支。
@@ -101,7 +101,7 @@ AURORA_TEST_CASE(text_paint_justify_single_word_fallback) {
 }
 
 AURORA_TEST_CASE(text_paint_decoration_lines) {
-    BuildContext ctx;
+    BuildContext const ctx;
     Painter p;
     const Rect box{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 200.0F, .height = 60.0F}};
     Text t{"decorated"};
@@ -111,7 +111,7 @@ AURORA_TEST_CASE(text_paint_decoration_lines) {
 }
 
 AURORA_TEST_CASE(button_paint_border_branches) {
-    BuildContext ctx;
+    BuildContext const ctx;
     Painter p;
     const Rect box{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 120.0F, .height = 40.0F}};
 
@@ -120,7 +120,7 @@ AURORA_TEST_CASE(button_paint_border_branches) {
     round.set_label("X");
     round.set_corner_radius(8.0F);
     round.set_enabled(false);
-    round.set_border(Color{10, 20, 30, 255}, 2.0F);
+    round.set_border_color(Color{10, 20, 30, 255}).set_border_width(2.0F);
     round.paint(p, box, ctx);  // 222(with_alpha) + 223-224
 
     // 直角 + 禁用：走 draw_rect 兜底。
@@ -128,7 +128,7 @@ AURORA_TEST_CASE(button_paint_border_branches) {
     square.set_label("Y");
     square.set_corner_radius(0.0F);
     square.set_enabled(false);
-    square.set_border(Color{10, 20, 30, 255}, 2.0F);
+    square.set_border_color(Color{10, 20, 30, 255}).set_border_width(2.0F);
     square.paint(p, box, ctx);  // 222 + 226
 
     // 启用态：边框不淡化。
@@ -136,7 +136,7 @@ AURORA_TEST_CASE(button_paint_border_branches) {
     enabled.set_label("Z");
     enabled.set_corner_radius(8.0F);
     enabled.set_enabled(true);
-    enabled.set_border(Color{10, 20, 30, 255}, 2.0F);
+    enabled.set_border_color(Color{10, 20, 30, 255}).set_border_width(2.0F);
     enabled.paint(p, box, ctx);  // 222(无 with_alpha) + 223-224
 }
 

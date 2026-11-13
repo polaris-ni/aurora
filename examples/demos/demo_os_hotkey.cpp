@@ -17,7 +17,7 @@ namespace {
 
 /// @brief 生成一个点击即执行 fn 的按钮节点（免写 Node{} 包裹）。
 auto action_button(const char *label, std::function<void()> fn) -> au::Node {
-    au::Button button{au::ButtonProps{.label = label}};
+    au::Button button{au::ButtonProps().set_label(label)};
     button.on_click = std::move(fn);
     return au::Node{std::move(button)};
 }
@@ -71,47 +71,46 @@ auto main() -> int {
         log_status("hotkey triggered");
     });
 
-    au::Node root = au::Column{au::ColumnProps{
-        .children = {
-            GradientTitle{"OS hotkey"},
-            gap(8),
-            au::Text{au::TextProps{.content = au::Reactive{status}}},
-            gap(8),
-            au::Text{au::TextProps{.content = au::Reactive{hits_text}}},
-            gap(12),
-            action_button("Register Ctrl+Shift+K",
-                          [&hotkeys, &registered, &log_status]() -> void {
-                              if (registered != au::OsHotkeyHandle{}) {
-                                  log_status("already registered; unregister first");
-                                  return;
-                              }
-                              auto res = hotkeys.add(
-                                  au::KeyCombo{au::ModifierKey::Control | au::ModifierKey::Shift, au::KeyCode::K},
-                                  []() -> void {});
-                              if (!res) {
-                                  log_status("register failed: " + res.error().message);
-                                  return;
-                              }
-                              registered = res.value();
-                              log_status("registered; switch focus away and press Ctrl+Shift+K");
-                          }),
-            gap(8),
-            action_button("Unregister",
-                          [&hotkeys, &registered, &log_status]() -> void {
-                              if (!hotkeys.remove(registered)) {
-                                  log_status("nothing to unregister");
-                                  return;
-                              }
-                              registered = au::OsHotkeyHandle{};
-                              log_status("unregistered");
-                          }),
-            gap(12),
-            au::Text{"Focus another window and press the combination: the hit is queued by the "
-                     "message pump and drained once per frame."},
-            gap(8),
-            au::Text{"Unregister on exit is automatic: the registry releases every OS hotkey in "
-                     "its destructor."},
-        }}};
+    au::Node root = au::Column({
+        GradientTitle{"OS hotkey"},
+        gap(8),
+        au::Text{au::TextProps().set_content(*status)},
+        gap(8),
+        au::Text{au::TextProps().set_content(*hits_text)},
+        gap(12),
+        action_button("Register Ctrl+Shift+K",
+                      [&hotkeys, &registered, &log_status]() -> void {
+                          if (registered != au::OsHotkeyHandle{}) {
+                              log_status("already registered; unregister first");
+                              return;
+                          }
+                          auto res = hotkeys.add(
+                              au::KeyCombo{au::ModifierKey::Control | au::ModifierKey::Shift, au::KeyCode::K},
+                              []() -> void {});
+                          if (!res) {
+                              log_status("register failed: " + res.error().message);
+                              return;
+                          }
+                          registered = res.value();
+                          log_status("registered; switch focus away and press Ctrl+Shift+K");
+                      }),
+        gap(8),
+        action_button("Unregister",
+                      [&hotkeys, &registered, &log_status]() -> void {
+                          if (!hotkeys.remove(registered)) {
+                              log_status("nothing to unregister");
+                              return;
+                          }
+                          registered = au::OsHotkeyHandle{};
+                          log_status("unregistered");
+                      }),
+        gap(12),
+        au::Text{"Focus another window and press the combination: the hit is queued by the "
+                 "message pump and drained once per frame."},
+        gap(8),
+        au::Text{"Unregister on exit is automatic: the registry releases every OS hotkey in "
+                 "its destructor."},
+    });
     app.scene().root_node() = std::move(root);
     app.focus().set_root(&app.scene().root());
 

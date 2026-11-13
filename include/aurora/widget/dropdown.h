@@ -13,7 +13,9 @@
 #include "aurora/render/font_engine.h"
 #include "aurora/render/painter.h"
 #include "aurora/state/state.h"
+#include "aurora/theming/theme.h"
 #include "aurora/theming/theme_scope.h"
+#include "aurora/theming/type_scale.h"  // 未显式设字号时取字阶正文档；非正字号的兜底也来自它的声明默认值
 #include "aurora/widget/descriptor.h"
 #include "aurora/widget/widget.h"
 
@@ -64,7 +66,7 @@ class Dropdown : public Widget {
 
     /// @brief 收集本控件的可订阅信号。
     /// @param out 输出收集器；追加选中序号信号 selected_ 的视图指针。
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&selected_); }
+    auto collect_signals(StateSink &out) -> void override { out.push(selected_); }
 
     /// @brief 选项数量。
     /// @return options_ 的大小。
@@ -188,12 +190,21 @@ class Dropdown : public Widget {
     }
 
     /// @brief 设置字号 pt（链式）。
-    /// @param s 主框与选项行文本字号（pt）；<= 0 时回退默认 13.0。
+    /// @param s 主框与选项行文本字号（pt）；> 0 才记为显式表态，<= 0 视作清除表态、回落主题字阶。
     /// @return 引用 *this。
     auto set_font_size(float s) -> Dropdown & {
-        font_size_ = s > 0.0F ? s : 13.0F;
+        font_size_ = s > 0.0F ? std::optional<float>{s} : std::nullopt;
         mark_needs_layout();
         return *this;
+    }
+
+    /// @brief 解析生效字号：未显式设字号时经 ctx 取主题字阶**正文档**（风格档基准与无障碍字号缩放
+    ///        都只在这一处生效，控件侧不再乘第二次）。
+    /// @param ctx 构建上下文：供主题取字阶；无注入时 `inherit_theme` 回落 light。
+    /// @return 生效字号（pt）。主题正文档被写成非正数时兜底取 `TypeScale{}` 的声明默认值。
+    [[nodiscard]] auto effective_font_size(const BuildContext &ctx) const -> float {
+        const float pt = font_size_.value_or(inherit_theme(ctx).type_scale.body_medium.size_pt);
+        return pt > 0.0F ? pt : TypeScale{}.body_medium.size_pt;
     }
 
     /// @brief 设置主框圆角半径 dp（链式；0 = 直角）。
@@ -313,13 +324,24 @@ class Dropdown : public Widget {
         if (accent_color_.has_value()) {
             props.set("accent_color", color_to_json(*accent_color_));  // 未设置不输出：保留「跟随主题」语义
         }
-        props.set("box_color", color_to_json(box_color_));
-        props.set("border_color", color_to_json(border_color_));
-        props.set("text_color", color_to_json(text_color_));
-        props.set("arrow_color", color_to_json(arrow_color_));
+        if (box_color_.has_value()) {
+            props.set("box_color", color_to_json(*box_color_));  // 未设置不输出：保留「跟随主题」语义
+        }
+        if (border_color_.has_value()) {
+            props.set("border_color", color_to_json(*border_color_));  // 未设置不输出：保留「跟随主题」语义
+        }
+        if (text_color_.has_value()) {
+            props.set("text_color", color_to_json(*text_color_));  // 未设置不输出：保留「跟随主题」语义
+        }
+        if (arrow_color_.has_value()) {
+            props.set("arrow_color", color_to_json(*arrow_color_));  // 未设置不输出：保留「跟随主题」语义
+        }
         props.set("box_height", box_height_);
         props.set("item_height", item_height_);
-        props.set("font_size", font_size_);
+        // 字号「只写意图」：缺键 ≡ 未表态 ≡ 取主题字阶正文档（旧 JSON 里显式的 13.0 仍逐字复原）
+        if (font_size_.has_value()) {
+            props.set("font_size", *font_size_);
+        }
         props.set("corner_radius", corner_radius_);
         props.set("enabled", Json{enabled_});
     }
@@ -363,7 +385,8 @@ class Dropdown : public Widget {
             item_height_ = props.at("item_height")->as_or<float>(0.0F);
         }
         if (props.contains("font_size")) {
-            font_size_ = props.at("font_size")->as_or<float>(0.0F);
+            const auto s = props.at("font_size")->as_or<float>(0.0F);
+            font_size_ = s > 0.0F ? std::optional<float>{s} : std::nullopt;  // 非法值 ⇒ 退出表态，回落主题字阶
         }
         if (props.contains("corner_radius")) {
             corner_radius_ = props.at("corner_radius")->as_or<float>(0.0F);
@@ -398,7 +421,7 @@ class Dropdown : public Widget {
         env_ = ctx.env;  // 环境链兜底写入（主写入点在 on_paint，见 PanelGeometry 文档）
         // 主框宽度 = 最长选项宽 + 箭头区；下拉为覆盖绘制不占布局
         Font f;
-        f.size_pt = font_size_;
+        f.size_pt = effective_font_size(ctx);
         float w = 80.0F;
         for (const auto &o : options_) {
             w = std::max(w, render::FontEngine::measure_width(o, f) + (AURORA_PAD * 2.0F) + AURORA_ARROW_ZONE);
@@ -433,19 +456,20 @@ class Dropdown : public Widget {
         // 更新，故事件侧查链读到的视口高恒新鲜，不像「采样成标量」那样滞后一帧。
         env_ = ctx.env;
         Font f;
-        f.size_pt = font_size_;
+        f.size_pt = effective_font_size(ctx);
         // 状态色解析：显式设置优先，否则跟随主题 primary；禁用态统一灰化。
         Color accent = accent_color_.value_or(inherit_theme(ctx).roles.primary);
-        Color box = box_color_;
-        Color border = border_color_;
-        Color text = text_color_;
-        Color arrow = arrow_color_;
+        Color box = box_color_.value_or(inherit_theme(ctx).roles.surface_container_lowest);
+        Color border = border_color_.value_or(inherit_theme(ctx).roles.outline_variant);
+        Color text = text_color_.value_or(inherit_theme(ctx).roles.on_surface);
+        Color arrow = arrow_color_.value_or(inherit_theme(ctx).roles.on_surface_variant);
         if (!enabled_) {
-            accent = Color{176, 176, 180, 255};
-            box = Color{235, 235, 237, 255};
-            border = Color{215, 215, 219, 255};
-            text = Color{168, 168, 172, 255};
-            arrow = Color{190, 190, 194, 255};
+            const auto &roles = inherit_theme(ctx).roles;
+            accent = roles.outline_variant;
+            box = roles.surface_container_high;
+            border = roles.outline_variant;
+            text = roles.outline;
+            arrow = roles.outline_variant;
         } else if (hovered() || is_open_) {
             border = accent;  // 悬停/展开时边框高亮
         }
@@ -458,9 +482,9 @@ class Dropdown : public Widget {
         if (const std::optional<PanelGeometry> geo = panel_geometry(box_rect.size.width, bounds.origin.y);
             geo.has_value()) {
             const Rect drop = geo->window;
-            p.draw_shadow(drop, 0.0F, 2.0F, 8.0F, Color(0, 0, 0, 48));
-            p.fill_rect(drop, box_color_);
-            p.draw_rect(drop, border_color_);
+            p.draw_shadow(drop, 0.0F, 2.0F, 8.0F, inherit_theme(ctx).roles.shadow.with_alpha(48));
+            p.fill_rect(drop, box);
+            p.draw_rect(drop, border);
             // 裁剪到窗口盒：被限高时只画窗口内那几行，其余行滚入后才可见。
             p.push_clip(drop);
             const float y = drop.origin.y - geo->scroll;  // 内容顶相对窗口顶上移 scroll
@@ -645,15 +669,15 @@ class Dropdown : public Widget {
     std::function<void(int)> on_change_;  ///< 选中变更回调（入参为新序号）；空 = 不回调
     std::string placeholder_;  ///< 空选项时的占位文本
     std::optional<Color> accent_color_;  ///< 选中高亮色；空 = 跟随主题 primary
-    Color box_color_ = Color{255, 255, 255, 255};  ///< 主框背景色
-    Color border_color_ = Color{200, 200, 205, 255};  ///< 主框/面板边框色
-    Color text_color_ = Color{30, 30, 30, 255};  ///< 选项文本色
-    Color arrow_color_ = Color{120, 120, 125, 255};  ///< 箭头颜色
+    std::optional<Color> box_color_;  ///< 主框背景色；空 = 跟随主题 surface_container_lowest
+    std::optional<Color> border_color_;  ///< 主框/面板边框色；空 = 跟随主题 outline_variant
+    std::optional<Color> text_color_;  ///< 选项文本色；空 = 跟随主题 on_surface
+    std::optional<Color> arrow_color_;  ///< 箭头颜色；空 = 跟随主题 on_surface_variant
     float box_height_ = 30.0F;  ///< 主框高度 dp
     float item_height_ = 26.0F;  ///< 选项行高 dp
     float panel_scroll_ = 0.0F;  ///< 面板内部滚动偏移 dp（仅面板被限高时非零；见 panel_geometry）
     const Environment *env_ = nullptr;  ///< 环境链（on_layout 从 ctx.env 存；窗口期恒定，事件阶段读视口用）
-    float font_size_ = 13.0F;  ///< 字号 pt
+    std::optional<float> font_size_;  ///< 字号 pt；空 = 跟随主题字阶正文档 `type_scale.body_medium`
     float corner_radius_ = 4.0F;  ///< 主框圆角半径 dp；0 = 直角
     bool enabled_ = true;  ///< 禁用态灰化并忽略点击
     // NOLINTEND(*-non-private-member-variables-in-classes)
@@ -689,33 +713,33 @@ inline auto Dropdown::describe_static() -> WidgetDescriptor {
                  .json_type = "string"},
                 {.name = "accent_color",
                  .type = "Color",
-                 .default_value = "theme.primary",
+                 .default_value = theme_token_expr<&ColorRoles::primary>(),
                  .required = false,
                  .note = "Selection highlight color (defaults to theme primary)",
                  .json_type = "array"},
                 {.name = "box_color",
                  .type = "Color",
-                 .default_value = "Color::white()",
+                 .default_value = theme_token_expr<&ColorRoles::surface_container_lowest>(),
                  .required = false,
-                 .note = "Main box background color",
+                 .note = "Main box background color (defaults to theme surface_container_lowest)",
                  .json_type = "array"},
                 {.name = "border_color",
                  .type = "Color",
-                 .default_value = "{200,200,205,255}",
+                 .default_value = theme_token_expr<&ColorRoles::outline_variant>(),
                  .required = false,
-                 .note = "Main box / panel border color",
+                 .note = "Main box / panel border color (defaults to theme outline_variant)",
                  .json_type = "array"},
                 {.name = "text_color",
                  .type = "Color",
-                 .default_value = "{30,30,30,255}",
+                 .default_value = theme_token_expr<&ColorRoles::on_surface>(),
                  .required = false,
-                 .note = "Option text color",
+                 .note = "Option text color (defaults to theme on_surface)",
                  .json_type = "array"},
                 {.name = "arrow_color",
                  .type = "Color",
-                 .default_value = "{120,120,125,255}",
+                 .default_value = theme_token_expr<&ColorRoles::on_surface_variant>(),
                  .required = false,
-                 .note = "Arrow color",
+                 .note = "Arrow color (defaults to theme on_surface_variant)",
                  .json_type = "array"},
                 {.name = "box_height",
                  .type = "float",
@@ -735,9 +759,9 @@ inline auto Dropdown::describe_static() -> WidgetDescriptor {
                  .min_value = "0"},
                 {.name = "font_size",
                  .type = "float",
-                 .default_value = "13.0",
+                 .default_value = "type_scale.body_medium",
                  .required = false,
-                 .note = "Font size (pt)",
+                 .note = "Font size (pt; follows the theme body type scale when unset)",
                  .json_type = "number",
                  .enum_values = {},
                  .min_value = "0"},

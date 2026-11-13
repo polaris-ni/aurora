@@ -7,7 +7,7 @@
 #include <string_view>
 #include <vector>
 
-#include "aurora/state/reactive.h"
+#include "aurora/state/state.h"
 #include "aurora/widget/bottom_nav_bar.h"
 #include "aurora/widget/button.h"
 #include "aurora/widget/checkbox.h"
@@ -47,19 +47,19 @@ template <typename T, typename... Args>
 /// @param props 文本属性块（默认构造）
 /// @return 指向新建 `Text` 的裸指针，生命周期由 parent 子树持有
 inline auto label(Container &parent, std::string_view text, TextProps props = {}) -> Text * {
-    props.content = std::string(text);
+    props.set_content(std::string(text));
     return detail::make_add<Text>(parent, std::move(props));
 }
 
-/// @brief 按钮。`text` 为主文案（覆盖 `props.label`）；`on_click` 可选，连接后于点击触发。
+/// @brief 按钮。`text` 为主文案（覆盖 `label` 行）；`on_click` 可选，连接后于点击触发。
 /// @param parent 目标父容器
-/// @param text 主文案，写入 props.label
+/// @param text 主文案，经 `set_label` 写入
 /// @param props 按钮属性块（默认构造）
 /// @param on_click 点击回调（可空，非空时经 set_on_click 连接）
 /// @return 指向新建 `Button` 的裸指针，生命周期由 parent 子树持有
 inline auto button(Container &parent, std::string_view text, ButtonProps props = {},
                    std::function<void()> on_click = {}) -> Button * {
-    props.label = std::string(text);
+    props.set_label(std::string(text));
     auto *b = detail::make_add<Button>(parent, std::move(props));
     if (on_click) {
         b->set_on_click(std::move(on_click));
@@ -67,51 +67,50 @@ inline auto button(Container &parent, std::string_view text, ButtonProps props =
     return b;
 }
 
-/// @brief 单行文本输入框。`value` 为初始文本（覆盖 `props.value`）。
+/// @brief 单行文本输入框。`value` 为初始文本，经 `TextInputProps::set_value` 写入。
 /// @param parent 目标父容器
 /// @param value 初始文本（默认为空）
 /// @param props 输入框属性块（默认构造）
 /// @return 指向新建 `TextInput` 的裸指针，生命周期由 parent 子树持有
 inline auto input(Container &parent, std::string_view value = "", TextInputProps props = {}) -> TextInput * {
-    props.value = std::string(value);
+    props.set_value(std::string(value));
     return detail::make_add<TextInput>(parent, std::move(props));
 }
 
-/// @brief 复选框（双模：`Reactive<bool>` 或简单 `bool` 初值）。
+/// @brief 复选框（双模：`State<bool>` 或简单 `bool` 初值）。
 /// @param parent 目标父容器
 /// @param checked 响应式勾选状态
 /// @param on_changed 勾选变化回调（可空）
 /// @return 指向新建 `Checkbox` 的裸指针，生命周期由 parent 子树持有
-inline auto checkbox(Container &parent, Reactive<bool> checked, std::function<void(bool)> on_changed = {})
-    -> Checkbox * {
+inline auto checkbox(Container &parent, State<bool> checked, std::function<void(bool)> on_changed = {}) -> Checkbox * {
     return detail::make_add<Checkbox>(parent, std::move(checked), std::move(on_changed));
 }
 
-/// @brief 复选框（简单初值重载）：包装为 `Reactive<bool>` 后转调响应式重载。
+/// @brief 复选框（简单初值重载）：包装为 `State<bool>` 后转调响应式重载。
 /// @param parent 目标父容器
 /// @param initial 初始勾选状态
 /// @param on_changed 勾选变化回调（可空）
 /// @return 指向新建 `Checkbox` 的裸指针，生命周期由 parent 子树持有
 inline auto checkbox(Container &parent, bool initial, std::function<void(bool)> on_changed = {}) -> Checkbox * {
-    return checkbox(parent, Reactive<bool>{initial}, std::move(on_changed));
+    return checkbox(parent, State<bool>{initial}, std::move(on_changed));
 }
 
-/// @brief 滑块（双模：`Reactive<double>` 或简单 `double` 初值）。
+/// @brief 滑块（双模：`State<double>` 或简单 `double` 初值）。
 /// @param parent 目标父容器
 /// @param value 响应式滑块值
 /// @param on_changed 值变化回调（可空）
 /// @return 指向新建 `Slider` 的裸指针，生命周期由 parent 子树持有
-inline auto slider(Container &parent, Reactive<double> value, std::function<void(double)> on_changed = {}) -> Slider * {
+inline auto slider(Container &parent, State<double> value, std::function<void(double)> on_changed = {}) -> Slider * {
     return detail::make_add<Slider>(parent, std::move(value), std::move(on_changed));
 }
 
-/// @brief 滑块（简单初值重载）：包装为 `Reactive<double>` 后转调响应式重载。
+/// @brief 滑块（简单初值重载）：包装为 `State<double>` 后转调响应式重载。
 /// @param parent 目标父容器
 /// @param initial 初始滑块值
 /// @param on_changed 值变化回调（可空）
 /// @return 指向新建 `Slider` 的裸指针，生命周期由 parent 子树持有
 inline auto slider(Container &parent, double initial, std::function<void(double)> on_changed = {}) -> Slider * {
-    return slider(parent, Reactive<double>{initial}, std::move(on_changed));
+    return slider(parent, State<double>{initial}, std::move(on_changed));
 }
 
 /// @brief 纵向盒子容器（`Column` 的语法糖）。
@@ -148,10 +147,11 @@ inline auto grid(Container &parent, GridProps props = {}) -> Grid * {
 
 /// @brief 滚动容器（`Scroll`）。
 /// @param parent 目标父容器
+/// @param child 被滚动的内容节点（`Scroll` 只接受一个子节点）
 /// @param props 滚动属性块（默认构造）
 /// @return 指向新建 `Scroll` 的裸指针，生命周期由 parent 子树持有
-inline auto scroll(Container &parent, ScrollProps props = {}) -> Scroll * {
-    return detail::make_add<Scroll>(parent, std::move(props));
+inline auto scroll(Container &parent, Node child, ScrollProps props = {}) -> Scroll * {
+    return detail::make_add<Scroll>(parent, std::move(child), std::move(props));
 }
 
 /// @brief 横向虚拟列表（`LazyRow`）。`builder` 在可见窗口内惰性构造子项。
@@ -187,10 +187,12 @@ inline auto lazy_list(Container &parent, int count, LazyList::ItemBuilder builde
 
 /// @brief 底部导航栏（`BottomNavBar`）。
 /// @param parent 目标父容器
-/// @param props 导航栏属性块
+/// @param items 导航项列表（栏宽按项数等分，依序排列）
+/// @param props 其余属性块（默认全未表态，生效值即各行回落点）
 /// @return 指向新建 `BottomNavBar` 的裸指针，生命周期由 parent 子树持有
-inline auto bottom_nav_bar(Container &parent, BottomNavBarProps props) -> BottomNavBar * {
-    return detail::make_add<BottomNavBar>(parent, std::move(props));
+inline auto bottom_nav_bar(Container &parent, std::vector<BottomNavItem> items, BottomNavBarProps props = {})
+    -> BottomNavBar * {
+    return detail::make_add<BottomNavBar>(parent, std::move(items), std::move(props));
 }
 
 }  // namespace aurora::ui

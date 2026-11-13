@@ -130,7 +130,7 @@ AURORA_TEST_CASE(state_is_preserved_for_props_the_json_does_not_declare) {
     // 热重载的核心价值：改结构不该把用户刚勾上的状态冲掉。
     Json current = Json::object();
     current.set("type", "Column");
-    Json checkbox_node = json_obj({{"type", "Checkbox"}, {"props", json_obj({{"checked", Json{false}}})}});
+    Json const checkbox_node = json_obj({{"type", "Checkbox"}, {"props", json_obj({{"checked", Json{false}}})}});
     current.set("children", json_arr({checkbox_node}));
 
     HotReload hr("ui.json");
@@ -146,8 +146,8 @@ AURORA_TEST_CASE(state_is_preserved_for_props_the_json_does_not_declare) {
     }
 
     // 新 JSON 追加了一个兄弟，且**没有**声明 checked ⇒ 勾选状态应被保留。
-    Json bare = json_obj({{"type", "Checkbox"}});
-    Json added = json_obj({{"type", "Text"}, {"props", json_obj({{"content", "added"}})}});
+    Json const bare = json_obj({{"type", "Checkbox"}});
+    Json const added = json_obj({{"type", "Text"}, {"props", json_obj({{"content", "added"}})}});
     current.set("children", json_arr({bare, added}));
 
     auto rebuilt = hr.try_sync();
@@ -162,7 +162,7 @@ AURORA_TEST_CASE(declared_props_win_over_preserved_state) {
     // 反面对照：源文件显式声明的值永远优先，热重载不得反过来覆盖用户的 JSON。
     Json current = Json::object();
     current.set("type", "Column");
-    Json checkbox_node = json_obj({{"type", "Checkbox"}, {"props", json_obj({{"checked", Json{false}}})}});
+    Json const checkbox_node = json_obj({{"type", "Checkbox"}, {"props", json_obj({{"checked", Json{false}}})}});
     current.set("children", json_arr({checkbox_node}));
 
     HotReload hr("ui.json");
@@ -178,8 +178,8 @@ AURORA_TEST_CASE(declared_props_win_over_preserved_state) {
     // 这次新 JSON **显式写了** checked=false ⇒ 必须落到 false。
     // 注意：JSON 必须与上一轮**确有不同**，否则 HotReload 按「无变化」直接跳过（返回 nullptr），
     // 那是在测另一条分支。这里追加一个无关兄弟来制造差异。
-    Json redeclared = json_obj({{"type", "Checkbox"}, {"props", json_obj({{"checked", Json{false}}})}});
-    Json unrelated = json_obj({{"type", "Text"}, {"props", json_obj({{"content", "unrelated"}})}});
+    Json const redeclared = json_obj({{"type", "Checkbox"}, {"props", json_obj({{"checked", Json{false}}})}});
+    Json const unrelated = json_obj({{"type", "Text"}, {"props", json_obj({{"content", "unrelated"}})}});
     current.set("children", json_arr({redeclared, unrelated}));
 
     auto rebuilt = hr.try_sync();

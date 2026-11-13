@@ -195,6 +195,11 @@ add_dependencies(aurora generate_error_codes)
 # 工具：反射 aurora 公共 API 生成 aurora_api.json。
 aurora_add_tool(gen_api_tools tools/gen/gen_api.cpp)
 
+# 工具：色角色对比度审计矩阵（唯一取数口，供 check_theme_contrast 门禁消费）。
+# 比值一律经库内 aurora::contrast_ratio 求出——门禁、测试、库三方各写一份 WCAG 公式正是本目标要
+# 消灭的形态，故本目标自身不得含任何颜色数学。运行：cmake --build build --target gen_contrast_tools
+aurora_add_tool(gen_contrast_tools tools/gen/gen_contrast.cpp)
+
 # 可复现生成：运行 gen_api_tools 直接写 aurora_api.json（跨平台，无需 shell 重定向）。
 # gen_api_tools 全量重写时保留既有 error_codes/debug 段（见 gen_api.cpp）；
 # 随后 gen_debug_api 以 codespec/debug_api.toml 为准重并 debug 段——单跑本目标即得完整文件，
@@ -255,6 +260,17 @@ if (MINGW)
             -Wl,-Bstatic -lwinpthread -Wl,-Bdynamic)
 endif ()
 
+# 生成物顺序边（与上方 add_dependencies(aurora generate_error_codes) 同口径）：
+# generate_error_codes 会 copy_if_different 把暂存区产物落回源码树的 error_codes.gen.h。
+# 链接 aurora 的工具经 cmake_object_order_depends_target_aurora 间接带上该边，但下面两个
+# 独立生成器只链接 aurora_json，object 链里没有 generate_error_codes；它们的 TU 仍经
+# core/json.h -> core/result.h -> core/error_codes.h 传递包含 error_codes.gen.h。全量
+# --parallel 下编译与覆写撞在同一窗口时，会读到正在改写的引导副本（CI 实测 file not found）。
+# 显式补边把编译排到生成之后，与调度、clang-format 是否可探测无关。
+# ⚠️ gen_error_codes / aurora_json 是生成链的前置，补了会成 build.ninja 依赖环，禁止列入。
+add_dependencies(gen_debug_api generate_error_codes)
+add_dependencies(gen_i18n generate_error_codes)
+
 # MCP Server：stdio JSON-RPC 2.0，供 AI Agent 直接调用。
 aurora_add_tool(aurora_mcp tools/servers/aurora_mcp.cpp)
 
@@ -314,6 +330,10 @@ aurora_add_tool(bench_render tools/bench/bench_render.cpp)
 # app 场景（自包含于 bench_scroll.cpp，复刻真实商店首页形态）即 §7 的滚动基线口径载体，
 # 不依赖 examples/ 下任何 fixture 头；synthetic 为无应用形态的对照组。
 aurora_add_tool(bench_scroll tools/bench/bench_scroll.cpp)
+
+# 主题读面基准：同一棵树跑「整值拷贝 / 按引用 / 不读」三形态，产出一帧内主题解析次数、
+# 每次解析的堆分配与纳秒、换肤一帧耗时（非 CTest；Headless 后端下才可运行）。
+aurora_add_tool(bench_theme tools/bench/bench_theme.cpp)
 
 # Win32 上屏诊断基准：拆分拖选帧的 paint / GDI blit 成本（非 CTest；无 Win32 后端时直接跳过）。
 aurora_add_tool(bench_win32_present tools/bench/bench_win32_present.cpp)

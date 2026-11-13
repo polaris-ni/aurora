@@ -49,7 +49,6 @@
 ///       thread-safe——调用方以每连接一枚互斥量串行化全部调用，后端因此可以用裸成员而不必自己加锁
 /// @note Side-effects: 进程级注册表状态变更（注册 / 注销 / 缺省链），不新增操作系统句柄类型
 
-#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>

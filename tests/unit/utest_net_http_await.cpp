@@ -9,29 +9,36 @@
 ///           放行、拒投腿也会恢复（退避中的协程绝不悬着）。`await_read` / `await_write` 面覆盖最朴素的一次
 ///           往返把传输计数交回协程，并证明 spans 指向的调用方存储扛过了整段挂起；另覆盖「同步完成不重入
 ///           挂起点」——写一登记就交付时，重试环的下一轮写绝不在上一轮写尚未返回时发起（嵌套深度恒 1）。
-/// 全程零 socket、零线程：交付时机与虚拟时钟都由用例点名——「谁先到」这条竞速判据用真实套接字测不出来。
+/// 竞速用例零 socket、零线程：交付时机与虚拟时钟都由用例点名——「谁先到」这条判据用真实套接字测不出来。
 /// 异步路径的用例统一装「排队式」主线程投递器：恢复只入队不执行，由用例线程排空——恢复点由用例说了算，
 /// 与真实事件循环同形，「交付恰一次」也可经队列长度逐一点验。同步完成（窗口非正、引擎拒投、已取消、
 /// 非正退避）则一律不经投递器：`await_suspend` 返回 `false`，协程在挂起表达式里就地前进，故这些用例的
 /// `drain()` 恒为 0——这是「同步完成不得在 await_suspend 内重入协程帧」的回归哨：无主投递器时
 /// `post_to_main` 就地执行闭包，一旦同步完成改走投递器，挂起点之后的代码就会在 await_suspend 尚未返回时
 /// 跑第二遍，协程经其中一条路收尾释放帧后，迟到的回调再恢复已释放的帧即成 heap-use-after-free。
+/// 完成决议面覆盖：完成回调从工作线程抵达时恢复恰好一次、结果原样交回；完成与「发起器已返回」的
+/// 发布在跨线程竞速下反复交错，恢复次数仍恒为 1、投递至多一次、结局不丢——钉的是可确定性区分的
+/// 计数，不是「多读几次看崩不崩」。
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
 #include "aurora/core/error_codes.h"
+#include "aurora/core/main_queue.h"
 #include "aurora/core/result.h"
 #include "aurora/net/cancellation.h"
 #include "aurora/net/detail/http_await.h"
@@ -56,53 +63,48 @@ using aurora::test::FakeEngine;
 using aurora::test::FakeEngineScope;
 using aurora::testing::require_value;
 
-/// @brief 排队式主线程投递器：续体只入队不执行，由用例线程排空。
-/// @note Thread: 装与拆限用例线程（进程级单例投递器）
-/// @note Side-effects: 改写进程级主线程投递器的指向
+/// @brief 排队式值班租约：领一枚空唤醒租约，续体只入进程级全局队列不执行，
+/// 由用例线程排空——全局队列就是「帧还没收尾」的可控现场。
+/// @note Thread: 领与还限用例线程（租约为进程级独占凭证）
+/// @note Side-effects: 登记/摘除全局队列的值班位
 class PosterQueue {
   public:
-    PosterQueue() {
-        aurora::Task<int>::set_main_poster([this](std::function<void()> fn) -> void {
-            std::scoped_lock<std::mutex> lock(mutex_);
-            queued_.push_back(std::move(fn));
-        });
-    }
+    PosterQueue() : duty_(MainQueue::on_duty([]() -> void {})) {}
     PosterQueue(const PosterQueue &) = delete;
     auto operator=(const PosterQueue &) -> PosterQueue & = delete;
     PosterQueue(PosterQueue &&) = delete;
     auto operator=(PosterQueue &&) -> PosterQueue & = delete;
-    ~PosterQueue() { aurora::Task<int>::set_main_poster(nullptr); }
-
-    /// @brief 尚未执行的投递项数。
-    /// @return 队列长度。
-    [[nodiscard]] auto size() -> std::size_t {
-        std::scoped_lock<std::mutex> lock(mutex_);
-        return queued_.size();
+    ~PosterQueue() {
+        if (duty_.has_value()) {
+            duty_->release();
+        }
     }
 
-    /// @brief 排空队列（含恢复期间新排入的项）。
+    /// @brief 尚未执行的投递项数。
+    /// @return 全局队列长度。
+    [[nodiscard]] auto size() -> std::size_t { return MainQueue::pending_count(); }
+
+    /// @brief 排空全局队列（含恢复期间新排入的项）。
     /// @return 本次执行的闭包数。
     auto drain() -> std::size_t {
         std::size_t ran = 0;
         for (;;) {
-            std::function<void()> fn;
-            {
-                std::scoped_lock<std::mutex> lock(mutex_);
-                if (queued_.empty()) {
-                    break;
-                }
-                fn = std::move(queued_.front());
-                queued_.erase(queued_.begin());
+            auto batch = MainQueue::take_batch();
+            if (batch.empty()) {
+                break;
             }
-            fn();
-            ++ran;
+            for (std::function<void()> const &fn : batch) {
+                if (fn) {
+                    fn();
+                }
+                ++ran;
+            }
         }
         return ran;
     }
 
   private:
-    std::mutex mutex_;  ///< 保护队列（投递器可能被任何线程调用）
-    std::vector<std::function<void()>> queued_;  ///< 已排入、待执行的闭包
+    std::optional<MainQueue::Lease> duty_;  ///< 在岗租约（空 wake）：回投入全局队列待排空
 };
 
 /// @brief 一条只记录请求、由用例决定何时交付的假流：读写出口与 `StreamTransport` 同构。
@@ -335,6 +337,24 @@ auto wait_then_report(Cancellation token, std::chrono::milliseconds delay, Sleep
     const auto woke = co_await await_sleep(delay, token);
     out->ok = woke.ok();
     out->cancelled = token.is_cancelled();
+    co_return 1;
+}
+
+/// @brief 完成回调由工作线程交付的一次等待；恢复次数与结局都写到外部，工作线程内不做任何断言。
+/// @param worker_out 工作线程落点（由用例线程 join）。
+/// @param resumes 协程恢复次数（只由协程体递增）。
+/// @param out 等待体交回的值落点。
+/// @return 恒 1。
+/// @note Thread: 完成回调在工作线程执行；判据读的是外部原子计数与栈上出参
+auto cross_thread_wait(std::shared_ptr<std::thread> *worker_out, std::atomic<int> *resumes, int *out) -> CoroTask<int> {
+    aurora::net::detail::CallbackAwaiter<int> awaiter(
+        [worker_out](aurora::net::detail::CallbackAwaiter<int>::Sink on_done) {
+            *worker_out = std::make_shared<std::thread>(
+                [on_done = std::move(on_done)]() mutable -> void { on_done(Result<int>{42}); });
+        });
+    const auto handed = co_await awaiter;
+    ++*resumes;
+    *out = handed.value();
     co_return 1;
 }
 
@@ -648,4 +668,48 @@ AURORA_TEST_CASE(a_plain_write_then_read_hands_back_the_transport_counts) {
     AURORA_TEST_CHECK_EQ(written, payload.size());
     AURORA_TEST_CHECK_EQ(read_count, std::size_t{3});
 }
+AURORA_TEST_CASE(a_completion_from_another_thread_resumes_exactly_once) {
+#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
+    AURORA_TEST_SKIP("WASM without pthreads has no real worker threads; cross-thread completion is untestable");
+#endif
+    PosterQueue poster;
+    std::shared_ptr<std::thread> worker;
+    std::atomic<int> resumes{0};
+    int value = 0;
+
+    const auto task = launch(cross_thread_wait(&worker, &resumes, &value));
+    AURORA_TEST_REQUIRE_TRUE(static_cast<bool>(worker));
+    worker->join();  // 完成回调已在工作线程返回，与用例线程之间只有等待体自己的同步
+    const std::size_t drained = poster.drain();
+
+    AURORA_TEST_CHECK_TRUE(drained <= std::size_t{1});
+    AURORA_TEST_CHECK_TRUE(task.is_done());
+    AURORA_TEST_CHECK_EQ(resumes.load(), 1);
+    AURORA_TEST_CHECK_EQ(value, 42);
+}
+
+AURORA_TEST_CASE(completion_racing_with_arm_resumes_exactly_once) {
+#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
+    AURORA_TEST_SKIP("WASM without pthreads has no real worker threads; cross-thread completion is untestable");
+#endif
+    const int rounds = 64;
+    for (int round = 0; round < rounds; ++round) {
+        PosterQueue poster;
+        std::shared_ptr<std::thread> worker;
+        std::atomic<int> resumes{0};
+        int value = 0;
+
+        // 工作线程在发起器返回前后都可能抢先交付，覆盖「就地前进」与「投递恢复」两种合法交错。
+        const auto task = launch(cross_thread_wait(&worker, &resumes, &value));
+        AURORA_TEST_REQUIRE_TRUE(static_cast<bool>(worker));
+        worker->join();
+        const std::size_t drained = poster.drain();
+
+        AURORA_TEST_CHECK_TRUE(drained <= std::size_t{1});
+        AURORA_TEST_CHECK_TRUE(task.is_done());
+        AURORA_TEST_CHECK_EQ(resumes.load(), 1);
+        AURORA_TEST_CHECK_EQ(value, 42);
+    }
+}
+
 }  // namespace aurora::test_cases::utest_net_http_await

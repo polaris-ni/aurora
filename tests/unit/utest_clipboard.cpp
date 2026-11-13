@@ -1,39 +1,40 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/app/clipboard.h
-/// 测试说明: 经进程内 memory 测试后端（install/reset/remove 注入点）覆盖文本读写往返、
+/// 测试说明: 经测试框架的进程内 memory 后端（clipboard_memory::install/reset/remove）覆盖文本读写往返、
 /// 覆盖写、空文本、图像 RGBA8 往返与清空语义；失败口径另设两条平台路径用例
 /// （非法 UTF-8 载荷 → ClipboardWriteFailed 且不动既有内容；图像参数非法 → GeneralInvalidArgument），
 /// 其余路径全程不写系统剪贴板（后端不可用时 SKIP）；
 /// 富格式段覆盖自定义 MIME 载荷、files / html 便利封装、available_formats 如实反映已写格式、
-/// 空值与空写口径、以及立骨期平台路径的 clipboard-format-unsupported；
+/// 空值与空写口径、以及无平台后端时的 clipboard-format-unsupported（macOS 已接线，此判据跳过）；
 /// 惰性要约与监听段覆盖按需兑现（注册零调用、逐格式各自一次、渲染一次即缓存）、
-/// 立即写与惰性混用互不覆盖、所有权丢失与变更监听的触发 / 替换 / 无机制如实报错、
+/// 立即写与惰性混用互不覆盖、on_event 纯多播 / 类别过滤 / 快照派发 / owner 守卫 / 无机制如实报错、
 /// 提供失败的 provider-failed 口径、clear 与空写 no-op 的相反语义、
 /// 以及 ClipboardOffer 与 DragOffer 的同构锚点
 
 #include <algorithm>
 #include <cstdint>
+#include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "aurora/app/clipboard.h"
 #include "aurora/app/mime_types.h"
 #include "aurora/core/platform.h"
 #include "aurora/event/event.h"
+#include "aurora/widget/text.h"
 #include "framework/aurora_test.h"
+#include "framework/clipboard_memory_backend.h"
 
 namespace aurora::test_cases::utest_clipboard {
+namespace clipboard_memory = aurora::testing::clipboard_memory;
 
 namespace {
 
-/// 安装 memory 后端（同时清空内容）；双宏未齐备的构建下跳过本用例。
-auto require_test_backend() -> void {
-    if (!Clipboard::install_test_backend()) {
-        AURORA_TEST_SKIP(
-            "clipboard memory test backend unavailable (AURORA_ENABLE_DEBUG/AURORA_ENABLE_TEST_HOOKS not both set)");
-    }
-}
+/// 安装 memory 后端（同时清空内容）。
+auto require_test_backend() -> void { AURORA_TEST_CHECK_TRUE(clipboard_memory::install()); }
 
 /// 2x2 RGBA8 测试图像，像素字节 0..15 各不相同。
 auto make_image() -> Image {
@@ -46,7 +47,7 @@ auto make_image() -> Image {
 
 }  // namespace
 
-AURORA_TEST_CASE(install_test_backend_activates_memory_backend) {
+AURORA_TEST_CASE(install_activates_memory_backend) {
     require_test_backend();
 
     // 安装成功即处于活动状态：set/get 均改走内存（此处以空文本读取可立即返回验证）。
@@ -56,7 +57,7 @@ AURORA_TEST_CASE(install_test_backend_activates_memory_backend) {
 
     // 重复安装幂等（内容被清空），仍返回 true。
     AURORA_TEST_REQUIRE(Clipboard::set_text("stale").ok());
-    AURORA_TEST_CHECK_TRUE(Clipboard::install_test_backend());
+    AURORA_TEST_CHECK_TRUE(clipboard_memory::install());
     AURORA_TEST_CHECK_EQ(Clipboard::get_text().value(), std::string{});
 }
 
@@ -84,14 +85,14 @@ AURORA_TEST_CASE(empty_text_roundtrip) {
     AURORA_TEST_CHECK_EQ(Clipboard::get_text().value(), std::string{});
 }
 
-AURORA_TEST_CASE(reset_test_backend_clears_content) {
+AURORA_TEST_CASE(reset_clears_content) {
     require_test_backend();
 
     AURORA_TEST_REQUIRE(Clipboard::set_text("payload").ok());
     AURORA_TEST_REQUIRE(Clipboard::set_image(make_image()).ok());
     AURORA_TEST_CHECK_EQ(Clipboard::get_text().value(), std::string{"payload"});
 
-    Clipboard::reset_test_backend();
+    clipboard_memory::reset();
     AURORA_TEST_CHECK_EQ(Clipboard::get_text().value(), std::string{});
     AURORA_TEST_CHECK_EQ(Clipboard::get_image().value().width, 0);
 }
@@ -120,20 +121,20 @@ AURORA_TEST_CASE(image_absent_after_reset_returns_empty) {
     AURORA_TEST_CHECK_TRUE(out.value().pixels.empty());
 }
 
-AURORA_TEST_CASE(remove_test_backend_reports_state_transitions) {
+AURORA_TEST_CASE(memory_backend_reports_state_transitions) {
     // 复位入口状态：前序用例可能已把后端留在安装态；此刻不读取剪贴板内容。
-    (void)Clipboard::remove_test_backend();
+    (void)clipboard_memory::remove();
 
     // 未安装时卸载为 no-op，返回 false（不触碰平台实现）。
-    AURORA_TEST_CHECK_FALSE(Clipboard::remove_test_backend());
+    AURORA_TEST_CHECK_FALSE(clipboard_memory::remove());
 
     require_test_backend();
-    AURORA_TEST_CHECK_TRUE(Clipboard::remove_test_backend());
+    AURORA_TEST_CHECK_TRUE(clipboard_memory::remove());
     // 已卸载后再卸载仍为 false。
-    AURORA_TEST_CHECK_FALSE(Clipboard::remove_test_backend());
+    AURORA_TEST_CHECK_FALSE(clipboard_memory::remove());
 
     // 重新安装：内容被清空（不读平台剪贴板，随即恢复内存后端）。
-    AURORA_TEST_CHECK_TRUE(Clipboard::install_test_backend());
+    AURORA_TEST_CHECK_TRUE(clipboard_memory::install());
     AURORA_TEST_CHECK_EQ(Clipboard::get_text().value(), std::string{});
 }
 
@@ -145,7 +146,7 @@ AURORA_TEST_CASE(remove_test_backend_reports_state_transitions) {
 // 不是被测缺陷，故读数不可得时跳过坐实而非判红——写失败的断言与剪贴板是否可读无关。
 AURORA_TEST_CASE(invalid_utf8_payload_surfaces_write_error) {
 #ifdef AURORA_PLATFORM_WINDOWS
-    (void)Clipboard::remove_test_backend();  // 走平台路径
+    (void)clipboard_memory::remove();  // 走平台路径
 
     const auto before = Clipboard::get_text();  // 可能因外部占用而 Err，不作为前置要求
     const auto result = Clipboard::set_text(std::string{"\xF0\x28\x8C\x28"});  // 非法 UTF-8 序列
@@ -172,7 +173,7 @@ AURORA_TEST_CASE(invalid_utf8_payload_surfaces_write_error) {
 
 // 调用方参数错误与平台能力缺失都必须以 code 区分开，而不是静默 no-op。
 AURORA_TEST_CASE(bad_image_argument_is_not_silent) {
-    (void)Clipboard::remove_test_backend();  // 走平台路径
+    (void)clipboard_memory::remove();  // 走平台路径
 
     Image bad = make_image();
     bad.pixels.pop_back();  // 2x2 却只有 15 字节：缓冲与维度不一致
@@ -201,7 +202,8 @@ auto has_format(const std::vector<std::string> &formats, std::string_view mime) 
     return std::find(formats.begin(), formats.end(), mime) != formats.end();
 }
 
-/// @brief 立骨期富格式在平台路径上的统一失败（memory 后端已卸载时走此路）。
+#ifndef AURORA_PLATFORM_MACOS
+/// @brief 无平台后端时富格式在平台路径上的统一失败（memory 后端已卸载时走此路）。
 auto expect_format_unsupported(const Error &err, std::string_view mime) -> void {
     AURORA_TEST_CHECK_EQ(err.code_enum, ErrorCode::ClipboardFormatUnsupported);
     AURORA_TEST_CHECK_EQ(err.code, std::string{"clipboard-format-unsupported"});
@@ -209,6 +211,7 @@ auto expect_format_unsupported(const Error &err, std::string_view mime) -> void 
     AURORA_TEST_CHECK_FALSE(err.message.empty());
     AURORA_TEST_CHECK_TRUE(err.message.find(std::string{mime}) != std::string::npos);  // 失败点名是哪个 MIME
 }
+#endif
 
 }  // namespace
 
@@ -314,7 +317,7 @@ AURORA_TEST_CASE(available_formats_reflects_written_formats) {
     AURORA_TEST_CHECK_FALSE(has_format(formats.value(), AURORA_MIME_URI_LIST));
     AURORA_TEST_CHECK_FALSE(has_format(formats.value(), AURORA_MIME_IMAGE_PNG));
 
-    Clipboard::reset_test_backend();
+    clipboard_memory::reset();
     const auto cleared = Clipboard::available_formats();
     AURORA_TEST_REQUIRE(cleared.ok());
     AURORA_TEST_CHECK_EQ(cleared.value(), std::vector<std::string>{});
@@ -353,12 +356,16 @@ AURORA_TEST_CASE(empty_values_and_empty_writes_follow_the_documented_contract) {
     AURORA_TEST_CHECK_EQ(Clipboard::get_payload("application/x-probe").value(), bytes);
 }
 
-// 立骨期：富格式 API 在平台路径上（测试后端已卸载）一律报「本平台无该格式机制」，
-// 且该错误码的 retryable 为 false——机制缺失是稳态，调用方该改走别的通道而不是重试。
-// 变异自证：把平台路径的返回改成 `Ok(空值)`（谎称成功）或沿用 `GeneralNotSupported`，
-// 本用例的 code_enum 断言即转红。
-AURORA_TEST_CASE(rich_formats_report_unsupported_on_platform_path) {
-    (void)Clipboard::remove_test_backend();  // 走平台路径
+// 无平台后端时：富格式 API 一律报「本平台无该格式机制」，且该错误码的 retryable 为 false——
+// 机制缺失是稳态，调用方该改走别的通道而不是重试。判据只在**确实没有富格式后端**的平台路径上
+// 成立：macOS 的 NSPasteboard 后端在首次查询即自举登记（真读写会触碰系统剪贴板，不入单测）；
+// Linux 无富格式后端；Win32 依赖 owner 窗口登记，单测进程无窗口。变异自证：把平台路径的返回
+// 改成 `Ok(空值)`（谎称成功）或沿用 `GeneralNotSupported`，本用例的 code_enum 断言即转红。
+AURORA_TEST_CASE(rich_formats_report_unsupported_without_a_platform_backend) {
+#ifdef AURORA_PLATFORM_MACOS
+    AURORA_TEST_SKIP("macOS wires NSPasteboard rich formats; no unsupported platform path remains there");
+#else
+    (void)clipboard_memory::remove();  // 走平台路径
 
     const auto set_payload = Clipboard::set_payload("application/x-probe", to_bytes("x"));
     AURORA_TEST_REQUIRE_FALSE(set_payload.ok());
@@ -385,7 +392,8 @@ AURORA_TEST_CASE(rich_formats_report_unsupported_on_platform_path) {
     expect_format_unsupported(get_html.error(), AURORA_MIME_TEXT_HTML);
 
     // 末尾恢复测试后端：本用例卸载了它，不能把「已卸载」这一状态泄漏给同进程的后继用例。
-    (void)Clipboard::install_test_backend();
+    (void)clipboard_memory::install();
+#endif
 }
 
 // MIME 为空不是「空内容」，而是调用方参数错：空串无法作为存储键，静默接受等于留下一个读不回来的格式。
@@ -524,63 +532,240 @@ AURORA_TEST_CASE(immediate_write_and_lazy_offer_coexist_without_clobbering) {
     AURORA_TEST_REQUIRE_EQ(probe.calls.size(), 1U);  // 被接管的格式不再回调 provide
 }
 
-// 所有权丢失：回调被调用且只调一次；未注册惰性要约时整体 no-op；重复注册新回调后旧的不再被调用
-// （替换不叠加，避免多注册点各自持资源）。
-AURORA_TEST_CASE(ownership_lost_fires_once_and_replaces_previous_registration) {
+// 所有权丢失：纯多播（注册几次收几次），未持有惰性要约时整体 no-op，回调收到命中类别。
+AURORA_TEST_CASE(ownership_lost_event_is_multicast) {
     require_test_backend();
 
     // 未注册要约：模拟所有权被夺也不触发（没有可失去的所有权）。
     int early_calls = 0;
-    Clipboard::on_ownership_lost([&early_calls]() -> void { ++early_calls; });
-    Clipboard::emit_ownership_lost();
+    auto early = Clipboard::on_event(ClipboardEventKind::OwnershipLost,
+                                     [&early_calls](ClipboardEventKind) -> void { ++early_calls; });
+    AURORA_TEST_REQUIRE(early.ok());
+    auto early_sub = std::move(early.value());
+    clipboard_memory::emit_ownership_lost();
     AURORA_TEST_CHECK_EQ(early_calls, 0);
 
     ProvideProbe probe;
     AURORA_TEST_REQUIRE(Clipboard::set_offer(make_offer(probe)).ok());
 
     int first_calls = 0;
-    Clipboard::on_ownership_lost([&first_calls]() -> void { ++first_calls; });
-    Clipboard::emit_ownership_lost();
+    ClipboardEventKind seen = ClipboardEventKind::ContentChanged;
+    auto first =
+        Clipboard::on_event(ClipboardEventKind::OwnershipLost, [&first_calls, &seen](ClipboardEventKind kind) -> void {
+            ++first_calls;
+            seen = kind;
+        });
+    AURORA_TEST_REQUIRE(first.ok());
+    auto first_sub = std::move(first.value());
+    clipboard_memory::emit_ownership_lost();
     AURORA_TEST_CHECK_EQ(first_calls, 1);
+    AURORA_TEST_CHECK_TRUE(seen == ClipboardEventKind::OwnershipLost);
 
     // 要约随所有权一并失效：二次模拟无约可在手，不再触发。
-    Clipboard::emit_ownership_lost();
+    clipboard_memory::emit_ownership_lost();
     AURORA_TEST_CHECK_EQ(first_calls, 1);
 
-    // 替换语义：旧回调不再被调用。
+    // 后注册的条目同样收到（纯多播不是替换）。
     int second_calls = 0;
-    Clipboard::on_ownership_lost([&second_calls]() -> void { ++second_calls; });
+    auto second = Clipboard::on_event(ClipboardEventKind::OwnershipLost,
+                                      [&second_calls](ClipboardEventKind) -> void { ++second_calls; });
+    AURORA_TEST_REQUIRE(second.ok());
+    auto second_sub = std::move(second.value());
     ProvideProbe probe2;
     AURORA_TEST_REQUIRE(Clipboard::set_offer(make_offer(probe2)).ok());
-    Clipboard::emit_ownership_lost();
-    AURORA_TEST_CHECK_EQ(first_calls, 1);  // 旧的没动
+    clipboard_memory::emit_ownership_lost();
+    AURORA_TEST_CHECK_EQ(first_calls, 2);  // 第一个注册从未被替换
     AURORA_TEST_CHECK_EQ(second_calls, 1);
 }
 
-// 变更监听：有机制时注册即生效、模拟变化触发回调；无机制时注册即失败（不谎报——注册了却收不到
-// 通知会让调用方逻辑静默失效）。变异自证：把「无机制」分支改成返回 Ok，本用例即刻转红。
-AURORA_TEST_CASE(change_listener_reports_unsupported_without_mechanism) {
-    require_test_backend();  // 安装即置「有监听机制」
+// 纯多播 + 注销：同一类别注册两份各自收到；析构 / reset 的那个立即停止投递。
+AURORA_TEST_CASE(change_events_are_multicast_and_reset_stops_delivery) {
+    require_test_backend();
+
+    int first_calls = 0;
+    auto first = Clipboard::on_event(ClipboardEventKind::ContentChanged,
+                                     [&first_calls](ClipboardEventKind) -> void { ++first_calls; });
+    AURORA_TEST_REQUIRE(first.ok());
+    auto first_sub = std::move(first.value());
+
+    int second_calls = 0;
+    auto second = Clipboard::on_event(ClipboardEventKind::ContentChanged,
+                                      [&second_calls](ClipboardEventKind) -> void { ++second_calls; });
+    AURORA_TEST_REQUIRE(second.ok());
+    auto second_sub = std::move(second.value());
+
+    clipboard_memory::emit_change();
+    AURORA_TEST_CHECK_EQ(first_calls, 1);
+    AURORA_TEST_CHECK_EQ(second_calls, 1);
+
+    first_sub.reset();
+    clipboard_memory::emit_change();
+    AURORA_TEST_CHECK_EQ(first_calls, 1);  // 已注销的不再收到
+    AURORA_TEST_CHECK_EQ(second_calls, 2);  // 另一份注册不受影响
+}
+
+// 类别过滤：只收自己订阅的类别；组合订阅两类各收一次。
+AURORA_TEST_CASE(subscription_receives_only_its_kinds) {
+    require_test_backend();
 
     int changes = 0;
-    AURORA_TEST_REQUIRE(Clipboard::on_change([&changes]() -> void { ++changes; }).ok());
-    Clipboard::emit_change();
+    int lost = 0;
+    int both = 0;
+    auto change_only =
+        Clipboard::on_event(ClipboardEventKind::ContentChanged, [&changes](ClipboardEventKind) -> void { ++changes; });
+    AURORA_TEST_REQUIRE(change_only.ok());
+    auto change_sub = std::move(change_only.value());
+    auto lost_only =
+        Clipboard::on_event(ClipboardEventKind::OwnershipLost, [&lost](ClipboardEventKind) -> void { ++lost; });
+    AURORA_TEST_REQUIRE(lost_only.ok());
+    auto lost_sub = std::move(lost_only.value());
+    auto combined = Clipboard::on_event(ClipboardEventKind::ContentChanged | ClipboardEventKind::OwnershipLost,
+                                        [&both](ClipboardEventKind) -> void { ++both; });
+    AURORA_TEST_REQUIRE(combined.ok());
+    auto combined_sub = std::move(combined.value());
+
+    clipboard_memory::emit_change();
+    AURORA_TEST_CHECK_EQ(changes, 1);
+    AURORA_TEST_CHECK_EQ(lost, 0);
+    AURORA_TEST_CHECK_EQ(both, 1);
+
+    ProvideProbe probe;
+    AURORA_TEST_REQUIRE(Clipboard::set_offer(make_offer(probe)).ok());
+    clipboard_memory::emit_ownership_lost();
+    AURORA_TEST_CHECK_EQ(changes, 1);
+    AURORA_TEST_CHECK_EQ(lost, 1);
+    AURORA_TEST_CHECK_EQ(both, 2);
+}
+
+// 快照派发：回调内新注册的条目本轮不参与，下一轮才生效。
+AURORA_TEST_CASE(registrations_during_dispatch_apply_to_the_next_round) {
+    require_test_backend();
+
+    int first_calls = 0;
+    int late_calls = 0;
+    std::optional<Subscription> late_sub;
+    auto first = Clipboard::on_event(ClipboardEventKind::ContentChanged, [&](ClipboardEventKind) -> void {
+        ++first_calls;
+        if (!late_sub.has_value()) {
+            auto added = Clipboard::on_event(ClipboardEventKind::ContentChanged,
+                                             [&late_calls](ClipboardEventKind) -> void { ++late_calls; });
+            AURORA_TEST_CHECK_TRUE(added.ok());
+            late_sub.emplace(std::move(added.value()));
+        }
+    });
+    AURORA_TEST_REQUIRE(first.ok());
+    auto first_sub = std::move(first.value());
+
+    clipboard_memory::emit_change();
+    AURORA_TEST_CHECK_EQ(first_calls, 1);
+    AURORA_TEST_CHECK_EQ(late_calls, 0);  // 本轮快照不含新注册
+
+    clipboard_memory::emit_change();
+    AURORA_TEST_CHECK_EQ(first_calls, 2);
+    AURORA_TEST_CHECK_EQ(late_calls, 1);  // 下一轮生效
+}
+
+// 快照派发：回调内取消的条目立即止损，含本轮尚未轮到的后序条目。
+AURORA_TEST_CASE(cancellation_during_dispatch_stops_remaining_entries) {
+    require_test_backend();
+
+    std::optional<Subscription> later_sub;
+    int later_calls = 0;
+    auto canceller = Clipboard::on_event(ClipboardEventKind::ContentChanged,
+                                         [&later_sub](ClipboardEventKind) -> void { later_sub->reset(); });
+    AURORA_TEST_REQUIRE(canceller.ok());
+    auto canceller_sub = std::move(canceller.value());
+    auto later = Clipboard::on_event(ClipboardEventKind::ContentChanged,
+                                     [&later_calls](ClipboardEventKind) -> void { ++later_calls; });
+    AURORA_TEST_REQUIRE(later.ok());
+    later_sub.emplace(std::move(later.value()));
+
+    clipboard_memory::emit_change();
+    AURORA_TEST_CHECK_EQ(later_calls, 0);  // 本轮尚未轮到即被取消
+}
+
+// 参数口径：空回调与空类别掩码都是调用方参数错，不是「订阅成功但永不触发」。
+AURORA_TEST_CASE(on_event_rejects_empty_callback_and_empty_kinds) {
+    require_test_backend();
+
+    const auto no_callback = Clipboard::on_event(ClipboardEventKind::ContentChanged, {});
+    AURORA_TEST_REQUIRE_FALSE(no_callback.ok());
+    AURORA_TEST_CHECK_EQ(no_callback.error().code_enum, ErrorCode::GeneralInvalidArgument);
+
+    const auto no_kinds = Clipboard::on_event(ClipboardEventKind::None, [](ClipboardEventKind) -> void {});
+    AURORA_TEST_REQUIRE_FALSE(no_kinds.ok());
+    AURORA_TEST_CHECK_EQ(no_kinds.error().code_enum, ErrorCode::GeneralInvalidArgument);
+}
+
+// 变更监听：有机制时注册即生效、模拟变化触发回调；无机制时**请求 ContentChanged** 注册即失败
+// （不谎报），而只请求 OwnershipLost 恒成功。变异自证：把「无机制」分支改成返回 Ok，本用例转红。
+AURORA_TEST_CASE(content_changed_requires_a_listener_mechanism) {
+    require_test_backend();  // 安装即模拟「有监听机制」
+
+    int changes = 0;
+    auto first =
+        Clipboard::on_event(ClipboardEventKind::ContentChanged, [&changes](ClipboardEventKind) -> void { ++changes; });
+    AURORA_TEST_REQUIRE(first.ok());
+    auto first_sub = std::move(first.value());
+    clipboard_memory::emit_change();
     AURORA_TEST_CHECK_EQ(changes, 1);
 
     // 无机制平台：注册即失败，且此后模拟变化不再触发新回调（没有注册进去）。
-    Clipboard::set_listen_supported(false);
-    int lost = 0;
-    const auto unsupported = Clipboard::on_change([&lost]() -> void { ++lost; });
+    clipboard_memory::set_listen_supported(false);
+    int rejected_calls = 0;
+    const auto unsupported = Clipboard::on_event(ClipboardEventKind::ContentChanged,
+                                                 [&rejected_calls](ClipboardEventKind) -> void { ++rejected_calls; });
     AURORA_TEST_REQUIRE_FALSE(unsupported.ok());
     AURORA_TEST_CHECK_EQ(unsupported.error().code_enum, ErrorCode::ClipboardListenUnsupported);
     AURORA_TEST_CHECK_EQ(unsupported.error().code, std::string{"clipboard-listen-unsupported"});
     AURORA_TEST_CHECK_FALSE(unsupported.error().retryable);  // 机制缺失是稳态
-    Clipboard::emit_change();
-    AURORA_TEST_CHECK_EQ(lost, 0);  // 新回调从未注册进去
+    clipboard_memory::emit_change();
+    AURORA_TEST_CHECK_EQ(rejected_calls, 0);  // 新回调从未注册进去
     AURORA_TEST_CHECK_EQ(changes, 2);  // 失败注册无副作用：先前那个注册仍然有效
 
+    // 只请求 OwnershipLost 不依赖监听机制：无机制时同样注册成功并收到派发。
+    int owned = 0;
+    auto only_lost =
+        Clipboard::on_event(ClipboardEventKind::OwnershipLost, [&owned](ClipboardEventKind) -> void { ++owned; });
+    AURORA_TEST_REQUIRE(only_lost.ok());
+    auto only_lost_sub = std::move(only_lost.value());
+    ProvideProbe probe;
+    AURORA_TEST_REQUIRE(Clipboard::set_offer(make_offer(probe)).ok());
+    clipboard_memory::emit_ownership_lost();
+    AURORA_TEST_CHECK_EQ(owned, 1);
+
     // 恢复监听机制，避免把「无机制」状态泄漏给同进程后继用例。
-    Clipboard::set_listen_supported(true);
+    clipboard_memory::set_listen_supported(true);
+}
+
+// owner 守卫：非 shared_ptr 托管的 owner 无法建立弱守卫，注册如实失败（不静默退化为强引用）。
+AURORA_TEST_CASE(guarded_registration_requires_shared_ownership) {
+    require_test_backend();
+
+    Text stack_owner;
+    const auto rejected =
+        Clipboard::on_event(stack_owner, ClipboardEventKind::ContentChanged, [](ClipboardEventKind) -> void {});
+    AURORA_TEST_REQUIRE_FALSE(rejected.ok());
+    AURORA_TEST_CHECK_EQ(rejected.error().code_enum, ErrorCode::GeneralInvalidArgument);
+}
+
+// owner 守卫：owner 销毁后条目不再投递（清扫只回收内存，派发永远逐条判活）。
+AURORA_TEST_CASE(guarded_registration_stops_delivery_after_owner_destroyed) {
+    require_test_backend();
+
+    int calls = 0;
+    auto owner = std::make_shared<Text>();
+    auto registered = Clipboard::on_event(*owner, ClipboardEventKind::ContentChanged,
+                                          [&calls](ClipboardEventKind) -> void { ++calls; });
+    AURORA_TEST_REQUIRE(registered.ok());
+    auto sub = std::move(registered.value());
+
+    clipboard_memory::emit_change();
+    AURORA_TEST_CHECK_EQ(calls, 1);
+
+    owner.reset();
+    clipboard_memory::emit_change();
+    AURORA_TEST_CHECK_EQ(calls, 1);  // owner 已销毁，跳过投递
 }
 
 // 提供失败口径：惰性回调返回 Error 时读取侧拿到 ClipboardProviderFailed（而非既有三枚之一），

@@ -1,7 +1,7 @@
 #pragma once
 
 /// @brief 平台网络运行时的 RAII 会话。
-/// @file net/detail/runtime.h
+/// @file runtime.h
 ///
 /// **仅供 `src/aurora/net/` 实现侧使用，不占公共 API 预算。**存在理由三条：
 /// 1. Windows 的 Winsock 在使用任何 socket API 前必须 `WSAStartup`、末个使用者退出时

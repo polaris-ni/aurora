@@ -10,7 +10,7 @@ auto main() -> int {
         au::Text{"Click outside to close"},
     }});
 
-    au::Button open_btn{au::ButtonProps{.label = "Open Popup"}};
+    au::Button open_btn{au::ButtonProps().set_label("Open Popup")};
     open_btn.on_click = [popup]() -> void { popup->open_at(au::Point{.x = 140.0F, .y = 120.0F}); };
 
     au::Node root = au::Column{

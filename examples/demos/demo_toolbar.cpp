@@ -5,9 +5,9 @@
 // try/catch 包装
 // NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
-    au::Button run_btn{au::ButtonProps{.label = "Run"}};
+    au::Button run_btn{au::ButtonProps().set_label("Run")};
     run_btn.on_click = []() -> void { AURORA_LOG_INFO("demo", "Run"); };
-    au::Button stop_btn{au::ButtonProps{.label = "Stop"}};
+    au::Button stop_btn{au::ButtonProps().set_label("Stop")};
 
     std::vector<au::Node> tool_kids;
     tool_kids.emplace_back(std::move(run_btn));

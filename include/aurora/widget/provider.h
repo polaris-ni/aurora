@@ -4,7 +4,6 @@
 #include "aurora/environment/environment.h"
 #include "aurora/environment/media_query.h"
 #include "aurora/i18n/locale.h"
-#include "aurora/state/reactive.h"
 #include "aurora/state/state.h"
 #include "aurora/theming/theme.h"
 #include "aurora/widget/widget.h"
@@ -38,12 +37,48 @@ inline auto provider_type_name<MediaQuery>() -> const char * {
     return "MediaQueryProvider";
 }
 
+/// @brief 注入值的类型名（描述符的载荷格）：默认无载荷，未特化的 `T` 发空串。
+///
+/// 与 `provider_type_name` 同一族写法：类型名是显示面事实，不能由 RTTI 现取（本库不开 RTTI 依赖），
+/// 也不写死在生成器里。空串即「该 Provider 的载荷类型没有登记名」，发射侧按稀疏口径整组不输出 ——
+/// 宁可少发一格，也不发一枚猜出来的类型名。
+/// @tparam T 注入值类型。
+/// @return 载荷类型名（`"Theme"` / `"Locale"` / `"MediaQuery"`），未特化时为空串。
+template <typename T>
+auto provider_payload_type() -> const char * {
+    return "";
+}
+/// @brief `Theme` 特化：主题 Provider 的载荷类型名。
+/// @return "Theme"。
+template <>
+inline auto provider_payload_type<Theme>() -> const char * {
+    return "Theme";
+}
+/// @brief `Locale` 特化：区域设置 Provider 的载荷类型名。
+/// @return "Locale"。
+template <>
+inline auto provider_payload_type<Locale>() -> const char * {
+    return "Locale";
+}
+/// @brief `MediaQuery` 特化：设备度量 Provider 的载荷类型名。
+/// @return "MediaQuery"。
+template <>
+inline auto provider_payload_type<MediaQuery>() -> const char * {
+    return "MediaQuery";
+}
+
+/// @brief 载荷的传入通道显示串：三枚已登记 Provider 同形（注入值只占构造式第一个位置参数）。
+/// @return 构造参数与环境读取路径的说明串。
+[[nodiscard]] inline auto provider_payload_channel() -> const char * {
+    return "first constructor argument; descendants read it via BuildContext::environment<T>()";
+}
+
 /// @brief 环境注入器（参考 Flutter InheritedWidget / SwiftUI Environment）。
 /// @tparam T 要向下注入的值类型（如 Theme / Locale）。
 /// 把值 `T` 注入环境，子树经 `BuildContext::environment<T>()` 取到最近祖先的 Provider。
 /// 注意：实作放在 widget 模块以避免 environment→widget 的循环依赖；环境机制
 /// （Environment/BuildContext）本身在 environment 模块。
-/// 本行隐式生成的拷贝/移动构造复制响应式持有 Reactive<T>（其拷贝即分配值存储与订阅），被异常逃逸检查判
+/// 本行隐式生成的拷贝/移动构造复制响应式持有 State<T>（其拷贝即分配值存储与订阅），被异常逃逸检查判
 /// 「不应抛出」；该隐式特成员按 [except.spec] 本就是 potentially-throwing，抛出（bad_alloc）沿栈交给
 /// 构造方。本类刻意依赖隐式拷贝/移动（CODING_STANDARDS.md §5.1），故不补 = delete 而逐点豁免。
 /// 豁免取**行尾**形态而非「下一行」形态：本类是模板，告警报在**实例化点**所属的声明行
@@ -52,44 +87,36 @@ inline auto provider_type_name<MediaQuery>() -> const char * {
 template <typename T>
 class Provider : public SingleChild {  // NOLINT(bugprone-exception-escape)
   public:
-    /// @brief 用静态值注入（按值构造响应式持有）。
-    /// @param value 注入的值。
+    /// @brief 注入只读值句柄：常量值、`State<T>` 与 `ReadOnlyState<T>` 都经单向转换进来。
+    ///
+    /// 本控件只读注入值、不提供写入口：需要后代修改时显式用 `Provider<State<T>>`
+    /// （注入的是句柄本身，后代拿到后可写原来源），或注入带领域命令的应用模型。
+    /// @param value 注入值句柄；可指向调用方持有的来源。
     /// @param child 子节点。
-    Provider(T value, Node child) : SingleChild(std::move(child)), value_(std::move(value)) {}
+    Provider(ReadOnlyState<T> value, Node child) : SingleChild(std::move(child)), value_(std::move(value)) {}
 
-    /// @brief 用静态值注入并接受具体 widget 引用（隐式转 Node 挂接）。
+    /// @brief 注入只读值句柄并接受具体 widget 引用（隐式转 Node 挂接）。
     /// @tparam W 子 widget 的具体类型。
-    /// @param value 注入的值。
+    /// @param value 注入值句柄。
     /// @param child 转发给 SingleChild 的子 widget 引用。
     template <typename W>
         requires std::derived_from<W, Widget>
-    Provider(T value, W &&child) : SingleChild(Node{std::forward<W>(child)}), value_(std::move(value)) {}
-
-    /// @brief 用共享 `State<T>` 注入：外部 State 变化时子树自动重渲染（运行时换肤/换区域）。
-    /// @param state 共享状态指针。
-    /// @param child 子节点。
-    explicit Provider(std::shared_ptr<State<T>> state, Node child)
-        : SingleChild(std::move(child)), value_(std::move(state)) {}
-
-    /// @brief 用共享 `State<T>` 注入并接受具体 widget 引用（运行时换肤/换区域）。
-    /// @tparam W 子 widget 的具体类型。
-    /// @param state 共享状态指针。
-    /// @param child 转发给 SingleChild 的子 widget 引用。
-    template <typename W>
-        requires std::derived_from<W, Widget>
-    explicit Provider(std::shared_ptr<State<T>> state, W &&child)
-        : SingleChild(Node{std::forward<W>(child)}), value_(std::move(state)) {}
+    Provider(ReadOnlyState<T> value, W &&child) : SingleChild(Node{std::forward<W>(child)}), value_(std::move(value)) {}
 
     /// @brief 收集本控件的可订阅信号。
     /// @param out 输出容器；追加响应式持有 value_ 的视图指针。
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&value_); }
+    auto collect_signals(StateSink &out) -> void override { out.push(value_); }
 
     /// @brief 控件类型名：按注入值类型 `T` 映射（见 provider_type_name）。
     /// @return "ThemeProvider"/"LocaleProvider"/"MediaQueryProvider"，其余类型返回通用 "Provider"。
     [[nodiscard]] auto type_name() const -> const char * override { return provider_type_name<T>(); }
 
     /// @brief 运行时自描述（规格附录 B）：名称取 provider_type_name<T>()，属性键含 width/height/show。
-    /// @return 描述符：single 子策略与 Provider 构造示例。
+    ///
+    /// 载荷格按 provider_payload_type<T>() 填写：已登记的三型（`Theme` / `Locale` / `MediaQuery`）发类型名
+    /// 与传入通道，其余 `T` 发空串即整组不输出 —— 注入值不是属性键，序列化与写件面都没有它的位置，
+    /// 「这条通路靠什么供给」这句话必须由载荷格承担，不能再让消费侧从 examples 的字面串里猜。
+    /// @return 描述符：single 子策略、Provider 构造示例与（已登记型时）载荷声明。
     [[nodiscard]] static auto describe_static() -> WidgetDescriptor {
         return WidgetDescriptor{
             .name = std::string(provider_type_name<T>()),
@@ -102,19 +129,17 @@ class Provider : public SingleChild {  // NOLINT(bugprone-exception-escape)
             .events = {},
             .children_policy = "single",
             .examples = {"au::Provider<Theme>(theme, child)"},
+            .payload_type = std::string(provider_payload_type<T>()),
+            .payload_channel = provider_payload_channel(),
         };
     }
     /// @brief 实例侧描述入口：转发静态描述。
     /// @return 与 describe_static() 相同的 WidgetDescriptor。
     [[nodiscard]] auto describe() const -> WidgetDescriptor override { return describe_static(); }
 
-    /// @brief 当前注入值（读取响应式持有，自动登记依赖）。
+    /// @brief 当前注入值（读取只读句柄，自动登记依赖）。
     /// @return 注入值 `T` 的当前值引用。
     [[nodiscard]] auto value() const -> const T & { return value_.get(); }
-
-    /// @brief 运行时改写注入值（触发子树刷新）。
-    /// @param v 新的注入值。
-    auto set_value(T v) -> void { value_ = std::move(v); }
 
   protected:
     /// @brief 换值标脏口径：在默认「标脏本控件及其祖先缓存」之外，追加**子树**缓存清零。
@@ -175,7 +200,7 @@ class Provider : public SingleChild {  // NOLINT(bugprone-exception-escape)
         }
     }
 
-    Reactive<T> value_;  ///< 响应式持有（支持按值或共享 State<T> 注入）
+    ReadOnlyState<T> value_;  ///< 注入值的只读句柄（常量、外部 State 或外部只读句柄同源）
     Environment child_env_;
 };
 

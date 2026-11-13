@@ -2,6 +2,8 @@
 
 #include <utility>
 
+#include "aurora/theming/theme_scope.h"  // inherit_theme：控件色只取主题角色，不写死字面量
+
 namespace aurora {
 
 auto Drawer::describe_static() -> WidgetDescriptor {
@@ -73,6 +75,7 @@ auto Drawer::on_layout(const Constraints &c, const BuildContext &ctx) -> Size {
 }
 
 auto Drawer::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void {
+    const auto &roles = inherit_theme(ctx).roles;
     if (content_) {
         const Rect cb = content_.bounds();
         content_.widget().paint(
@@ -85,13 +88,13 @@ auto Drawer::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -
     if (panel_visible && panel_) {
         // 模态遮罩
         if (!permanent_) {
-            p.fill_rect(bounds, Color(0, 0, 0, 96));
+            p.fill_rect(bounds, roles.scrim.with_alpha(96));
         }
         const Rect pb = panel_.bounds();
         const Rect global{.origin = Point{.x = bounds.origin.x + pb.origin.x, .y = bounds.origin.y + pb.origin.y},
                           .size = pb.size};
-        p.draw_shadow(global, side_ == DrawerSide::Left ? 2.0F : -2.0F, 0.0F, 8.0F, Color(0, 0, 0, 60));
-        p.fill_rect(global, Color(252, 252, 254, 255));
+        p.draw_shadow(global, side_ == DrawerSide::Left ? 2.0F : -2.0F, 0.0F, 8.0F, roles.shadow.with_alpha(60));
+        p.fill_rect(global, roles.surface);
         panel_.widget().paint(p, global, ctx);
     }
 }
@@ -188,39 +191,40 @@ auto ProgressDialog::on_layout(const Constraints &c, const BuildContext & /*ctx*
     return c.constrain(self);
 }
 
-auto ProgressDialog::on_paint(Painter &p, const Rect &bounds, const BuildContext & /*ctx*/) -> void {
+auto ProgressDialog::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void {
     if (!open_) {
         return;
     }
+    const auto &roles = inherit_theme(ctx).roles;
     // 遮罩 + 对话框
-    p.fill_rect(bounds, Color(0, 0, 0, 128));
+    p.fill_rect(bounds, roles.scrim.with_alpha(128));
     const Rect box{
         .origin = Point{.x = bounds.origin.x + box_rect_.origin.x, .y = bounds.origin.y + box_rect_.origin.y},
         .size = box_rect_.size};
-    p.draw_shadow(box, 0.0F, 4.0F, 12.0F, Color(0, 0, 0, 80));
-    p.fill_rect(box, Color(255, 255, 255, 255));
+    p.draw_shadow(box, 0.0F, 4.0F, 12.0F, roles.shadow.with_alpha(80));
+    p.fill_rect(box, roles.surface);
 
     Font f;
     f.size_pt = 13.0F;
     p.draw_text(Rect{.origin = Point{.x = box.origin.x + 16.0F, .y = box.origin.y + 14.0F},
                      .size = Size{.width = box.size.width - 32.0F, .height = 20.0F}},
-                message_, f, Color(30, 30, 30, 255));
+                message_, f, roles.on_surface);
 
     // 进度条
     const Rect track{.origin = Point{.x = box.origin.x + 16.0F, .y = box.origin.y + 46.0F},
                      .size = Size{.width = box.size.width - 32.0F, .height = 8.0F}};
-    p.fill_rect(track, Color(230, 230, 234, 255));
+    p.fill_rect(track, roles.surface_variant);
     const float prog = progress_.get();
     if (prog >= 0.0F) {
         p.fill_rect(
             Rect{.origin = track.origin, .size = Size{.width = track.size.width * prog, .height = track.size.height}},
-            Color(0, 122, 255, 255));
+            roles.primary);
     } else {
         // 不确定态：中段高亮块
         const float seg = track.size.width * 0.3F;
         p.fill_rect(Rect{.origin = Point{.x = track.origin.x + (track.size.width * 0.35F), .y = track.origin.y},
                          .size = Size{.width = seg, .height = track.size.height}},
-                    Color(0, 122, 255, 160));
+                    roles.primary.with_alpha(160));
     }
 
     // 取消按钮
@@ -228,11 +232,11 @@ auto ProgressDialog::on_paint(Painter &p, const Rect &bounds, const BuildContext
         const Rect cbtn{
             .origin = Point{.x = bounds.origin.x + cancel_rect_.origin.x, .y = bounds.origin.y + cancel_rect_.origin.y},
             .size = cancel_rect_.size};
-        p.fill_rect(cbtn, Color(240, 240, 244, 255));
-        p.draw_rect(cbtn, Color(200, 200, 205, 255));
+        p.fill_rect(cbtn, roles.surface_container);
+        p.draw_rect(cbtn, roles.outline_variant);
         p.draw_text(Rect{.origin = Point{.x = cbtn.origin.x + 18.0F, .y = cbtn.origin.y + 7.0F},
                          .size = Size{.width = cbtn.size.width - 20.0F, .height = cbtn.size.height - 14.0F}},
-                    "Cancel", f, Color(60, 60, 65, 255));
+                    "Cancel", f, roles.on_surface_variant);
     }
 }
 
@@ -299,6 +303,7 @@ auto PageView::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx)
     }
     // 指示器圆点（底部居中；简化为小方块）
     if (show_indicator_ && children_.size() > 1) {
+        const auto &roles = inherit_theme(ctx).roles;
         constexpr float dot = 8.0F;
         constexpr float gap = 8.0F;
         const float total =
@@ -308,7 +313,7 @@ auto PageView::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx)
         for (std::size_t i = 0; i < children_.size(); ++i) {
             const bool active = std::cmp_equal(i, cur);
             p.fill_rect(Rect{.origin = Point{.x = x, .y = y}, .size = Size{.width = dot, .height = dot}},
-                        active ? Color(0, 122, 255, 255) : Color(0, 0, 0, 60));
+                        active ? roles.primary : roles.on_surface.with_alpha(60));
             x += dot + gap;
         }
     }

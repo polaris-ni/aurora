@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cmath>
 #include <cstdint>
 
 /// @brief Aurora 根命名空间：库的全部公共类型与自由函数均在此命名空间下（推荐别名 `au`）。
@@ -94,6 +95,43 @@ struct Color {
     /// @return RGB 三通道不变、alpha 更新后的颜色。
     [[nodiscard]] constexpr auto with_alpha(uint8_t alpha) const noexcept -> Color { return Color{r, g, b, alpha}; }
 };
+
+/// @brief 相对亮度（WCAG 2.x 定义）：sRGB 三通道线性化后的加权和。
+///
+/// 全库唯一的一份感知亮度算法：无障碍配对断言、色角色对比度门禁与运行期覆盖面校验都取此值，
+/// 不得另写第二份（三处各说各话正是本函数要消灭的形态）。
+///
+/// @param c 输入颜色。**alpha 不参与**——半透明层（如状态叠色）的对比度只在它合成到某个底色之后
+///        才有定义，未合成前求出的比值无意义；该口径见 `codespec/specification/07-environment-modifier.md` §5.1。
+/// @return 区间 [0, 1] 的相对亮度：纯黑为 0，纯白为 1。
+/// @note Thread: thread-safe
+/// @note Side-effects: pure
+[[nodiscard]] inline auto relative_luminance(const Color &c) noexcept -> double {
+    const auto linear = [](const uint8_t v) noexcept -> double {
+        const double s = static_cast<double>(v) / 255.0;
+        return s <= 0.04045 ? s / 12.92 : std::pow((s + 0.055) / 1.055, 2.4);
+    };
+    return (0.2126 * linear(c.r)) + (0.7152 * linear(c.g)) + (0.0722 * linear(c.b));
+}
+
+/// @brief 两色对比度（WCAG 2.x 定义）：较亮者与较暗者的相对亮度商。
+///
+/// 判定阈值不在本函数里：3:1 / 4.5:1 是「哪一类配对」的属性（非文本 / 文本），见
+/// `codespec/specification/07-environment-modifier.md` §5.1 的三档口径与色角色对比度门禁。
+/// 公式对参数次序对称，前景与底色谁先传都一样。
+///
+/// @param a 第一色（alpha 不参与，理由同 `relative_luminance`）。
+/// @param b 第二色（alpha 不参与）。
+/// @return 区间 [1, 21] 的对比度：同色为 1，纯黑配纯白为 21。
+/// @note Thread: thread-safe
+/// @note Side-effects: pure
+[[nodiscard]] inline auto contrast_ratio(const Color &a, const Color &b) noexcept -> double {
+    const double la = relative_luminance(a);
+    const double lb = relative_luminance(b);
+    const double hi = la >= lb ? la : lb;
+    const double lo = la >= lb ? lb : la;
+    return (hi + 0.05) / (lo + 0.05);
+}
 
 /// @brief 调色板命名空间（需求 SPEC.API.NAMING-CONSISTENCY.001：具名色集中在扁平的 `au::colors` 下，易发现）。
 /// 与 `Color::red()` 等静态工厂并存；AI 可任选其一。

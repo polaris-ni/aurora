@@ -6,10 +6,14 @@
 #include <memory>
 #include <string>
 #include <type_traits>
+#include <utility>
 
 #include "aurora/environment/build_context.h"
+#include "aurora/environment/environment.h"
 #include "aurora/event/event.h"
 #include "aurora/render/painter.h"
+#include "aurora/theming/theme.h"
+#include "aurora/theming/theme_scope.h"
 #include "aurora/widget/button.h"
 #include "aurora/widget/containers.h"
 #include "aurora/widget/inspect.h"
@@ -43,6 +47,17 @@ namespace {
 /// @brief 有限约束：on_layout 取 c.max 为总尺寸，得到确定的 400x300 面板几何。
 [[nodiscard]] auto bounded(float w, float h) -> Constraints {
     return Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = w, .height = h}};
+}
+
+/// @brief 造一个注入指定主题的构建上下文（根级环境，无父指针）。
+/// @param t 注入的主题取值。
+/// @return holder + ctx；二者须在同一作用域内使用（BuildContext 只供当帧读取）。
+auto themed_ctx(const Theme &t) -> std::pair<std::shared_ptr<Environment>, BuildContext> {
+    auto env = std::make_shared<Environment>();
+    env->set_local(t);
+    BuildContext ctx;
+    ctx.env = env.get();
+    return {std::move(env), ctx};
 }
 
 }  // namespace
@@ -292,9 +307,42 @@ AURORA_TEST_CASE(inspector_panel_get_and_set_widget_props) {
     // 单属性回写 → 读回一致；再恢复原值。
     auto &col_ref = dynamic_cast<Column &>(root.widget());
     set_widget_prop(root.widget(), "gap", Json(16.0F));
-    AURORA_TEST_CHECK_NEAR(col_ref.gap, 16.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(col_ref.gap(), 16.0F, 1e-4F);
     set_widget_prop(root.widget(), "gap", Json(8.0F));
-    AURORA_TEST_CHECK_NEAR(col_ref.gap, 8.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(col_ref.gap(), 8.0F, 1e-4F);
+}
+
+AURORA_TEST_CASE(inspector_panel_surfaces_paint_with_theme_roles) {
+    // 树标题 / 树身 / 属性面三块底色曾各自写死；改读角色后同一像素在明暗两档下必须等于该档的角色，
+    // 且明暗互不相等——判的是「读了主题」而不是「恰好写灰」。每档各用一枚新控件：显示列表缓存
+    // 只认盒与光栅世代，同一实例二绘会直接回放上一档的命令。
+    const auto [env_l, light] = themed_ctx(Theme::light());
+    const auto [env_d, dark] = themed_ctx(Theme::dark());
+    InspectorPanel light_panel;
+    (void)light_panel.layout(bounded(600.0F, 400.0F), light);
+    const Rect light_box{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = light_panel.size()};
+    InspectorPanel dark_panel;
+    (void)dark_panel.layout(bounded(600.0F, 400.0F), dark);
+    const Rect dark_box{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = dark_panel.size()};
+
+    Painter lp;
+    lp.begin(600, 400);
+    light_panel.paint(lp, light_box, light);
+    Painter dp;
+    dp.begin(600, 400);
+    dark_panel.paint(dp, dark_box, dark);
+
+    const auto &lr = inherit_theme(light).roles;
+    const auto &dr = inherit_theme(dark).roles;
+    // ratio 0.35 × 600 = 210 宽树列、5 宽分隔条；默认无根节点故树身/属性面无行覆盖。
+    // (1,1) 树标题；(1,398) 树身底部空白；(598,398) 属性面底部空白（x 均在行首缩进左缘）。
+    AURORA_TEST_CHECK(lp.get_pixel(1, 1) == lr.surface_container_high);
+    AURORA_TEST_CHECK(dp.get_pixel(1, 1) == dr.surface_container_high);
+    AURORA_TEST_CHECK(lp.get_pixel(1, 398) == lr.surface_container);
+    AURORA_TEST_CHECK(dp.get_pixel(1, 398) == dr.surface_container);
+    AURORA_TEST_CHECK(lp.get_pixel(598, 398) == lr.surface_container_lowest);
+    AURORA_TEST_CHECK(dp.get_pixel(598, 398) == dr.surface_container_lowest);
+    AURORA_TEST_CHECK(lp.get_pixel(1, 1) != dp.get_pixel(1, 1));
 }
 
 }  // namespace aurora::test_cases::utest_inspector_panel

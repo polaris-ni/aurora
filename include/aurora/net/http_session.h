@@ -1,5 +1,5 @@
 /// @brief HTTP 会话面（身份层）：Cookie Jar + 缺省配置（§12「Cookie」条、提案 §16 第 36 项第①款）。
-/// @file net/http_session.h
+/// @file http_session.h
 ///
 /// 本头回答一个问题：**「一组请求共享同一次登录态」**。`Session` 收窄为身份层——持一枚内存 Cookie Jar
 /// 并把它装进自己的 `Client`，`client()` 交出的引用照常配置（连接池、重试、代理……都在 `Client` 上）：

@@ -138,8 +138,8 @@ class Stack : public Container {
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
         for (std::size_t i = 0; i < children_.size(); ++i) {
             const Point off = (i < origins_.size()) ? origins_[i] : Point{.x = 0, .y = 0};
-            Rect child_bounds{.origin = Point{.x = bounds.origin.x + off.x, .y = bounds.origin.y + off.y},
-                              .size = children_[i].widget().size()};
+            Rect const child_bounds{.origin = Point{.x = bounds.origin.x + off.x, .y = bounds.origin.y + off.y},
+                                    .size = children_[i].widget().size()};
             children_[i].widget().paint(p, child_bounds, ctx);
         }
     }

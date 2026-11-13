@@ -38,8 +38,12 @@
 #include <array>
 #include <functional>
 #include <memory>
+#include <string>
+#include <vector>
 
 #include "aurora/event/event.h"
+
+struct wl_data_offer;  // 前向声明：本头不引 wayland-client.h（见文件头），仅借类型名表达转发器签名
 
 namespace aurora::detail {
 
@@ -113,9 +117,25 @@ class WaylandDragBridge final {
     /// @brief 本桥是否处于拖入会话中（宿主据此屏蔽拖入期内的重复悬停派发）。
     [[nodiscard]] auto drag_in_active() const -> bool;
 
+    /// @brief 共享的 `wl_data_device`（`void *` 形态；剪贴板桥复用同一枚）。
+    ///
+    /// `wl_data_device` 每 seat 唯一：剪贴板桥不自行 `get_data_device`（那会触发协议错误），
+    /// 而是经本访问器取同一枚对象。未 `install()` 时为 `nullptr`。
+    [[nodiscard]] auto data_device() const -> void *;
+
     /// @brief 登记「当前发起窗口」槽（进程级；由宿主在事件泵入口刷新，供拖出后端解析发起桥）。
     /// @param bridge 发起桥（可为空：窗口销毁时清槽）。
     static auto note_initiator(WaylandDragBridge *bridge) -> void;
+
+    /// @brief 登记剪贴板 selection 转发器（进程级一次性；由 `WaylandClipboardBridge` 安装时调用）。
+    ///
+    /// `wl_data_device` 每 seat 唯一：拖放与剪贴板共用本桥创建的那一枚。剪贴板桥无法再加自己的
+    /// 监听器（协议只允许一枚），故本桥的 `selection` 事件经此转发器交给剪贴板桥——拖放走 `enter`、
+    /// 剪贴板走 `selection`，两路在同一枚 device 上不冲突。
+    /// @param forwarder 转发器：携带 `wl_data_offer *` 与本次到达的名称清单——selection 事件
+    /// 带完整清单（offer 为 null 表示选择区被清空），此后该 offer 的迟到名称以增量补发。
+    static auto set_clipboard_forwarder(
+        std::function<void(wl_data_offer *, const std::vector<std::string> &)> forwarder) -> void;
 
     /// @brief 协议状态机（display / data_device / 两侧会话态），定义在 `wayland_drag.cpp`。
     ///

@@ -21,7 +21,6 @@
 ///   cmake --build build-wasm --target aurora_verify_wasm_audio
 /// 运行：node tools/verify/wasm_audio_cdp_drive.mjs
 #include <cmath>
-#include <cstdint>
 #include <cstdio>
 #include <memory>
 #include <numbers>

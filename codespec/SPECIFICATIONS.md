@@ -4,7 +4,7 @@
 > **设计内核**：声明式、响应式、概念可枚举
 > **版本说明**：本文档为设计规格（文档自身无版本号）。库发布版本见 `CHANGELOG.md`（`currentVersion`）；文档与实现冲突时以**代码运行时**为准并回填本文档。
 >
-> 本文件是**总纲与索引**：定位、设计原则、范围、约束、43 条特性清单与文档导航。各主题的详细契约见 `specification/` 九份子系统文档与五份顶层文档。
+> 本文件是**总纲与索引**：定位、设计原则、范围、约束、50 条特性清单与文档导航。各主题的详细契约见 `specification/` 九份子系统文档与五份顶层文档。
 
 ---
 
@@ -75,7 +75,7 @@ Aurora 本质上是一个**把 UI 开发变成「结构化数据描述」问题*
 
 ---
 
-## 5 特性清单（需求 ID 体系，43 条）
+## 5 特性清单（需求 ID 体系，50 条）
 
 需求 ID 形如 `SPEC.<类目>.<域>.[<子域>…]<语义短名>.<数字尾>`：全大写、点分割、层级不限，短名多词用连字符。
 类目封闭 6 类（`API` 语言与接口设计原则 / `FEAT` 面向使用者的功能能力 / `QUALITY` 质量不变量与保证 /
@@ -91,9 +91,9 @@ Aurora 本质上是一个**把 UI 开发变成「结构化数据描述」问题*
 | SPEC.API.NAMING-CONSISTENCY.001 | 极致命名一致性 + 扁平命名空间 | AI 易补全 | [`CODING_STANDARDS.md`](CODING_STANDARDS.md) §11.2 |
 | SPEC.API.MINIMAL-COMPOSITION.001 | 正交可组合的最小核心 API | AI 少幻觉 | [`CODING_STANDARDS.md`](CODING_STANDARDS.md) §11.3 |
 | SPEC.API.STRONG-TYPES.001 | 强类型 + 单位标注 + 编译期校验 | 编译即验证 | [`CODING_STANDARDS.md`](CODING_STANDARDS.md) §11.4 |
-| SPEC.API.SENSIBLE-DEFAULTS.001 | 合理默认值（声明处可见） | AI 少写少错 | [`CODING_STANDARDS.md`](CODING_STANDARDS.md) §11.5 |
+| SPEC.API.SENSIBLE-DEFAULTS.001 | 合理默认值（声明处可见；度量与配色默认值 = 平台风格解算出的整套主题令牌） | AI 少写少错 | [`CODING_STANDARDS.md`](CODING_STANDARDS.md) §11.5 |
 | SPEC.FEAT.STATE.SIGNAL-STATE.001 | 单向数据流 + 细粒度信号状态模型 | AI 易理解状态 | [`02-state.md`](specification/02-state.md) §7.1 |
-| SPEC.FEAT.WIDGET.FLAT-COMPONENTS.001 | 扁平组合模型 + 共享所有权组件 | AI 易追踪逻辑 | [`04-widget.md`](specification/04-widget.md) §6.1 |
+| SPEC.FEAT.WIDGET.FLAT-COMPONENTS.001 | 扁平组合模型 + 共享所有权组件（命中链解引用一律经 `lock()` 持强引用） | AI 易追踪逻辑 | [`04-widget.md`](specification/04-widget.md) §6.1 |
 | SPEC.API.EXPLICIT-FIRST.001 | 显式优于隐式（含样式继承） | AI 无理解盲区 | [`05-event-navigation.md`](specification/05-event-navigation.md) §8.1 |
 | SPEC.QUALITY.CORE.STRUCTURED-ERROR.001 | 结构化错误信息（JSON 可解析） | AI 易调试 | [`08-tooling.md`](specification/08-tooling.md) §10.1 |
 | SPEC.FEAT.TOOLING.UI-INSPECTOR.001 | 内置 UI Inspector（HTTP / MCP 接口） | AI 可观测运行时 | [`08-tooling.md`](specification/08-tooling.md) §10.2 |
@@ -105,31 +105,38 @@ Aurora 本质上是一个**把 UI 开发变成「结构化数据描述」问题*
 | SPEC.FEAT.TOOLING.RECIPE-DOCS.001 | 示例驱动文档（Recipe 形式） | AI 从示例高效学习 | [`08-tooling.md`](specification/08-tooling.md) §10.5 |
 | SPEC.FEAT.TOOLING.AI-TOOLCHAIN.001 | LSP / MCP Server / CLI 工具链 | AI Agent 直接集成 | [`08-tooling.md`](specification/08-tooling.md) §10.6、[`09-cli.md`](specification/09-cli.md) §10.1（argv 解析底座） |
 | SPEC.QUALITY.CORE.MEMORY-SAFETY.001 | 安全的内存与所有权模型 | AI 生成无内存错误的代码 | [`01-core.md`](specification/01-core.md) §8.1 |
-| SPEC.FEAT.CORE.ASYNC-CONCURRENCY.001 | 结构化异步与并发模型 | AI 轻松处理耗时操作 | [`01-core.md`](specification/01-core.md) §8.2、[`02-state.md`](specification/02-state.md) §7.2 |
+| SPEC.FEAT.CORE.ASYNC-CONCURRENCY.001 | 结构化异步与并发模型（进程级唯一队列 `MainQueue` + 值班租约；发起需循环在场、落地晚于打烊 = 取消、无就地回退；`Task<T>::blocking_wait` 为循环外取结果出口） | AI 轻松处理耗时操作 | [`01-core.md`](specification/01-core.md) §8.2、[`02-state.md`](specification/02-state.md) §7.2 |
 | SPEC.QUALITY.LAYOUT.ALGEBRA.001 | 布局系统的代数一致性 | AI 可推理尺寸和位置 | [`03-layout-render.md`](specification/03-layout-render.md) §10.2 |
 | SPEC.QUALITY.CORE.GRACEFUL-DEGRADATION.001 | 错误恢复与降级渲染 | AI 生成的错误 UI 不会崩溃 | [`01-core.md`](specification/01-core.md) §8.3 |
 | SPEC.FEAT.TOOLING.UI-TO-CODE.001 | 可逆性：UI → 代码的参考还原 | AI 可分析现有界面并重构 | [`08-tooling.md`](specification/08-tooling.md) §10.7（工具链侧）、[`04-widget.md`](specification/04-widget.md) §6.2（控件侧） |
 | SPEC.QUALITY.CORE.PARTIAL-TOLERANCE.001 | 部分代码容错（半成品可编译可运行） | AI 可增量开发 | [`01-core.md`](specification/01-core.md) §8.4 |
 | SPEC.PERF.API.TOKEN-EFFICIENCY.001 | Token 效率 + 编译速度约束 | AI 迭代循环效率 | 本文 §4.3 |
-| SPEC.FEAT.APP.MULTI-WINDOW.001 | 多窗口（一个进程多个顶层窗口） | AI 生成的复合应用可多窗协同，且不退化单窗调用模型；逐窗几何记忆（尺寸 / 位置 / 几何态三项落盘，重启后几何态经幂等原语追回那一档，`Minimized` 按政策恢复为 `Normal`）；窗口关闭请求可经闸门在销毁前可否决（来源三档 + 边沿闩一次一问 + fail-open 后置条件）；活动窗口寻址（`Application::active_window()` 答「最近一次用户输入派发的目的窗口」，**不等价于 OS 前台窗**，记账 O(1)、回收即清号） | [`06-app-platform.md`](specification/06-app-platform.md) §2.4（活动窗口查询 / 关闭请求闸门） |
+| SPEC.FEAT.APP.MULTI-WINDOW.001 | 多窗口（一个进程多个顶层窗口） | AI 生成的复合应用可多窗协同，且不退化单窗调用模型；逐窗几何记忆（尺寸 / 位置 / 几何态三项落盘，重启后几何态经幂等原语追回那一档，`Minimized` 按政策恢复为 `Normal`）；窗口关闭请求可经闸门在销毁前可否决（来源三档 + 边沿闩一次一问 + fail-open 后置条件）；活动窗口寻址（`Application::active_window()` 答「最近一次用户输入派发的目的窗口」，**不等价于 OS 前台窗**，记账 O(1)、回收即清号）；OS 明暗偏好的应用级聚合读点（`os_color_scheme_state()` / `set_on_os_color_scheme()` / 显式 seed `refresh_os_color_scheme()`，跨宿主同值只通知一次、原值透传不回落）；运行期窗口显隐与置顶开关（`Surface` / `Window` 的 `set_visible` / `is_visible` / `set_always_on_top` / `is_always_on_top`，建窗档只是初值；Win32 / D3D11 / macOS 三档已接线，显示档不抢焦点、置顶切换不动几何；未接线后端是可观测 no-op，先查 `capabilities().runtime_visibility` / `runtime_always_on_top`）；程序化窗控四槽（`minimize` / `toggle_maximize` / `set_window_mode` / `set_fullscreen`，Win32 / D3D11 已接、全屏档为可查询的不支持——`set_fullscreen(true)` 留唯一 WARN，能力位 `runtime_window_mode` / `runtime_fullscreen` 按「公共入口是否全部接通」申报；X11 / GLFW 公共切换腿未接、能力位如实 false） | [`06-app-platform.md`](specification/06-app-platform.md) §2.4（活动窗口查询 / 关闭请求闸门）/ §3.6（建窗可见性档与运行期显隐 / 置顶）/ §5（能力位与置位矩阵）/ §6.2（应用级聚合与聚合范围差异、`compute_window_state` 的 `on_screen` 输入） |
 | SPEC.FEAT.WIDGET.LAYOUT.BASELINE-ALIGN.001 | 交叉轴基线对齐（`CrossAxisAlignment::Baseline`） | 同一行内文本与控件的首行基线共线（含 Modifier 内边距与退化路径） | [`03-layout-render.md`](specification/03-layout-render.md) §3.8、[`04-widget.md`](specification/04-widget.md) §3.3 |
 | SPEC.FEAT.WIDGET.LAYOUT.SCROLL-RESTORE.001 | 滚动位置保存/恢复（`app::ScrollStorage`） | 重建 / 重启后滚动位置可还原，且多窗口与同键争用不串味 | [`06-app-platform.md`](specification/06-app-platform.md) §9.3、[`04-widget.md`](specification/04-widget.md) §3.3 |
 | SPEC.FEAT.WIDGET.DATA.LIST-REORDER.001 | 列表拖拽重排（`ReorderableList`） | 用户可拖动条目换位：跟手 / 让位 / 近边缘自动滚动 / 落位动画，数据由控件改写 | [`04-widget.md`](specification/04-widget.md) §3.4、[`GUIDELINE.md`](GUIDELINE.md) §36 |
-| SPEC.FEAT.WIDGET.SCROLL-INTERACTION.001 | 滚动交互增强（`ScrollSnap` / `PullToRefresh` / `StickyHeader` / `offset_signal`） | 轮播整页对齐、分组头部钉顶、到顶下拉即刷新、嵌套滚动余量移交，且全程尊重 reduce-motion | [`04-widget.md`](specification/04-widget.md) §3.3、[`05-event-navigation.md`](specification/05-event-navigation.md) §3.3、[`GUIDELINE.md`](GUIDELINE.md) §38 |
+| SPEC.FEAT.WIDGET.SCROLL-INTERACTION.001 | 滚动交互增强（`ScrollSnap` / `PullToRefresh` / `StickyHeader` / `offset_signal` / 滚动条可视化：`Classic` 收缩内容盒恒绘、`Overlay` 浮层悬停显现两档、拖拽 / 轨道翻页 / 悬停加粗） | 轮播整页对齐、分组头部钉顶、到顶下拉即刷新、嵌套滚动余量移交，且全程尊重 reduce-motion；虚拟列表另有三条运行期入口——条目内容刷新 `invalidate_items`（只置位、下一帧回收重建）、布局前即可表达的末尾锚定 `scroll_to_end`（走显式待定偏移，优先于 `restore_key`）、偏移变更回调 `set_on_scroll_changed`（不进依赖收集作用域也有旁听口，落位才通知）；滚动条经共用纯函数内核（几何 / 拖拽 / 翻页 / 悬停）逐位同构，色走 `scrollbar_thumb` / `scrollbar_track` 两枚角色，基线逐像素可判 | [`04-widget.md`](specification/04-widget.md) §3.3、§3.4、§4.1（滚动条几何、模式与交互）、[`05-event-navigation.md`](specification/05-event-navigation.md) §3.1（滚动条拖拽为指针捕获消费者）、§3.2（条带自交自身）、§3.3、§5.2、[`06-app-platform.md`](specification/06-app-platform.md) §3.1（帧计时去留）、[`GUIDELINE.md`](GUIDELINE.md) §38 |
 | SPEC.FEAT.CORE.JSON.001 | 自研 JSON 值容器与编解码器（`au::json`） | AI 可在无第三方 JSON 依赖下解析（DOM / SAX 双出口）/ 构造 / 序列化，按 RFC 6901 路径寻址读写删，读缺失键不隐式变更文档，并通过外部语料的 RFC 8259 合规验收 | [`01-core.md`](specification/01-core.md) §9、[`GUIDELINE.md`](GUIDELINE.md) §42 |
-| SPEC.FEAT.APP.SYSTEM-DRAG-DROP.001 | 系统级拖放（OS↔应用跨进程互操作：enter / over / leave / drop 四态事件族、MIME 载荷、Copy / Move / Link 动作协商、拖入反馈与拖出发起） | AI 可让应用与资源管理器 / 其他应用互拖文件与文本，拖入反馈与动作协商跨后端一致 | [`05-event-navigation.md`](specification/05-event-navigation.md) §5.2、[`06-app-platform.md`](specification/06-app-platform.md) §5、§8 |
-| SPEC.FEAT.APP.CLIPBOARD-RICH-FORMATS.001 | 剪贴板富格式（files / uri-list / HTML / 自定义 MIME） | AI 可实现文件清单与富文本的剪贴板交互；MIME 词汇与空口径同系统拖放一致 | [`06-app-platform.md`](specification/06-app-platform.md) §8.2 |
-| SPEC.FEAT.APP.NATIVE-MENU-BAR.001 | 原生菜单栏（MenuModel 单一真源 + Win32 / macOS / Linux 原生渲染桥） | AI 声明一次菜单即获原生渲染，自绘与原生二显一存、不建平行菜单 API | [`06-app-platform.md`](specification/06-app-platform.md) §8 |
-| SPEC.FEAT.APP.RECENT-DOCUMENTS.001 | 最近文档列表（应用内 store 持久化 + OS 级投影） | AI 可实现跨重启的最近文档；OS 级缺位时应用内列表全平台行为一致 | [`06-app-platform.md`](specification/06-app-platform.md) §8 |
+| SPEC.FEAT.APP.SYSTEM-DRAG-DROP.001 | 系统级拖放（OS↔应用跨进程互操作：enter / over / leave / drop 四态事件族、MIME 载荷、Copy / Move / Link 动作协商、拖入反馈与拖出发起；`text/uri-list` 解码出口有结构性非法条目闸门，真实路径边界归调用方） | AI 可让应用与资源管理器 / 其他应用互拖文件与文本，拖入反馈与动作协商跨后端一致 | [`05-event-navigation.md`](specification/05-event-navigation.md) §5.2、[`06-app-platform.md`](specification/06-app-platform.md) §5、§8 |
+| SPEC.FEAT.APP.CLIPBOARD-RICH-FORMATS.001 | 剪贴板富格式（files / uri-list / HTML / 自定义 MIME；uri-list 解码出口有结构性非法条目闸门，真实路径边界归调用方） | AI 可实现文件清单与富文本的剪贴板交互；MIME 词汇与空口径同系统拖放一致 | [`06-app-platform.md`](specification/06-app-platform.md) §8.2 |
+| SPEC.FEAT.APP.NATIVE-MENU-BAR.001 | 原生菜单栏（MenuModel 单一真源 + 原生渲染桥：Win32 `HMENU` 与 macOS `NSMenu` 两座桥已落地；Linux 无 OS 级菜单栏机制，能力位如实为 `false` 并回落自绘） | AI 声明一次菜单即获原生渲染（Win32 / macOS），自绘与原生二显一存、不建平行菜单 API；桥缺位平台应用内菜单行为一致，安装入口明确报错（`native-menu-unsupported`）而非静默 | [`06-app-platform.md`](specification/06-app-platform.md) §8.4 |
+| SPEC.FEAT.APP.RECENT-DOCUMENTS.001 | 最近文档列表（应用内 store 持久化 + OS 级投影：显式 `project_to_os` / `clear_os_projection`、平台无关投影计划、Win32 `SHAddToRecentDocs` 桥与 macOS `NSDocumentController` 桥、投影记账撤销） | AI 可实现跨重启的最近文档，并让用户在系统入口（跳转列表 / 资源管理器「最近」/ Dock 最近文档）看到同一批文档；OS 级投影缺位（Linux 无该机制，能力位如实为 `false`）时应用内列表全平台行为一致、投影入口明确报错而不静默 | [`06-app-platform.md`](specification/06-app-platform.md) §5、§8.10 |
+| SPEC.FEAT.APP.FILE-DIALOG.001 | 文件 / 目录选择器（三入口共用 `Options`：标题、初始目录、建议文件名、缺省扩展名、筛选器；Win32 COM 腿、macOS 原生 NSOpenPanel / NSSavePanel 腿与桌面自绘腿三真实现 + 内联回退腿） | AI 声明一次 `Options` 即得「打开到哪、叫什么名、什么类型」的完整意图，三条真实现腿逐格真实消费（`suggested_name` 只另存为消费、`initial_dir` 不可解析时留 WARN 并按 OS 默认位置降级；macOS 原生面板无命名筛选器，`Filter::name` 在该腿如实不消费、扩展名折成类型白名单）；无真实选择器平台仅保钩子语义、无上下文等价取消，取消恒为 `Ok(空)` 不是 `Error` | [`06-app-platform.md`](specification/06-app-platform.md) §8.1 |
+| SPEC.FEAT.APP.PRINT-SESSION.001 | 文档输出与打印会话（跨平台多页栅格入 PDF：毫米纸张几何 + DPI 栅格、逐页绘制回调、不透明合成；Windows GDI / macOS AppKit 打印会话；打印面板自绘） | AI 可把界面按纸张几何与目标 DPI 导出为可打印 PDF 或直接送打印机；**栅格入 PDF 的三条局限**（文本不可选不可搜 / 放大失真 / 体积随页数线性膨胀）在需求层明示；Linux 不声称原生打印会话（能力位如实为 `false`），无打印机时返回空列表配 `Ok` 而非错误 | [`06-app-platform.md`](specification/06-app-platform.md) §5、§8.11、§8.12 |
+| SPEC.FEAT.APP.URL-SCHEME.001 | URL 方案注册与单实例转交（用户级登记：Windows `HKCU\Software\Classes` / Linux 桌面条目 + `mimeapps.list` / macOS 包内 `CFBundleURLTypes`；归属校验后撤销；命令行 URI 交付已运行实例） | AI 可让应用被系统深链唤起，且第二个进程把 URI 交给已运行实例、失败时回落为新实例（不「闪一个空窗」也不默默退出）；撤销不越过别人的登记，Linux 本机通道落在 0700 私有目录而非 `/tmp` | [`06-app-platform.md`](specification/06-app-platform.md) §5、§8.13 |
+| SPEC.FEAT.APP.FILE-ASSOCIATION.001 | 文件关联查询与声明候选（Win32 `HKCU` ProgID + `RegisteredApplications`/Capabilities、macOS UTI + Launch Services、Linux `mimeapps.list` 的 `[Added Associations]`；扩展名规范化 + 扩展名→MIME 单一真源） | AI 可查询某扩展名当前归谁、声明本应用可处理它，并出现在系统「打开方式」候选里；**不抢占默认处理程序**（默认归用户偏好），撤销只摘本应用的声明 | [`06-app-platform.md`](specification/06-app-platform.md) §5、§8.14 |
+| SPEC.FEAT.APP.RUN-AT-LOGIN.001 | 登录项三态（`Enabled` / `Disabled` / `Unsupported`；Windows `HKCU` Run 值 + `StartupApproved` 禁用记录、Linux 自动启动桌面条目的 `Hidden=` 开关键、macOS `SMAppService`） | AI 能区分「未设置 / 用户禁用 / 本机无机制 / 查询失败」，用户手工禁用的条目保留实体、不被「删文件当禁用」抹掉；沙箱 / 裸可执行形态如实报 `Unsupported` 并点名成因 | [`06-app-platform.md`](specification/06-app-platform.md) §5、§8.15 |
 | SPEC.FEAT.NET.ENGINE-PLUGGABILITY.001 | 可插拔网络引擎（公共 API 面不加宏，实现按平台引擎可选） | AI 生成的网络代码零 `#ifdef`、无能力平台明确降级报错而非静默失败 | [`06-app-platform.md`](specification/06-app-platform.md) §8.8 |
 | SPEC.PLATFORM.NET.EVENT-SOURCE.001 | 事件循环网络完成事件与通用事件源注册口 | 网络结果恒回主线程投递，UI 线程不阻塞在 I/O 等待上 | [`06-app-platform.md`](specification/06-app-platform.md) §8.8 |
-| SPEC.FEAT.NET.TRANSPORT-SUITE.001 | 异步 TCP / UDP / 本地 IPC（UDS / NamedPipe）传输族，含 DNS 双栈与竞速、代理族（`CONNECT` / SOCKS5 / 系统与环境变量）、分帧工具与读写背压 | 可连任意主机、可监听服务、可取消，为第三方非阻塞会话（如 SSH）提供字节流底座，且慢消费者不导致无界缓冲 | [`06-app-platform.md`](specification/06-app-platform.md) §8.8 |
-| SPEC.PLATFORM.NET.TLS-BACKEND.001 | TLS 通道（可插拔后端注册表：系统栈引擎与使用方 provider **共存装配** + 每次握手指定后端 + 默认证书校验与自定义信任根） | 加密通道与明文流同构，上层协议无需感知，校验失败即断连；后端可注入 / 可注销 / 可查询，缺省走有序候选链、回落只发生在握手开始前，显式指定后端则绝不换腿 | [`06-app-platform.md`](specification/06-app-platform.md) §8.8.18 |
-| SPEC.FEAT.NET.HTTP-CLIENT.001 | HTTP/1.1 客户端（`Url` 值类型 / 基础请求集 / 流式与帧对齐进度 / gzip 透明解压 / 条件请求与内存缓存 / Cookie / 认证 / SSE / 交换钩子（客户端级登记链：只读请求视图 + 头改写通道 / `send` 上短路交付）） | AI 可直接拉取数据与资源，手拼 URL 与静默字符集替换这类高频错误在类型层消失，大文件不占满内存，跨平台协议语义逐值一致 | [`06-app-platform.md`](specification/06-app-platform.md) §8.8 |
+| SPEC.FEAT.NET.TRANSPORT-SUITE.001 | 异步 TCP / UDP / 本地 IPC（UDS / NamedPipe）传输族，含 DNS 双栈与竞速、代理族（`CONNECT` / SOCKS5 / 系统与环境变量）、分帧工具与读写背压 | 可连任意主机、可监听服务、可取消，为第三方非阻塞会话（如 SSH）提供字节流底座，且慢消费者不导致无界缓冲；阻塞监听口的关闭唤醒为有定义的并发操作（句柄原子交换、读侧单次快照） | [`06-app-platform.md`](specification/06-app-platform.md) §8.8 |
+| SPEC.PLATFORM.NET.TLS-BACKEND.001 | TLS 通道（可插拔后端注册表：系统栈引擎与使用方 provider **共存装配** + 每次握手指定后端 + 默认证书校验与自定义信任根） | 加密通道与明文流同构，上层协议无需感知，校验失败即断连；后端可注入 / 可注销 / 可查询，缺省走有序候选链、回落只发生在握手开始前，显式指定后端则绝不换腿；名字判定按 SAN 优先（SAN 扩展存在即不再回看 CN），CN-only 分叉由跨后端对账用例记录 | [`06-app-platform.md`](specification/06-app-platform.md) §8.8.18 |
+| SPEC.FEAT.NET.HTTP-CLIENT.001 | HTTP/1.1 客户端（`Url` 值类型 / 基础请求集 / 流式与帧对齐进度 / gzip 透明解压 / 条件请求与内存缓存 / Cookie / 认证 / SSE / 交换钩子（客户端级登记链：只读请求视图 + 头改写通道 / `send` 上短路交付）） | AI 可直接拉取数据与资源，手拼 URL 与静默字符集替换这类高频错误在类型层消失，大文件不占满内存，跨平台协议语义逐值一致；协程等待体的完成决议跨线程串行、恰好一次恢复 | [`06-app-platform.md`](specification/06-app-platform.md) §8.8 |
 | SPEC.FEAT.NET.WEBSOCKET.001 | WebSocket 客户端（RFC 6455 握手 / 分帧 / ping-pong / close code） | 长连接双向增量数据可订阅，帧上限与关闭语义明确 | [`06-app-platform.md`](specification/06-app-platform.md) §8.8 |
 | SPEC.FEAT.NET.DECLARATIVE-BINDING.001 | 异步结果三态响应式绑定（`state` 模块的 `Resource` / `StreamResource`） | 请求即状态源，`loading / ready / failed` 定点刷新，重发自动取消前序且宿主失效不回调 | [`02-state.md`](specification/02-state.md) §7.3 |
 | SPEC.FEAT.NET.OBSERVABILITY.001 | 网络活动可观测（进程级事件总线与活动存储、请求时间线 + 活动表、Inspector / MCP 暴露、凭据分级强制脱敏） | AI 能从一次界面异常按 `X-Request-Id` 反查到每一跳的耗时、失败阶段与归因，且四个导出面（`Timeline` / `InspectorJson` / `Log` / `ErrorDetail`）在宿主策略下均不泄漏凭据原值；Release 构建如实回 unavailable 而非静默假成功 | [`06-app-platform.md`](specification/06-app-platform.md) §8.8.36–§8.8.39、[`08-tooling.md`](specification/08-tooling.md) §10.2、[`ARCHITECTURE.md`](ARCHITECTURE.md) §14 |
+| SPEC.FEAT.NET.CONNECTIVITY.001 | 网络链路态监听（同步采集腿读 OS 事实：Windows 路由 / 接口表、Linux 路由伪文件 + sysfs `operstate`、macOS `SystemConfiguration` 动态存储的全局 IPv4/IPv6 键；不对称三态状态机、变更订阅与建连旁证插队） | AI 能把一批失败归因到同一场链路故障（`/api/network` 的 `connectivity` 字段与 `snapshot()` 同源），且库**不因此拒发任何请求**——链路态只是读者可查询的事实与退避提示，闸仍只在 `NetPolicy` 与能力闸；无源与读不到一律如实回 `Unknown`，不折算成离线也不折算成在线 | [`06-app-platform.md`](specification/06-app-platform.md) §8.8.41 |
 | SPEC.TEST.NET.OFFLINE-FIXTURE.001 | 可注入假引擎与离线网络夹具（`FakeEngine` + 条件等待辅助） | 超时、取消、半关闭、TLS 失败等故障可在禁网 CI 内逐值断言，网络行为可验证性不退化 | [`06-app-platform.md`](specification/06-app-platform.md) §8.8、[`ARCHITECTURE.md`](ARCHITECTURE.md) §14 |
+| SPEC.PERF.RUNTIME.FRAME-BUDGET.001 | 量化运行时性能需求（帧预算与分位数口径、按测试环境分桶的结构化读数与同机交错对照） | 跨提交趋势可比对且性能退化可检出，不承诺跨机器绝对数值 | [`08-tooling.md`](specification/08-tooling.md) §7.4、[`GUIDELINE.md`](GUIDELINE.md) §14 |
 
 ---
 
@@ -143,7 +150,7 @@ Aurora 本质上是一个**把 UI 开发变成「结构化数据描述」问题*
 | SPEC.API.STRONG-TYPES.001 强类型 vs 编译速度 | 大量模板 / 概念检查拖慢编译 | 核心路径用简单类型，高级校验放在**独立验证工具**中（CLI），不阻塞编译 |
 | SPEC.FEAT.TOOLING.API-SCHEMA.001 机器 Schema vs SPEC.API.NAMING-CONSISTENCY.001 命名一致 | Schema 需要额外维护 | Schema 从代码**自动生成**（`gen_api_tools`），保证与实现同步 |
 | SPEC.FEAT.STATE.SIGNAL-STATE.001 信号刷新 vs 高频交互 | 每帧走全链路延迟不可接受 | 默认细粒度信号定点刷新；高频绘制用 `Canvas` opt-in |
-| SPEC.QUALITY.CORE.MEMORY-SAFETY.001 单线程 UI vs SPEC.FEAT.CORE.ASYNC-CONCURRENCY.001 异步 | 异步结果需回 UI 线程 | `au::async` 经主线程投递器回到 UI 线程 |
+| SPEC.QUALITY.CORE.MEMORY-SAFETY.001 单线程 UI vs SPEC.FEAT.CORE.ASYNC-CONCURRENCY.001 异步 | 异步结果需回 UI 线程 | `au::async` 经进程级唯一队列 `MainQueue` 回投值班循环；发起需循环在场，打烊后落地 = 取消（无就地回退） |
 | SPEC.API.NAMING-CONSISTENCY.001 命名一致 vs 历史 API | AI 可能混用新旧命名 | 文档统一 snake_case 属性 + CamelCase 类型，废弃名仅在兼容层标注 |
 
 ---
@@ -168,7 +175,7 @@ Aurora 本质上是一个**把 UI 开发变成「结构化数据描述」问题*
 │   序列化(to_json/diff) · i18n(LocalizedString) · 焦点管理     │
 ├──────────────────────────────────────────────────────────────┤
 │                  Aurora State + Event Layer                   │
-│   信号 State/Reactive/Computed/Effect · 可选 Store<S>         │
+│   句柄 State / ReadOnlyState · 派生 computed · 副作用 effect  │
 │   细粒度定点刷新 · Canvas 高频 opt-in                         │
 ├──────────────────────────────────────────────────────────────┤
 │                  Aurora Async Layer                           │
@@ -199,13 +206,13 @@ Aurora 本质上是一个**把 UI 开发变成「结构化数据描述」问题*
 | 文档 | 覆盖 |
 |:---|:---|
 | [`01-core.md`](specification/01-core.md) | 基础层 `core/`：几何与尺寸意图、错误与结果、诊断与降级、日志、线程池、JSON 值容器、`au::TODO`；需求 SPEC.QUALITY.CORE.MEMORY-SAFETY.001 / SPEC.FEAT.CORE.ASYNC-CONCURRENCY.001 / SPEC.QUALITY.CORE.GRACEFUL-DEGRADATION.001 / SPEC.QUALITY.CORE.PARTIAL-TOLERANCE.001 / SPEC.FEAT.CORE.JSON.001 |
-| [`02-state.md`](specification/02-state.md) | 响应式 `state/`：信号原语、订阅生命周期、`Store`、异步与协程、依赖图与撤销；需求 SPEC.FEAT.STATE.SIGNAL-STATE.001 / SPEC.FEAT.CORE.ASYNC-CONCURRENCY.001 |
-| [`03-layout-render.md`](specification/03-layout-render.md) | `layout/` + `render/` + `image/` + `media/`：布局协议、Flex / Grid 算法、Painter、字体引擎、Surface 与后端、音频图（Web Audio 语义节点图 + WASAPI / ALSA / Web Audio 三端设备层）；需求 SPEC.TEST.RENDER.DETERMINISTIC-SNAPSHOT.001 / SPEC.QUALITY.LAYOUT.ALGEBRA.001 |
+| [`02-state.md`](specification/02-state.md) | 响应式 `state/`：状态句柄、派生与副作用、订阅生命周期、异步、资源快照、依赖图与撤销；需求 SPEC.FEAT.STATE.SIGNAL-STATE.001 / SPEC.FEAT.CORE.ASYNC-CONCURRENCY.001 / SPEC.FEAT.NET.DECLARATIVE-BINDING.001 |
+| [`03-layout-render.md`](specification/03-layout-render.md) | `layout/` + `render/` + `image/` + `media/`：布局协议、Flex / Grid 算法、Painter、字体引擎、Surface 与后端、音频图（Web Audio 语义节点图 + WASAPI / ALSA / CoreAudio / Web Audio 四端设备层）；需求 SPEC.TEST.RENDER.DETERMINISTIC-SNAPSHOT.001 / SPEC.QUALITY.LAYOUT.ALGEBRA.001 |
 | [`04-widget.md`](specification/04-widget.md) | `widget/` + `ui/`：控件基类契约、自描述、控件清单、可定制性契约；需求 SPEC.FEAT.WIDGET.FLAT-COMPONENTS.001 / SPEC.FEAT.TOOLING.UI-TO-CODE.001 |
 | [`05-event-navigation.md`](specification/05-event-navigation.md) | `event/` + `animation/` + `navigation/`：事件模型、命中测试、焦点、手势、动画、页面栈；需求 SPEC.API.EXPLICIT-FIRST.001 |
 | [`06-app-platform.md`](specification/06-app-platform.md) | `app/` + `window/`（平台 API 在 `window/platform.h`）+ `preferences/` + `storage/` + `perf/` + `debug/`：应用驱动、多窗口容器（`WindowHost`）、帧循环、窗口生命周期、定时任务、平台 Shell、持久化、调试门面；需求 SPEC.PLATFORM.ZERO-IFDEF.001 / SPEC.PLATFORM.CONSISTENT-BEHAVIOR.001 / SPEC.FEAT.APP.MULTI-WINDOW.001
 | [`07-environment-modifier.md`](specification/07-environment-modifier.md) | `environment/` + `theming/` + `i18n/` + `modifier/`：环境注入、媒体查询、窗口装饰、主题、国际化、Modifier；需求 SPEC.FEAT.TOOLING.API-SCHEMA.001 |
-| [`08-tooling.md`](specification/08-tooling.md) | 序列化 / 代码生成 / YAML、控件树检查、Inspector 面板与远程服务、自描述发现、MCP / CLI / LSP、测试原语、日志通道；需求 SPEC.QUALITY.CORE.STRUCTURED-ERROR.001 / SPEC.FEAT.TOOLING.UI-INSPECTOR.001 / SPEC.FEAT.TOOLING.API-SCHEMA.001 / SPEC.FEAT.TOOLING.UI-SERIALIZATION.001 / SPEC.FEAT.TOOLING.RECIPE-DOCS.001 / SPEC.FEAT.TOOLING.AI-TOOLCHAIN.001 / SPEC.FEAT.TOOLING.UI-TO-CODE.001 |
+| [`08-tooling.md`](specification/08-tooling.md) | 序列化 / 代码生成 / YAML、控件树检查、Inspector 面板与远程服务、自描述发现、MCP / CLI / LSP、测试原语、日志通道；需求 SPEC.QUALITY.CORE.STRUCTURED-ERROR.001 / SPEC.FEAT.TOOLING.UI-INSPECTOR.001 / SPEC.FEAT.TOOLING.API-SCHEMA.001 / SPEC.FEAT.TOOLING.UI-SERIALIZATION.001 / SPEC.FEAT.TOOLING.RECIPE-DOCS.001 / SPEC.FEAT.TOOLING.AI-TOOLCHAIN.001 / SPEC.FEAT.TOOLING.UI-TO-CODE.001 / SPEC.PERF.RUNTIME.FRAME-BUDGET.001 |
 | [`09-cli.md`](specification/09-cli.md) | `cli/`：argv → 强类型值的声明表驱动解析（GNU/POSIX 语法全集、`cli-*` 错误码、usage / help / schema 派生视图），工具链与 demo 的共用底座；需求 SPEC.FEAT.TOOLING.AI-TOOLCHAIN.001 |
 
 ### 8.2 顶层文档（`codespec/`）
@@ -223,7 +230,7 @@ Aurora 本质上是一个**把 UI 开发变成「结构化数据描述」问题*
 
 | 文件 | 说明 |
 |:---|:---|
-| [`errors.toml`](errors.toml) | 错误码单一声明源（slug / severity / category / 元数据 / message 模板） |
+| [`errors.toml`](errors.toml) | 错误码单一声明源（slug / domain / kind / severity / retryable / 元数据 / message 模板） |
 | [`debug_api.toml`](debug_api.toml) | `aurora::debug` 公共自由函数声明源 |
 | [`ERROR_CATALOG.md`](ERROR_CATALOG.md) | 由 `tools/gen/gen_error_codes.cpp` 生成的错误码全量清单（**生成物，勿手改**） |
 
@@ -314,11 +321,14 @@ ctest -R itest_ai_compat
 | 全量构建 | `cmake --build build` 0 error | — |
 | 完整测试 | `ctest` 全绿（含 `aurora_test_runner` 单元 / 集成） | — |
 | API 漂移 | `ctest -R check_api_schema_sync` | `check_api_schema_sync` |
-| 命名一致性 | `ctest -R check_naming_conventions`（SPEC.API.NAMING-CONSISTENCY.001：类型 PascalCase、属性/事件/函数 snake_case、事件 `on_` 前缀） | `check_naming_conventions` |
+| 命名一致性 | `ctest -R check_naming_conventions`（SPEC.API.NAMING-CONSISTENCY.001：类型 PascalCase、属性/事件/函数 snake_case、事件 `on_` 前缀；另带属性公共面白名单一腿——继承链上类的 public 区除 `clear` 与 `rows` 外不得出现机制件（`assign` / `rebind` / `resolve` / `stated` / `get` / `read` / `present` / `bind` / `props_*`），也不得经 `using 基类::机制件;` 把 protected 的那一面再暴露出来；链外同名接口不归它管） | `check_naming_conventions` |
 | 零原生平台宏 | `ctest -R check_platform_macros`（SPEC.PLATFORM.ZERO-IFDEF.001：预处理分支禁原生平台/架构宏，规范化宏密度仅报告） | `check_platform_macros` |
 | API token 预算 | `ctest -R check_api_budget`（SPEC.PERF.API.TOKEN-EFFICIENCY.001：`aurora_api.json` 估算 token 数 ≤ 预算） | `check_api_budget` |
 | 无写死本机路径 | `ctest -R check_no_hardcoded_paths`（禁止盘符 / 用户主目录等本机专属绝对路径入库，外部路径须显式传入） | `check_no_hardcoded_paths` |
 | 豁免指令排版 | `ctest -R check_nolint_layout`（clang-tidy 豁免只在物理行生效：理由夹在指令与代码之间、被豁免语句折行、注释散文抄裸令牌，三类均静默失效，见 `CODING_STANDARDS.md` §5.2） | `check_nolint_layout` |
+| 属性权威表覆盖 | `ctest -R check_props_table_coverage`（单一声明口径的机械判据：已迁移的 `XxxProps` 须「一私有字段 / 一表行 / 一 JSON 键」三方计数相等、每行回落点与必填二选一、读面每行恰一件且形状由回落点决定、写件逐行转调对号，公共面不得出现句柄读件 / 合成读件 / 组合便利写件 / 具名撤表态件；未迁移的公有字段聚合体放行——18 型在册后该放行分支已无对象，留着是给「新增聚合却暂未收表」的窗口期） | `check_props_table_coverage` |
+| 属性基类接线 | `ctest -R check_widget_bind_pattern`（迁移后的控件与属性面之间的两条结构判据：`XxxProps` 必须是该控件的**末位公有基类**——基类子对象先于成员子对象移动，次序颠倒则移动后的控件静默失联；非转调构造的函数体尾部必须**恰有一次** `bind(*this)` 且实参为 `*this`，默认构造与只在头文件里声明、`src/` 也无定义的构造同判红灯；转调委托的构造豁免） | `check_widget_bind_pattern` |
+| 公共签名裸类型 | `ctest -R check_no_optional_in_public_signature`（属性面公共签名禁 `std::optional`：写件参数与读件返回值均取裸 `T`，可空性只活在存储层的表态位里；同时拦 `ReadOnlyState<T>` 作读面、`ReadOnlyState<std::optional<T>>` 一类双重空态、`PropRow` 进参数或作非行访问件的返回值；豁免逐处登记，登记而未命中即红） | `check_no_optional_in_public_signature` |
 | codespec 交叉引用 | `ctest -R check_codespec_xref` | `check_codespec_xref` |
 | 代码-文档同步 | `ctest -R check_code_doc_sync` | `check_code_doc_sync` |
 | Doxygen 注释规范 | `ctest -R check_doc_comments`（`CODING_STANDARDS.md` §13 的 DOC-R1–DOC-R8：标记唯一 / `@` 前缀 / `///` 须挂声明 / `include/` 公共声明须 `///` / 覆盖与命令必选矩阵 / 排版次序 / 矩阵禁写侧（`@param` 名须真实、`void` 与构造析构不写 `@return`）/ `///<` 只挂真实成员） | `check_doc_comments` |

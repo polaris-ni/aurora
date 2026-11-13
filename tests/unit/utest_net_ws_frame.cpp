@@ -298,7 +298,7 @@ AURORA_TEST_CASE(non_minimal_length_forms_are_refused) {
     expect_refused(feed(rec, peer_frame(true, 0x1, "hi", 0, false, LengthForm::TwoBytes)), "fits the 7-bit form");
     expect_refused(feed(rec, peer_frame(true, 0x1, "hi", 0, false, LengthForm::EightBytes)), "fits the 16-bit form");
     // 64 位档的最高位留着：那一型长度不是「大」，而是根本没意义。
-    std::string huge = peer_frame(true, 0x1, "", 0, false, LengthForm::EightBytes, 0x8000'0000'0000'0000ULL);
+    std::string const huge = peer_frame(true, 0x1, "", 0, false, LengthForm::EightBytes, 0x8000'0000'0000'0000ULL);
     expect_refused(feed(rec, huge), "most significant bit set");
 }
 

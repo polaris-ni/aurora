@@ -1,12 +1,24 @@
 #include "aurora/window/win32_host.h"
 
+#include "aurora/window/detail/clipboard_win32_translate.h"
 #include "aurora/window/detail/csd_decoration.h"  // 跨后端共享 CSD 策略/交互/绘制装配层
+#include "aurora/window/detail/menu_bar_translate.h"  // 折算层（进程级渲染通路单槽）
+#include "aurora/window/detail/win32_clipboard.h"  // 剪贴板惰性提供 / 监听的 owner 窗口承载
 #include "aurora/window/detail/win32_dpi.h"
 #include "aurora/window/detail/win32_drag.h"
 #include "aurora/window/detail/win32_dwm.h"  // DWM composition 探测 / 帧扩展
 #include "aurora/window/detail/win32_ime.h"
 #include "aurora/window/detail/win32_keymap.h"
+#include "aurora/window/detail/win32_menu_bar.h"  // Win32 原生菜单栏桥（宿主唯一持有）
 #include "aurora/window/detail/win32_modifiers.h"
+#include "aurora/window/detail/win32_recent_documents.h"  // OS 最近文档投影桥（宿主引用守卫）
+
+// Windows SDK 的 rpcndr.h 会把 small 定义为 char，经上面 detail 头引入的 windows.h 带进来；
+// 下面 ua.h 链上的主题头有同名成员字段，会被该宏改写。此处撤掉这个 SDK 遗留宏。
+#ifdef small
+#undef small
+#endif
+
 #include "aurora/window/detail/win32_ua.h"
 
 #ifdef AURORA_BACKEND_WIN32
@@ -168,7 +180,7 @@ namespace aurora {
 }
 
 // pimpl：全部 Win32/GDI 状态与消息处理都在这里；公共头仅持有 unique_ptr<Impl>。
-struct Win32Host::Impl {
+struct Win32Host::Impl {  // NOLINT(clang-analyzer-optin.performance.Padding)
     HWND hwnd = nullptr;
     HINSTANCE hinst = nullptr;
     Size size{.width = 0.0F, .height = 0.0F};
@@ -187,6 +199,9 @@ struct Win32Host::Impl {
     bool tracking_leave = false;  ///< 是否已登记 WM_MOUSELEAVE 通知（TrackMouseEvent 一次性，hover 清除用）。
     bool active = true;  ///< 是否前台激活（WM_ACTIVATE 非 WA_INACTIVE）。初值 true：创建即激活。
     bool maximized = false;  ///< 是否最大化（WM_SIZE SIZE_MAXIMIZED）。
+    bool fullscreen = false;  ///< 是否处于 borderless 全屏（覆盖所在显示器整屏，含任务栏带）。
+    DWORD saved_style = 0;  ///< 进入全屏前的窗口样式（退出时还原）。
+    RECT saved_rect{};  ///< 进入全屏前的窗口矩形（退出时还原几何）。
     WindowMode mode = WindowMode::Normal;  ///< 当前几何态（状态变化时上报）。
     WindowState state = WindowState::Visible;  ///< 当前可见性状态（变化时上报）。
     WindowStateHandler window_state_handler;
@@ -210,6 +225,27 @@ struct Win32Host::Impl {
     /// 注册失败时对象仍在（`installed() == false`），供真机探针与自检观测器区分「未注册」与
     /// 「未构造」两种失败。
     std::unique_ptr<detail::Win32DragBridge> drag;
+    /// @brief OS 最近文档投影桥的**宿主引用守卫**（Win32 / D3D11 / WgpuWin32 各持一份，进程级
+    /// 引用计数归零才注销通路——先关的窗口不会把仍在世的窗口的通路一起拆掉）。
+    ///
+    /// 与拖放桥的差别：`SHAddToRecentDocs` 与 HWND 无关，故本守卫的意义是**生命周期接线**
+    /// （窗口在 ⇒ 通路在），不是「投影必须有窗口」；无宿主进程由 `RecentDocuments::project_to_os()`
+    /// 自举同一条通路（见 `win32_recent_documents.h`）。
+    std::unique_ptr<detail::Win32RecentDocumentsBridge> recent_docs;
+    /// @brief 原生菜单栏桥（与窗口同生命周期；由本 Impl **唯一持有**，Win32 / D3D11 / WgpuWin32
+    /// 三个 Surface 转发同一实例，避免多份 HWND → 窗口映射分裂；窗口销毁期先拆桥再放窗口）。
+    ///
+    /// 进程级渲染通路单槽由本桥在构造期登记（覆盖式）、析构期注销——与原生菜单栏「同一进程只认
+    /// 一份」的语义一致（见 `native_menu_bar.h`）。多窗口场景下第一个存活窗口持有该单槽。
+    std::unique_ptr<detail::Win32MenuBarBridge> menu_bar;
+
+    /// @brief 剪贴板桥的**宿主引用守卫**（同款引用计数：进程级桥状态只有一份，先关的窗口不拆
+    /// 仍在世的窗口的能力）。
+    ///
+    /// 与最近文档桥的差别恰好相反：剪贴板的惰性提供（`WM_RENDERFORMAT`）、所有权丢失与变更监听
+    /// **都以 owner 窗口为投递目标**，故本守卫的意义是「窗口在 ⇒ owner 在」——窗口销毁即触发一次
+    /// 所有权丢失并让三件如实不可用，不是「能力常在」。
+    std::unique_ptr<detail::Win32ClipboardBridge> clipboard;
     /// @brief 修饰键跟踪器：随 `WM_KEY*` / `WM_SYSKEY*` 推进，失焦清空、重新激活播种。
     detail::ModifierKeyTracker mods;
     /// @brief 焦点控件的候选窗定位盒查询（由 `WindowHost` 注入；空 = 无定位，走系统默认）。
@@ -426,7 +462,8 @@ Win32Host::Impl::Impl(int w, int h, const std::string &title, const WindowStyleO
                          static_cast<int>(std::lround(fix_size.height)), SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
         }
         if (style.always_on_top) {
-            SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+            // `SWP_NOACTIVATE`：置顶是 z 序属性，不该顺带激活窗口（与运行期 `set_always_on_top` 同口径）。
+            SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
         }
         // 可见性策略：构造期一次定档，避免「先可见后隐藏」造成的一帧闪烁。
         // 窗口本就以无 WS_VISIBLE 的 WS_OVERLAPPEDWINDOW 创建，Hidden 档显式隐藏以固化语义。
@@ -441,6 +478,12 @@ Win32Host::Impl::Impl(int w, int h, const std::string &title, const WindowStyleO
                 ShowWindow(hwnd, SW_SHOW);
                 break;
         }
+        // 状态基线按**真实可见性**播种（不是上报——此刻 handler 尚未安装，播种不产生任何通知，
+        // 故既有上报序列逐位不变）。以 `Visible` 起步而窗口其实 `SW_HIDE`，则第一次真实变化会被
+        // 「与上次相同」的去重吞掉；`NoActivate` 档同理：显示但未激活，初值应为 `Occluded`。
+        // 运行期 `set_visible(false)` 与建窗 `Hidden` 档因此读回同一个值。
+        active = visibility == WindowVisibility::Normal;
+        state = compute_window_state(false, active, visibility != WindowVisibility::Hidden);
         UpdateWindow(hwnd);
         // IMM32 组合桥：桥自身只吃 WM_IME_*，无输入法时一条也不来，故随窗口直接构造。
         ime = std::make_unique<detail::Win32ImeBridge>(
@@ -473,6 +516,25 @@ Win32Host::Impl::Impl(int w, int h, const std::string &title, const WindowStyleO
         // 「先到者优先」去重。注册失败无回路可走：真实后端缺失时 `system_drag::begin` 落
         // not-supported，不谎报有通路。
         detail::register_win32_drag_out_backend();
+        // OS 最近文档投影桥：本窗口持一份进程级引用（通路登记与 HWND 无关，计数纪律见成员注记）。
+        recent_docs = std::make_unique<detail::Win32RecentDocumentsBridge>();
+        // 原生菜单栏桥：随窗口构造；进程级渲染通路单槽在构造期登记（覆盖式），析构期注销。
+        // 单槽只认一份菜单栏：多窗口时第一个存活窗口持有它（见成员注记）；菜单项的点击经
+        // wnd_proc 的 WM_COMMAND 转 `menu_bar->on_command`，再按模型 id 回投命令注册表。
+        menu_bar = std::make_unique<detail::Win32MenuBarBridge>(hwnd);
+        menu_bar_translate::register_menu_bar_backend(menu_bar_translate::MenuBarBackend{
+            .install = [this](const std::vector<menu_bar_translate::FlatMenuItem> &items,
+                              std::function<void(std::string)> on_click) -> Result<void> {
+                return menu_bar->install(items, std::move(on_click));
+            },
+            .uninstall = [this]() -> void { menu_bar->uninstall(); },
+            .is_installed = [this]() -> bool { return menu_bar->is_installed(); },
+        });
+        // 剪贴板桥：本窗口登记为剪贴板 owner（覆盖式，最近登记者生效）。与最近文档桥相反，
+        // 它的三件能力（延迟渲染 / 所有权通知 / 变更监听）**必须**有 owner 窗口才能兑现，
+        // 故此处登记的 HWND 就是它们唯一的投递目标。
+        clipboard = std::make_unique<detail::Win32ClipboardBridge>();
+        clipboard->attach(hwnd);
     }
     size = Size{.width = static_cast<float>(w), .height = static_cast<float>(h)};  // 逻辑 dp（布局用）
 }
@@ -493,6 +555,14 @@ Win32Host::Impl::~Impl() {
     // OLE 拖入桥同理：RevokeDragDrop 需要**有效 HWND**，故必须在 DestroyWindow 之前卸载
     // （放到析构末尾会在窗口已毁后调 Revoke，那条路径上句柄已失效）。
     drag = nullptr;
+    // 投影桥守卫同理先散（它不持 HWND，但通路登记随最后一个宿主窗口一起注销，与窗口销毁同批收口）。
+    recent_docs = nullptr;
+    // 原生菜单栏桥：先注销进程级渲染通路单槽（否则槽里还指着即将销毁的桥），再散桥（析构会摘菜单）。
+    menu_bar_translate::unregister_menu_bar_backend();
+    menu_bar = nullptr;
+    // 剪贴板桥必须更早散：owner 窗口一旦销毁，延迟渲染的 `WM_RENDERFORMAT` 就再无投递目标，
+    // 故在 DestroyWindow 之前先让本窗口退位（refs 归零则连进程级后端一并注销）。
+    clipboard = nullptr;
     if (hwnd != nullptr) {
         DestroyWindow(hwnd);
         hwnd = nullptr;
@@ -566,7 +636,13 @@ auto Win32Host::Impl::on_char(std::uint32_t ch) const -> void {
 }
 
 auto Win32Host::Impl::update_window_state() -> void {
-    const WindowState want = compute_window_state(minimized, active);
+    // 「是否在屏上」是第三枚输入：`SW_HIDE`（运行期 `set_visible(false)`）与最小化一样属
+    // `WindowState::Hidden` 的定义域。更关键的是 Win32 在 `SW_HIDE` 时会同步派发
+    // `WM_ACTIVATE(WA_INACTIVE)`，只按 minimized/active 推导会把「隐藏」改写成「被遮挡」。
+    // 读 `IsWindowVisible` 而非自维护一份意图位：本函数与 setter 改的是同一个 OS 状态，
+    // 读它就等于读自己刚写下的值，不需要第二份真值源（最小化窗口仍返回 TRUE，旧口径不受影响）。
+    const bool on_screen = hwnd != nullptr && IsWindowVisible(hwnd) != FALSE;
+    const WindowState want = compute_window_state(minimized, active, on_screen);
     if (want != state) {
         state = want;
         if (window_state_handler) {
@@ -687,7 +763,12 @@ auto Win32Host::Impl::handle_size(HWND hwnd_in, WPARAM wp, LPARAM lp) -> LRESULT
         size = Size{.width = logical.x, .height = logical.y};
     }
     // 几何态变化（最小化/最大化/还原）上报，仅模式实际改变时通知。
-    const WindowMode want = classify_size_mode(wp);
+    // borderless 全屏改样式后 WM_SIZE 仍按 SIZE_RESTORED 定档，故全屏态以 `fullscreen` 标志覆盖，
+    // 避免被 classify_size_mode 误报成 Normal。
+    WindowMode want = classify_size_mode(wp);
+    if (fullscreen) {
+        want = WindowMode::FullScreen;
+    }
     if (want != mode) {
         mode = want;
         minimized = (want == WindowMode::Minimized);
@@ -1214,6 +1295,18 @@ auto WINAPI Win32Host::Impl::wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             return self->handle_setting_change(wp, lp);
         case WM_GETMINMAXINFO:
             return self->handle_getminmaxinfo(lp);
+        case WM_RENDERFORMAT:
+            // 延迟渲染索取：剪贴板此刻由请求方持有，本方不再 OpenClipboard，只提交数据。
+            if (self->clipboard != nullptr && detail::win32_clipboard_render_format(hwnd, static_cast<unsigned>(wp))) {
+                return 0;
+            }
+            return DefWindowProcA(hwnd, msg, wp, lp);
+        case WM_DESTROYCLIPBOARD:
+            detail::win32_clipboard_destroy_clipboard();
+            return 0;
+        case WM_CLIPBOARDUPDATE:
+            detail::win32_clipboard_clipboard_update();
+            return 0;
         case WM_CLOSE:
             return self->handle_close();
         case WM_DESTROY:
@@ -1221,6 +1314,13 @@ auto WINAPI Win32Host::Impl::wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         case WM_GETOBJECT: {
             const std::optional<LRESULT> answered = self->handle_get_object(wp, lp);
             return answered.has_value() ? *answered : DefWindowProcA(hwnd, msg, wp, lp);
+        }
+        case WM_COMMAND: {
+            // 原生菜单项点击：转发给菜单栏桥；桥只认自己派发的命令 id 区间（其余消息交 DefWindowProc）。
+            if (self->menu_bar != nullptr && self->menu_bar->on_command(wp)) {
+                return 0;  // 已由原生菜单栏桥消费（菜单项点击的路由在桥内完成）
+            }
+            return DefWindowProcA(hwnd, msg, wp, lp);
         }
         default:
             return DefWindowProcA(hwnd, msg, wp, lp);
@@ -1324,9 +1424,62 @@ auto Win32Host::cancel_close() -> void {
     }
 }
 
+auto Win32Host::set_fullscreen(bool on) -> void {
+    if (pimpl_ == nullptr || pimpl_->hwnd == nullptr) {
+        return;
+    }
+    Impl &d = *pimpl_;
+    if (d.fullscreen == on) {
+        return;  // 幂等：重复进入/退出不闪动、不冗余上报
+    }
+    if (on) {
+        // 存档还原几何：进入前样式与窗口矩形（退出时原样还原）。
+        d.saved_style = static_cast<DWORD>(GetWindowLongPtrA(d.hwnd, GWL_STYLE));
+        GetWindowRect(d.hwnd, &d.saved_rect);
+        // 枚举窗口所在显示器，取整屏目标矩形（rcMonitor 覆盖任务栏带，达成真全屏）。
+        HMONITOR mon = MonitorFromWindow(d.hwnd, MONITOR_DEFAULTTONEAREST);
+        RECT target = d.saved_rect;
+        MONITORINFO mi{};
+        mi.cbSize = sizeof(mi);
+        if (GetMonitorInfoA(mon, &mi) != FALSE) {
+            target = mi.rcMonitor;
+        }
+        // Borderless 全屏：去标题/可调边框/系统菜单可见性，转 WS_POPUP 覆盖整屏。
+        const DWORD new_style = (d.saved_style | WS_POPUP) & ~(WS_CAPTION | WS_THICKFRAME | WS_BORDER | WS_DLGFRAME);
+        SetWindowLongPtrA(d.hwnd, GWL_STYLE, static_cast<LONG_PTR>(new_style));
+        SetWindowPos(d.hwnd, HWND_TOP, target.left, target.top, target.right - target.left, target.bottom - target.top,
+                     SWP_FRAMECHANGED | SWP_NOACTIVATE);
+        d.fullscreen = true;
+    } else {
+        // 还原样式与几何（不抢前台：HWND_TOPMOST 不用于还原）。
+        SetWindowLongPtrA(d.hwnd, GWL_STYLE, static_cast<LONG_PTR>(d.saved_style));
+        SetWindowPos(d.hwnd, nullptr, d.saved_rect.left, d.saved_rect.top, d.saved_rect.right - d.saved_rect.left,
+                     d.saved_rect.bottom - d.saved_rect.top, SWP_FRAMECHANGED | SWP_NOZORDER | SWP_NOACTIVATE);
+        d.fullscreen = false;
+    }
+    // 定档上报：handle_size 因 fullscreen 标志会收敛到同值，此处显式收口（size 已随 WM_SIZE 更新）。
+    const WindowMode want = on ? WindowMode::FullScreen : WindowMode::Normal;
+    if (d.mode != want) {
+        d.mode = want;
+        if (d.window_mode_handler) {
+            d.window_mode_handler(want);
+        }
+        d.update_window_state();
+    }
+    if (d.present_request) {
+        d.present_request();
+        ++d.present_count;
+    }
+}
+
 auto Win32Host::set_window_mode(WindowMode m) -> void {
     if (pimpl_ == nullptr || pimpl_->hwnd == nullptr) {
         return;
+    }
+    // 非 FullScreen 目标态若当前处于全屏，先退出全屏还原样式/几何，再走各自的 SC_* 通道，
+    // 避免全屏样式下 SC_MAXIMIZE/SC_RESTORE 语义错乱（saved_rect 在退出时还原）。
+    if (m != WindowMode::FullScreen && pimpl_->fullscreen) {
+        set_fullscreen(false);
     }
     // SC_* 是请求语义：结果由 WM_SIZE → handle_size 定档（IsZoomed / SIZE_MINIMIZED）并上报，
     // 与用户操作系统菜单同路径。
@@ -1341,8 +1494,7 @@ auto Win32Host::set_window_mode(WindowMode m) -> void {
             PostMessageA(pimpl_->hwnd, WM_SYSCOMMAND, SC_MINIMIZE, 0);
             break;
         case WindowMode::FullScreen:
-            // 本后端无 monitor 切换通道（FullScreen 只作为 CSD 布局判据存在）：留痕，不装懂。
-            AURORA_LOG_WARN("window", "Win32Host::set_window_mode: FullScreen is not implemented on this backend");
+            set_fullscreen(true);
             break;
     }
 }
@@ -1475,6 +1627,42 @@ auto Win32Host::set_size(Size s) const -> void {
                                                    pimpl_->csd_title || pimpl_->csd_border);
     SetWindowPos(pimpl_->hwnd, nullptr, 0, 0, static_cast<int>(std::lround(win_size.width)),
                  static_cast<int>(std::lround(win_size.height)), SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+auto Win32Host::set_visible(bool on) const -> void {
+    if (pimpl_->hwnd == nullptr) {
+        return;
+    }
+    // 幂等：先读 OS 实值，同值不再发第二次 `ShowWindow`——重复 `SW_HIDE` / `SW_SHOWNA` 会各自
+    // 带一条 `WM_WINDOWPOSCHANGED`（进而一条多余的同步重渲染），而语义上没有任何东西要变。
+    if ((IsWindowVisible(pimpl_->hwnd) != FALSE) == on) {
+        return;
+    }
+    // 显示档取 `SW_SHOWNA`（显示但不激活）：热键呼出面板不该打断用户当前输入，
+    // 需要焦点由调用方另调 `focus_window()`（与建窗期 NoActivate 档同口径）。
+    ShowWindow(pimpl_->hwnd, on ? SW_SHOWNA : SW_HIDE);
+    // 状态经同一条推导上报：隐藏 ⇒ Hidden，显示 ⇒ 按当时 minimized/active 重算。
+    pimpl_->update_window_state();
+}
+
+auto Win32Host::is_visible() const -> bool { return pimpl_->hwnd != nullptr && IsWindowVisible(pimpl_->hwnd) != FALSE; }
+
+auto Win32Host::set_always_on_top(bool on) const -> void {
+    if (pimpl_->hwnd == nullptr) {
+        return;
+    }
+    const bool now = (GetWindowLongPtrA(pimpl_->hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0;
+    if (now == on) {
+        return;  // 同值幂等，理由见 `set_visible`
+    }
+    // `SWP_NOACTIVATE`：置顶属 z 序属性，不该顺带激活窗口；`SWP_NOMOVE | SWP_NOSIZE` 保证
+    // 切换不改几何（否则「置顶一下」会把窗口拽回原位或改尺寸）。
+    SetWindowPos(pimpl_->hwnd, on ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+}
+
+auto Win32Host::is_always_on_top() const -> bool {
+    return pimpl_->hwnd != nullptr && (GetWindowLongPtrA(pimpl_->hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0;
 }
 
 }  // namespace aurora

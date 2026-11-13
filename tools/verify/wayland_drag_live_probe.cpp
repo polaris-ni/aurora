@@ -1068,7 +1068,7 @@ auto run_interactive() -> int {
     }
     // 两种模式都不设帧预算：power_saving 关掉保证帧循环持续泵平台消息——Wayland 会话回调经
     // 事件队列到达，空闲阻塞等待会把拖放事件的派发推迟到人工操作之后。
-    Application app(Scene{Node{Column(ColumnProps{.children = {Node{panel}, Node{source}}})}}, std::move(surface),
+    Application app(Scene{Node{Column({Node{panel}, Node{source}})}}, std::move(surface),
                     WindowOptions{.size = Size{.width = 480.0F, .height = 300.0F},
                                   .title = "Aurora Wayland drag verify",
                                   .max_frames = -1,

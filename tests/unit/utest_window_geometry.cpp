@@ -174,7 +174,7 @@ AURORA_TEST_CASE(window_group_uses_distinct_keys) {
     preferences::Preferences prefs;
     auto group = prefs.group("windows");  // 窗口组：一组窗口共用一个分组，键区分各窗口
 
-    WindowGeometry main_geo = usable_geometry();
+    WindowGeometry const main_geo = usable_geometry();
     WindowGeometry aux_geo = usable_geometry();
     aux_geo.origin = Point{.x = main_geo.origin.x + 80.0F, .y = main_geo.origin.y + 60.0F};
 
@@ -308,7 +308,7 @@ AURORA_TEST_CASE(application_restores_window_mode_from_storage) {
 }
 
 AURORA_TEST_CASE(minimized_mode_restores_as_normal_with_info_log) {
-    CapturedLog log;  // 须先于恢复动作构造，否则捕不到 INFO
+    CapturedLog const log;  // 须先于恢复动作构造，否则捕不到 INFO
     preferences::Preferences prefs;
     WindowGeometry stored = usable_geometry();
     stored.mode = WindowMode::Minimized;  // 落盘最小化
@@ -339,7 +339,7 @@ AURORA_TEST_CASE(minimized_mode_restores_as_normal_with_info_log) {
 }
 
 AURORA_TEST_CASE(offscreen_geometry_load_returns_nullopt_with_warn) {
-    CapturedLog log;
+    CapturedLog const log;
     preferences::Preferences prefs;
     // 屏外几何：is_window_geometry_usable 宽松判定（尺寸为正 + 与任一 work_area 相交）拒绝 →
     // load 回 nullopt，apply 不执行，mode 天然保持默认 Normal。
@@ -351,7 +351,7 @@ AURORA_TEST_CASE(offscreen_geometry_load_returns_nullopt_with_warn) {
 }
 
 AURORA_TEST_CASE(missing_display_degrades_mode_to_normal_with_warn) {
-    CapturedLog log;
+    CapturedLog const log;
     preferences::Preferences prefs;
     // display_id 指向的显示器已不在：is_window_geometry_usable 完全不看 display_id（宽松口径），
     // load 照常成功；降级判定在恢复腿（apply）——不拒绝恢复，但几何态归 Normal + WARN。

@@ -134,9 +134,14 @@ class Win32Host {
     auto cancel_close() -> void;
     /// @brief 程序化设定几何态（幂等）：Normal / Maximized / Minimized 经 SC_RESTORE /
     ///        SC_MAXIMIZE / SC_MINIMIZE 落到窗口过程，WM_SIZE 回来时定档并上报（与用户走
-    ///        系统菜单同一路径，不在此另设判定）。FullScreen 本后端无实现，调用时留一条 WARN。
+    ///        系统菜单同一路径，不在此另设判定）。FullScreen 经 `set_fullscreen` 落到 OS。
     /// @param m 目标几何态。
     auto set_window_mode(WindowMode m) -> void;
+    /// @brief 进入/退出 borderless 全屏（幂等）：进入前存档窗口样式与矩形，去标题/可调边框转
+    ///        `WS_POPUP` 并覆盖所在显示器整屏；退出时还原。进入 FullScreen 前若已是别的档，由
+    ///        `set_window_mode` 先退出全屏再走对应通道。
+    /// @param on true 进入全屏，false 还原到进入前几何。
+    auto set_fullscreen(bool on) -> void;
     /// @brief 已呈现次数（测试/自检用）：验证 WM_SIZE/WM_PAINT 触发了同步重渲染。
     /// @return present_request 生效以来的呈现计数。
     [[nodiscard]] auto present_count() const -> int;
@@ -183,9 +188,27 @@ class Win32Host {
     /// @brief 程序化移动窗口（`SetWindowPos`，物理像素）。
     /// @param p 目标左上角位置（物理像素）。
     auto set_position(Point p) const -> void;
-    /// @brief 程序化设置窗口**外框**尺寸（`SetWindowPos`，物理像素）。
-    /// @param s 目标外框尺寸（物理像素）。
+    /// @brief 程序化设置窗口尺寸（**逻辑 dp**，语义为请求的**客户区**尺寸；`Surface::set_size` 同口径）。
+    /// @param s 目标客户区尺寸（逻辑 dp；外框由本类按装饰 / 菜单 / CSD 补偿自行算出）。
     auto set_size(Size s) const -> void;
+    /// @brief 运行期显隐：`ShowWindow(hwnd, on ? SW_SHOWNA : SW_HIDE)`。
+    ///
+    /// 显示档取 `SW_SHOWNA`（显示但不激活），与建窗期 `WindowVisibility::NoActivate` 同口径——
+    /// 全局热键呼出不应打断用户当前输入，要焦点由调用方另调 `focus_window()`。
+    /// 同值重复调用幂等（不发第二次 OS 调用）；状态上报经 `update_window_state` 走
+    /// 「不在屏 ⇒ Hidden」的推导，故隐藏期间即使 OS 送来失焦消息也不会报成 `Occluded`。
+    /// @param on true 显示、false 隐藏。
+    auto set_visible(bool on) const -> void;
+    /// @brief 当前是否在用户视野内（`IsWindowVisible` 实值回读，非应用意图缓存）。
+    /// @return 在屏上为 true；句柄失效时按不可见处理返回 false。
+    [[nodiscard]] auto is_visible() const -> bool;
+    /// @brief 运行期置顶：`SetWindowPos(HWND_TOPMOST / HWND_NOTOPMOST, ..., SWP_NOMOVE |
+    /// SWP_NOSIZE | SWP_NOACTIVATE)`——切换不产生移动、尺寸变化或激活。同值幂等。
+    /// @param on true 置顶、false 取消置顶。
+    auto set_always_on_top(bool on) const -> void;
+    /// @brief 当前是否置顶（`GWL_EXSTYLE & WS_EX_TOPMOST` 实值回读）。
+    /// @return 置顶为 true。
+    [[nodiscard]] auto is_always_on_top() const -> bool;
     /// @brief 注册 DPI 缩放变化回调：`WM_DPICHANGED` 处理后上报新的 `scale_factor`。
     /// @param h 缩放变化处理器，参数为新的缩放因子。
     auto set_scale_change_handler(std::function<void(float)> h) const -> void;

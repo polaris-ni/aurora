@@ -90,10 +90,10 @@ auto same_color(const Color &a, const Color &b) -> bool { return a.r == b.r && a
 }  // namespace
 
 AURORA_TEST_CASE(sticky_hook_defaults_to_false_and_header_overrides) {
-    ColorBox plain(30.0F, AURORA_RED);
+    ColorBox const plain(30.0F, AURORA_RED);
     AURORA_TEST_CHECK_FALSE(plain.is_sticky_header());
 
-    StickyHeader h{box(30.0F, AURORA_GREEN)};
+    StickyHeader const h{box(30.0F, AURORA_GREEN)};
     AURORA_TEST_CHECK_TRUE(h.is_sticky_header());
     AURORA_TEST_CHECK_EQ(std::string{h.type_name()}, std::string{"StickyHeader"});
 

@@ -24,7 +24,7 @@ class LeafProbe final : public Widget {
     int mounts = 0;
     int unmounts = 0;
     [[nodiscard]] auto type_name() const -> const char * override { return "LeafProbe"; }
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { (void)out; }
+    auto collect_signals(StateSink &out) -> void override { (void)out; }
     auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
         return c.constrain(Size{.width = 20.0F, .height = 20.0F});
     }
@@ -49,14 +49,14 @@ AURORA_TEST_CASE(default_ctor_api_surface) {
     def.for_each_child([](const Widget &) {});
     auto d = LayoutBuilder::describe_static();
     AURORA_TEST_CHECK_EQ(d.name, "LayoutBuilder");
-    std::vector<SignalViewBase *> sigs;
+    StateSink sigs;
     def.collect_signals(sigs);
-    AURORA_TEST_CHECK_EQ(sigs.size(), 1U);
+    AURORA_TEST_CHECK_EQ(sigs.sources().size(), 1U);
 }
 
 AURORA_TEST_CASE(empty_builder_falls_back_to_empty_child) {
     LayoutBuilder def;
-    BuildContext ctx;
+    BuildContext const ctx;
     def.mount(ctx);
     const Size sz = def.layout(
         Constraints{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = 300.0F, .height = 200.0F}}, ctx);
@@ -71,7 +71,7 @@ AURORA_TEST_CASE(rebuild_on_constraint_change_reuse_on_same) {
         [](const BuildContext &, const Constraints &) -> Node { return Node{std::make_shared<LeafProbe>()}; });
     AURORA_TEST_CHECK_EQ(lb->wants_focus(), false);
 
-    BuildContext ctx;
+    BuildContext const ctx;
     lb->mount(ctx);
 
     const Constraints a{.min = Size{.width = 0.0F, .height = 0.0F}, .max = Size{.width = 300.0F, .height = 200.0F}};

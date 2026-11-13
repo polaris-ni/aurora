@@ -28,6 +28,8 @@ class LiteralFactory {
 
 ///
 /// @brief 按声明类型把 token 转为 `Value`。
+/// @param kind 声明类型，决定基底与边界校验口径。
+/// @param token 待转换的原文。
 /// @param option_display 错误回显用的选项名（`--width` 或位置参数名）。
 /// @return 失败返回 `cli-invalid-value`（携带 kind 与原文）。
 ///

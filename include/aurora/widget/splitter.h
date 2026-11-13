@@ -7,6 +7,7 @@
 
 #include "aurora/core/color.h"
 #include "aurora/render/painter.h"
+#include "aurora/theming/theme_scope.h"  // inherit_theme：拖拽态取主题 primary / on_surface
 #include "aurora/widget/descriptor.h"
 #include "aurora/widget/widget.h"
 
@@ -90,7 +91,7 @@ class Splitter : public Widget {
 
     /// @brief 把可订阅信号登记到 out（Inspector/序列化遍历用）。
     /// @param out 输出容器，追加本控件暴露的信号视图。
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&ratio_); }
+    auto collect_signals(StateSink &out) -> void override { out.push(ratio_); }
 
     /// @brief 当前比例（响应式）。
     /// @return 比例信号的可订阅视图引用。
@@ -312,7 +313,8 @@ class Splitter : public Widget {
                                               .size = Size{.width = handle_size_, .height = bounds.size.height}}
                                        : Rect{.origin = Point{.x = bounds.origin.x, .y = bounds.origin.y + start},
                                               .size = Size{.width = bounds.size.width, .height = handle_size_}};
-        p.fill_rect(handle, dragging_ ? Color{0, 122, 255, 120} : Color{0, 0, 0, 24});
+        const auto &roles = inherit_theme(ctx).roles;
+        p.fill_rect(handle, dragging_ ? roles.primary.with_alpha(120) : roles.on_surface.with_alpha(24));
     }
 
     auto on_hit_test(const Point &local, const Rect &bounds, const BuildContext &ctx) -> Widget * override {

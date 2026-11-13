@@ -5,8 +5,8 @@
 //   - 等待窗口由「最早到期定时」与空闲上限共同决定，唤醒通道负责把新任务/新事件源立刻送到
 //     循环眼前（不在 UI 线程等待，也不忙等）；
 //   - 就绪回调经 `app::EventSourceRegistry` 的 `Dispatcher` 投递，引擎启动时装入
-//     `aurora::detail::post_to_main` 形态——即 §1 不变量所指「与 `Task<T>::set_main_poster`
-//     同一条投递器」，宿主已装则不改。
+//     `aurora::detail::post_to_main` 形态——即 §1 不变量所指「与 `Task<T>` 共用进程级唯一
+//     投递队列（`core/main_queue.h`）」，投递恒回值班主线程，无回退直调。
 //
 // 唤醒通道刻意**不引入新的平台代码**：它是一对回环 TCP 流（`blocking::Listener` +
 // `blocking::StreamSocket`，POSIX 与 Winsock 皆可 poll），因此本文件不出现 `poll.h` / `winsock2.h`
@@ -422,7 +422,7 @@ namespace detail {
 
 /// @brief 替身指针的存储位（进程级单点；纪律见 `detail/engine_override.h`）。
 /// @note 用 `nullptr` 表示「未装」，故读取一次即得到当时的完整事实，不需要与别处对齐。
-///       函数局部静态与 `detail::main_poster_mutex()` 同形态：`std::atomic<Engine *>` 平凡可析构，
+///       函数局部静态与 `MainQueue` 的内部状态同形态：`std::atomic<Engine *>` 平凡可析构，
 ///       既无退出期顺序问题，也不留文件级可变全局。
 static auto engine_override_slot() -> std::atomic<Engine *> & {
     static std::atomic<Engine *> slot{nullptr};

@@ -1,7 +1,7 @@
 #pragma once
 
 /// @brief 非阻塞 socket 出口。
-/// @file net/detail/async_io.h
+/// @file async_io.h
 ///
 /// **仅供 `src/aurora/net/` 实现侧使用，不占公共 API 预算。**存在理由有三：
 /// 1. 「平台 socket 头唯一落点在 `src/aurora/net/socket.cpp`」这条既有不变量要继续成立，

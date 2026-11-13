@@ -101,7 +101,9 @@ struct Constraints {
 
 `Error`（`core/result.h`）是结构化错误值，字段如下：
 
-`code`（冻结 slug）、`message`、`suggestion`、`docs`、`where`、`hint`、`code_enum`、`severity`、`category`、`retryable`。
+`code`（冻结 slug）、`message`、`suggestion`、`docs`、`where`、`hint`、`code_enum`、`severity`、`domain`、`kind`、`retryable`。
+
+`domain`（`ErrorDomain`）答「去哪个子系统排查」、`kind`（`ErrorKind`）答「坏了什么、因此下一步做什么」，两轴正交且互不派生；维度定义与取值清单见 [`ARCHITECTURE.md`](../ARCHITECTURE.md) §12.3。
 
 其中 `retryable` 是**声明性**标记，只回答「同一输入重跑一次是否可能换到不同结果」，**不**回答「这次该不该重试」。后者由调用方结合幂等性、退避预算与 `error_class_of()` 的归因档共同决定（网络侧的判据与算式见 [`06-app-platform.md`](06-app-platform.md) §8.8.x）；库内唯一按此合成的判定是 `net::detail::should_retry_error()`。
 
@@ -149,16 +151,18 @@ auto widget = restored.value();
 | 字段 | 说明 |
 |:---|:---|
 | `severity` | 与 `Error::severity` 对齐的 `ErrorSeverity`（默认 `Warning`） |
-| `category` | `ErrorCategory`（默认 `General`） |
+| `domain` | 与 `Error::domain` 对齐的 `ErrorDomain`（默认 `General`） |
+| `kind` | 与 `Error::kind` 对齐的 `ErrorKind`（默认 `Internal`） |
 | `message` | 人类可读描述 |
 | `where` | 位置（`file:line` 或控件类型） |
 | `code` | 机器可读 slug（可为空） |
 | `code_enum` | 与 `code` 对应的 `ErrorCode`（无码时 `GeneralUnknown`） |
-| `fix` | 可选结构化修复建议 `FixSuggestion` |
 
-`FixSuggestion`（`diagnostics.h`）含机器可读 `code` 与人类可读 `description`，只作展示——库产出修复建议，不代调用方改写代码。
+默认值恒等于零值哨兵 `ErrorCode::GeneralUnknown` 那一行的表元数据，故默认构造的 `Diagnostic` 不引入第三种 `(domain, kind)` 组合。
 
-`Diagnostic::to_json_line()` 输出 JSON 行，供工具链消费。`severity_str()` / `category_str()` 供遗留代码按字符串比较，新代码应直接用枚举比较（两个 `using` 别名已标记 `[[deprecated]]`）。
+修复指引只有一个来源：[`errors.toml`](../errors.toml) 的 `hint`，经 `explain_diagnostic()` 出码。诊断记录**不携带**独立的修复载荷——库只上报错误信息与机器码，代调用方决定怎么修会把「库知道你的代码」这一不存在的前提写进契约。
+
+`Diagnostic::to_json_line()` 输出 JSON 行，供工具链消费（键：`severity` / `domain` / `kind` / `message`，`where` / `code` 非空才输出）。`severity_str()` / `domain_str()` / `kind_str()` 供遗留代码与测试按字符串比较，新代码应直接用枚举比较（`DiagnosticSeverity` 别名仍标 `[[deprecated]]`）。
 
 ### 4.2 Diagnostics 收集器
 
@@ -166,14 +170,13 @@ auto widget = restored.value();
 
 | 方法 | 说明 |
 |:---|:---|
-| `report(message, where, code, is_degraded, fix)` | 上报一条诊断。元数据由 `code` 对应的错误码表驱动注入；`code` 为空时退化为 `Warning` / `General`，并由 `is_degraded` 决定日志级别（`degraded` → `Error`，否则 `Warn`） |
+| `report(message, where, code, is_degraded)` | 上报一条诊断。元数据由 `code` 对应的错误码表驱动注入；`code` 为空时退化为 `Warning` / `General` / `Internal`，并由 `is_degraded` 决定日志级别（`degraded` → `Error`，否则 `Warn`） |
 | `warn(message, where, code)` | 便捷：普通警告 |
 | `degraded(message, where, code)` | 便捷：降级渲染。严格模式下升级为硬失败 |
 | `take()` | 取出并清空累计诊断（测试 / 工具用） |
 | `count()` | 当前累计诊断数 |
 | `get_last_diagnostics()` | 最近诊断环形缓冲（上限 `AURORA_RECENT_CAP` = 64） |
-| `explain_diagnostic(code)` | slug → 人类可读解释，两个重载（字符串 / `ErrorCode`） |
-| `collect_fixes()` | 收集最近诊断中携带的修复建议（仅 `code` 非空者，不消费，同一 `code` 可能多次出现） |
+| `explain_diagnostic(code)` | slug → 人类可读解释，两个重载（字符串 / `ErrorCode`）；这是修复指引的唯一出口 |
 
 ### 4.3 严格模式
 
@@ -274,7 +277,7 @@ auto widget = restored.value();
 
 | 头文件 | 能力 |
 |:---|:---|
-| `color.h` | `Color` 结构（`color.h`）与具名颜色（`aurora::colors` 子命名空间） |
+| `color.h` | `Color` 结构（`color.h`）与具名颜色（`aurora::colors` 子命名空间），加全库唯一的感知亮度对：`relative_luminance` / `contrast_ratio`（WCAG 2.x 定义，sRGB 线性化后加权求和 / 亮度商；**alpha 不参与**，半透明层的对比度只在合成之后有定义）。阈值不在函数里——3:1 / 4.5:1 是「哪一类配对」的属性，判档见 [`07-environment-modifier.md`](07-environment-modifier.md) §5.1；无障碍配对断言、色角色对比度门禁与派生实现共读这一份，不得另写第二套公式 |
 | `time.h` / `duration.h` | 时间表示与时长 |
 | `event_stream.h` | 事件流 |
 | `file_watcher.h` | 文件监听 |
@@ -292,7 +295,7 @@ auto widget = restored.value();
 `au::TODO`（根级 `todo.h`）是占位回调，用于标记尚未实现的事件处理——编译通过，运行时触发时经 `Diagnostics::warn("TODO", what)` 输出警告。它是占位回调而非错误码。
 
 ```cpp
-auto btn = au::Button(au::ButtonProps{ .label = "OK" });
+auto btn = au::Button(au::ButtonProps().set_label("OK"));
 btn.set_on_click(au::TODO("handle_click"));   // 编译通过，运行时留可读警告
 ```
 
@@ -341,6 +344,12 @@ btn.set_on_click(au::TODO("handle_click"));   // 编译通过，运行时留可�
 
 `AccessibilityEventKind` 含 `Announcement`（动态播报 / Live Region）：`announce_accessibility(text, target)` 走独立事件通道，**不经**语义树 diff——toast / 状态提示 / 异步结果这类临时文本没有焦点或取值变化，只有此通道能被读屏感知。
 
+**三枚开关的消费点是唯一物化点，不在本层**。`reduce_motion` / `high_contrast` / `font_scale` 作为输入折进主题快照的那一处（`Theme::with_accessibility`，口径与逐开关折法见 [`07-environment-modifier.md`](07-environment-modifier.md) §5.1）之后即退场：控件与图表读的是折好的令牌，不再回读这些位，因此本类型与 `Theme` 之间不存在并行的第二条通道。三处口径：
+
+- 读取入口统一为 `resolved_accessibility_settings(ctx)`——上下文注入优先，缺失回落进程级单例 `current_accessibility_settings()`。链上没有 `BuildContext` 的子系统（动画驱动器由控件墙钟 tick 推进）传 `BuildContext{}` 走兜底档，那是同一入口的缺省腿而非旁路。
+- `resolved_font_scale()` 是倍率的唯一取用形态：非正 / 非有限值归一化为 1.0，故宿主反复写入同一非法值不会被窗口误判成换档。裸字段 `font_scale` 不参与比较与解算。
+- `screen_reader_active` 不是渲染输入：它不改任何主题取值，只影响语义树播报与桥的通知映射，因此既不入物化也不入窗口的解算键（窗口的换档差量比对同样跳过该位）。
+
 `screen_reader_active`（`AccessibilitySettings`）的语义是 **heuristic**：以「读屏主动取根对象」近似「有读屏在线」，由桥激活时回填 `true`、桥去激活时回填 `false`；读屏退出无反向信号，故不保证及时复位。
 
 ### 7.3 Unicode 码点宽度判定（`unicode_width.h`）
@@ -371,7 +380,7 @@ btn.set_on_click(au::TODO("handle_click"));   // 编译通过，运行时留可�
 **需求陈述：**
 
 - UI 树通过 `std::shared_ptr<Widget>` 管理所有权，父子关系即「树内拥有」：拷贝即共享、移动即转移，整棵树随根 `Node` 析构而析构。AI 不需要手动 `delete`，也不必担心 use-after-free。
-- 禁止**拥有语义**的裸指针进入公开 API；非拥有的观察指针 / 句柄（如 `Binding<T>::target()` 返回的 `State<T>*`）除外。事件回调需要引用「触发者」时，用稳定标识 `Node::id()` 加查询，而非引用或指针。
+- 禁止**拥有语义**的裸指针进入公开 API；非拥有的观察指针（如 `BuildContext::env` 指向祖先 `Environment`）与按值传递的状态句柄（`State<T>` / `ReadOnlyState<T>`）不在此列。事件回调需要引用「触发者」时，用稳定标识 `Node::id()` 加查询，而非引用或指针。
 - **例外**：Inspector / 调试内部句柄（如 `selected_widget()`、`set_surface_getter`）可返回裸 `Widget*` / `Surface*`，但必须配弱引用守卫（生命周期由树 `shared_ptr` 持有），且不得进入业务公开 API。
 
 ```cpp
@@ -398,6 +407,28 @@ auto node = au::find_node_by_path(root, path);  // widget/inspect.h，位于 aur
 **验收标准：** 全部后台工作都可在无 GUI 环境（headless）下完成并回到主线程；`ThreadPool` 存活期间不出现新建的游离 `std::thread`；超时与取消路径只改变结果的投递去向，绝不中断用户函数。
 
 > 异步 API 契约（`au::async`、`Task<T>::then`、`co_async`、`CoroTask<T>`、`launch`）见 [`02-state.md`](02-state.md) §5；定时与周期任务由 `Scheduler` / `Timer` 承担，见 [`06-app-platform.md`](06-app-platform.md)。
+
+**主线程队列与值班租约**（`core/main_queue.h` 的 `MainQueue`，不变量）
+
+跨线程回投只有一个进程级队列：全静态门面，队列、值班位、世代计数与唤醒通道同址同锁，「投进谁家队列」与「叫谁起床」不再由安装者决定。消费权经 `on_duty(wake)` 领取 RAII 租约 `Lease`；同一时刻至多一个循环在岗，CAS 只拒**并发**（归还后重入的循环可再次领取，覆盖 WASM `raf_tick` 后重跑 `run()` 的形态）。
+
+- **世代号**：`on_duty` 成功时单调分配（自 1 起，永不重置 / 复用 / 回退）。`current_epoch()` 是值班世代的全函数——在岗返回当前世代号，否则恒为 `0`；`has_on_duty()` 只是该式的可读别名，判据单源。接受判据（与入队原子）：`current_epoch() != 0 && (expected_epoch == 0 || expected_epoch == current_epoch())`。三条推论：打烊期一切投递（含代际无关的网络 / 协程）拒绝；重入 run 领到更大的新世代 ⇒ 上一世在途任务拒绝；同世在途任务放行。`expected_epoch == 0` 是「代际无关」哨兵，发起时捕获世代的追踪任务恒为 ≥1。
+- **两相失败**：**发起时**（`au::async` / `Task<T>::then`）按时间相三分——在岗 ⇒ 正常发起并捕获本世世代；打烊窗口（`is_closing()`）⇒ **出生即取消**（不排工，立即返回 `is_cancelled()` 的 Task，`then` 恒不执行、`on_cancel` 登记即触发）；其余无值班 ⇒ 纯编程错误，经 `on_contract_violation` 硬失败（FATAL 日志 + 默认 terminate，与线程局部 strict 开关无关，故 worker 线程上的违规同样被拦）。**落地时**（`MainQueue::post` / `try_post`）无值班或世代失配 ⇒ 合法生命周期事实：不投递、不 terminate，记 ERROR 诊断并累加 `dropped_count()`；`post` 返回 void（失败无可行动作），契约边界需要失败知识处走 `try_post`（返回 false，且不触发失败处理器）。**不存在「空槽就地执行」的回退**——旧语义会让回调在 worker 线程写 `State`，正是本机制要根除的跨线程写入。
+- **时序纪律**：`loop_end` 先 `Lease::release()`（世代归 0），再以 `MainQueue::closing_scope()` 守卫罩住 `take_batch()` 的收尾排空，守卫析构即关窗。`closing` 必须**有界**：绝不延到下次 `on_duty` 才清，否则「循环结束后仍发起异步」会被弱化成静默取消而丢掉 fail-fast。`take_batch()` 不要求值班在手（收尾排空专用），捞完后队列不可能再被写入。
+- **唤醒与等待决策**：`wake` 在投递者线程的锁外调用，只负责打断值班者的 `wait_events`；`has_pending()` 供帧末等待决策（有待办即不深睡）。唤醒方式由上岗者注入，`core` 不认识 `Application`。
+
+```cpp
+const auto lease = aurora::MainQueue::on_duty([this] { request_wake_all(); });
+if (!lease) { /* 并发 run：硬失败，见 on_contract_violation */ }
+// ... 帧循环：MainQueue::take_batch() 逐个执行 ...
+lease->release();
+{
+    const auto closing = aurora::MainQueue::closing_scope();  // 收尾排空窗口
+    drain_posted();
+}
+```
+
+**验收标准：** `utest_main_queue` 覆盖租约互不冒卸与归还后重领、`release()` 前入队项必被收尾捞全、世代失配落地不 terminate、`try_post` 两种失败均返回 false、epoch 全函数与重入世代防线、打烊窗口发起二分；`utest_async` / `utest_coroutine` / `utest_state_resource` 以 `Lease` + `take_batch` 替身迁移后全绿。
 
 ### 8.3 SPEC.QUALITY.CORE.GRACEFUL-DEGRADATION.001 错误恢复与降级渲染
 
@@ -582,7 +613,8 @@ auto dump_into(const Value &v, std::string &out, DumpOptions opts = {}) -> Resul
 ### 9.8 错误码
 
 复用既有 `JsonParseError` / `json-parse-error` 作为解析失败与 DOM 访问失败的统一码位；新增三条
-（`category` 一律 `io`，元数据见 [`errors.toml`](../errors.toml)，全量清单见
+（`domain` 一律 `json`，`kind` 逐条分开：深度触顶是 `exhausted`、类型不符与不可序列化是 `invalid`，
+被解析的字节不合形状才是 `corrupt`；元数据见 [`errors.toml`](../errors.toml)，全量清单见
 [`ERROR_CATALOG.md`](../ERROR_CATALOG.md)）：
 
 | enum | slug | 触发 |
@@ -909,7 +941,7 @@ initial bias 72 / initial n 0x80，前缀 `xn--`、定界符 `-`。
 
 - **格式 ID 是小写字符串，显式入参，不做内容嗅探**：格式与线上包装的对应是精确的——`AURORA_COMPRESS_FORMAT_GZIP` = RFC 1952 包装、`AURORA_COMPRESS_FORMAT_ZLIB` = RFC 1950 包装、`AURORA_COMPRESS_FORMAT_DEFLATE` = RFC 1951 裸 DEFLATE。内置三格式经头文件预定义常量暴露（先例：`net/detail/http_encoding.h` 的 `AURORA_HTTP_ACCEPT_ENCODING`）；自定义格式（zstd / brotli / 应用私有 ID）由应用自选字符串注册。格式 ID 按字节精确匹配、大小写敏感：拼错的 ID 在运行期落 `compression-unavailable` 且 detail 点名（诚实失败，不静默回落）。HTTP 的 `Content-Encoding: deflate` 名义上是 zlib 格式但存在历史服务器发裸流的歧义，该歧义的消解（先试 zlib、失败回落裸流）属 HTTP 层编排，不进本通用 API。
 - **实现可替换、注册即用**：全部入口经 `CompressionCodecRegistry` 按格式 ID 分派；`register_codec` 为**覆盖语义**（同格式 ID 后注册者替换先注册者，内置 wuffs 实现即被覆盖对象），`unregister_codec` 清除覆盖并回落内置（若有）——注销即回默认态，测试隔离因此确定。编解码器只写流式解压即自动获得一次性入口（框架派生）；编解码器方法返回的错误原样透传（不包装、不改码）。
-- **解压炸弹防护双层**：实现层收到的 `DecompressOptions::max_output_bytes` 即产出上限，实现应自行止步（CPU 视角不白烧）；框架层再以计数装饰器兜底——越限即止交并落 `compression-output-too-large`，不依赖实现是否自觉。限额的单一事实源是 `DecompressOptions`，装饰器是兜底而非第二真源。
+- **解压炸弹防护双层**：实现层收到的 `DecompressOptions::max_output_bytes` 即产出上限，实现应自行止步（CPU 视角不白烧）；框架层再以计数装饰器兜底——越限即止交并落 `compression-output-too-large`，不依赖实现是否自觉。限额的单一事实源是 `DecompressOptions`，装饰器是兜底而非第二真源；是否注入限额由各消费面决定，HTTP 流式入口在未显式设定 `max_decompressed_bytes()` 时逐层不限。
 - **注入路径恒在**：`AURORA_ENABLE_COMPRESSION`（默认 ON）只门控内置 wuffs 编解码器的**注册**；编解码器抽象、注册表与自由函数恒编入——关闭宏的构建里注册自定义编解码器即可用（诚实降级不静默把压缩字节当明文交出）。
 
 ### 12.2 接口契约

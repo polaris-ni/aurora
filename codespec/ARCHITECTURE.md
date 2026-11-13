@@ -21,7 +21,7 @@ Aurora 是一个 C++20 跨平台 GUI 库，以**声明式 + 响应式**为核心
 ├───────────────────────────────────────────┤
 │  Widgets / Controls (include/aurora/widget/)│  组件层：声明式 UI 原语
 ├───────────────────────────────────────────┤
-│  Reactive Core (include/aurora/state/)    │  响应式核心：State / Signal / Effect
+│  Reactive Core (include/aurora/state/)    │  响应式核心：State / ReadOnlyState / computed / effect
 ├───────────────────────────────────────────┤
 │  Layout Engine (include/aurora/layout/)   │  布局引擎：Constraints / flex / grid 求解
 ├───────────────────────────────────────────┤
@@ -36,7 +36,7 @@ Aurora 是一个 C++20 跨平台 GUI 库，以**声明式 + 响应式**为核心
 - **依赖方向以向下为主，`core/` 为硬边界**：`core/`（基础层）的**公共头不依赖任何其他 aurora 模块**（只依赖自身与标准库）；其余层间以「上层依赖下层」为常态，确有必要时下层可反向引用上层（例：`render/offscreen.h` 的 `render_to_logical_snapshot` 需读取 widget 类型名与属性以产出逻辑快照；`window/` 的 `Surface` 家族需渲染类型）。该边界由门禁 `tools/check/check_core_layer_boundary.py` 守护（扫描 `include/aurora/core/**` 的 `#include`，任何指向上层的包含即失败）。`src/aurora/core/` 的实现**不在门禁范围**——其 2 处既知上层引用属叶子级、非传递性的元数据查阅：`diagnostics.cpp` 读 `widget/props_io.h` 以格式化属性值、`image.cpp` 委派 `image/image_codec.h` 解码。
 - **内核 / 适配分离**：平台差异收敛到 `Surface` 实现。**第二类平台扩展点** `NativeViewHost`（`include/aurora/webview/`）另行收敛「宿主管理的原生子视图」——嵌入的系统原生视图（首例 `WebView`）由窗口系统叠加显示，其像素**不经** `Painter` / `RhiBackend` 帧流；控件与宿主保持零 `#ifdef`，平台差异仅在引擎实现源文件内、经运行期绑定（缺引擎只降级）。
 - **命令流与执行分离**：`DisplayList` 是绘制命令的**唯一来源**，`rhi::RhiBackend` 是它的**回放目标抽象**（command sink）；软件 `Painter`（经 `rhi::SoftwareRhi`）与 GPU 后端是它的**平级消费者**。新增后端只实现 `RhiBackend`，不改动录制侧与 `DisplayList`。
-- **响应式与渲染解耦**：状态变更经 `State` / `Signal` 精确投递到受影响的 widget 子树，不经「整树 diff + 重建」；渲染核心只负责把 widget 树绘制到 `Surface`。
+- **响应式与渲染解耦**：状态变更经 `State` / `ReadOnlyState` 订阅精确投递到受影响的 widget 子树，不经「整树 diff + 重建」；渲染核心只负责把 widget 树绘制到 `Surface`。
 
 ---
 
@@ -44,11 +44,11 @@ Aurora 是一个 C++20 跨平台 GUI 库，以**声明式 + 响应式**为核心
 
 ### 3.1 线程与事件模型
 
-- **单线程 UI**：所有 widget 树操作、状态变更、事件处理都在主线程。`State::set` 仅限主线程调用（赋值 + notify 无锁无原子）；跨线程计算结果须经 `au::async` / `Task::set_main_poster` 回投主线程后再写 `State`。
+- **单线程 UI**：所有 widget 树操作、状态变更、事件处理都在主线程。`State::set` 仅限主线程调用（赋值 + notify 无锁无原子）；跨线程计算结果须经 `au::async` 回投进程级唯一队列（`MainQueue`）并由值班循环在主线程执行后再写 `State`。
 - **多窗口（仍在同一线程内）**：一个 `Application` 持有一组 `WindowHost`（各自 `Window` + `Scene` + `FocusManager` + 指针/触控捕获表 + 帧统计），由**单一帧循环**统一驱动（`Application::run`，不再委托 `Window::run`）。**焦点与捕获不跨窗口**；`Animator` / `Scheduler` / 快捷键 / 命令注册表为应用级共享（`dt` 每帧只推进一次）。详见 `specification/06-app-platform.md` §2.4。
 - **活动窗口记账点在派发链上的位置**：`Application::active_window()` 的记账落在两处——① 宿主级键盘派发的键盘前置拦截器内，**早于** `ShortcutRegistry::handle`（故快捷键闭包内读到的是本次派发来源）；② 应用级六条程序化派发入口，按「用户输入意图类」事件范围过滤后记账。宿主级直调程序化入口不记账（`WindowHost` 无 `Application` 反指，刻意不加）。记账为 O(1) 指针赋值（成员 `mutable`，以适配 const 派发入口），帧循环零新增开销。它与 `FocusManager` 的**逐窗隔离**是两件互补的事：后者答「窗内哪个控件有焦点」，前者答「这条输入落在哪一扇窗」，二者互不替代，也都不等价于 OS 前台态。语义与范围见 `specification/06-app-platform.md` §2.4。
 - **同步事件**：`EventDispatcher` 在收到原生平台事件后同步派发，命中测试链自最深节点向根冒泡，写 `e.handled = true` 即止。
-- **响应式细粒度信号**：`State<T>` / `Signal` 订阅精确到具体订阅者；状态变更只刷新依赖它的 widget，避免整树重绘。
+- **响应式细粒度信号**：`State<T>` / `computed` 订阅精确到具体订阅者；状态变更只刷新依赖它的 widget，避免整树重绘。
 
 ### 3.2 几何权威
 
@@ -67,7 +67,7 @@ Aurora 是一个 C++20 跨平台 GUI 库，以**声明式 + 响应式**为核心
 
 **同步回调期间必须持住强引用**：事件派发是同步的，用户回调可以在回调内销毁触发它的控件；而回调返回后框架仍要继续访问该控件（`Widget::on_pointer_event` 写 `pressed_` 等）。因此凡要解引用跨帧缓存的控件引用，都须在**整个调用期间**持有强引用（`HitNode::lock(keepalive)`），而非仅做一次「取指针 + 判空」。
 
-**观察者图生命周期安全**：信号源与 `Effect` 经 `Connection`（`weak_ptr` 锚点）连接，`notify()` 惰性摘除失效边，任一侧先析构均不解引用悬垂对象。
+**观察者图生命周期安全**：来源节点持裸指针观察者表，派生与终端按共享句柄保活其依赖；取消、析构与失败回滚都成对解边，内核不构造强引用环。终端交付前逐依赖保鲜，失效派生节点在传播排空前重算，故任一侧先析构都不会被解引用。
 
 **非拥有登记必须成对注销**：`Animator::drive` / `bind` 以裸指针登记控制器与目标 `State`。若被登记对象的生命周期短于 `Animator`（典型：widget 成员控制器注册进应用级 `Animator`），**必须**在其析构函数中调用 `Animator::remove(c)`，否则下一帧 `tick` 即写入已释放内存。凡新增「把自身成员注册进更长寿命管理器」的代码，都要同时写好注销路径。
 
@@ -87,7 +87,7 @@ Aurora 是一个 C++20 跨平台 GUI 库，以**声明式 + 响应式**为核心
 | 模块 | 路径 | 主要头文件 |
 |:---|:---|:---|
 | 基础层 | `core/` | `types.h` `result.h`（`Result<T>` / `Error`） `log.h` `diagnostics.h` `color.h` `dimension.h` `image.h` `font.h` `strict_mode.h` `event_stream.h` `accessibility.h` `a11y_types.h` `a11y_provider.h` `a11y_text.h` `json.h`（JSON 值容器，见 `specification/01-core.md` §9） `headers.h`（大小写不敏感 HTTP 头集合，见 `specification/01-core.md` §10） `url.h`（URL 值类型与查询参数，见 `specification/01-core.md` §11） `compression.h`（压缩解压编解码器与注册表：字符串格式 ID + 可替换实现，见 `specification/01-core.md` §12） |
-| 响应式核心 | `state/` | `state.h` `computed.h` `effect.h` `binding.h` `immutable.h`（`Immutable<T>` / `Mutable<T>` 作用域权限包装） `store.h` `reactive.h` `signal_view.h` `async.h` `coroutine.h` `state_graph.h` `state_registry.h` `resource.h`（三态异步绑定 `Resource<T>` / `StreamResource<T>`，见 `specification/02-state.md` §5.4） |
+| 响应式核心 | `state/` | `state.h` `read_only_state.h`（`State<T>` / `ReadOnlyState<T>` / `StateSink`） `computed.h` `effect.h` `subscription.h` `async.h` `coroutine.h` `state_graph.h` `undo_stack.h` `resource.h`（三态异步绑定与公开快照 `Resource<T>` / `StreamResource<T>` / `ResourceSnapshot<T>` / `StreamSnapshot<T>`，见 `specification/02-state.md` §5.4）；内核节点与传播引擎在 `state/detail/` |
 
 ### 4.2 布局与渲染
 
@@ -104,7 +104,7 @@ Aurora 是一个 C++20 跨平台 GUI 库，以**声明式 + 响应式**为核心
 |:---|:---|:---|
 | 平台抽象 | `window/` | `surface.h`（`Surface` / `HeadlessSurface`） `window.h` `native_surfaces.h` `win32_host.h` `win32_surface.h` `glfw_surface.h` `x11_surface.h` `wayland_surface.h` `wasm_surface.h` `macos_surface.h` `d3d11_surface.h` `frame_pacing.h` `title_bar_geometry.h` `title_bar_style.h` `window_chrome.h` `window_state.h` `platform.h`（`au::platform()` / `Platform` / `PlatformCapabilities`） |
 
-`Surface` 为可扩展边界：自定义 Surface 经 `Application(Scene, unique_ptr<Surface>)` 注入，不随内置 Surface 增长；各后端由 feature 宏 `AURORA_BACKEND_*` 控制代码剪裁（该宏组覆盖内置 `Surface` 图形后端；音频设备后端开关归 `AURORA_ENABLE_AUDIO` / `AURORA_ENABLE_AUDIO_WASAPI` / `AURORA_ENABLE_AUDIO_ALSA` / `AURORA_ENABLE_AUDIO_WEBAUDIO`，见 `BUILD_OPTIONS.md` §1/§3/§4）。
+`Surface` 为可扩展边界：自定义 Surface 经 `Application(Scene, unique_ptr<Surface>)` 注入，不随内置 Surface 增长；各后端由 feature 宏 `AURORA_BACKEND_*` 控制代码剪裁（该宏组覆盖内置 `Surface` 图形后端；音频设备后端开关归 `AURORA_ENABLE_AUDIO` / `AURORA_ENABLE_AUDIO_WASAPI` / `AURORA_ENABLE_AUDIO_ALSA` / `AURORA_ENABLE_AUDIO_COREAUDIO` / `AURORA_ENABLE_AUDIO_WEBAUDIO`，见 `BUILD_OPTIONS.md` §1/§3/§4）。
 
 `win32_host.h` 与 `glfw_surface.h` 均 **pimpl 隔离**，公共头零 `<windows.h>` / GLFW / OpenGL 依赖。全部真实后端（`Win32Host` / `GlfwSurface` / `X11Surface` / `WaylandSurface`）的公共头均已收敛为 pimpl 句柄，即便后端开启，消费者编译单元也不会被拉入重型平台头，连带避免 `min` / `max`、`None` / `Bool` / `Status` 等宏污染。
 
@@ -123,8 +123,8 @@ Aurora 是一个 C++20 跨平台 GUI 库，以**声明式 + 响应式**为核心
 | 模块 | 路径 | 主要头文件 |
 |:---|:---|:---|
 | 导航 | `navigation/` | `navigator.h` `route.h`（`Route` / `RouteTransition`） `router.h` `transition_layer.h` `navigator_host.h` `hero.h` |
-| 动画 | `animation/` | `timeline.h`（`Tween` / `Keyframes`） `animator.h` `easing.h`（`Curve`） `spring.h`（`SpringSimulation`） |
-| 主题 | `theming/` | `theme.h`（聚合） `color_roles.h` `type_scale.h` `csd_roles.h` `csd_style_bridge.h` `theme_scope.h` `theme_query.h` `theme_extension.h` `color_scheme.h` |
+| 动画 | `animation/` | `timeline.h`（`Tween` / `Keyframes` / `TimelineSpec`） `animator.h`（`AnimationController` / `Animator` / `AnimatedValue` / `TimelinePlayer`） `easing.h`（`Curve`） `spring.h`（`SpringSimulation` / `SpringAnimation`） |
+| 主题 | `theming/` | `theme.h`（聚合 + `from_style` / `default_style` / `defaults`，四套风格的标定表实现体在 `theming/theme_presets.cpp`） `theme_style.h` `color_scheme.h` `color_roles.h` `type_scale.h` `csd_roles.h` `shape_scale.h` `spacing_scale.h` `motion_scale.h` `control_metrics.h` `layout_conventions.h`（度量令牌各组各带「成员指针 → 短名」编译期对照表，供属性行作活令牌回落点） `csd_style_bridge.h` `theme_scope.h` `theme_query.h` `theme_extension.h`；桌面外壳探测的实现体 `theming/detail/theme_probe.cpp`（全库唯一的环境变量读取点） |
 | 环境注入 | `environment/` | `environment.h` `media_query.h` `build_context.h` |
 | 国际化 | `i18n/` | `message_id.h`（`MessageId`） `locale.h` `localized_string.h`（`LocalizedString` / `MessageArg`） `message_catalog.h`（`MessageCatalog` / `default_catalog`） `plural.h`（CLDR 表驱动判定） `format.h`（数字 / 货币 / 日期 + `CivilDate`） `builtin_messages.h`（内置词表薄封装，生成件 `builtin_messages.gen.h`） |
 | 事件 | `event/` | `event.h` `dispatcher.h` `gesture.h` `focus.h` `keycode.h` `drag_drop.h` |
@@ -146,7 +146,7 @@ Aurora 是一个 C++20 跨平台 GUI 库，以**声明式 + 响应式**为核心
 | 调试门面 | `debug/` | `debug_backend.h` `debug_paint.h` `debug_runtime.h` `debug_trace.h`（`aurora::debug`） |
 | 图像编解码 | `image/` | `image_codec.h` |
 | 检查器 | `inspector/` | `inspector_server.h` `inspector_api.h` |
-| 网络套接字层 | `net/` | `blocking.h`（`aurora::net::blocking`：`Listener` / `StreamSocket` 同步阻塞面，**仅供非 UI 线程的工具与测试宿主**；Winsock2/BSD socket 的仓内唯一适配落点是 `net/socket.cpp`，运行时由实现侧随句柄钉住、使用方不感知，地址族取自 `Endpoint`，契约见 [`specification/06-app-platform.md`](specification/06-app-platform.md) §8.8 与 []()）、`address.h`（`Endpoint` / `AddressFamily`：仓内手写的 IPv4 / IPv6 / zone id / 本机 IPC 路径解析与规范化，契约见 []()）、`cancellation.h`（`Cancellation`：异步网络操作的取消令牌）、`poll.h`（`wait_ready`：多句柄四向事件驱动就绪等待基元，POSIX `poll`/Winsock `WSAPoll` 实现落 `socket.cpp`，契约见 [`specification/06-app-platform.md`](specification/06-app-platform.md) §8.8.3）、`capabilities.h`（`Capabilities`：具名布尔能力矩阵，`Engine::capabilities()` 的唯一真值源）、`engine.h`（`Engine`：常驻事件驱动引擎抽象面——任务/定时器投递与停机语义，`instance()` 取进程级实现，契约见 [`specification/06-app-platform.md`](specification/06-app-platform.md) §8.8.4）、`proxy.h`（`ProxyConfig` / `ProxyCredentials` / `NoProxy` / `ProxyEnvironment`：目标 → 代理的唯一决策入口与封闭文法，含系统代理读取，契约见同文件 §8.8.7 与 §8.8.10）、`resolver.h`（`Resolver`：主机名 → 规范化去重的端点列表，数字字面量在查表前短路、不排序不缓存，契约见同文件 §8.8.9）、`transport.h`（`StreamTransport` / `StreamListener` / `StreamOptions` / `ShutdownMode`：异步流与监听、读写背压与半关闭，含按主机名连接的双栈竞速与 `connect_via` 的代理隧道，以及各腿 `AF_UNIX` 本机 IPC 流与 `NativeOptions` 原生选项逃生舱（`peer_credentials()` 只在内核登记对端身份的腿给数值答复），契约见同文件 §8.8.11、§8.8.12 与 §8.8.15）、`framer.h`（`Framer` / `FrameOptions` / `FrameSink` / `LengthByteOrder`：把字节流切成完整消息的三型分帧器（按行 / 按分隔符 / 按长度前缀），拉模型背压与终态超限，零 socket 零平台头，契约见同文件 §8.8.13）、`datagram.h`（`DatagramTransport` / `Datagram` / `DatagramOptions`：UDP 数据报收发、connect 模式对端过滤、组播加入 / 离开与广播允许位，一次接收恰一条消息且截断在库内判定，契约见同文件 §8.8.14）、`tls.h`（`TlsVersion` / `PeerCertificate` / `TlsContext` / `TlsTransport`：把既有 `StreamTransport` 升级为记录级收发的 TLS 通道，`TlsTransport::handshake()` 是唯一入口，读写纪律逐字沿用 L1；信任判定（链 / 主机名 / 有效期 / SPKI pin 叠加）由本层产出，危险开关只有 `allow_insecure_certificate` 一枚且启用必留 warning 诊断；后端引擎由 `cmake/AuroraNetTls.cmake` 探测装配（Windows Schannel / macOS SecureTransport / provider 库 OpenSSL 或 mbedTLS 二选一），契约见同文件 §8.8.18 与 []()）、`http.h`（`aurora::net::http::Method` / `Request` / `Response`：HTTP 发起侧的请求 / 应答值类型与方法令牌双向换算，六枚同名工厂在构造时即 `Url::parse`、`render_head()` 补 `Content-Length` 并复用字节层 `net/detail/http_wire.h` 序列化，零 socket 零平台头；发起侧 `Client` 见 `http_client.h`，§12 其余语义件（流式与进度节流 / 条件请求与缓存 / 认证 / `MultipartWriter` / 连接池与 `Session`）待建，契约见同文件 §8.8.19）、`http_client.h`（`aurora::net::http::Client`：HTTP 发起侧客户端，`send(Request) -> CoroTask<Result<Response>>` 协程把 `Request` 送出并物化 `Response`——`http://` 直连 `StreamTransport`、`https://` 先 `TlsTransport::handshake()` 再套流，逐段喂 `net/detail/http_wire.h` 的 `ResponseAssembler` 按分帧装配、物化完毕再按 `net/detail/http_encoding.h`（库内 TU，不占公共 API）透明解压 `Content-Encoding`——宣告集与支持集同源（`gzip, deflate`）、编码链按 `RFC 9110` §8.4 的应用次序反序逐层解、`deflate` 采 zlib→裸流回落、core 的三枚 `compression-*` 一律换算为 `http-content-encoding-unsupported` / `http-body-too-large` / `http-body-corrupt` 而不穿透，解压产物另有独立上限 `max_decompressed_bytes()`（未设跟随 `max_body_bytes`）、core 注册表三槽（gzip / zlib / deflate）未全部注册时既不注入 `Accept-Encoding` 也不接受编码载荷（内置解码器仅在 `AURORA_ENABLE_COMPRESSION=ON` 的构建编入，应用可自注册补位）；按 `Location` 跟随重定向（超限落 `http-redirect-limit`）、三档超时任一到点落 `http-timeout`；回调→协程桥接落库内 `net/detail/http_await.h`（不占公共 API），连接生命周期由池口径裁决（`Client::pool()` 挂池、缺省关，复用资格五判据与排队计入 `connect` 档，契约见同文件 §8.8.20 / §8.8.31））、`http_hook.h`（`aurora::net::http::ExchangeLeg` / `ExchangeRequestView` / `ExchangeHook` / `ExchangeHookRegistration`：客户端级交换钩子的公共契约——钩子只拿得到一枚**只读**请求视图与一枚**只改请求头**的写通道，方法 / 目标 / 消息体 / `BodySource` / 协议旋钮 / 超时在类型上不可达；`before_request` 可在 `send` 腿短路整次交换（其余三条腿交出短路值即整次落 `http-request-invalid`），`after_response` 只问成功交出应答的那次。链内核、逐钩子保留头差分与线程局部递归闸落库内 `net/detail/http_hook_chain.{h,cpp}`（不占公共 API、不进伞头），触点差异比较器（钩子经手字段名集合：跨 origin 重定向剥离 + 缓存 `Vary` 追加名）同处，短路交付的记账落 `net/http_client.cpp` 的库内 `record_hook_delivery`；`Client::use()` 登记的链由 `Client` 拷贝共享，契约见同文件 §8.8.40 与 §16 第 47 项）、`http_session.h`（`Session`：HTTP 会话面——身份层，持一枚 Cookie Jar（`RFC 6265` 最小集，`Secure` 遇明文不发送也不存储、缓存键自动看见 Cookie）并装进自持的 `Client`，`client()` 交出的引用挂同一张连接池；裸 `Client` 不收不发 Cookie，契约见同文件 §8.8.31）、`http_sse.h`（`aurora::net::http::SseEvent` / `SseSink` / `SseOutcome`：`text/event-stream` 的订阅面——`Client::open_sse` 住在 `open_stream` 之上，只加行与字段的语义（库内 `net/detail/http_sse.{h,cpp}` 自带 CR / CRLF / LF 三型行终止与 BOM 剥离的增量解析器，**不复用 `Framer`**）与「重连之后还是同一次订阅」的会话状态（`Last-Event-ID` 由库带着、`retry:` 原样驱动窗口、自动重连缺省开且 `SseOptions` 两级口径）；声明式侧 `http_binding.h` 同批多出 `SseRecord` 与 `deliver_sse`，契约见同文件 §8.8.33 与 §16 第 38 项）、`random.h`（`aurora::net::RandomSource` / `default_random_source()`：进程级系统熵的唯一取值口，抽象类留应用自实现，缺省源 Windows 走 `BCryptGenRandom`、POSIX 与 macOS 读 `/dev/urandom`、wasm 经 WebCrypto 且按单调用上限切段；熵不可得即交出 `net-platform-unavailable`，协议必需档（掩码密钥、multipart 缺省边界）绝不回落伪随机，观测性档降级并留 WARN，契约见同文件 §8.8.34 与 §8.8.27）、`websocket.h`（`aurora::net::WsMessageKind` / `WsCloseInfo` / `WebSocketSink` / `WebSocketOptions` / `WsSent` 与 move-only 的 `WebSocket` 句柄：`RFC 6455` 客户端**升级之后**的双向会话——`Client::connect_websocket` 住在 HTTP 那条腿之上，`Upgrade` / `Connection` / `Sec-WebSocket-Version: 13` / `Sec-WebSocket-Key` 四枚字段由库写定，分帧与编帧落库内 `net/detail/ws_frame.{h,cpp}`、应答判定落 `net/detail/ws_handshake.{h,cpp}`（**不复用 `Framer`、也不上 `wire::ResponseAssembler`**），句柄自持读环且析构尽力投递 `close(1000)`，队满只拒当次发送不断连接、心跳被动为主且判定时不读时钟；声明式侧 `http_binding.h` 同批多出 `WsRecord` 与 `deliver_ws`（一条成形消息一条记录），契约见同文件 §8.8.34 与 §8.8.35 及 §16 第 39 项）、`observability.h`（`aurora::net::ExportSurface` / `FieldClass` / `ExportPolicy` / `present_field` / `present_url`：凭据分级与两段式呈现——`Secret` 恒折叠且宿主无权放大、`Sensitive` 按 `(导出面 + 键)` 放行、消息体恒不导出；不随 `AURORA_ENABLE_DEBUG` 裁切，契约见同文件 §8.8.38）、`http_observability.h`（`aurora::net::http::HttpStage` / `StageMark` / `HttpRequestTimeline` / `HttpActivityEntry` / `ActivityOptions` / `ActivitySnapshot` / `NetEventSink` 与七枚配置 / 查询函数：进程级活动存储与事件总线，三处 emit 由内部 RAII 守卫 `net/detail/observability_trace.h` 驱动，最新一跳含在途、容量淘汰不豁免在途、迟到 end 不复活；Release 下整体裁切并如实回 unavailable，契约见同文件 §8.8.36 与 §8.8.37） |
+| 网络套接字层 | `net/` | `blocking.h`（`aurora::net::blocking`：`Listener` / `StreamSocket` 同步阻塞面，**仅供非 UI 线程的工具与测试宿主**；Winsock2/BSD socket 的仓内唯一适配落点是 `net/socket.cpp`，运行时由实现侧随句柄钉住、使用方不感知，地址族取自 `Endpoint`，契约见 [`specification/06-app-platform.md`](specification/06-app-platform.md) §8.8 与 []()）、`address.h`（`Endpoint` / `AddressFamily`：仓内手写的 IPv4 / IPv6 / zone id / 本机 IPC 路径解析与规范化，契约见 []()）、`cancellation.h`（`Cancellation`：异步网络操作的取消令牌）、`poll.h`（`wait_ready`：多句柄四向事件驱动就绪等待基元，POSIX `poll`/Winsock `WSAPoll` 实现落 `socket.cpp`，契约见 [`specification/06-app-platform.md`](specification/06-app-platform.md) §8.8.3）、`capabilities.h`（`Capabilities`：具名布尔能力矩阵，`Engine::capabilities()` 的唯一真值源）、`engine.h`（`Engine`：常驻事件驱动引擎抽象面——任务/定时器投递与停机语义，`instance()` 取进程级实现，契约见 [`specification/06-app-platform.md`](specification/06-app-platform.md) §8.8.4）、`proxy.h`（`ProxyConfig` / `ProxyCredentials` / `NoProxy` / `ProxyEnvironment`：目标 → 代理的唯一决策入口与封闭文法，含系统代理读取，契约见同文件 §8.8.7 与 §8.8.10）、`resolver.h`（`Resolver`：主机名 → 规范化去重的端点列表，数字字面量在查表前短路、不排序不缓存，契约见同文件 §8.8.9）、`transport.h`（`StreamTransport` / `StreamListener` / `StreamOptions` / `ShutdownMode`：异步流与监听、读写背压与半关闭，含按主机名连接的双栈竞速与 `connect_via` 的代理隧道，以及各腿 `AF_UNIX` 本机 IPC 流与 `NativeOptions` 原生选项逃生舱（`peer_credentials()` 只在内核登记对端身份的腿给数值答复），契约见同文件 §8.8.11、§8.8.12 与 §8.8.15）、`framer.h`（`Framer` / `FrameOptions` / `FrameSink` / `LengthByteOrder`：把字节流切成完整消息的三型分帧器（按行 / 按分隔符 / 按长度前缀），拉模型背压与终态超限，零 socket 零平台头，契约见同文件 §8.8.13）、`datagram.h`（`DatagramTransport` / `Datagram` / `DatagramOptions`：UDP 数据报收发、connect 模式对端过滤、组播加入 / 离开与广播允许位，一次接收恰一条消息且截断在库内判定，契约见同文件 §8.8.14）、`tls.h`（`TlsVersion` / `PeerCertificate` / `TlsContext` / `TlsTransport`：把既有 `StreamTransport` 升级为记录级收发的 TLS 通道，`TlsTransport::handshake()` 是唯一入口，读写纪律逐字沿用 L1；信任判定（链 / 主机名 / 有效期 / SPKI pin 叠加）由本层产出，危险开关只有 `allow_insecure_certificate` 一枚且启用必留 warning 诊断；后端引擎由 `cmake/AuroraNetTls.cmake` 探测装配（Windows Schannel / macOS SecureTransport / provider 库 OpenSSL 或 mbedTLS 二选一），契约见同文件 §8.8.18 与 []()）、`http.h`（`aurora::net::http::Method` / `Request` / `Response`：HTTP 发起侧的请求 / 应答值类型与方法令牌双向换算，六枚同名工厂在构造时即 `Url::parse`、`render_head()` 补 `Content-Length` 并复用字节层 `net/detail/http_wire.h` 序列化，零 socket 零平台头；发起侧 `Client` 见 `http_client.h`，§12 其余语义件（流式与进度节流 / 条件请求与缓存 / 认证 / `MultipartWriter` / 连接池与 `Session`）待建，契约见同文件 §8.8.19）、`http_client.h`（`aurora::net::http::Client`：HTTP 发起侧客户端，`send(Request) -> CoroTask<Result<Response>>` 协程把 `Request` 送出并物化 `Response`——`http://` 直连 `StreamTransport`、`https://` 先 `TlsTransport::handshake()` 再套流，逐段喂 `net/detail/http_wire.h` 的 `ResponseAssembler` 按分帧装配、物化完毕再按 `net/detail/http_encoding.h`（库内 TU，不占公共 API）透明解压 `Content-Encoding`——宣告集与支持集同源（`gzip, deflate`）、编码链按 `RFC 9110` §8.4 的应用次序反序逐层解、`deflate` 采 zlib→裸流回落、core 的三枚 `compression-*` 一律换算为 `http-content-encoding-unsupported` / `http-body-too-large` / `http-body-corrupt` 而不穿透，解压产物另有独立上限 `max_decompressed_bytes()`（未设跟随 `max_body_bytes`）、core 注册表三槽（gzip / zlib / deflate）未全部注册时既不注入 `Accept-Encoding` 也不接受编码载荷（内置解码器仅在 `AURORA_ENABLE_COMPRESSION=ON` 的构建编入，应用可自注册补位）；按 `Location` 跟随重定向（超限落 `http-redirect-limit`）、三档超时任一到点落 `http-timeout`；回调→协程桥接落库内 `net/detail/http_await.h`（不占公共 API），连接生命周期由池口径裁决（`Client::pool()` 挂池、缺省关，复用资格五判据与排队计入 `connect` 档，契约见同文件 §8.8.20 / §8.8.31））、`http_hook.h`（`aurora::net::http::ExchangeLeg` / `ExchangeRequestView` / `ExchangeHook` / `ExchangeHookRegistration`：客户端级交换钩子的公共契约——钩子只拿得到一枚**只读**请求视图与一枚**只改请求头**的写通道，方法 / 目标 / 消息体 / `BodySource` / 协议旋钮 / 超时在类型上不可达；`before_request` 可在 `send` 腿短路整次交换（其余三条腿交出短路值即整次落 `http-request-invalid`），`after_response` 只问成功交出应答的那次。链内核、逐钩子保留头差分与线程局部递归闸落库内 `net/detail/http_hook_chain.{h,cpp}`（不占公共 API、不进伞头），触点差异比较器（钩子经手字段名集合：跨 origin 重定向剥离 + 缓存 `Vary` 追加名）同处，短路交付的记账落 `net/http_client.cpp` 的库内 `record_hook_delivery`；`Client::use()` 登记的链由 `Client` 拷贝共享，契约见同文件 §8.8.40 与 §16 第 47 项）、`http_session.h`（`Session`：HTTP 会话面——身份层，持一枚 Cookie Jar（`RFC 6265` 最小集，`Secure` 遇明文不发送也不存储、缓存键自动看见 Cookie）并装进自持的 `Client`，`client()` 交出的引用挂同一张连接池；裸 `Client` 不收不发 Cookie，契约见同文件 §8.8.31）、`http_sse.h`（`aurora::net::http::SseEvent` / `SseSink` / `SseOutcome`：`text/event-stream` 的订阅面——`Client::open_sse` 住在 `open_stream` 之上，只加行与字段的语义（库内 `net/detail/http_sse.{h,cpp}` 自带 CR / CRLF / LF 三型行终止与 BOM 剥离的增量解析器，**不复用 `Framer`**）与「重连之后还是同一次订阅」的会话状态（`Last-Event-ID` 由库带着、`retry:` 原样驱动窗口、自动重连缺省开且 `SseOptions` 两级口径）；声明式侧 `http_binding.h` 同批多出 `SseRecord` 与 `deliver_sse`，契约见同文件 §8.8.33 与 §16 第 38 项）、`random.h`（`aurora::net::RandomSource` / `default_random_source()`：进程级系统熵的唯一取值口，抽象类留应用自实现，缺省源 Windows 走 `BCryptGenRandom`、POSIX 与 macOS 读 `/dev/urandom`、wasm 经 WebCrypto 且按单调用上限切段；熵不可得即交出 `net-platform-unavailable`，协议必需档（掩码密钥、multipart 缺省边界）绝不回落伪随机，观测性档降级并留 WARN，契约见同文件 §8.8.34 与 §8.8.27）、`websocket.h`（`aurora::net::WsMessageKind` / `WsCloseInfo` / `WebSocketSink` / `WebSocketOptions` / `WsSent` 与 move-only 的 `WebSocket` 句柄：`RFC 6455` 客户端**升级之后**的双向会话——`Client::connect_websocket` 住在 HTTP 那条腿之上，`Upgrade` / `Connection` / `Sec-WebSocket-Version: 13` / `Sec-WebSocket-Key` 四枚字段由库写定，分帧与编帧落库内 `net/detail/ws_frame.{h,cpp}`、应答判定落 `net/detail/ws_handshake.{h,cpp}`（**不复用 `Framer`、也不上 `wire::ResponseAssembler`**），句柄自持读环且析构尽力投递 `close(1000)`，队满只拒当次发送不断连接、心跳被动为主且判定时不读时钟；声明式侧 `http_binding.h` 同批多出 `WsRecord` 与 `deliver_ws`（一条成形消息一条记录），契约见同文件 §8.8.34 与 §8.8.35 及 §16 第 39 项）、`observability.h`（`aurora::net::ExportSurface` / `FieldClass` / `ExportPolicy` / `present_field` / `present_url`：凭据分级与两段式呈现——`Secret` 恒折叠且宿主无权放大、`Sensitive` 按 `(导出面 + 键)` 放行、消息体恒不导出；不随 `AURORA_ENABLE_DEBUG` 裁切，契约见同文件 §8.8.38）、`http_observability.h`（`aurora::net::http::HttpStage` / `StageMark` / `HttpRequestTimeline` / `HttpActivityEntry` / `ActivityOptions` / `ActivitySnapshot` / `NetEventSink` 与七枚配置 / 查询函数：进程级活动存储与事件总线，三处 emit 由内部 RAII 守卫 `net/detail/observability_trace.h` 驱动，最新一跳含在途、容量淘汰不豁免在途、迟到 end 不复活；Release 下整体裁切并如实回 unavailable，契约见同文件 §8.8.36 与 §8.8.37）、`connectivity.h`（`aurora::net::NetworkState` / `ConnectivitySource` / `ConnectivityChangeCause` / `ConnectivityFact` / `ConnectivityChange` / `ConnectivityOptions` / `ConnectivityMonitor` / `ConnectivityRegistration` 与三枚令牌换算函数：进程级链路态——同步采集腿读 OS 事实（Windows 路由 / 接口表查询落 `socket.cpp`，Linux 读路由伪文件 + sysfs `operstate`，macOS 读 `SystemConfiguration` 动态存储的全局 IPv4/IPv6 键），不对称阈值状态机（判断快、判通慢，连接失败只触发采样不判决），定时复用引擎 `post_after` 并以 epoch + pending 合并插队，订阅回调经 `post_to_main` 回投；**零新线程、零出站 I/O、无新增错误码、不随 `AURORA_ENABLE_DEBUG` 裁切**，`/api/network` 顶层的 `connectivity` 对象与本面同源，契约见同文件 §8.8.41 与 §16 第 48 项） |
 | WebView 嵌入 | `webview/` | `web_view.h` `native_view_host.h`（`aurora::webview`：`WebView` 控件 + 宿主侧原生子视图书架 `NativeViewHost`；第二类平台扩展点，像素不经 `Painter` 合成。契约见 [`specification/06-app-platform.md`](specification/06-app-platform.md) §12.1） |
 | 工厂语法糖 | `ui/` | 声明式工厂函数（见 [`specification/04-widget.md`](specification/04-widget.md) §5） |
 | 入口 | `aurora.h` | 聚合 include + `namespace au` 别名提示 |
@@ -171,7 +171,7 @@ API 契约以 `include/aurora/storage/*.h` 的落地声明为准（见 [`specifi
 ## 5 核心数据流
 
 ```text
-[State / Signal 变更]
+[State 变更]
       │
       ▼
 [Reactive Core 计算依赖图] ──精确──► [受影响的 Widget 子树]
@@ -197,7 +197,7 @@ API 契约以 `include/aurora/storage/*.h` 的落地声明为准（见 [`specifi
 
 ### 5.2 事件驱动帧循环
 
-`Application::run` / `Window::run` 为**事件驱动 + 帧节流**模型：每帧末尾经纯函数 `compute_wait_timeout`（`window/frame_pacing.h`）决策下次唤醒，循环在 `Surface::wait_events(timeout_ms)` 阻塞。
+`Application::run` 为**事件驱动 + 帧节流**模型：每帧末尾经纯函数 `compute_wait_timeout`（`window/frame_pacing.h`）决策下次唤醒，循环在 `Surface::wait_events(timeout_ms)` 阻塞（`Window` 不再自带帧循环）。
 
 **帧内次序（`Application::run` 的 `step_frame`）**：
 
@@ -215,7 +215,9 @@ drain_posted → pump_all_once → on_frame_ → 关闭闸门询问步 poll_clos
 | 仅定时任务 | 睡到最近到期时刻（`Scheduler::next_deadline_ms`） |
 | 后端自带节拍（D3D11 vsync，`Surface::paces_frames()` 为真） | 跳过 CPU sleep，避免双重限速 |
 
-各后端实现真阻塞：`Win32` 经 `MsgWaitForMultipleObjectsEx`、`Glfw` 经 `glfwWaitEventsTimeout`；`Headless` 为 no-op（测试以 `max_frames` 驱动，保证确定性与速度）。跨线程回投（`au::async` 的 `then` 回调）经 `Task::set_main_poster` 入队 + `Surface::request_wake()` 唤醒睡眠中的主循环，下一帧开头在主线程排水执行。
+「有动画」分支的读法须与动画层的两个机制对齐：`repeat(-1, ...)` 的无限循环与在途 `SpringAnimation` 都算「有动画」，前者本就要求常驻帧（能力本身的代价），后者在 `is_settled` 定格并 `stop()` 登记时钟后自动退出该分支。反向的一条是**冻结不得变成常驻帧**：`Animator::set_time_scale(0.0)` 下 `has_active()` 恒假、登记控制器不置脏，控件自驱路径拿到 0 步长也不标脏、不请求帧——「停着不动却满帧唤醒」是缺陷不是设计。解冻不能靠控件自醒（每帧计时是逐控件私有标志），`0 → >0` 由 `Animator::take_rearm_request()` 请求「下一帧不深睡」，那一帧各控件照常推进并自行续帧。
+
+各后端实现真阻塞：`Win32` 经 `MsgWaitForMultipleObjectsEx`、`Glfw` 经 `glfwWaitEventsTimeout`；`Headless` 为 no-op（测试以 `max_frames` 驱动，保证确定性与速度）。跨线程回投（`au::async` 的 `then` 回调）经 `MainQueue::post` 入队，由上岗者注入的唤醒体（`Application` 传 `request_wake_all`）唤醒睡眠中的主循环，下一帧开头 `take_batch` 在主线程排水执行。
 
 `power_saving = false` 或 `max_fps = 0` 退回忙轮询（持续重绘场景的 opt-out）。`FrameStats` 以 `wakeups_per_sec()` 与 `sleep_ratio()` 观测。
 
@@ -249,6 +251,7 @@ drain_posted → pump_all_once → on_frame_ → 关闭闸门询问步 poll_clos
 
 - **`Painter`**：纯软件栅格（RGBA8 帧缓冲），不依赖 GPU；接口为纯函数式（给定节点 + 约束 → 确定像素），支持确定性快照比对。
 - **圆角抗锯齿裁剪**：`Painter` 用 SDF coverage + 1px 羽化。
+- **圆角填充的行级全覆写快路径**：`fill_rect_slow_path` 逐行先求「coverage 恒为 1」的 x 区间，区间内整行批量混合、只有过渡区逐像素求 SDF，避免整块矩形都付 `sqrt` 的代价。区间求解的半径必须是**含 AA 阈值的有效半径** `rad + t`（`t = −0.5` 抗锯齿 / `0` 硬边）：圆弧段解根 `sqrt((rad + t)² − py²)`、越界判定 `py > rad + t`、直边段半宽 `hw + t`；右界取 `floor(cx + half_range) + 1`。把 `t` 直接当半径会漏掉几乎全部行——**胶囊形（半径 = 半高）会整条退回逐像素**，普通圆角矩形只在两端各 `rad` 行受影响，因此该缺陷只在胶囊控件上成片显形。快路径必须在这些形态上与逐像素 coverage 逐位一致（判据见 §10.5）。
 - **矢量描边原语**：`draw_line(a, b, width, color)`（点到线段距离 SDF，圆帽 + 1px 羽化）、`fill_rounded_rect(r, radius, color)`、`draw_rounded_border(r, radius, thickness, color)`（圆角矩形 SDF 带状覆盖、向内描边）；三者均接入 Display List 录制回放，回放与直绘逐位一致。
 - **GPU 栅格后端（`GpuGlRhi`）**：`DisplayList` 的第二类消费者（与软件 `Painter` 平级，见 §2 命令流与执行分离）。语义与软件路径**同源**——渐变经 1D LUT 纹理复现软件采样；图像预乘 alpha（PMA）上传、`ONE/ONE_MINUS_SRC_ALPHA` 混合规避半透明缩放暗晕；文本复用软件 `GlyphAtlas` 光栅化（经字形发射桥 `emit_text_glyphs`，shaping / 度量 / 缓存单一代码路径）；Shadow/Blur/Blend/Mask 按软件逐像素公式以 SDF / ping-pong pass 等价实现。GL 函数表自写最小 loader（无 GLAD/gl3w），GL 上下文创建与呈现由所在 Surface（GLFW）承担，本后端只做「DisplayList → 批渲染」。**常驻资源双通道**：GPU 层缓存把 `cache_layer` 子树重定向到 FBO 常驻层纹理（epoch + 尺寸键控失效，干净帧仅一条 `DrawLayer` 合成；软件回退经 `SoftwareRhi` 进程级全局层存储语义对齐）；流式纹理常驻槽按 `stream_key` 寻址、`stream_version` 门控增量子上传（视频 / 大图逐帧更新免全量重传）。能力位 `RhiCapabilities` 与原生 GPU 表面导入 `import_native_surface` 为后端无关契约位（GL 恒返回 0，供平台互操作后端兑现）。
 - **wgpu GPU 栅格后端（`WgpuRhi` + `WgpuWin32Surface`）**：跨平台 GPU 主力路径——同一套 WGSL 管线经 wgpu-native（Rust 静态库，源码 vendored 于 `third_party/wgpu-native/`，cargo 构建）覆盖 Vulkan / D3D12 / Metal / GLES。命令消费面与 `GpuGlRhi` 实现同一 `RhiBackend` + `RhiFrameSink` 契约、语义同源（SDF 裁剪 / LUT 渐变 / PMA 图像 / 字形图集复用 / 层缓存 + 流式槽）；另有离屏模式（`read_pixels` 全帧读回，测试与探针通道）。compute 实路径：静态大图整条 mip 链由 `cs_mip` compute shader 逐级生成、`DrawImage` 缩小走三线性 mip 采样（`compute` 能力位 Vulkan/D3D12/Metal 端为 true，GLES 端与管线构建失败时如实回落单级 + lod0）。宿主接线：`WgpuWin32Surface` 复用 `Win32Host` 宿主、`WgpuX11Surface` / `WgpuWaylandSurface` 组合内嵌 `X11Surface` / `WaylandSurface` 宿主，做 GPU 直渲上屏（`end_frame` 内 present），失败永久回退软件上传路径（GDI / XPutImage / wl_shm）；`RendererPreference::GpuWgpu` 强制路由不降级（Linux `create_native_window` 运行期按 `WAYLAND_DISPLAY` 会话择宿主）。规格见 `specification/03-layout-render.md` §8.8。
@@ -263,7 +266,7 @@ drain_posted → pump_all_once → on_frame_ → 关闭闸门询问步 poll_clos
 
 ### 8.3 Scroll 离屏内容缓冲（滑窗）
 
-`Scroll` 把内容录进与滚动偏移无关的**内容坐标滑窗缓冲** `content_`（`unique_ptr<Painter>`），尺寸 = 视口高 × (1 + 2 × `overscan`)，仅覆盖可见区上下各 `overscan` 视口高的带而非整页；`buffer_origin_y_` 标记该带在内容坐标系中的锚点。`ScrollProps::overscan`（默认 `1.0F`，共 3 屏厚）控制缓冲带厚度。
+`Scroll` 把内容录进与滚动偏移无关的**内容坐标滑窗缓冲** `content_`（`unique_ptr<Painter>`），尺寸 = 视口高 × (1 + 2 × `overscan`)，仅覆盖可见区上下各 `overscan` 视口高的带而非整页；`buffer_origin_y_` 标记该带在内容坐标系中的锚点。`ScrollProps::overscan()`（默认 `1.0F`，共 3 屏厚，唯一绘制档行）控制缓冲带厚度。
 
 - 滚动帧满足「内容仍有效且为纯滚动且未触发重锚点」时，直接 `p.composite(*content_, translate(0, buffer_origin_y_ - offset_y_))` 一次 blit，不重新栅格。
 - **程序化跳转**（`set_offset` / `restore_key` 恢复）**不**置 `content_valid_ = false`：偏移不参与内容录制（内容以稳定内容坐标录进缓冲），跳越缓冲窗口时由 `on_paint` 的 `!in_buffer → reanchor` 分支整块/条带重录兜底，故无需在此强制整块重录。
@@ -288,7 +291,7 @@ drain_posted → pump_all_once → on_frame_ → 关闭闸门询问步 poll_clos
 | `WaylandSurface` | CPU swizzle 到 `WL_SHM_FORMAT_ARGB8888`（预乘 alpha）经 `wl_shm` 共享内存双缓冲槽，CSD 态缓冲含四周 10dp 阴影 margin（swizzle 后 `csd::compose_shadow_margins_bgra` 直写真 alpha，`set_window_geometry` 声明内容边界、opaque region 仅报内容矩形，见 `specification/03` §8.5 与 `specification/07` §4.1）；`wait_events` 经 `poll(2)`；`scale_factor` 取 `wl_output.scale`；光标走 `libwayland-cursor` 客户端主题（cursor 专用 `wl_surface` + `wl_pointer.set_cursor`，见 `specification/03` §8.3） | `AURORA_BACKEND_WAYLAND`（默认 OFF） |
 | `WgpuWaylandSurface` | 组合内嵌 `WaylandSurface` 宿主（窗口壳/事件/xkb/CSD 全走它，本类零 wayland-client），帧级 DisplayList 交 `WgpuRhi` 在 GPU 端光栅化并经 Wayland surface swapchain present 直渲同一 `wl_surface`；GPU 失败永久回退内嵌宿主的 `wl_shm` 上传路径；GPU 模式下 CSD 分两层合成进帧（begin_frame 阴影 underlay + end_frame 标题 overlay，见 `specification/03` §8.8） | `AURORA_BACKEND_GPU_WGPU` ∧ `AURORA_BACKEND_WAYLAND`（默认 OFF） |
 | `WasmSurface` | `<canvas>` 像素写回（`EM_ASM` `putImageData`） | `AURORA_BACKEND_WASM`（默认 OFF） |
-| `MacOSSurface` | AppKit / CoreGraphics（**未支持**：仅骨架代码，窗口创建/销毁/上屏与事件泵均未实装，运行期不可用） | `AURORA_BACKEND_MACOS`（默认 OFF） |
+| `MacOSSurface` | AppKit / CoreGraphics（`NSWindow` + 自定义 `NSView`；`present` 把 Painter 缓冲零拷贝包装成 `CGImage` 交视图重绘；事件泵 `nextEventMatchingMask` + `sendEvent`；鼠标 / 滚轮 / 键盘 / `NSTextInputClient` 文本输入与 IME / 系统拖放 / 最近文档 / 明暗跟随已接，见 `specification/03` §8 与 `specification/05` / `06`） | `AURORA_BACKEND_MACOS`（Apple 默认 ON，其余平台默认 OFF 且开启 FATAL；Apple 上关闭亦 FATAL，见 §8.4 末段） |
 
 `Win32Surface`、`D3D11Surface` 与 `WgpuWin32Surface` 共用 `Win32Host` 宿主（创建 / 消息泵 / 事件翻译 / DPI / 同步重渲染 / 运行期标题），仅 present 后端不同。宿主采用 pimpl 隔离，故 `hwnd()` / `background_brush()` 以 `void*` 返回（调用方 `static_cast`）。窗口过程按**消息族**分派到各 `handle_*` 函数，取代单体 switch。X11/Wayland 侧的 `WgpuX11Surface` / `WgpuWaylandSurface` 不走共享宿主路线而是**组合**内嵌 `X11Surface` / `WaylandSurface`（窗口创建 / 事件泵 / 光标全走它，本类只做 GPU 帧路径与软件回退分流，句柄以 void* 同源取得），避免把 Xlib / wayland-client 逻辑复制第二份。
 
@@ -296,7 +299,7 @@ drain_posted → pump_all_once → on_frame_ → 关闭闸门询问步 poll_clos
 
 **自定义后端**：任意 `Surface` 子类经 `Application(Scene, unique_ptr<Surface>)` / `App().surface(...)` 注入，无需为每种后端在 `Application` 上加构造重载；`Surface` 之外的扩展点收口在 `create_window` 工厂。
 
-**编译 / 链接期代码剪裁**：关闭某 `AURORA_BACKEND_*` 后，对应 `Surface` 实现类、工厂重载与重型平台头被预处理器剔除，链接产物不再含该后端；关闭 `AURORA_ENABLE_AUDIO_WASAPI` / `AURORA_ENABLE_AUDIO_ALSA` / `AURORA_ENABLE_AUDIO_WEBAUDIO` 同样剔除对应音频设备后端实现。自定义注入路径（自定义 `Surface` / 自定义 `AudioDeviceBackend`）不受影响，故「只用自定义 backend」可不编译任何内置后端。
+**编译 / 链接期代码剪裁**：关闭某 `AURORA_BACKEND_*` 后，对应 `Surface` 实现类、工厂重载与重型平台头被预处理器剔除，链接产物不再含该后端；关闭 `AURORA_ENABLE_AUDIO_WASAPI` / `AURORA_ENABLE_AUDIO_ALSA` / `AURORA_ENABLE_AUDIO_COREAUDIO` / `AURORA_ENABLE_AUDIO_WEBAUDIO` 同样剔除对应音频设备后端实现。自定义注入路径（自定义 `Surface` / 自定义 `AudioDeviceBackend`）不受影响，故「只用自定义 backend」可不编译任何内置后端。**一处例外**：`AURORA_BACKEND_MACOS` 在 Apple 上默认 ON 且不允许关闭（配置期 FATAL，口径见 `BUILD_OPTIONS.md` §3）。例外不是设计偏好而是当前事实——`Surface` 之外的 macOS 应用域实现（通知中心、系统托盘、最近文档投影、原生菜单栏桥，见 `specification/06-app-platform.md` §8）按**平台宏**而非**后端宏**门控，因为它们对接的是 OS 级服务而非上屏路径，关掉后端只会让这些文件被编成不含 AppKit 的纯 C++（实测报 `unknown type name 'NSString'` 与未声明的桥符号），得到一台构建不过的机器。把门控改成后端宏被试过并否决：那只是把洞从「链接期」搬到「运行期静默失效」，且让 Apple 平台出现一条从未被任何 CI 作业构建过的组合。口径与 `AURORA_BACKEND_WIN32`（Windows 默认 ON）及四枚 `AURORA_ENABLE_AUDIO_*`（各自平台默认 ON）一致：**自己平台的原生后端默认开**。Linux / Windows 上按本段剪裁后端不受影响。
 
 ### 8.5 无障碍桥接（platform accessibility bridge）
 
@@ -318,11 +321,13 @@ drain_posted → pump_all_once → on_frame_ → 关闭闸门询问步 poll_clos
 2. 窗口销毁时 `disconnect_all()` 会先立**单向拆除门闩**再调 `UiaDisconnectProvider`：该 API 会**同步重入** provider 取属性（UIA 需为被丢弃的侦听者补发属性变更事件），门闩保证重入路径只读旧快照、绝不重建。
 
 `deactivate()` 与 `disconnect_all()` 等价且幂等，并在其中**从 `ProviderRegistry` 注销** —— 缺这一步，进程级事件广播会在已析构的桥上调用 `is_active()`（use-after-free）。
-**线程与降级（provider 回调一律回投主人线程）。** 语义树与桥**没有**额外的 UI 线程：但 in-proc provider 的回调由 `UIAutomationCore.dll` 投递在其 **COM/RPC 线程**上（激活时初始化 STA 套间只保证公寓模型，不等于「回调落在 UI 线程」），故桥对 provider 只暴露「回投主人线程 + 按值副本」的访问口（`eval_on_main` 家族），`sync_if_dirty` / `rebuild` / `find_node` 等裸口保持主人线程专用；主人线程自己调回投口时就地执行、零等待，无 `main_poster` 时同样就地执行。回投按预算限时等待（读 250ms / 动作 500ms），超时返回零值并映射 `UIA_E_ELEMENTNOTAVAILABLE`，且以 `abandoned`（调用方已放弃 ⇒ 晚到项不补做动作）与 `alive_`（桥已析构 ⇒ 闭包不碰树）两道闸封死两条迟到路径 —— 访问面劈分、超时降级与不变量详见 [`specification/06-app-platform.md`](specification/06-app-platform.md) §6.3。`UIAutomationCore.dll` 运行时 `LoadLibraryA` 动态加载，缺库或函数缺失即整桥降级 no-op + 一次 `Diagnostics::warn`，无链接期依赖。
+**线程与降级（provider 回调一律回投主人线程）。** 语义树与桥**没有**额外的 UI 线程：但 in-proc provider 的回调由 `UIAutomationCore.dll` 投递在其 **COM/RPC 线程**上（激活时初始化 STA 套间只保证公寓模型，不等于「回调落在 UI 线程」），故桥对 provider 只暴露「回投主人线程 + 按值副本」的访问口（`eval_on_main` 家族），`sync_if_dirty` / `rebuild` / `find_node` 等裸口保持主人线程专用；主人线程自己调回投口时就地执行、零等待；非主人线程一律经 `MainQueue::try_post`（无值班 = 无头 / 已打烊 ⇒ 返回 false、零值收场并映射 `UIA_E_ELEMENTNOTAVAILABLE`，不再有「槽为空就地执行」的第二条回退）。回投按预算限时等待（读 250ms / 动作 500ms），超时返回零值并映射 `UIA_E_ELEMENTNOTAVAILABLE`，且以 `abandoned`（调用方已放弃 ⇒ 晚到项不补做动作）与 `alive_`（桥已析构 ⇒ 闭包不碰树）两道闸封死两条迟到路径 —— 访问面劈分、超时降级与不变量详见 [`specification/06-app-platform.md`](specification/06-app-platform.md) §6.3。`UIAutomationCore.dll` 运行时 `LoadLibraryA` 动态加载，缺库或函数缺失即整桥降级 no-op + 一次 `Diagnostics::warn`，无链接期依赖。
 
 **Linux 桥差异（AT-SPI2）。** 无 `WM_GETOBJECT` 式「读屏在线才出现」的查询信号，故构造时机改为**首次语义树根注入时一次性尝试**（失败 = 永久降级，不再重试）；建树同步点由「入站查询」与「帧循环 dirty」双侧驱动——`pump()` 每轮开头 `sync_point()`（若脏），事件推送不依赖客户端恰好在做查询。D-Bus 传输 fd 经 `Provider` 侧 `poll_watches()` 并入 X11/Wayland 事件等待的 `poll`，fd 就绪由 `pump()` 读入并派发（单线程、无额外线程）。事件通道 = 快照 diff 的另一种消费：`sync_point()` 产 `TreeDiff` 后按上游 `atk-adaptor` 线格式发 D-Bus 信号广播（added/removed → Cache Add/RemoveAccessible + children-changed；Name/Value/Hint/State → property-/state-changed；焦点 → Event.Focus；播报 → Announcement 直发），与 Win32 UIA 桥 `queue_*` 系列同一「diff → 平台事件」消费范式。降级面 = 无会话总线 / `org.a11y.Bus` 不可达 / libdbus 缺失 / `NO_AT_BRIDGE=1`；线格式契约与申报空位见 [`specification/06-app-platform.md`](specification/06-app-platform.md) §6.4。
 
 **Wasm 桥差异（ARIA 镜像）。** 第三个平台实现（`include/aurora/window/wasm_aria.h` + `src/aurora/window/wasm_aria.cpp`，门控 `AURORA_PLATFORM_WASM ∧ AURORA_BACKEND_WASM`，折算层同样是零平台头的 `detail/aria_protocol.{h,cpp}` + 无头单测 `utest_aria_protocol`），消费端不是 IPC 协议而是**浏览器原生 ARIA 支持**：快照折算成页面隐藏 DOM 镜像（clip 隐藏保进树、`role`/`aria-*`/`aria-activedescendant`/`aria-live`），读屏经无障碍引擎直接消费，故无 `sync_point` 应答面、也**无几何面**（申报）。激活为惰性激活的既定例外（浏览器无读屏探测信号，首根注入即激活）；同步与反向动作排水由桥**自持 rAF 蹦床**每拍执行（`live_bridges()` 成员性做悬垂守卫），不挂 `present()` 帧尾——静止页面没有脏帧就没有 present，读屏动作会被饿死。反向动作走 JS 写队列 + 帧尾轮询（刻意避开 `-sEXPORTED_FUNCTIONS`，保消费者零链接配置）。契约、载荷协议与 CDP 真机验收见 [`specification/06-app-platform.md`](specification/06-app-platform.md) §6.5。
+
+**macOS 桥差异（NSAccessibility）。** 第四座平台实现（`src/aurora/window/detail/macos_ax_bridge.{h,cpp}`，门控 `AURORA_PLATFORM_MACOS ∧ AURORA_BACKEND_MACOS`，由 `MacOSSurface::Impl` 唯一持有）消费端是 AppKit 的无障碍协议而非自研 IPC：内容视图 `isAccessibilityElement` 回 NO、角色为 group，`accessibilityChildren` / `accessibilityHitTest:` / `accessibilityFocusedUIElement` 转发给桥——**首个查询到达才构造并激活**（与 Win32 的惰性口径同形），激活时回填 `screen_reader_active`；宿主在桥存在前记下的根由 `ensure_a11y()` 补喂。重建仍是拉取式：查询即 `sync_if_dirty()`，语义树 → 快照（`a11y::build_tree_snapshot`）→ 按 `runtime_id` 复用的 `NSAccessibilityElement` 元素树，字段按值持有、帧经 `convertRect:toView:` + `convertRectToScreen:` 换算成屏幕点；`set_root` 恒置脏（帧是元素属性，布局每帧可动）。反向动作按节点 id 回控件（Invoke→Click→Toggle / 步进 Value / Focus），推送面把快照 diff 折成 `FocusedUIElementChanged` / `TitleChanged` / `ValueChanged` / 视图级 `LayoutChanged` 与 `AnnouncementRequested`。拆除与另三桥同两条硬不变量：窗口销毁先 `deactivate()`（注销注册表、清元素与快照）再放视图；根控件销毁经 `on_widget_destroying` 立即切断。AppKit 查询只在主线程，故无 UIA 的跨线程回投面。
 
 ### 8.6 输入法桥接（platform IME bridge）
 
@@ -347,7 +352,7 @@ drain_posted → pump_all_once → on_frame_ → 关闭闸门询问步 poll_clos
 
 **拖入入口（与前两桥不同的一点）**：拖出由本进程发起（`system_drag::begin`），拖入由**外部进程**发起，故多一层「宿主投事件的唯一入口」`src/aurora/event/detail/system_drag_ingress.h`（内部头，不进 `include/`）：平台桥把折算好的事件交给它、拿回派发器写定的 `allowed` 去回写 OS 光标；配套的 inert 拖入后端（`install_test_drag_in` 一族，双宏裁切）在接管期间**抑制真实派发**，使拖入链在无头环境可被完整接管。槽由调用方持有而非全局登记——多窗口下进程级单槽会让后登记者覆盖先登记者。
 
-**窗口归属与能力位**：桥由各自的 `Impl` 唯一持有——Win32 侧 `Win32Host::Impl`（`Win32Surface` / `D3D11Surface` / `WgpuWin32Surface` 转发同一实例，与 §8.5、§8.6 同纪律）；X11 侧 `X11Surface::Impl`（析构时先于 X 资源销毁）；Wayland 侧 `WaylandSurface::Impl`（构造末尾 install、随窗口销毁期卸载，按下序 serial 由指针按下路径经 `note_press_serial` 刷新）。 macOS 侧 `MacOSSurface::Impl`（构造末尾 install、`destroy_window` 内先收桥再放视图；按下 `NSEvent` 由指针按下路径经 `note_press_event` 暂存，`attach_view` 供「视图由桥自己产出」的宿主与探针回装）。拖出侧另经 `src/aurora/event/detail/system_drag_backend.h`（内部头）向事件层注册进程级单槽后端（发起 / 取消 / 在途要约索取），由各窗口宿主持有期注册、「先到者优先」去重。能力位 `system_drag_in` / `system_drag_out` **按方向独立翻位**（拖入与拖出分批次落地，成对翻位会让未落地的方向谎报支持），当前 `Win32`、`D3D11`、`X11`、`Wayland` 与 `MacOS` 五类 `SurfaceKind` 两个方向均为 true（macOS 的窗口壳仍为骨架，无内容视图可登记 ⇒ 运行期 `install()` 必失败并记日志降级；能力位表机制归属，与 `multitouch` 等位的声明口径一致）。
+**窗口归属与能力位**：桥由各自的 `Impl` 唯一持有——Win32 侧 `Win32Host::Impl`（`Win32Surface` / `D3D11Surface` / `WgpuWin32Surface` 转发同一实例，与 §8.5、§8.6 同纪律）；X11 侧 `X11Surface::Impl`（析构时先于 X 资源销毁）；Wayland 侧 `WaylandSurface::Impl`（构造末尾 install、随窗口销毁期卸载，按下序 serial 由指针按下路径经 `note_press_serial` 刷新）。 macOS 侧 `MacOSSurface::Impl`（构造末尾 install、`destroy_window` 内先收桥再放视图；按下 `NSEvent` 由指针按下路径经 `note_press_event` 暂存，`attach_view` 供「视图由桥自己产出」的宿主与探针回装）。拖出侧另经 `src/aurora/event/detail/system_drag_backend.h`（内部头）向事件层注册进程级单槽后端（发起 / 取消 / 在途要约索取），由各窗口宿主持有期注册、「先到者优先」去重。能力位 `system_drag_in` / `system_drag_out` **按方向独立翻位**（拖入与拖出分批次落地，成对翻位会让未落地的方向谎报支持），当前 `Win32`、`D3D11`、`X11`、`Wayland` 与 `MacOS` 五类 `SurfaceKind` 两个方向均为 true（macOS 的窗口壳已实写：内容视图在 `create_window` 内建出后即 `install()`，运行期 install 失败如实记日志降级；能力位表机制归属，与 `multitouch` 等位的声明口径一致）。
 
 **受理信号的两条来源（不改派发器）**：`EventDispatcher` 只对 `Enter` / `Over` 写 `event.allowed`（既有单测锁定该语义），而目标侧要回写给源的终态事件（Xdnd 的 `XdndFinished`、Wayland 的 `wl_data_offer.finish`）需要「这一次落放到底有没有被消费」。故 `Drop` 态的受理信号取事件的 `is_handled`——派发器语义不动，桥在 sink 里读回即可（Xdnd 侧另需执行动作，取目标侧 `XdndStatus` 缓存；Wayland 的 `finish` 不带动作，受理位即全部信息）。 macOS 侧没有回写给源的终态事件（AppKit 目标侧不回报执行动作），受理只影响 `prepareForDragOperation` 闸门的返回值——闸门为 NO 时 AppKit 根本不会调 `performDragOperation`。
 
@@ -370,7 +375,7 @@ drain_posted → pump_all_once → on_frame_ → 关闭闸门询问步 poll_clos
 
 ## 10 性能检测体系
 
-Aurora 内置轻量级运行时性能检测体系，提供帧级指标采集、分阶段计时、可视化叠加与日志导出。整个体系零外部依赖，所有组件默认关闭、按需启用。
+Aurora 内置轻量级运行时性能检测体系，提供帧级指标采集、分阶段计时、可视化叠加与日志导出。整个体系零外部依赖，开销按**分级**契约而非「所有组件默认关闭」：帧级采集（`FrameStats` / `PerfOverlay` / `PerfLog`）与恒开的下游订阅门面不受插桩开关控制；分阶段计时与深度作用域插桩由 `AURORA_ENABLE_PROFILING` 编译期归零；可视化叠加层默认 `set_visible(false)`。下游订阅门面在无订阅者时不挂底层采集、不分配、不读时钟，因此 Release 与预编译库都可用。
 
 ### 10.1 FrameStats
 
@@ -419,8 +424,8 @@ Aurora 内置轻量级运行时性能检测体系，提供帧级指标采集、�
 
 ### 10.5 硬约束
 
-- **快速路径逐位一致**：所有快速路径必须与慢路径 golden 零差异，修改后须跑 `utest_offscreen` 全量回归。
-- **SIMD 双实现确定性**：SIMD 路径必须与标量黄金路径逐位一致（`-ffp-contract=off`、同浮点运算序列、整型 `cvtt` 截断）；CI 由 `utest_simd_parity` 逐位比对，一票否决。
+- **快速路径逐位一致**：所有快速路径必须与慢路径 golden 零差异，修改后须跑 `utest_offscreen` 全量回归。圆角填充的行级全覆写快路径由 `utest_painter` 的逐位用例单独钉住：以「圆角裁剪 + 逐像素 `blend_pixel`」作独立基准，对正胶囊 / 胶囊偏锚点 / 普通圆角 / 普通圆角偏锚点四种形态比对 `fill_rounded_rect` 的输出，要求 0 像素差异——覆盖度差一档即转红。
+- **SIMD 双实现确定性**：SIMD 路径必须与标量黄金路径逐位一致（`-ffp-contract=off`、同浮点运算序列、整型 `cvtt` 截断）；CI 由 `utest_simd_parity` 逐位比对，一票否决。实物落点是 `tests/unit/utest_simd_parity.cpp`：五组「标量 ↔ SSE2 ↔ AVX2」三元组各以同一份确定性输入逐字节比对，混合与扫描线覆盖非 4/8 倍数的尾部回落，关闭档与非 x86 档在用例体内按能力退让声明不失踪；「文档声明的现役门禁名是否真的注册」另由 `check_declared_gates` 守护（见 §14.6）。
 
 ### 10.6 调试能力的设计依据
 
@@ -434,13 +439,19 @@ Aurora 内置轻量级运行时性能检测体系，提供帧级指标采集、�
 | 远程访问 | DevTools Server（WebSocket） | React DevTools 独立进程 | GammaRay 进程注入 | `InspectorServer` localhost REST（`/api/debug/*`） |
 | 平台限制 | Skia / Impeller 后端 | DOM / reconciler | 原生 Qt | 真实窗口截图在 Wayland / Headless 不支持（不破解合成器隐私边界） |
 
+### 10.7 基准读数契约与持续看护
+
+六个基准工具统一落盘结构化结果文件（契约在 `tools/include/bench_result.h`），保留原标准输出；结果按测试环境规格、构建口径、后端与场景分桶，跨桶读数不得互相比较。采样不可信、后端不可用或场景跳过时仍落盘带原因码的结果并判数据缺失，不把跳过当绿灯。阈值登记册 `tools/check/perf_gates.json` 与入库基线仓库 `tools/check/perf_baselines.json` 是两类数据：前者记 G-1 至 G-14 的阈值且读取方不动，后者记跨提交趋势读数且只允许显式写入动作更新。
+
+判定分两层：计数类与确定性指标继续由既有单元测试硬红守护；时间类由 `tools/check/bench_compare.py` 以同机同次双构建交错对照判定——每臂不少于九次有效重复、显式种子决定交错顺序、两臂同码对照标定噪声预算、双样本秩检验并对并行指标族做多重比较校正。入库基线只作趋势，同次对照才作回归判定，任一侧缺失即判数据缺失，不回退静态阈值。编排落在独立工作流 `.github/workflows/nightly-bench.yml`，由 `tools/check/bench_nightly.py` 在同一运行器内构建父提交与当前提交两套产物并产出报告与作业摘要；时间类超阈值只告警，不改动 `ci.yml` 全量矩阵的通过失败语义。权威口径见 `specification/08-tooling.md`（工具规格章节）。
+
 ---
 
 ## 11 设计不变量
 
 任何改动都不得破坏以下不变量（违反会导致挂起、闪烁或行为不确定）。
 
-1. **细粒度订阅去重**：`State::subscribe` 必须对同一 `Effect` 去重，否则约 25 帧后挂死。
+1. **观察边与来源成对**：每个终端运行记录与派生节点按本轮读取集合替换依赖边；取消、析构、构造失败都须成对解边。重复读取同源只保留一条边，否则图与通知关系不一致并随轮次累积。
 2. **根挂载唯一**：`Window::present_root` 对同一根只 mount 一次。
 3. **命中测试用局部坐标**：`Rect{Point{0,0}, bounds.size}.contains(local)`（非 `bounds.contains`）。
 4. **事件冒泡协议**：`Widget::on_pointer_event` 写 `e.handled = true` 即停止冒泡；纯展示控件不拦截以放行父级点击。
@@ -452,6 +463,15 @@ Aurora 内置轻量级运行时性能检测体系，提供帧级指标采集、�
 10. **`RelayoutBoundary` 语义**：`set_relayout_boundary(true)` 的控件成为显式重排边界——布局脏标记冒泡在边界处截断，且 `on_dirty(true)` 走局部重排而非整树重排。**`Scroll` 不得无条件置此标志**：骨架 → 真实内容的切换逻辑位于 `Scroll` 之上的祖先（由下方 `mark_needs_layout` 驱动），若 `Scroll` 成为边界会截断该脏冒泡，使内容切换永不触发（离屏缓冲恒为骨架）。仅在确有「子树自包含、且切换由本控件自身驱动」的语义时才置位。
 11. **几何权威在 `Node`**：`Widget` 不持有任何几何缓存。
 12. **原生子视图不被合成**：`NativeViewHost` 管理的原生子视图（系统 WebView 等）由窗口系统直接叠加显示，**不参与** `Painter` / `RhiBackend` 的帧录制与回放；aurora 侧只下发几何 / 可见性并按需读取快照像素。命中 / 裁剪 / 重叠一律以宿主窗口系统的实际叠加为准，库内不得假设其被合成进 aurora 帧缓冲。
+13. **平台 socket 头唯一落点不放宽**：`net/socket.cpp` 是 Winsock2 / BSD socket 头的仓内唯一适配 TU——其他 TU（含链路态采集腿这类新增的 OS 查询）不得包含平台 socket 头，也不得为一条查询新增线程。链路态的 Windows 腿（`GetIfTable2` / `GetIpForwardTable2`）因此住在 `socket.cpp`，Linux 腿只读伪文件与 `sysfs`；「多一条 OS 事实要读」不是放宽这条边界的理由。
+14. **动画时间轴的 dt 只有单一漏斗入口**：帧步长到动画步长的折算只经 `scaled_frame_dt`（或 `Animator::scale_frame_dt`）**一次**——`Animator::tick` 折算后推进控制器并把折算值交给 `add_frame_binding`，各控件自驱路径在自己的 `tick` / `tick_gestures` 入口折算一次，下游求解器（`ScrollGlide::tick`、`SpringSimulation::value`、`AnimationController::tick`）保持纯时序、不感知倍率。两层都乘 ⇒ 倍率变平方。`Animator::current()` 为空时漏斗恒等返回（无头 / golden 的确定性基线据此不破），漏斗**只做乘法、不夹取**。缩放为 `0.0`（冻结）不得产生常驻帧：控制器不置脏、绑定不写回、`has_active()` 转假、控件侧不标脏不请求帧。
+15. **循环模式不改写既有一次性语义**：`PlaybackMode::Repeat` 只改变「到达端点之后怎么办」，不改单次播放的进度方程、曲线、终值，也不新增 `completed` 触发——`on_completed` 仍只在控制器被置为 `Completed` / `Dismissed` 终态那一帧触发一次，无限循环全程不触发；`reset()` / `stop()` 把模式清回 `Once`。`reduce_motion` 优先于循环：无障碍档单帧落本次目标端点即止，不进入往复。
+16. **`set_progress` 不改状态语义**：外部定位只写进度（越界夹入 `[0,1]`），**不改 `status_`、不清 `PlaybackMode`**；它与 `reset(v)`（按值改写 `status_`）是两条不同语义，不得互相代偿。外部脏位与推进脏分离：`tick()` 入口只清推进脏，外部脏活到 `Animator` 帧末 `clear_dirty()` 一并清——否则「手势在帧边界前写入、同一帧绑定阶段写回」与「空闲帧不写回」两条既有语义会同时失真。
+17. **风格轴与明暗轴正交，明暗三态不可折平**：`ThemeStyle{Material, Windows, MacOs, Gnome, Kde}` 表「用哪套设计语言」，`ColorScheme{Unspecified, Light, Dark}` 表「这套语言的明暗呈现」，二者不得折成一枚枚举（否则要么丢档、要么给每档造 `*Light` / `*Dark` 两枚风格名，命名面即违规）。`Unspecified` 是**三态**而非 Dark 的别名：它只在根注入解算处取一次「明色基准列」，主题实例内仍只持一列取值。任何新增的中间解算层都不得把 `Unspecified` 提前折成具体档——折平会让三级优先链（显式样式 > `scheme` > OS 偏好）失去「本层不表态」的表达力。锚点：`itest_theme_root_injection` 的两轴三格。
+18. **主题兜底三点同源 ≡ Material 基线**：`inherit_theme(ctx)` 无注入时、`resolve_theme` 找不到目标时、DFS 种子处，兜底**恒等于** `Theme::with_defaults()`（Material 明色列），**不读**风格档探测结果。平台风格只能经 `Window` 根注入或树内 `ThemeScope` 进入——兜底读探测值会让「无主题」与「探测到 KDE」两种状态给出同一观感，把「探测失效」这个事实变得不可观测。三处各有断言（`itest_theme_root_injection` 钉根注入、`utest_theme_query` 钉查询、控件侧以裸 `BuildContext` 调 `resolve_*` 的基线用例钉构建上下文），改任一兜底取值须三处同批改。
+19. **确定性渲染优先于观感跟随**：风格档改的是取值表（配色 / 度量 / 字阶族名），不改字形来源——四档的族名在未装该系统字体的机器上仍解析到内置 Noto Sans，golden 与无头 CI 逐位不变（见 [`specification/03-layout-render.md`](specification/03-layout-render.md) §8.2）。因此**绝对像素或绝对宽度判据必须先钉 Material 档**（或注入同一份 TTF），不得依赖真机所装字体；同理，探测到的风格档在进程内只解算一次（`Theme::default_style()` 的静态局部量），换外壳须重启，不得为了「实时跟随外壳」把每次读取都变成 `getenv`。
+20. **根主题解算不在帧路径重建 `Theme`**：`Window::resolved_root_theme()` 按**解析后的（风格档 × 明暗档）对**缓存整份 `Theme`（尺寸读数见 `CHANGELOG.md` 的 Notes 节），命中即返回引用。`prepare_context` 每帧调用它，直接 `Theme::from_style` 等于每帧两次整份构造。缓存键取**解析后**的取值而非三枚输入，故 setter 侧不需要失效钩子；显式 `set_theme` 在缓存之前短路。判据：删掉缓存键里的 `scheme` 比较必须让三格注入用例变红——否则缓存退化成只认风格档，判据空转。
+21. **换档要同时关掉两条独立的复用通道，缺一半就出现「逻辑对了、屏幕没变」**：脏标记只**向上**溯达到重排边界，改主题这种「整棵子树的取值表都换」的事件必须另外显式**向下**失效（`Widget::invalidate_subtree_caches()`），否则下游读到旧档的排版 / 度量缓存；而增量脏区只覆盖「本帧画过的像素」，令牌换档改的是整窗配色与度量，故还须 `force_full_redraw()` 把整帧标脏。两半各自充分、合起来才完整：只失效不标脏，重排读新值但屏幕不重绘；只标脏不失效，重绘仍按旧缓存出图。三枚主题 setter（`set_theme` / `set_theme_style` / `set_os_color_scheme`）因此成对做这两件事，宿主层不得再补置脏（会重复标脏、掩盖漏做的那一半）。**同值重推两半都不做**：宿主 `attach_surface` 会原样再推一次当前 OS 档，短路分支让它不触发整帧重绘——没有短路，每次新建窗口都白白全窗重绘一次。锚点：`itest_theme_root_injection` 的两格（关脏追踪钉「向下失效」侧、开脏追踪钉「整帧标脏」侧，后者含同值重推不置脏的反向断言）。完整口径见 [`specification/07-environment-modifier.md`](specification/07-environment-modifier.md) §5.2。
 
 ---
 
@@ -464,13 +484,13 @@ Aurora 内置轻量级运行时性能检测体系，提供帧级指标采集、�
 每个错误同时服务于两类受众：
 
 - **进程外**（JSON / 日志 / IDE 工具 / AI 编码助手）：只认冻结 `slug`（如 `"nav-depth-exceeded"`，改名标识符也不变）与 `code_enum`。
-- **进程内**：用 `code_enum` 做类型安全分支，用 `severity` / `category` / `retryable` 等元数据做策略判断。
+- **进程内**：用 `code_enum` 做类型安全分支，用 `severity` / `domain` / `kind` / `retryable` 等元数据做策略判断。
 
 失败路径统一：可恢复失败经 `Result<T>` 沿调用链返回，不靠异常横跨业务边界。
 
 ### 12.2 类型模型
 
-`Error`（`core/result.h`）字段分两类受众：`code` / `code_enum` 供机器解析；`severity` / `category` / `retryable` 供进程内策略判断；另有 `message` / `suggestion` / `docs` / `where` / `hint` 供人与 AI 阅读。所有表驱动元数据由 [`errors.toml`](errors.toml) 经生成器产出，经 `make_error` 自动填充，无需手填。
+`Error`（`core/result.h`）字段分两类受众：`code` / `code_enum` 供机器解析；`severity` / `domain` / `kind` / `retryable` 供进程内策略判断；另有 `message` / `suggestion` / `docs` / `where` / `hint` 供人与 AI 阅读。所有表驱动元数据由 [`errors.toml`](errors.toml) 经生成器产出，经 `make_error` 自动填充，无需手填。
 
 `Result<T>` 成功持 `T`、失败持结构化 `Error`；`Result<void>` 特化用于只关心「是否出错」的接口（如 `flush` / `reload`），以 `bool` 标记成功态。
 
@@ -478,16 +498,21 @@ Aurora 内置轻量级运行时性能检测体系，提供帧级指标采集、�
 
 ### 12.3 分类维度
 
+「去哪找」与「坏了什么」是两件事，压进一枚枚举会让调用方靠猜分工，故拆成两枚正交维度各自成表：
+
 | 维度 | 取值 | 用途 |
 |:---|:---|:---|
-| `ErrorCategory` | `General` / `Layout` / `Widget` / `Render` / `Io` / `Validation` / `Navigation` / `Platform` / `Runtime` / `Generation` / `Diagnostic`（共 11 域） | 错误域归类，过滤与聚合 |
+| `ErrorDomain` | 29 枚：`general` / `layout` / `widget` / `render` / `navigation` / `validation` / `generation` / `runtime` / `io` / `json` / `compression` / `storage` / `i18n` / `prefs` / `icon` / `platform` / `window` / `dialog` / `clipboard` / `drag` / `menu` / `notification` / `recent-documents` / `webview` / `audio` / `cli` / `net` / `http` / `ws`（逐码声明于 [`errors.toml`](errors.toml)，全量见 [`ERROR_CATALOG.md`](ERROR_CATALOG.md)） | 子系统归属：该去哪一层排查，过滤与聚合 |
+| `ErrorKind` | 12 枚按判型优先级声明（先命中者得）：`invalid` / `not-found` / `unsupported` / `unavailable` / `denied` / `conflict` / `exhausted` / `timeout` / `cancelled` / `corrupt` / `io` / `internal` | 故障性质：坏了什么，因此下一步该做什么动作；`internal` 是兜底档 |
 | `ErrorSeverity` | `Info` / `Warning` / `Error` / `Fatal` | 严重度分级，决定上报与中断策略 |
 | `retryable` | `bool` | 声明性标记：同一输入重跑一次是否可能换到不同结果（如异步超时）。**不**回答「这次该不该重试」——后者由调用方结合幂等性、退避预算与 `error_class_of()` 归因档决定 |
+
+两轴互不派生：`domain` **不由 slug 前缀推导**（`not-restorable`、`recent-documents`、`system-drag-*` 都推不出正确归属），`kind` 也不由 `domain` 映射——同一域铺开在多种性质上，同一性质横跨多个域。两轴各占一个 JSON 键，故 `io` 这枚拼写在两处都出现（`domain = io` 指泛文件系统，`kind = io` 指底层原语调用失败）却不混淆：判读靠枚举类型与键名，不靠字符串。`ErrorKind` 的声明序同时是判型优先级，故新增条目按「先具体后兜底」落第一枚命中的性质，不靠后补者的临场判断。
 
 ### 12.4 生成管线
 
 ```text
-codespec/errors.toml          (源：slug / severity / category / 元数据 / message 模板)
+codespec/errors.toml          (源：slug / domain / kind / severity / retryable / 元数据 / message 模板)
         │  tools/gen/gen_error_codes.cpp
         ▼
   include/aurora/core/error_codes.gen.h   (ErrorCode 枚举 + 表)
@@ -496,6 +521,7 @@ codespec/errors.toml          (源：slug / severity / category / 元数据 / me
 ```
 
 - **`slug` 冻结对外契约**：跨语言 / JSON / 日志只认 `slug`；`enum` 为 C++ 标识符可自由改名。
+- **条目按 `domain` 分组排列**：`ErrorCode` 的数值就是表行下标，故排序固定了进程内取值（对外契约仍是 `slug`，不受影响）。首行恒为 `general-unknown`——`ErrorCode{}` 是 `Error` / `Diagnostic` 的默认哨兵，生成器按位置硬校验而不信任排序约定。`domain` / `kind` 缺列或取值越界同样判红且不写产物。
 - **只增不删**：新增错误码追加，不重用 / 删除已发布 `slug`。
 - 三处生成物读现有文件、只写各自段，可任意顺序运行。
 
@@ -514,14 +540,14 @@ codespec/errors.toml          (源：slug / severity / category / 元数据 / me
 2. **概念可枚举性**：全部 UI 原语可枚举、可命名、可映射。
 3. **概念映射透明性**：Aurora 概念与 React / Flutter / Qt 一一对应。
 4. **声明式优于命令式**：组件以不可变声明式树表达，状态变更驱动局部刷新；禁止命令式事后改树。
-5. **最小正交 API**：布局用 `Column` / `Row` / `Stack` / `Grid` / `Scroll`，装饰用 `Modifier`，状态用 `State` / `Signal` / `Store`，互不重叠；避免「多种方式做同一件事」带来的选择困惑。
-6. **线程模型**：单线程 UI；`State::set` 仅限主线程（跨线程结果须经 `au::async` / `Task::set_main_poster` 回投后再写）。在文档与示例中明确标注，避免 AI 误用多线程改树。
-7. **显式数据流**：状态经 `State` / `Signal` / `Store` 显式流动，依赖图可静态推导，便于 AI 推断「改 X 会影响哪些 widget」。
-8. **单向 / 纯函数**：状态变更单向；`Computed` 为纯函数派生值，无副作用，可安全重算。
+5. **最小正交 API**：布局用 `Column` / `Row` / `Stack` / `Grid` / `Scroll`，装饰用 `Modifier`，状态用 `State` / `ReadOnlyState`（派生 `computed`、副作用 `effect`），互不重叠；避免「多种方式做同一件事」带来的选择困惑。
+6. **线程模型**：单线程 UI；`State::set` 仅限主线程（跨线程结果须经 `au::async` 回投 `MainQueue`、由值班循环执行后再写）。在文档与示例中明确标注，避免 AI 误用多线程改树。
+7. **显式数据流**：状态经 `State` / `ReadOnlyState` 显式流动，依赖图可静态推导（`StateGraph` 带 `schema: 1`），便于 AI 推断「改 X 会影响哪些 widget」。
+8. **单向 / 纯函数**：状态变更单向；`computed` 为纯函数派生值，无副作用，可安全重算。
 9. **扁平组合**：以 `Modifier` 包裹 + 容器组合替代深层继承嵌套。
 10. **布局代数**：布局以可组合的 `Constraints` + 对齐参数表达，避免魔法数字。
 11. **事件模型**：统一事件类型（`MouseEvent` / `KeyEvent` / `ScrollEvent` / `TextInputEvent` / `TextCompositionEvent` / `TouchEvent` / `SystemDropEvent`）+ 冒泡协议；事件坐标在 `e.position` 而非 `e.x` / `e.y`。
-12. **状态作用域**：状态作用域显式——局部 `State` 由组件持有，全局 `Store` 由应用持有并通过 `Environment` 注入；`Binding<T>` 为非拥有引用，上游生命周期须更长。
+12. **状态作用域**：状态作用域显式——局部 `State` 由组件持有，应用级状态由应用持有并通过 `Environment` 注入；只读消费方拿 `ReadOnlyState`，写权限靠类型表达。`shared_ptr<State<T>>` 只是应用级所有权选择，不再是属性接线前提。
 
 ---
 
@@ -560,33 +586,42 @@ CI 配置位于 `.github/workflows/`：
 
 | 工作流 | 作用 |
 |:---|:---|
-| `ci.yml` | 宏矩阵全量覆盖，push / PR 双触发经作业 0 `gate` 查重收口（分支推送的提交已被 open PR 收编时，push 腿重作业跳过、由 PR 腿承担全套；无 PR 的分支与 master/main 推送照旧全量，判据 fail-open），`concurrency` 取消旧运行以提速；所有 `cmake --build` 带 `--parallel` 取满 runner 核数（`lint` 目标内部按 `--jobs` 并行，口径相同）。共 14 组功能 job + gate：**core**（linux/gcc + linux/clang + windows/msvc + windows/mingw + windows/llvm（clang-cl）+ macos/clang，Release 与 Debug 各编一次覆盖 `AUTO` 三态的两个分支，Debug 覆盖 linux/gcc、windows/msvc 与 windows/llvm；linux-gcc-release 与 windows-llvm 额外构建 `demos` 聚合目标）；**backends**（X11/Wayland/GLFW、D3D11/GLFW、macOS/GLFW 各编译一次）；**toggles**（优化三开关全关 / SIMD 关 / 图像编解码+Inspector 开 / PROFILING+TRACING+DEBUG 强制开 / DEBUG 强制关 / TLS provider 反极性（静态 mbedTLS 为全作业公共前缀，`tls-openssl-shared` 腿改动态 OpenSSL），均 ubuntu/gcc，另 HEADLESS 关分支仅验库与工具构建绿、跳过 Test 步骤）；**asan**（ASan+UBSan 全量 ctest，`-LE e2e` 排除真实后端 E2E）；**coverage**（`coverage` 聚合目标：ctest + gcov 摘要，CSV/HTML 入 artifact，`-LE e2e` 同上）；**wasm**（emcmake + `AURORA_BACKEND_WASM=ON`，构建库与测试 runner 并全量 ctest，能力缺失用例走 SKIP 路径；两腿一并编出 Inspector Server——浏览器口径没有 TLS provider 安装根，故不给 provider）；**tls-providers**（`AURORA_NET_TLS_PROVIDERS` 与 `AURORA_ENABLE_NET_TLS_SYSTEM` 的构建面四腿：Linux 双 provider 共存（静态 mbedTLS 安装根 `static:/opt/aurora-tls-mbedtls` + 动态 OpenSSL `shared:/usr`）+ Windows 动态 OpenSSL（作业自建 vcpkg 安装根）与系统栈 Schannel 共存 + macOS 系统栈 SecureTransport 单腿 + macOS 动态 OpenSSL（homebrew keg-only 根）与系统栈共存，后三腿证明「给了 provider 也保住系统栈那条腿」而不是二选一；Windows 腿 `AURORA_BUILD_TESTS=OFF`（动态库不落测试可执行旁），其余三腿在两个进程里分别跑 `utest_net_tls_backend` 与 `utest_net_tls`）；**install-consumer**（`cmake --install` + `find_package(Aurora)` 最小消费端冒烟，GUIDELINE §1 配方；默认配置与 Release 下强制 `AURORA_ENABLE_DEBUG=ON` 的「非默认宏一致性」各一组）；**lint**（clang-tidy 门禁，矩阵 = DEBUG OFF / DEBUG ON / optimizations-off 三份扩面编译数据库 × TU 分片 4 片 = 12 个作业，去重后 0 finding 才过；编译库显式打开除 Windows / macOS 特有宏外的全部后端与能力开关，含 `AURORA_BACKEND_GPU_WGPU` / `AURORA_ENABLE_GLFW_GPU_GL`，其 wgpu 的 configure 期工具链探测由作业的 `libclang1-22` 安装与 `Ensure Rust toolchain` 步骤满足，`lint` 目标不 `DEPENDS` `wgpu_native_build` 故不触发真正的 cargo 编译）；**lint-wasm**（同一门禁的浏览器口径，`--emscripten` 重写后的 wasm 编译库分 4 片，只 configure 不构建）；**lint-incremental**（只在非 master / main 分支推送时跑：单 job 顺序跑 native(DEBUG OFF/ON) 与 wasm 三套编译库上「本次改动本身即 TU」的那批，`--changed-only` 不展开 include 闭包）；**lint-windows** / **lint-macos**（平台子作业：用各自平台编译库**只扫平台相关 TU**，`git grep` 按平台 token 现场选集，Windows 另在每周定时跑一遍全量；macOS 子作业只 configure 不 build，故 configure 显式关 PCH `-DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON`——clang 侧 `AURORA_PCH_ENABLED` 默认 ON 会让全 TU 因缺 `-include-pch` 产物而 broken）；**fmt**（`format-check` 全量排版校验）。四道 lint 与排版均为**必过**位，各自清单逐片入 artifact；静态检查为什么按 TU 分片、分片改了判据没有，见 [`BUILD_OPTIONS.md`](BUILD_OPTIONS.md) §4.5。core 与 backends 的 Test 步骤按实际编译的后端面逐作业声明 E2E 期望集（`AURORA_E2E_EXPECT`；asan / coverage 以 `-LE e2e` 排除，wasm 在 CMake 层即无 E2E 面），逐作业期望集表与边界结论见 [`specification/08-tooling.md`](specification/08-tooling.md) §8.2「CI 作业口径」 |
+| `ci.yml` | 宏矩阵全量覆盖，push / PR 双触发经作业 0 `gate` 查重收口（分支推送的提交已被 open PR 收编时，push 腿重作业跳过、由 PR 腿承担全套；无 PR 的分支与 master/main 推送照旧全量，判据 fail-open），`concurrency` 取消旧运行以提速；所有 `cmake --build` 带 `--parallel` 取满 runner 核数（`lint` 目标内部按 `--jobs` 并行，口径相同）。共 15 组功能 job + gate：**core**（linux/gcc + linux/clang + windows/msvc + windows/mingw + windows/llvm（clang-cl）+ macos/clang，Release 与 Debug 各编一次覆盖 `AUTO` 三态的两个分支，Debug 覆盖 linux/gcc、windows/msvc 与 windows/llvm；linux-gcc-release、windows-llvm 与 macos-clang 额外构建 `demos` 聚合目标；macos-clang 是 Apple 的「能力开关全开」腿——音频（CoreAudio 在 Apple 随 `AURORA_ENABLE_AUDIO=ON` 自动）、三枚图片解码、SQLite、压缩、Tracing（强制连带 Profiling）、WebView 门面一并打开，让这些能力的 TU 在 Apple 上至少进一次编译面与全量 ctest；WebView 在 macOS 没有原生引擎（WEBVIEW2 仅 Windows、WebKitGTK 仅 Linux），该腿因此走的正是「有门面、无引擎即占位降级」那条真实路径）；**backends**（X11/Wayland/GLFW、D3D11/GLFW、macOS/GLFW 各编译一次；macOS 腿在双后端之上把能力开关开满，并补上与 linux / windows 腿同口径的 `AURORA_ENABLE_DEBUG=ON`（`Surface::data()` 读回随该宏门控）与 `AURORA_ENABLE_GLFW_GPU_GL=ON`，`AURORA_BUILD_VERIFY_TOOLS=ON` 另让九枚 AppKit / ObjC++ 探针进入 CI 编译面——只编不跑，探针里的窗口壳、拖放、菜单栏、剪贴板、通知、托盘、热键调用写错过去只有本机能发现）；**toggles**（优化三开关全关 / SIMD 关 / 图像编解码+Inspector 开 / PROFILING+TRACING+DEBUG 强制开 / DEBUG 强制关 / TLS provider 反极性（静态 mbedTLS 为全作业公共前缀，`tls-openssl-shared` 腿改动态 OpenSSL），均 ubuntu/gcc，另 HEADLESS 关分支仅验库与工具构建绿、跳过 Test 步骤）；**asan**（ASan+UBSan 全量 ctest，`-LE e2e` 排除真实后端 E2E）；**tsan**（全局编译标志注入 `-fsanitize=thread`，只跑四个网络用例的竞态定点红线，判定看落盘报告正文与 ctest 退出码的组合；只在 PR 与 master(+main) 推送跑，普通分支 push / 每周定时 / 手动触发都不跑；不装配网络能力公共前缀，理由见下文）；**coverage**（`coverage` 聚合目标：ctest + gcov 摘要，CSV/HTML 入 artifact，`-LE e2e` 同上）；**wasm**（emcmake + `AURORA_BACKEND_WASM=ON`，构建库与测试 runner 并全量 ctest，能力缺失用例走 SKIP 路径；两腿一并编出 Inspector Server——浏览器口径没有 TLS provider 安装根，故不给 provider）；**tls-providers**（`AURORA_NET_TLS_PROVIDERS` 与 `AURORA_ENABLE_NET_TLS_SYSTEM` 的构建面四腿：Linux 双 provider 共存（静态 mbedTLS 安装根 `static:/opt/aurora-tls-mbedtls` + 动态 OpenSSL `shared:/usr`）+ Windows 动态 OpenSSL（作业自建 vcpkg 安装根）与系统栈 Schannel 共存 + macOS 系统栈 SecureTransport 单腿 + macOS 动态 OpenSSL（homebrew keg-only 根）与系统栈共存，后三腿证明「给了 provider 也保住系统栈那条腿」而不是二选一；Windows 腿 `AURORA_BUILD_TESTS=OFF`（动态库不落测试可执行旁），其余三腿在两个进程里分别跑 `utest_net_tls_backend` 与 `utest_net_tls`）；**install-consumer**（`cmake --install` + `find_package(Aurora)` 最小消费端冒烟，GUIDELINE §1 配方；默认配置与 Release 下强制 `AURORA_ENABLE_DEBUG=ON` 的「非默认宏一致性」各一组）；**lint**（clang-tidy 门禁，主遍把 DEBUG / SIMD / TEST_HOOKS 全钉 ON 并追加 OpenSSL provider，按 TU 分片 4 片 = 4 个作业，去重后 0 finding 才过；编译库显式打开除 Windows / macOS 特有宏外的全部后端与能力开关，含 `AURORA_BACKEND_GPU_WGPU` / `AURORA_ENABLE_GLFW_GPU_GL`，其 wgpu 的 configure 期工具链探测由作业的 `libclang1-22` 安装与 `Ensure Rust toolchain` 步骤满足，`lint` 目标不 `DEPENDS` `wgpu_native_build` 故不触发真正的 cargo 编译）；**lint-polarity** / **lint-wasm**（辅助定向遍：DEBUG=OFF、SIMD/TEST_HOOKS=OFF 与 wasm 三份编译库各按宏 token 用 `git grep` 定向选集，共 3 个单 job、不分片、只补极性差集；每周定时改跑全量兜底 token 漏选；wasm 仍只 configure 不构建，跑 `--emscripten` 口径）；**lint-incremental**（只在非 master / main 分支推送时跑：单 job 顺序跑 native(DEBUG OFF/ON) 与 wasm 三套编译库上「本次改动本身即 TU」的那批，`--changed-only` 不展开 include 闭包）；**lint-windows** / **lint-macos**（平台子作业：用各自平台编译库**只扫平台相关 TU**，`git grep` 按平台 token 现场选集，Windows 另在每周定时跑一遍全量；macOS 子作业只 configure 不 build，故 configure 显式关 PCH `-DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON`——clang 侧 `AURORA_PCH_ENABLED` 默认 ON 会让全 TU 因缺 `-include-pch` 产物而 broken；该子作业现跑两遍 configure（`AURORA_ENABLE_DEBUG=OFF` / `ON` 各一份编译数据库，复用同一平台 token 选集），能力串并补齐 GLFW 与其 GPU 特性、wgpu 宿主、Profiling + Tracing、内置 mbedTLS，使 DEBUG 分支与这些门下的 TU 也进 Apple 静态分析面，单遍 60 分钟余量按两遍翻倍为 90）；**fmt**（`format-check` 全量排版校验）。四道 lint 与排版均为**必过**位，各自清单逐片入 artifact；静态检查为什么按 TU 分片、分片改了判据没有，见 [`BUILD_OPTIONS.md`](BUILD_OPTIONS.md) §4.5。core 与 backends 的 Test 步骤按实际编译的后端面逐作业声明 E2E 期望集（`AURORA_E2E_EXPECT`；asan / coverage 以 `-LE e2e` 排除，wasm 在 CMake 层即无 E2E 面），逐作业期望集表与边界结论见 [`specification/08-tooling.md`](specification/08-tooling.md) §8.2「CI 作业口径」 |
+| `fuzz.yml` | 覆盖引导模糊测试短跑（独立工作流，按周 / 手动 / fuzz 资产变更 PR 触发；Clang 独立构建目录，不进 CTest，不改 `ci.yml` 的全量矩阵与四类出口） |
+| `nightly-bench.yml` | 运行时持续基准（独立工作流，按日 / 手动触发；同一运行器构建父提交与当前提交两套产物，先同码标定噪声预算再交错采样，机器可读报告与作业摘要入 artifact）。纯观测作业：时间类超阈值只告警，不注册 CTest、不进现役一票否决声明清单、不改 `ci.yml` 全量矩阵与四类出口 |
 | `release.yml` | 发布流程（构建产物 / 版本标签） |
 
 矩阵按「每个 feature 宏分支至少被一个 job 编译一次」设计；选项语义见 [`BUILD_OPTIONS.md`](BUILD_OPTIONS.md)。CI 只负责「拉起构建 + 跑 CTest」，不承载测试设计。
 
-**网络能力面（Inspector 服务器 + TLS provider）是流水线的公共前缀**，不是某一个作业的职责：由 `.github/actions/setup-net-capability-flags` 复合动作按 runner OS 装配开关串——Linux 侧装 `libmbedtls-dev` 并把安装根指向动作搭好的 `/opt/aurora-tls-mbedtls`（不能用 `/usr`：那里 openssl 与 mbedtls 两套头同时在场，OpenSSL 优先，`tls_mbedtls.cpp` 会永远编不到），Windows / macOS 走系统栈缺省装配（Schannel / SecureTransport，不给 provider 即已开启），Emscripten 只取 Inspector。core / backends / toggles / tls-providers / asan / coverage / install-consumer / wasm 引用同一份串。集中一处的原因是这两枚开关控制的是**运行面**而非编译面：`utest_inspector_server` 在 `AURORA_BUILD_INSPECTOR_SERVER` 关闭时整文件降级 SKIP，`utest_net_tls` 在无 provider 时大半 SKIP，任一作业漏开即少一处别人补不上的覆盖。
+- **动画域不变量的单测没有 1:1 载体可对齐**：`include/aurora/widget/scroll_viewport.h` 不是 widget 单元头（widget spec 第 4 篇不收录它），其单测 `utest_scroll_viewport` 没有属性键 / 序列化 schema 可对账，故不进 `CODING_STANDARDS.md` §3.1「源—示例—测试 1:1」映射，也不受 §3.2 `TEST-R3`（一个单元头至多被一个 `tests/unit/` 测试声明）约束。该反向不变量由本条文本守住，与 `check_test_registry` 的孤儿 / 重名校验并列；新增此类「非单元头单测」时按同一条目登记，不要为凑齐 1:1 而给它造一个 demo。
+- **`tools/include/known_enums.h` 的入表判据**（该表注释就地写明，此处留存口径）：只在「工具链需要能填这个值」时入表——widget 属性键 / MCP 入参 / LSP 补全的取值域。仅经 getter 读出、既不作为任何属性类型也不作为工具入参出现的公共枚举（`AnimationStatus`、`PlaybackMode` 同族）不入表：入表会把「读出来的状态」提示成「填进去的值」，而后者编译不过。`itest_known_enums.cpp` 只对账「表里的枚举 ↔ 属性类型」，不检查公共枚举覆盖率，故新增枚举无须全量入表。
+
+**网络能力面（Inspector 服务器 + TLS provider）是流水线的公共前缀**，不是某一个作业的职责：由 `.github/actions/setup-net-capability-flags` 复合动作按 runner OS 装配开关串——Linux 侧装 `libmbedtls-dev` 并把安装根指向动作搭好的 `/opt/aurora-tls-mbedtls`（不能用 `/usr`：那里 openssl 与 mbedtls 两套头同时在场，OpenSSL 优先，`tls_mbedtls.cpp` 会永远编不到），Windows / macOS 走系统栈缺省装配（Schannel / SecureTransport，不给 provider 即已开启），Emscripten 只取 Inspector。core / backends / toggles / tls-providers / asan / coverage / install-consumer / wasm 引用同一份串。唯一的例外是 `tsan` 定点作业：它只跑四个纯网络竞态用例，实证基线是在不含该前缀的配置下取得的，装配它会同步扩大插桩面与第三方未插桩库的噪声来源，削弱判据的信噪比。集中一处的原因是这两枚开关控制的是**运行面**而非编译面：`utest_inspector_server` 在 `AURORA_BUILD_INSPECTOR_SERVER` 关闭时整文件降级 SKIP，`utest_net_tls` 在无 provider 时大半 SKIP，任一作业漏开即少一处别人补不上的覆盖。
 
 **编译缓存与执行口径**：
 
 - 全部 Test 步骤并行执行（`ctest -j "$(nproc)"`；coverage 聚合目标内的 ctest 除外——gcda 并发写在非加锁平台有损坏风险）。
-- 编译缓存接入 `hendrikmuhs/ccache-action`（key 按 job / 矩阵名分桶）：core（Linux / macOS / windows-mingw）、backends（Linux / macOS）、toggles、asan、coverage、install-consumer；缓存口径（SLOPPINESS / BASEDIR / NOHASHDIR / 压缩）由 `cmake/AuroraCcache.cmake` 的编译器启动器统一注入，与本地构建共享同一语义，避免「本地命中、CI 全 miss」。
+- 编译缓存接入 `hendrikmuhs/ccache-action`（key 按 job / 矩阵名分桶）：core（Linux / macOS / windows-mingw）、backends（Linux / macOS）、toggles、asan、tsan、coverage、install-consumer；缓存口径（SLOPPINESS / BASEDIR / NOHASHDIR / 压缩）由 `cmake/AuroraCcache.cmake` 的编译器启动器统一注入，与本地构建共享同一语义，避免「本地命中、CI 全 miss」。
 - windows-msvc（默认 Visual Studio 多配置生成器）不接入编译缓存：CMake 的编译器启动器（`<LANG>_COMPILER_LAUNCHER`，sccache / ccache 的挂接点）仅在 Makefile / Ninja 生成器实现，VS 生成器下被静默忽略；要接入须先将该矩阵切换到 Ninja + cl，暂无必要（该配置无缓存路径、PCH 净收益显著，冷构建本身不构成瓶颈）。
 - windows 侧 Test 步骤显式 `shell: bash` 并设 `PYTHONUTF8=1`（默认 pwsh 无 `nproc`；cp1252 控制台无法编码 CJK 诊断输出）。
 - **编译耗时观测**：`core` 与 `backends` job 在 Build/Test 之后调用 `tools/check/build_baseline.py`（解析 `.ninja_log` 与 `LastTest.log`，纯观测、恒退出 0、不进门禁），把 `.ninja_log` / `LastTest.log` / `build-baseline.json` 作为 artifact 上传，并把摘要写入 step summary。before/after 对照用于编译耗时回归的趋势观察。
 
 ### 14.5 本地验证的目标平台与真机探针
 
-⚠️ `ctest --preset ninja-test` **只覆盖 Windows Release 一个目标平台**。改动一旦触及公共头，必须补跑其余两个目标平台（wasm、Linux X11 / Wayland），否则 MinGW / clang / gcc 之间的严格度差异会一直拖到 CI 才暴露；推送后由 CI 十三组作业全矩阵兜底（§14.4）。
+⚠️ `ctest --preset ninja-test` **只覆盖 Windows Release 一个目标平台**。改动一旦触及公共头，必须补跑其余两个目标平台（wasm、Linux X11 / Wayland），否则 MinGW / clang / gcc 之间的严格度差异会一直拖到 CI 才暴露；推送后由 CI 的功能 job 全矩阵兜底（§14.4）。
 
 | 目标平台 | 入口 | 出口判据 |
 |:---|:---|:---|
 | Windows Release 全量 | `ctest --preset ninja-test`（逐条复跑用 `ctest -R <stem>`） | 全绿，含全部静态门禁 |
 | wasm 配置（Emscripten） | wasm 配置下全量 ctest | 该配置全绿 |
 | Linux X11 / Wayland 配置 | 对应后端配置下全量 ctest | 该配置全绿 |
-| 推送后 CI 全矩阵 | `.github/workflows/`（§14.4） | 全矩阵作业全绿（功能分支推送 lint 收窄为 1 个 `lint-incremental` 单 job，PR / master 推送走全量 18-job 矩阵） |
+| 推送后 CI 全矩阵 | `.github/workflows/`（§14.4） | 全矩阵作业全绿（功能分支推送 lint 收窄为 1 个 `lint-incremental` 单 job，PR / master 推送走全量 9-job lint 矩阵） |
 
 **真机验收探针不进 CTest**（`AURORA_BUILD_VERIFY_TOOLS` 默认 OFF、`EXCLUDE_FROM_ALL`，聚合目标 `aurora_verify`）：`--target aurora_verify_win32_dpi` 在 100% DPI 环境下判据恒真并记 SKIP，其自动段注入 `WM_DPICHANGED` 造变化故任何 DPI 环境均可跑，人工段做真跨屏拖动、未做记 PENDING MANUAL；`--target aurora_verify_glfw_dpi` 同构，Wayland 验证需 Linux 合成器环境。契约与判据见 [`specification/08-tooling.md`](specification/08-tooling.md) §8.2。
+
+**供应链审计不进全量 CI 矩阵**：`.github/workflows/sca.yml` 独立按周 / 手动触发，并在依赖清单或相关脚本变更时随 PR 触发，跑两枚静态门禁、生成 CycloneDX 物料清单与上游版本滞后报告。它**不修改 `ci.yml`**，不改全量四类出口；上游报告是人工复核输入而非自动漏洞裁决（OSV 对 vendored C++ 无包版本映射）。新增扫描面须沿用「独立工作流 + 本地门禁」这条编排约束，不得反向削弱全量矩阵。版本真值源见 `codespec/third_party_versions.json`。
+
+**模糊测试目标不进 CTest**：`AURORA_BUILD_FUZZ` 默认 OFF、目标全部 `EXCLUDE_FROM_ALL`，由 `.github/workflows/fuzz.yml` 在独立 Clang 构建目录里构建并直跑二进制；不注册 CTest 用例，故不改 `declared_gates.txt` 与 `AuroraTests.cmake`。每周定时、手动与 fuzz 资产变更的 PR 触发，沿用上一条「独立工作流 + 本地判定」的编排约束，不改全量四类出口。有效性自证目标故意含缺陷，必须转红才算消毒链路接上；判据见 [`specification/08-tooling.md`](specification/08-tooling.md) §8.2。
 
 ### 14.6 按改动类型的门禁矩阵
 
@@ -595,22 +630,31 @@ CI 配置位于 `.github/workflows/`：
 | 改了什么 | 必跑门禁（CTest 名 / 目标） | 回写落点 |
 |:---|:---|:---|
 | 公共 API：签名、类 / 类型、信号、属性键、枚举 | `check_api_schema_sync`（先 `--target aurora_api_json`）、`check_naming_conventions`、`check_api_budget`、`check_doc_comments`、`lint`、`format-check` | `specification/NN-*.md`（按模块域）+ `CODING_STANDARDS.md` §6 + 必要时 `CONCEPTS.md` |
+| 控件属性面（`XxxProps` 的字段、权威表行、读写件、控件接线） | `check_props_table_coverage`（三方计数 / 回落与必填二选一 / 读面每行恰一件 / 写件转调对号 / 表外名字）、`check_widget_bind_pattern`（属性基类须为末位公有基类 + 非转调构造尾部恰一次 `bind(*this)`）、`check_no_optional_in_public_signature`（公共签名裸 T / 裸句柄，`std::optional` 与 `PropRow` 不外泄）；三枚共用 `tools/check/props_scan.py` 的解析件，`check_naming_conventions` 另带属性公共面白名单一腿（链上类的 public 区不得出现机制件 `assign` / `rebind` / `resolve` / `stated` / `get` / `read` / `present` / `bind` / `props_*`，也不得经 `using 基类::机制件;` 再暴露；只许 `clear` 与 `rows`） | `specification/04-widget.md` §2.5 / §4.1 |
+| 主题令牌登记表（五组 `AURORA_TOKENS` / `token_name` / `theme_token_groups`）与令牌显示串 | `check_theme_token_registry`（T1 表 ↔ 字段集合相等、T2 短名前缀规则、T3 发射 `value_type` 与字段实型对号、T4 反向覆盖：登记了 `AURORA_TOKENS` 却没进 `theme_token_groups()` 亦红、T5 登记序 == 声明序）、`check_no_theme_display_literals`（源码手抄 `"theme.` 归零，裸串 / 转义串 / raw-string 三种拼法各自清点（带定界符的 raw-string 与裸 raw-string 同档）；豁免四类为登记表自身短名、`theme_token_groups()` 前缀串、就地 `THEME-LITERAL:` 标记行、名案文件）；两枚的发射面另由 `--target aurora_api_json` 的顶层 `theme_tokens` 块与逐行回落点派生 | `specification/07-environment-modifier.md` §5.1 + `specification/08-tooling.md` §10.3 + `CODING_STANDARDS.md` §11.5 |
+| 控件层色字面量与主题消费面（`include/aurora/widget` / `src/aurora/widget` / CSD 预设表） | `check_no_theme_color_literals`（L1 未登记构造式、L2 登记次数漂移、L3 缺文件或缺理由、L4 重复登记、L5 `shaded(` 残留、C1 未消费组与 `theme_tokens.consumed` 及 `07` §5.1 等集、E1 豁免登记表与 schema `theme_tokens.exemptions.files` 等集） | `specification/07-environment-modifier.md` §5.1 + `specification/04-widget.md` §4.2 |
+| 色角色对比度归档与预设豁免（`include/aurora/theming/detail/contrast_audit.h` 三张表、`core/color.h` 的亮度与比值实现、`Theme::from_style` / `Theme::with_accessibility` 各档取值） | `check_theme_contrast`（比值取自构建产物 `gen_contrast_tools`，门禁自身不写 WCAG：C0 产物缺失 / 非 JSON、C1 表声明枚数 ↔ 头内实际行数 ↔ 产物读数三方对号、C2 列面穷举 `enum class ThemeStyle` × 明暗 × 对比度两档、C3 色角色令牌表的 38 枚枚枚被工具读出且枚枚被审（期望集取自头内 `AURORA_TOKENS`，不取产物读数）、配对任一侧须是真角色、C4 档位下限仍是 WCAG 4.5 / 3.0 那两条 SC、C5 逐格达标（该格有登记豁免即按豁免判）、C6 豁免双向（仍须 < 档位下限、且低于下限的格不得漏登）、C7 理由逐条非空 ASCII、C8 §5.1 与表等集（比值与 SC 编号须同句在场）、C9 派生列不享豁免且「派生只在原生未达标时才动手」双向对号；十腿各有变异注入自证；先 `--target gen_contrast_tools`） | `specification/07-environment-modifier.md` §5.1 |
 | `include/aurora/aurora.h` 伞头 | `check_umbrella_header`（直连集合不得相对 `tools/check/umbrella_manifest.txt` 缩减） | `tools/check/umbrella_manifest.txt` 基线 |
 | `core/` 层依赖、模块边界、目录 | `check_core_layer_boundary`、`check_arch_module_map` | 本文件 §2 / §4 |
-| 平台 / 后端分支、feature 宏 | `check_platform_macros` + CI `toggles` 矩阵 + **扩面后的 `lint`**（主 Linux 遍开全部非 Windows / macOS 特有宏；`lint-wasm` 补浏览器面，`lint-windows` / `lint-macos` 各只扫平台相关 TU） | `BUILD_OPTIONS.md` §3 / §4 |
-| 经后端 / 能力宏门控的模块代码（`window/`、`media/`、`storage/`、`inspector/`、`tools/verify/`） | **扩面后的 `lint`**（CI 作业 8 三 pass × 4 片 + `lint-wasm` + `lint-windows` / `lint-macos`）——默认 OFF 的宏若不显式打开，其代码在分析面上是「不存在」而非「干净」（`window/` 下的 wgpu RHI 与 GPU 表面亦含在内：`AURORA_BACKEND_GPU_WGPU` / `AURORA_ENABLE_GLFW_GPU_GL` 已入矩阵，判据与覆盖面自述见 `BUILD_OPTIONS.md` §4.5） | `BUILD_OPTIONS.md` §4.5 / §4.6 |
+| 平台 / 后端分支、feature 宏 | `check_platform_macros` + CI `toggles` 矩阵 + **扩面后的 `lint`**（主 Linux 遍开全部非 Windows / macOS 特有宏；`lint-polarity` 补极性差集、`lint-wasm` 补浏览器面，`lint-windows` / `lint-macos` 各只扫平台相关 TU） | `BUILD_OPTIONS.md` §3 / §4 |
+| 经后端 / 能力宏门控的模块代码（`window/`、`media/`、`storage/`、`inspector/`、`tools/verify/`） | **扩面后的 `lint`**（CI 作业 8 主遍 4 片 + `lint-polarity` / `lint-wasm` 三个定向单 job + `lint-windows` / `lint-macos`）——默认 OFF 的宏若不显式打开，其代码在分析面上是「不存在」而非「干净」（`window/` 下的 wgpu RHI 与 GPU 表面亦含在内：`AURORA_BACKEND_GPU_WGPU` / `AURORA_ENABLE_GLFW_GPU_GL` 已入矩阵，判据与覆盖面自述见 `BUILD_OPTIONS.md` §4.5） | `BUILD_OPTIONS.md` §4.5 / §4.6 |
 | Win32 宿主的 DPI / dp↔物理换算 | `check_dpi_single_source`（换算只许在 `to_physical` / `to_logical`，DPI 只许在 `refresh_scale()` 读）；建窗尺寸那一项另跑真机探针 `aurora_verify_win32_dpi` | `specification/08-tooling.md` §8.2 |
 | GLFW / Wayland 的缩放变化上报 | 真机探针 `aurora_verify_glfw_dpi`（自动段注入 `WM_DPICHANGED`，人工段未做记 PENDING MANUAL） | `specification/08-tooling.md` §8.2「缩放变化上报的跨后端现状」 |
 | 字符串字面量 | `check_no_cjk_literals` | `CODING_STANDARDS.md` §14 |
 | i18n 词表数据（`codespec/i18n_builtin.json`、`gen_i18n` 及其 fixture、`AUM1` 布局） | `check_i18n_gen_golden`（先 `--target gen_i18n`；确定性 / 参数序无关 / golden 逐字节 / 内置同源锁 / 错误类不落盘 / warn-only / 非空转七条腿）+ `itest_i18n_pipeline` | `specification/08-tooling.md`（CLI 与校验）、`specification/07-environment-modifier.md` §6（值模型与 bin 布局） |
 | NOLINT 豁免排版 | `check_nolint_layout` | `CODING_STANDARDS.md` §5.2 |
+| `third_party/` vendored 依赖升级 / `codespec/third_party_versions.json` | `check_third_party_versions`（清单为版本唯一真值源：逐条以声明正则从源码解析版本并比对；清单为空、缺字段、名字重复、源文件缺失、正则 0 命中或多命中、版本漂移、覆盖不全、libjpeg-turbo CMake 镜像不一致均硬失败；输出全 ASCII） | `specification/08-tooling.md`、`THIRD_PARTY_LICENSES.md`、本文件 §14.6 |
+| `.github/workflows/` 的 `env:` 折叠标量 | `check_workflow_yaml`（只查 `env:` 下折叠标量的 `#` 行与含 `#` 的值——字面块 `run: \|` 内的 `#` 是合法 shell 注释不受影响；另做不依赖第三方解析库的结构自检：顶层键 / tab 缩进 / 重复键 / 零命中守卫，PyYAML 可用时追加 `safe_load`） | `specification/08-tooling.md`、`CODING_STANDARDS.md` §10.5 |
 | 测试文件 | `registry_integrity`、`check_test_temp_hygiene`、`framework_selftest` | `CODING_STANDARDS.md` §3 |
+| 在文档 / CI 里声明为「现役一票否决」的 CTest 名 | `check_declared_gates`（以 `tools/check/declared_gates.txt` 的显式审定清单核对本构建 `CTestTestfile.cmake` 的 `add_test()` 集合；清单为空 / 解析不到注册名 / 声明名未注册 / 名字同时进豁免表均硬失败，分片名 `<stem>_s<N>` 亦算命中）；`utest_simd_parity` 另跑逐位比对 | `specification/08-tooling.md` §7.4.3、`BUILD_OPTIONS.md` §4.2、`CODING_STANDARDS.md` §6.8；新增声明时同步清单与豁免表 |
 | `codespec/` 文档与交叉引用 | `check_codespec_xref`、`check_code_doc_sync` | 本文件 §14 / §15 |
 | `codespec/manual-test/*.md` | `check_manual_test_format` | — |
 | 仓库入口 `AGENTS.md` 本身 | `check_agents_size`（> 8 KiB 红灯；超限时把细节下沉 `codespec/`，不得放宽阈值） | 本表（把细则搬回这里） |
 | 版本号 / `CHANGELOG.md` | `check_version_consistency` | `CODING_STANDARDS.md` §7 |
+| 运行时基准结果契约、入库基线、比较载体与夜间编排 | `bench_compare_selftest`（普通 CTest 用例，非一票否决声明）、`utest_bench_result`、`check_workflow_yaml`（标准解析器完整读入且 `env:` 折叠标量值不含注释字符）、`check_declared_gates`（声明数与注册集合无差异）；夜间作业自身不进 CTest | `specification/08-tooling.md`（工具规格章节）、本文件 §10.7 / §14.4、`GUIDELINE.md` §14 |
 | 任何代码行为 | 相关 `ctest -R <stem>`、`--target docs` | 本文件 §15 流程表「回写」阶段 |
-| CI 静态检查编排（`tools/check/select_lint_tus.py`、`tools/check/run_clang_tidy.py`、`.github/workflows/`） | `check_change_proposals`、`check_no_cjk_literals`、`check_no_hardcoded_paths`；且**全量出口不得被削弱**——PR / master(+main) 推送 / 每周定时 / 手动触发四类事件下仍须走全量 18-job 矩阵遍；功能分支推送改由作业 8i `lint-incremental`（单 job 增量）覆盖，**不得反向把全量事件降级为增量**（判据见 `BUILD_OPTIONS.md` §4.5、作业编排见 `.github/workflows/ci.yml` 作业 8 / 8w / 8i / 8win / 8mac） | `BUILD_OPTIONS.md` §4.5 |
+| `tests/fuzz/`、模糊测试构建模块与独立工作流 | `check_workflow_yaml`（新增工作流的结构自检与完整解析）、`check_code_doc_sync`（设施目录白名单）、`check_no_cjk_literals`、`format-check`；夜间作业另跑判定脚本与有效性自证，不注册 CTest | `specification/08-tooling.md` §8.2、`BUILD_OPTIONS.md` §2 / §4 |
+| CI 静态检查编排（`tools/check/select_lint_tus.py`、`tools/check/run_clang_tidy.py`、`.github/workflows/`） | `check_change_proposals`、`check_no_cjk_literals`、`check_no_hardcoded_paths`；且**全量出口不得被削弱**——PR / master(+main) 推送 / 每周定时 / 手动触发四类事件下仍须走全量 9-job lint 矩阵；功能分支推送改由作业 8i `lint-incremental`（单 job 增量）覆盖，**不得反向把全量事件降级为增量**（判据见 `BUILD_OPTIONS.md` §4.5、作业编排见 `.github/workflows/ci.yml` 作业 8 / 8p / 8w / 8i / 8win / 8mac） | `BUILD_OPTIONS.md` §4.5 |
 
 门禁自身的两条纪律：凡「扫文档 / 目录做核对」的检查必须有**「0 命中即硬失败」守卫**（`check_arch_module_map` 曾因定位正则不匹配而空扫恒真 PASS，见其源码注释）；门禁输出必须全 ASCII，否则日志读不清。
 
@@ -631,10 +675,10 @@ CI 配置位于 `.github/workflows/`：
 | 落码 | 新增公共 API / widget / 核心逻辑必配单测；demo 与公共源一对一 | `CODING_STANDARDS.md` §3 | `utest_*` 存在并经 GLOB 接入 CTest |
 | 落码 | 新增或改动 widget / 类型 / 属性键 → 刷新 API schema | [`BUILD_OPTIONS.md`](BUILD_OPTIONS.md) §3.6 | `check_api_schema_sync` 绿 |
 | 验证 | 跑全量测试与全部静态门禁、lint、format-check | `AGENTS.md` §3 | 全绿；多目标平台与真机探针口径见本文件 §14.5 |
-| 回写 | 按改动类型回写 `codespec/` 文档 | `AGENTS.md` §3.1 第三列 | `check_codespec_xref` / `check_code_doc_sync` 绿 |
+| 回写 | 按改动类型回写 `codespec/` 文档 | 本节 §14.6 第三列 | `check_codespec_xref` / `check_code_doc_sync` 绿 |
 | 回写 | 版本与变更记录更新；破坏性变更给出迁移路径 | `CHANGELOG.md` SemVer 规则、[`SPECIFICATIONS.md`](SPECIFICATIONS.md) §12 | `check_version_consistency` 绿 |
 | 回写 | 按 Conventional Commits 写提交信息 | `CODING_STANDARDS.md` §10 | `git log` 可归类、无任务编号词 |
-| 归档 | 提案状态转 `已归档`，并核对提案列出的回写落点确已落地 | `AGENTS.md` §3.1 第三列 | 状态 `已归档`；落点文档与代码现状一致 |
+| 归档 | 提案状态转 `已归档`，并核对提案列出的回写落点确已落地 | 本节 §14.6 第三列 | 状态 `已归档`；落点文档与代码现状一致 |
 
 ### 15.1 什么可以跳过
 

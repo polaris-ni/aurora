@@ -36,7 +36,6 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -45,7 +44,6 @@
 #include "aurora/core/result.h"
 #include "aurora/net/cancellation.h"
 #include "aurora/net/engine.h"
-#include "aurora/net/poll.h"
 #include "aurora/net/transport.h"
 #include "framework/async_wait.h"
 #include "framework/aurora_test.h"
@@ -100,7 +98,7 @@ auto pump_until(aurora::app::EventSourceRegistry &registry, const std::function<
 /// @param pred 目标条件。
 /// @return 预算内成立为 true。
 [[maybe_unused]] auto wait_until(const std::function<bool()> &pred) -> bool {
-    return aurora::test::wait_until(AURORA_ENGINE_SUBJECT, pred).satisfied;
+    return aurora::test::net::engine_driven_wait(AURORA_ENGINE_SUBJECT, pred).satisfied;
 }
 
 /// @brief 一对已建立的回环流（宿主驱动形态，两端都在本线程拿到结果）。

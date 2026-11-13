@@ -2,7 +2,8 @@
 /// 目标单元: include/aurora/widget/codegen.h
 /// 测试说明: 覆盖 to_code 三风格代码生成（Fluent / DesignatedInit / StepByStep）——
 ///           容器/叶形式、属性落点换算（基类属性/嵌套路径/setter-only/同名遮蔽键）、`au::` 限定与字面量形态、
-///           指定初始化器按 `*Props` 声明序与枚举取值按自描述规范化，以及「无公开写入路径即省略」的能力边界
+///           链式写件按权威表点名序与枚举取值按自描述规范化、DesignatedInit 与 Fluent 同产物的别名判据，
+///           以及「无公开写入路径 / 无构造槽即省略」的能力边界
 /// 覆盖说明: 输入为 to_json 同构的 {type, props, children} 结构快照
 ///           产物可编译性由本文件的形态断言 + 全量类型体检（见 specification/08-tooling.md §2.5）共同锁定
 
@@ -40,51 +41,87 @@ auto make_text(const au::Json &props) -> au::Json { return make_node("Text", pro
 }  // namespace
 
 AURORA_TEST_CASE(codegen_fluent_emits_column_and_button) {
-    au::Json node =
+    au::Json const node =
         make_node("Column", au::Json::object(), testing::json_arr({make_button("OK"), make_button("Cancel")}));
 
     const std::string code = to_code(node);
     AURORA_TEST_CHECK_MSG(code.find("au::Column{") != std::string::npos, "codegen: fluent emits au::Column{");
-    AURORA_TEST_CHECK_MSG(code.find("au::Button(au::ButtonProps{") != std::string::npos,
-                          "codegen: fluent emits au::Button(...)");
-    AURORA_TEST_CHECK_MSG(code.find(".label = \"OK\"") != std::string::npos, "codegen: fluent emits .label = \"OK\"");
-    AURORA_TEST_CHECK_MSG(code.find(".label = \"Cancel\"") != std::string::npos,
-                          "codegen: fluent emits .label = \"Cancel\"");
+    // `Button` 已迁到属性单一声明形态：`ButtonProps` 无可直写成员，构造形改为 `ButtonProps()` 后接链式写件。
+    AURORA_TEST_CHECK_MSG(code.find("au::Button(au::ButtonProps().set_label(\"OK\"))") != std::string::npos,
+                          "codegen: fluent emits chained ButtonProps().set_label(...)");
+    AURORA_TEST_CHECK_MSG(code.find("au::ButtonProps{") == std::string::npos,
+                          "codegen: fluent never emits a designated initializer for the migrated Button");
+    AURORA_TEST_CHECK_MSG(code.find(".set_label(\"Cancel\")") != std::string::npos,
+                          "codegen: fluent emits .set_label(\"Cancel\")");
 }
 
 AURORA_TEST_CASE(codegen_fluent_grid_puts_column_count_in_props) {
-    // `au::Grid{a, b, 2}` 不是合法构造（无匹配 ctor），列数只能作 Props 成员发射。
-    au::Json node =
+    // `au::Grid{a, b, 2}` 不是合法构造（无匹配 ctor）：子节点作构造首参，列数只能经 Props 链式写件发射。
+    au::Json const node =
         make_node("Grid", testing::json_obj({{"columns", 2}}), testing::json_arr({make_button("A"), make_button("B")}));
 
     const std::string code = to_code(node);
-    AURORA_TEST_CHECK_MSG(code.find("au::Grid(au::GridProps{") != std::string::npos,
-                          "codegen: grid with props uses GridProps form");
-    AURORA_TEST_CHECK_MSG(code.find(".children = {") != std::string::npos, "codegen: grid children slot first");
-    AURORA_TEST_CHECK_MSG(code.find(".columns = 2") != std::string::npos, "codegen: grid emits .columns = 2");
+    AURORA_TEST_CHECK_MSG(code.find("au::Grid(") != std::string::npos,
+                          "codegen: grid uses the kids-first constructor form");
+    AURORA_TEST_CHECK_MSG(code.find("au::GridProps().set_columns(2)") != std::string::npos,
+                          "codegen: grid emits .set_columns(2)");
+    AURORA_TEST_CHECK_MSG(code.find(".children = {") == std::string::npos,
+                          "codegen: grid children are not a Props member");
     AURORA_TEST_CHECK_MSG(code.find("au::Grid{") == std::string::npos,
                           "codegen: grid never uses the positional column-count ctor");
 }
 
-AURORA_TEST_CASE(codegen_designated_init_and_step_by_step_styles) {
-    au::Json node = make_node("Column", au::Json::object(), testing::json_arr({make_button("OK")}));
+AURORA_TEST_CASE(codegen_fluent_pull_to_refresh_child_leads_and_props_chain) {
+    // 单子容器迁移后子节点出表、改作构造首参：`au::PullToRefreshProps{ .child = ... }` 已无该成员，
+    // 属性只能经链式写件接在第二实参上。
+    au::Json const node = make_node("PullToRefresh", testing::json_obj({{"threshold", 40.0}, {"max_pull", 90.0}}),
+                                    testing::json_arr({make_button("A")}));
 
-    // 指定初始化器只对 `*Props` 聚合合法：控件类本身是非聚合类型，`au::Button{.label=...}` 编译不过。
+    const std::string code = to_code(node);
+    AURORA_TEST_CHECK_MSG(code.find("au::PullToRefresh(au::Button(") != std::string::npos,
+                          "codegen: pull-to-refresh takes the child as first ctor argument");
+    AURORA_TEST_CHECK_MSG(code.find("au::PullToRefreshProps().set_threshold(40.0f)") != std::string::npos,
+                          "codegen: pull-to-refresh emits .set_threshold(40.0f)");
+    AURORA_TEST_CHECK_MSG(code.find(".set_max_pull(90.0f)") != std::string::npos,
+                          "codegen: pull-to-refresh emits .set_max_pull(90.0f)");
+    AURORA_TEST_CHECK_MSG(code.find(".child = ") == std::string::npos,
+                          "codegen: pull-to-refresh child is not a Props member");
+
+    // StepByStep 走「先声明后赋值」：子节点作构造实参交出，属性逐条经写件落到该变量上。
+    const std::string sb = to_code(node, CodeStyle::StepByStep);
+    AURORA_TEST_CHECK_MSG(sb.find("au::PullToRefresh{") != std::string::npos,
+                          "codegen: StepByStep constructs pull-to-refresh around a child");
+    AURORA_TEST_CHECK_MSG(sb.find("au::Node{std::move(__w1)}") != std::string::npos,
+                          "codegen: StepByStep hands the child over by move");
+    AURORA_TEST_CHECK_MSG(sb.find(".set_threshold(40.0f);") != std::string::npos,
+                          "codegen: StepByStep applies .set_threshold");
+}
+
+AURORA_TEST_CASE(codegen_designated_init_and_step_by_step_styles) {
+    au::Json const node = make_node("Column", au::Json::object(), testing::json_arr({make_button("OK")}));
+
+    // DesignatedInit 是 Fluent 的别名：指定初始化器要求 `*Props` 的公有同名成员，而 18 型聚合字段全私有、
+    // 其余 58 型不在发射名单内（属性按能力边界省略），故没有一条产物再发设计符。容器子项走构造首参，
+    // 属性续在 `TProps()` 之后。
     const std::string di = to_code(node, CodeStyle::DesignatedInit);
-    AURORA_TEST_CHECK_MSG(di.find("au::Column(au::ColumnProps{") != std::string::npos,
-                          "codegen: DesignatedInit wraps container in ColumnProps");
-    AURORA_TEST_CHECK_MSG(di.find("au::Button(au::ButtonProps{") != std::string::npos,
-                          "codegen: DesignatedInit wraps leaf in ButtonProps");
-    AURORA_TEST_CHECK_MSG(di.find(".children = {") != std::string::npos, "codegen: DesignatedInit uses .children slot");
+    AURORA_TEST_CHECK_MSG(di.find("au::Column{") != std::string::npos,
+                          "codegen: DesignatedInit (the Fluent alias) puts container children in the init list");
+    AURORA_TEST_CHECK_MSG(di.find("ColumnProps") == std::string::npos,
+                          "codegen: DesignatedInit no longer routes containers through a Props aggregate");
+    AURORA_TEST_CHECK_MSG(di.find("au::Button(au::ButtonProps().set_label(\"OK\"))") != std::string::npos,
+                          "codegen: DesignatedInit wraps migrated leaf in chained ButtonProps");
 
     const std::string sb = to_code(node, CodeStyle::StepByStep);
     AURORA_TEST_CHECK_MSG(sb.find("auto __w1 = au::Button{};") != std::string::npos,
                           "codegen: StepByStep declares Button var");
-    AURORA_TEST_CHECK_MSG(sb.find("__w1.label = \"OK\";") != std::string::npos, "codegen: StepByStep assigns label");
-    AURORA_TEST_CHECK_MSG(sb.find("auto __w0 = au::Column(au::ColumnProps{") != std::string::npos,
+    AURORA_TEST_CHECK_MSG(sb.find("__w1.set_label(\"OK\");") != std::string::npos,
+                          "codegen: StepByStep writes label through set_label");
+    AURORA_TEST_CHECK_MSG(sb.find("auto __w0 = au::Column{") != std::string::npos,
                           "codegen: StepByStep passes children at construction");
     AURORA_TEST_CHECK_MSG(sb.find("__w0.children =") == std::string::npos,
                           "codegen: StepByStep never assigns children post-construction");
+    AURORA_TEST_CHECK_MSG(sb.find("__w0.set_children") == std::string::npos,
+                          "codegen: StepByStep never rebuilds children through a setter");
     AURORA_TEST_CHECK_MSG(sb.find("au::Node{std::move(__w1)}") != std::string::npos,
                           "codegen: StepByStep hands child over by move");
 
@@ -92,34 +129,97 @@ AURORA_TEST_CASE(codegen_designated_init_and_step_by_step_styles) {
     AURORA_TEST_CHECK_MSG(to_code(node) == to_code(node, CodeStyle::Fluent), "codegen: default style == Fluent");
 }
 
+AURORA_TEST_CASE(codegen_designated_init_is_the_fluent_alias) {
+    // DesignatedInit 只是别名，不是另一种形态：枚举值留着是给 CLI `--style di`、MCP 与 Inspector 的
+    // `style=2` 留兼容。逐字节钉住「同产物」——别名哪天悄悄分叉，这条先红。样本覆盖四条实际可达的
+    // 发射分支（无聚合 / 无子节点 / 子项首参 / 单子首参）与嵌套一层。
+    const std::vector<au::Json> samples = {
+        make_node("Column", au::Json::object(), testing::json_arr({make_button("OK")})),
+        make_node("Column", testing::json_obj({{"gap", 8.0F}}), testing::json_arr({make_button("OK")})),
+        make_node("Column", testing::json_obj({{"gap", 8.0F}}),
+                  testing::json_arr({make_node("Row", au::Json::object(), testing::json_arr({make_button("In")}))})),
+        make_text(testing::json_obj({{"content", "Hi"}, {"font_size", 16.0F}, {"text_align", "center"}})),
+        make_node("Stack", au::Json::object(), testing::json_arr({make_button("OK")})),
+        make_node("PullToRefresh", testing::json_obj({{"threshold", 40.0F}}), testing::json_arr({make_button("OK")})),
+        make_node("Divider", testing::json_obj({{"orientation", "vertical"}})),
+        make_node("WebView", testing::json_obj({{"url", "https://example.com"}, {"mode", "Snapshot"}})),
+    };
+    for (const auto &node : samples) {
+        AURORA_TEST_CHECK_MSG(to_code(node) == to_code(node, CodeStyle::DesignatedInit),
+                              "codegen alias: DesignatedInit output is byte-identical to Fluent");
+    }
+}
+
+AURORA_TEST_CASE(codegen_namespaced_type_lands_in_its_own_subnamespace) {
+    // `WebView` 是在册 76 型里唯一不挂在 `aurora` 直属下的控件（真身 `aurora::webview::WebView`）。
+    // 它迁到链式形态后进了发射名单，于是发射面第一次要处理「类名之外还有一段子命名空间」：类名、聚合名
+    // 与枚举行自描述给出的类型名都取自同一段前缀，漏掉任何一处都会产出 `au::WebView` /
+    // `au::WebViewMode::Snapshot` 这种不存在的名字（编译红），而非少发一条属性。
+    const au::Json node =
+        make_node("WebView", testing::json_obj({{"url", "https://example.com"}, {"mode", "Snapshot"}}));
+    const std::string fluent = to_code(node, CodeStyle::Fluent);
+    AURORA_TEST_CHECK_MSG(fluent.find("au::webview::WebView(au::webview::WebViewProps()") != std::string::npos,
+                          "codegen: the ctor and its Props aggregate both carry the webview:: segment");
+    AURORA_TEST_CHECK_MSG(fluent.find(".set_mode(au::webview::WebViewMode::Snapshot)") != std::string::npos,
+                          "codegen: the enum row lands in webview::WebViewMode, not a bare WebViewMode");
+    AURORA_TEST_CHECK_MSG(fluent.find("au::WebView") == std::string::npos,
+                          "codegen: no unqualified au::WebView / au::WebViewMode reaches the output");
+
+    const std::string step =
+        to_code(make_node("WebView", testing::json_obj({{"mode", "snapshot"}})), CodeStyle::StepByStep);
+    AURORA_TEST_CHECK_MSG(step.find("auto __w0 = au::webview::WebView{};") != std::string::npos,
+                          "codegen: StepByStep declares the namespaced type qualified");
+    AURORA_TEST_CHECK_MSG(step.find("__w0.set_mode(au::webview::WebViewMode::Snapshot);") != std::string::npos,
+                          "codegen: StepByStep writes the mode row through set_mode (case-normalised)");
+}
+
+AURORA_TEST_CASE(codegen_child_slot_guard_keeps_output_compilable) {
+    // 兜底分支曾经发 `au::T(au::TProps{ …, .children = { 子项 } })`：链式形态的字段私有，那条产物编译红。
+    // 现在没有构造槽的类型按「宁缺不伪」告警丢弃子节点，属性照旧经链式写件装入。
+    // 真实快照不会给 Button 挂子节点，手改 JSON 或外部模型产出的快照会——生成器对它也不许发编译不过的形。
+    const au::Json odd =
+        make_node("Button", testing::json_obj({{"label", "OK"}}), testing::json_arr({make_button("Inner")}));
+    for (const CodeStyle style : {CodeStyle::Fluent, CodeStyle::DesignatedInit}) {
+        const std::string code = to_code(odd, style);
+        AURORA_TEST_CHECK_MSG(code.find(".children") == std::string::npos,
+                              "child slot guard: no `.children` designator reaches a Props aggregate");
+        AURORA_TEST_CHECK_MSG(code.find("au::ButtonProps{") == std::string::npos,
+                              "child slot guard: no designated initializer for a chain-form Props");
+        AURORA_TEST_CHECK_MSG(code.find("Inner") == std::string::npos,
+                              "child slot guard: the child without a construction slot is dropped");
+        AURORA_TEST_CHECK_MSG(code.find(".set_label(\"OK\")") != std::string::npos,
+                              "child slot guard: the scalar writer still carries the label");
+    }
+}
+
 AURORA_TEST_CASE(codegen_scalar_props_string_bool_float_int) {
     const std::string str_code = to_code(make_text(testing::json_obj({{"content", "Hello"}})));
-    AURORA_TEST_CHECK_MSG(str_code.find(".content = \"Hello\"") != std::string::npos, "emit_props: string content");
+    AURORA_TEST_CHECK_MSG(str_code.find(".set_content(\"Hello\")") != std::string::npos, "emit_props: string content");
 
     const std::string bool_true = to_code(make_text(testing::json_obj({{"soft_wrap", au::Json{true}}})));
-    AURORA_TEST_CHECK_MSG(bool_true.find(".soft_wrap = true") != std::string::npos, "emit_props: bool true");
+    AURORA_TEST_CHECK_MSG(bool_true.find(".set_soft_wrap(true)") != std::string::npos, "emit_props: bool true");
     const std::string bool_false = to_code(make_text(testing::json_obj({{"soft_wrap", au::Json{false}}})));
-    AURORA_TEST_CHECK_MSG(bool_false.find(".soft_wrap = false") != std::string::npos, "emit_props: bool false");
+    AURORA_TEST_CHECK_MSG(bool_false.find(".set_soft_wrap(false)") != std::string::npos, "emit_props: bool false");
 
     // 整数值浮点属性（`14.0`）必须带小数点：`14f` 会被解析成用户字面量 `operator""f`。
     const std::string float_code = to_code(make_node("Button", testing::json_obj({{"corner_radius", 14.0}})));
-    AURORA_TEST_CHECK_MSG(float_code.find(".corner_radius = 14.0f") != std::string::npos,
+    AURORA_TEST_CHECK_MSG(float_code.find(".set_corner_radius(14.0f)") != std::string::npos,
                           "emit_props: integral float keeps decimal point");
     AURORA_TEST_CHECK_MSG(float_code.find("14f") == std::string::npos, "emit_props: no bare integral-f literal");
 
     const std::string frac_code = to_code(make_node("Button", testing::json_obj({{"corner_radius", 6.5}})));
-    AURORA_TEST_CHECK_MSG(frac_code.find(".corner_radius = 6.5f") != std::string::npos,
+    AURORA_TEST_CHECK_MSG(frac_code.find(".set_corner_radius(6.5f)") != std::string::npos,
                           "emit_props: fractional float keeps f suffix");
 
     const std::string int_code = to_code(make_node("Grid", testing::json_obj({{"columns", 3}})));
-    AURORA_TEST_CHECK_MSG(int_code.find(".columns = 3") != std::string::npos, "emit_props: int prop");
+    AURORA_TEST_CHECK_MSG(int_code.find(".set_columns(3)") != std::string::npos, "emit_props: int prop");
 }
 
 AURORA_TEST_CASE(codegen_length_forms_px_percent_legacy_auto_fill) {
     const std::string px = to_code(
         make_node("Button", testing::json_obj({{"corner_radius", 8.0}, {"width", testing::json_arr({"px", 100.0F})}})));
     // 宽度是基类属性，表达式风格不承载；此处只验长度字面量形态（同一发射函数亦服务于 step 风格）。
-    AURORA_TEST_CHECK_MSG(px.find(".corner_radius = 8.0f") != std::string::npos,
+    AURORA_TEST_CHECK_MSG(px.find(".set_corner_radius(8.0f)") != std::string::npos,
                           "emit_props: Length sibling prop kept");
     const std::string step_px = to_code(
         make_node("Button", testing::json_obj({{"width", testing::json_arr({"px", 100.0F})}})), CodeStyle::StepByStep);
@@ -153,9 +253,9 @@ AURORA_TEST_CASE(codegen_color_and_edge_insets_values) {
     const std::string color = to_code(make_text(testing::json_obj({{"color", testing::json_arr({255, 0, 0, 255})}})));
     AURORA_TEST_CHECK_MSG(color.find("au::Color{255,0,0,255}") != std::string::npos,
                           "emit_props: Color array as au::Color RGBA");
-    // Text 的 `color` 键落在聚合成员 `text_color`（异名换算）。
-    AURORA_TEST_CHECK_MSG(color.find(".text_color = au::Color{") != std::string::npos,
-                          "emit_props: Text color aliases to text_color");
+    // Text 的 `color` 键经链式写件 `set_color` 装入（属性单一声明形态）。
+    AURORA_TEST_CHECK_MSG(color.find(".set_color(au::Color{") != std::string::npos,
+                          "emit_props: Text color through set_color");
 
     const std::string insets = to_code(make_node(
         "Button",
@@ -166,20 +266,17 @@ AURORA_TEST_CASE(codegen_color_and_edge_insets_values) {
 }
 
 AURORA_TEST_CASE(codegen_enum_keys_emit_qualified_expressions) {
+    AURORA_TEST_CHECK_MSG(to_code(make_text(testing::json_obj({{"text_align", "Center"}})))
+                                  .find(".set_text_align(au::TextAlign::Center)") != std::string::npos,
+                          "emit_props: enum TextAlign");
+    AURORA_TEST_CHECK_MSG(to_code(make_text(testing::json_obj({{"overflow", "Ellipsis"}})))
+                                  .find(".set_overflow(au::TextOverflow::Ellipsis)") != std::string::npos,
+                          "emit_props: Text overflow key → TextOverflow");
+    AURORA_TEST_CHECK_MSG(to_code(make_text(testing::json_obj({{"font_style", "Italic"}})))
+                                  .find(".set_font_style(au::FontStyle::Italic)") != std::string::npos,
+                          "emit_props: enum FontStyle");
     AURORA_TEST_CHECK_MSG(
-        to_code(make_text(testing::json_obj({{"text_align", "Center"}}))).find("au::TextAlign::Center") !=
-            std::string::npos,
-        "emit_props: enum TextAlign");
-    AURORA_TEST_CHECK_MSG(
-        to_code(make_text(testing::json_obj({{"overflow", "Ellipsis"}}))).find("au::TextOverflow::Ellipsis") !=
-            std::string::npos,
-        "emit_props: Text overflow key → TextOverflow");
-    AURORA_TEST_CHECK_MSG(
-        to_code(make_text(testing::json_obj({{"font_style", "Italic"}}))).find("au::FontStyle::Italic") !=
-            std::string::npos,
-        "emit_props: enum FontStyle");
-    AURORA_TEST_CHECK_MSG(
-        to_code(make_text(testing::json_obj({{"direction", "RTL"}}))).find("au::TextDirection::RTL") !=
+        to_code(make_text(testing::json_obj({{"direction", "RTL"}}))).find(".set_direction(au::TextDirection::RTL)") !=
             std::string::npos,
         "emit_props: enum TextDirection");
     // 基类 `overflow`（非 Text 类型）是 OverflowStrategy，经 overflow_strategy() setter 写入。
@@ -229,8 +326,8 @@ AURORA_TEST_CASE(codegen_key_without_public_write_path_is_dropped_not_invented) 
 AURORA_TEST_CASE(codegen_font_weight_and_text_decoration) {
     // 落点 `Font::weight` 是 int（CSS 100..900），故发射数值字面量而非枚举名。
     const std::string bold = to_code(make_text(testing::json_obj({{"font_weight", "700"}})), CodeStyle::StepByStep);
-    AURORA_TEST_CHECK_MSG(bold.find("__w0.font.weight = 700;") != std::string::npos,
-                          "emit_props: FontWeight 700 → font.weight int");
+    AURORA_TEST_CHECK_MSG(bold.find("__w0.set_font_weight(700);") != std::string::npos,
+                          "emit_props: FontWeight 700 → set_font_weight int");
 
     const std::string single =
         to_code(make_text(testing::json_obj({{"decoration", testing::json_arr({"Underline"})}})));
@@ -264,10 +361,10 @@ AURORA_TEST_CASE(codegen_base_props_only_reach_step_style) {
         AURORA_TEST_CHECK_MSG(expr.find(forbidden) == std::string::npos,
                               std::string("base prop absent from expression style: ") + forbidden);
     }
-    AURORA_TEST_CHECK_MSG(expr.find(".label = \"OK\"") != std::string::npos, "base prop filter keeps real props");
+    AURORA_TEST_CHECK_MSG(expr.find(".set_label(\"OK\")") != std::string::npos, "base prop filter keeps real props");
 
     const std::string step = to_code(make_node("Button", props), CodeStyle::StepByStep);
-    AURORA_TEST_CHECK_MSG(step.find("__w0.show = false;") != std::string::npos, "step assigns public show member");
+    AURORA_TEST_CHECK_MSG(step.find("__w0.set_show(false);") != std::string::npos, "step calls set_show");
     AURORA_TEST_CHECK_MSG(step.find("__w0.width(au::px(120.0f));") != std::string::npos, "step calls width() setter");
     AURORA_TEST_CHECK_MSG(step.find("__w0.height(au::fill());") != std::string::npos, "step calls height() setter");
     // CJK-LITERAL: cjk-fixture - same Han label expected back from the generator verbatim
@@ -297,43 +394,54 @@ AURORA_TEST_CASE(codegen_never_invents_props_aggregate) {
 }
 
 AURORA_TEST_CASE(codegen_nested_and_setter_props_only_reach_step_style) {
-    // 嵌套路径（font.size_pt / flex.main_axis）与 setter-only（TextInput 样式组）无法进指定初始化器：
-    // GCC 的 C++ 指定初始化器不支持嵌套设计符，protected 字段不能在类外赋值。
-    const au::Json text_props =
-        testing::json_obj({{"content", "Hi"}, {"font_size", 16.0F}, {"main_axis_alignment", "Center"}});
+    // Text / TextInput 的字体尺寸与样式键都经链式写件 `set_*` 装入，表达式风格同样承载
+    // （属性面迁到权威表后，`TextInputProps()` 词根可挂，样式键不再只在 StepByStep 出现）。
+    const au::Json text_props = testing::json_obj({{"content", "Hi"}, {"font_size", 16.0F}});
     const std::string expr = to_code(make_text(text_props));
-    AURORA_TEST_CHECK_MSG(expr.find(".font_size") == std::string::npos, "expression style drops nested font_size");
-    AURORA_TEST_CHECK_MSG(expr.find(".content = \"Hi\"") != std::string::npos,
-                          "expression style keeps top-level member");
+    AURORA_TEST_CHECK_MSG(expr.find(".set_font_size(16.0f)") != std::string::npos,
+                          "expression style keeps font_size through its writer");
+    AURORA_TEST_CHECK_MSG(expr.find(".set_content(\"Hi\")") != std::string::npos,
+                          "expression style keeps top-level content writer");
 
     const std::string step =
         to_code(make_text(testing::json_obj({{"content", "Hi"}, {"font_size", 16.0F}})), CodeStyle::StepByStep);
-    AURORA_TEST_CHECK_MSG(step.find("__w0.font.size_pt = 16.0f;") != std::string::npos,
-                          "step writes nested font.size_pt");
+    AURORA_TEST_CHECK_MSG(step.find("__w0.set_font_size(16.0f);") != std::string::npos,
+                          "step writes font_size through its setter");
 
     const au::Json col_props = testing::json_obj({{"main_axis_alignment", "SpaceBetween"},
                                                   {"cross_axis_alignment", "Stretch"},
                                                   {"main_axis_size", "Max"},
                                                   {"gap", 12.0F}});
     const std::string col_expr = to_code(make_node("Column", col_props));
-    AURORA_TEST_CHECK_MSG(col_expr.find(".gap = 12.0f") != std::string::npos, "container keeps plain gap member");
-    AURORA_TEST_CHECK_MSG(col_expr.find("main_axis_alignment") == std::string::npos,
-                          "expression style drops nested flex alignment");
+    AURORA_TEST_CHECK_MSG(col_expr.find(".set_gap(12.0f)") != std::string::npos,
+                          "container gap goes through the chained writer");
+    AURORA_TEST_CHECK_MSG(
+        col_expr.find(".set_main_axis_alignment(au::MainAxisAlignment::SpaceBetween)") != std::string::npos,
+        "expression style keeps the container alignment writer");
+    AURORA_TEST_CHECK_MSG(
+        col_expr.find(".set_cross_axis_alignment(au::CrossAxisAlignment::Stretch)") != std::string::npos,
+        "expression style keeps the container cross-axis writer");
     const std::string col_step = to_code(make_node("Column", col_props), CodeStyle::StepByStep);
     AURORA_TEST_CHECK_MSG(
-        col_step.find("__w0.flex.main_axis = au::MainAxisAlignment::SpaceBetween;") != std::string::npos,
-        "step writes flex.main_axis");
-    AURORA_TEST_CHECK_MSG(col_step.find("__w0.flex.cross_axis = au::CrossAxisAlignment::Stretch;") != std::string::npos,
-                          "step writes flex.cross_axis");
-    AURORA_TEST_CHECK_MSG(col_step.find("__w0.flex.main_axis_size = au::MainAxisSize::Max;") != std::string::npos,
-                          "step writes flex.main_axis_size");
+        col_step.find("__w0.set_main_axis_alignment(au::MainAxisAlignment::SpaceBetween);") != std::string::npos,
+        "step writes set_main_axis_alignment");
+    AURORA_TEST_CHECK_MSG(
+        col_step.find("__w0.set_cross_axis_alignment(au::CrossAxisAlignment::Stretch);") != std::string::npos,
+        "step writes set_cross_axis_alignment");
+    AURORA_TEST_CHECK_MSG(col_step.find("__w0.set_main_axis_size(au::MainAxisSize::Max);") != std::string::npos,
+                          "step writes set_main_axis_size");
 
     // CJK-LITERAL: cjk-fixture - Han placeholder fed to the generator as payload data
     const std::string input_step =
         to_code(make_node("TextInput", testing::json_obj({{"placeholder", "姓名"}, {"corner_radius", 4.0F}})),
                 CodeStyle::StepByStep);
     AURORA_TEST_CHECK_MSG(input_step.find("__w0.set_corner_radius(4.0f);") != std::string::npos,
-                          "step routes setter-only TextInput style through set_corner_radius");
+                          "step routes the TextInput style key through set_corner_radius");
+    // CJK-LITERAL: cjk-fixture - same Han placeholder, this time through the expression style
+    const std::string input_expr =
+        to_code(make_node("TextInput", testing::json_obj({{"placeholder", "姓名"}, {"corner_radius", 4.0F}})));
+    AURORA_TEST_CHECK_MSG(input_expr.find(".set_corner_radius(4.0f)") != std::string::npos,
+                          "expression style carries the TextInput style key");
 }
 
 AURORA_TEST_CASE(codegen_skips_props_without_write_path) {
@@ -342,28 +450,25 @@ AURORA_TEST_CASE(codegen_skips_props_without_write_path) {
         to_code(make_node("Scroll", testing::json_obj({{"offset", 240.0F}, {"step", 24.0F}})), CodeStyle::StepByStep);
     AURORA_TEST_CHECK_MSG(step.find("offset") == std::string::npos,
                           "codegen: Scroll offset has no write path, skipped");
-    AURORA_TEST_CHECK_MSG(step.find("__w0.step = 24.0f;") != std::string::npos, "codegen: sibling prop still emitted");
+    AURORA_TEST_CHECK_MSG(step.find("__w0.set_step(24.0f);") != std::string::npos,
+                          "codegen: sibling prop still emitted via chain writer");
 }
 
-AURORA_TEST_CASE(codegen_step_show_member_shadowed_by_method_uses_qualified_name) {
-    // Dialog/Drawer/ToastHost/ProgressDialog 自带成员函数 `show()`，遮蔽了基类成员 `Widget::show`；
-    // 裸写 `w.show = true;` 取到的是成员函数，编译失败，故走限定名。
-    for (const std::string type : {"Dialog", "Drawer", "ToastHost", "ProgressDialog"}) {
+AURORA_TEST_CASE(codegen_step_show_uses_setter_for_shadowed_and_plain_types) {
+    // 展示属性统一走换源入口：Dialog/Drawer/ToastHost/ProgressDialog 自带的成员函数 `show()`
+    // 不再可能被属性赋值遮蔽，与普通控件一样生成 `set_show(...)`。
+    for (const std::string type : {"Dialog", "Drawer", "ToastHost", "ProgressDialog", "Button"}) {
         const std::string step =
             to_code(make_node(type, testing::json_obj({{"show", au::Json{false}}})), CodeStyle::StepByStep);
-        AURORA_TEST_CHECK_MSG(step.find("__w0.Widget::show = false;") != std::string::npos,
-                              "codegen: shadowed show uses Widget:: qualification for " + type);
+        AURORA_TEST_CHECK_MSG(step.find("__w0.set_show(false);") != std::string::npos,
+                              "codegen: show prop emits set_show for " + type);
     }
-    const std::string plain =
-        to_code(make_node("Button", testing::json_obj({{"show", au::Json{false}}})), CodeStyle::StepByStep);
-    AURORA_TEST_CHECK_MSG(plain.find("__w0.show = false;") != std::string::npos,
-                          "codegen: unshadowed show stays plain member assignment");
 }
 
 AURORA_TEST_CASE(codegen_step_statements_are_complete_and_children_declared_first) {
     // 结构守卫（TC-WIDGET-006 的原始缺陷就是把变量声明写进了初始化列表）：
     // ① 每条非空行都以 `;`、`,`、`{` 或 `}` 收尾；② 子节点变量先声明后被 `std::move` 引用。
-    au::Json node = make_node(
+    au::Json const node = make_node(
         "Column", testing::json_obj({{"gap", 8.0F}}),
         testing::json_arr(
             {make_node("Row", au::Json::object(),
@@ -420,17 +525,17 @@ AURORA_TEST_CASE(codegen_multi_prop_mixed_emission) {
         {"max_lines", 2},
     });
     const std::string expr = to_code(make_text(props));
-    AURORA_TEST_CHECK_MSG(expr.find(".content = \"Hello\"") != std::string::npos, "mixed: content");
+    AURORA_TEST_CHECK_MSG(expr.find(".set_content(\"Hello\")") != std::string::npos, "mixed: content");
     AURORA_TEST_CHECK_MSG(expr.find("au::TextAlign::Center") != std::string::npos, "mixed: text_align");
     AURORA_TEST_CHECK_MSG(expr.find("au::Color{255,0,0,255}") != std::string::npos, "mixed: color");
-    AURORA_TEST_CHECK_MSG(expr.find(".max_lines = 2") != std::string::npos, "mixed: int member");
+    AURORA_TEST_CHECK_MSG(expr.find(".set_max_lines(2)") != std::string::npos, "mixed: int writer");
     AURORA_TEST_CHECK_MSG(expr.find(".show") == std::string::npos, "mixed: base show omitted from expression");
-    AURORA_TEST_CHECK_MSG(expr.find(".font_size") == std::string::npos, "mixed: nested font_size omitted");
+    AURORA_TEST_CHECK_MSG(expr.find(".set_font_size(16.0f)") != std::string::npos, "mixed: font_size writer kept");
 
     const std::string step = to_code(make_text(props), CodeStyle::StepByStep);
-    AURORA_TEST_CHECK_MSG(step.find("__w0.content = \"Hello\";") != std::string::npos, "mixed step: content");
-    AURORA_TEST_CHECK_MSG(step.find("__w0.show = true;") != std::string::npos, "mixed step: show");
-    AURORA_TEST_CHECK_MSG(step.find("__w0.font.weight = 700;") != std::string::npos, "mixed step: font weight");
+    AURORA_TEST_CHECK_MSG(step.find("__w0.set_content(\"Hello\");") != std::string::npos, "mixed step: content");
+    AURORA_TEST_CHECK_MSG(step.find("__w0.set_show(true);") != std::string::npos, "mixed step: show setter");
+    AURORA_TEST_CHECK_MSG(step.find("__w0.set_font_weight(700);") != std::string::npos, "mixed step: font weight");
     AURORA_TEST_CHECK_MSG(step.find("__w0.width(au::px(200.0f));") != std::string::npos, "mixed step: width setter");
 }
 
@@ -438,13 +543,15 @@ AURORA_TEST_CASE(codegen_from_widget_snapshot_compiles_shape) {
     // 便捷入口：直接对控件取快照再生成（Inspector / export_code 的同一条路径）。
     auto text = au::Text("Hi");
     const std::string code = au::serialization::to_code(text);
-    AURORA_TEST_CHECK_MSG(code.find("au::Text(au::TextProps{") != std::string::npos, "widget overload emits TextProps");
-    AURORA_TEST_CHECK_MSG(code.find(".content = \"Hi\"") != std::string::npos, "widget overload keeps content");
+    AURORA_TEST_CHECK_MSG(code.find("au::Text(au::TextProps()") != std::string::npos,
+                          "widget overload emits TextProps");
+    AURORA_TEST_CHECK_MSG(code.find(".set_content(\"Hi\")") != std::string::npos, "widget overload keeps content");
 }
 
-AURORA_TEST_CASE(codegen_designated_initializers_follow_declaration_order) {
-    // GCC 的 C++ 指定初始化器必须按成员**声明序**书写，而快照 JSON 的键序无字典序保证（插入序即存储序）。
-    // 属性顺序取自 `describe` 的 `props` 表（即 `*Props` 的声明序），乱序产物直接编译失败。
+AURORA_TEST_CASE(codegen_props_writers_follow_table_order) {
+    // 链式写件之间没有顺序约束（指定初始化器才有：乱序 GCC 直接报错），这里仍钉住权威表的点名序，
+    // 为的是产物与 schema、描述符能逐行对照；快照 JSON 的键序无从保证，乱序发射会让两份产物对不上。
+    // Button 已迁到链式发射，形态换了但顺序判据不变 —— 仍是那张权威表的点名序。
     const au::Json props = testing::json_obj(
         {{"enabled", au::Json{false}},
          {"padding", testing::json_obj({{"top", 6.0F}, {"right", 12.0F}, {"bottom", 6.0F}, {"left", 12.0F}})},
@@ -452,20 +559,21 @@ AURORA_TEST_CASE(codegen_designated_initializers_follow_declaration_order) {
          {"on_color", testing::json_arr({255, 255, 255, 255})},
          {"label", "OK"}});
     const std::string di = to_code(make_node("Button", props), CodeStyle::DesignatedInit);
-    const std::vector<std::string> order = {".label", ".on_color", ".corner_radius", ".padding", ".enabled"};
+    const std::vector<std::string> order = {".set_label", ".set_on_color", ".set_corner_radius", ".set_padding",
+                                            ".set_enabled"};
     std::size_t prev = 0;
     for (const std::string &needle : order) {
         const std::size_t at = di.find(needle);
-        AURORA_TEST_CHECK_MSG(at != std::string::npos, std::string("declaration order: ") + needle + " present");
-        AURORA_TEST_CHECK_MSG(at > prev, std::string("declaration order: ") + needle + " follows its predecessor");
+        AURORA_TEST_CHECK_MSG(at != std::string::npos, std::string("table order: ") + needle + " present");
+        AURORA_TEST_CHECK_MSG(at > prev, std::string("table order: ") + needle + " follows its predecessor");
         prev = at;
     }
-    // 子节点槽排在所有标量成员之前（`ColumnProps.children` 是聚合首成员）。
+    // 子节点排在所有标量属性之前：子项是容器构造的首参（`au::Column(子项, Props)`）。
     const std::string container =
         to_code(make_node("Column", testing::json_obj({{"gap", 8.0F}}), testing::json_arr({make_button("OK")})),
                 CodeStyle::DesignatedInit);
-    AURORA_TEST_CHECK_MSG(container.find(".children") < container.find(".gap"),
-                          "declaration order: children slot precedes scalar members");
+    AURORA_TEST_CHECK_MSG(container.find("au::Column(") < container.find(".set_gap"),
+                          "table order: children argument precedes scalar writers");
 }
 
 AURORA_TEST_CASE(codegen_enum_values_canonicalized_from_self_description) {
@@ -489,7 +597,7 @@ AURORA_TEST_CASE(codegen_font_weight_and_enum_numeric_forms) {
     // 数字取值必须留在 int 形态，不能拼成 `au::FontWeight::400`（那不是合法标识符）。
     const std::string weight =
         to_code(make_text(testing::json_obj({{"content", "Hi"}, {"font_weight", "400"}})), CodeStyle::StepByStep);
-    AURORA_TEST_CHECK_MSG(weight.find("__w0.font.weight = 400;") != std::string::npos,
+    AURORA_TEST_CHECK_MSG(weight.find("__w0.set_font_weight(400);") != std::string::npos,
                           "font_weight: CSS numeric string -> int literal");
     AURORA_TEST_CHECK_MSG(weight.find("au::FontWeight::") == std::string::npos,
                           "font_weight: does not assemble an enum member name");
@@ -569,8 +677,8 @@ AURORA_TEST_CASE(codegen_unconstructible_types_keep_their_real_type_name) {
 }
 
 AURORA_TEST_CASE(codegen_text_input_props_route_through_setters) {
-    // `TextInput` 以 `TextInputProps` 作构造参数、把值拷进 protected 字段，对外只有 `set_*()`/链式 setter：
-    // 同名赋值（`w.value = ...`）取到的是同名成员函数，必须走登记的 setter 落点。
+    // `TextInput` 公开继承 `TextInputProps`，字段全私有、公共面只有 `set_<键>` 链式写件：
+    // 同名赋值（`w.value = ...`）取到的是同名成员函数，故发射侧一律由词根推出 setter 落点。
     // CJK-LITERAL: cjk-fixture - Han placeholder fed to the generator, asserted verbatim below
     const std::string step = to_code(make_node("TextInput", testing::json_obj({{"value", "Ada"},
                                                                                {"placeholder", "姓名"},
@@ -583,7 +691,7 @@ AURORA_TEST_CASE(codegen_text_input_props_route_through_setters) {
     // CJK-LITERAL: cjk-fixture - same Han placeholder expected back verbatim
     AURORA_TEST_CHECK_MSG(step.find("__w0.set_placeholder(\"姓名\");") != std::string::npos,
                           "TextInput placeholder -> set_placeholder");
-    AURORA_TEST_CHECK_MSG(step.find("__w0.font_size(16.0f);") != std::string::npos,
+    AURORA_TEST_CHECK_MSG(step.find("__w0.set_font_size(16.0f);") != std::string::npos,
                           "TextInput font_size -> chained setter");
     AURORA_TEST_CHECK_MSG(step.find("__w0.set_max_length(40);") != std::string::npos, "TextInput max_length → setter");
     AURORA_TEST_CHECK_MSG(step.find("__w0.set_read_only(true);") != std::string::npos, "TextInput read_only → setter");

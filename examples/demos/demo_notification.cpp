@@ -21,7 +21,7 @@ namespace {
 
 /// @brief 生成一个点击即执行 fn 的按钮节点（免写 Node{} 包裹）。
 auto action_button(const char *label, std::function<void()> fn) -> au::Node {
-    au::Button button{au::ButtonProps{.label = label}};
+    au::Button button{au::ButtonProps().set_label(label)};
     button.on_click = std::move(fn);
     return au::Node{std::move(button)};
 }
@@ -73,29 +73,28 @@ auto main() -> int {
     (void)app.scheduler().set_interval(std::chrono::milliseconds(50),
                                        []() -> void { au::NotificationCenter::pump_events(); });
 
-    au::Node root = au::Column{au::ColumnProps{
-        .children = {
-            GradientTitle{"System notification"},
-            gap(8),
-            au::Text{au::TextProps{.content = au::Reactive{status}}},
-            gap(8),
-            au::Text{au::TextProps{.content = au::Reactive{activated}}},
-            gap(12),
-            action_button("Post low urgency", [&post]() -> void { post("demo-low", au::NotificationUrgency::Low, 0); }),
-            gap(8),
-            action_button("Post normal urgency",
-                          [&post]() -> void { post("demo-normal", au::NotificationUrgency::Normal, 6000); }),
-            gap(8),
-            action_button("Post critical urgency",
-                          [&post]() -> void { post("demo-critical", au::NotificationUrgency::Critical, 0); }),
-            gap(8),
-            action_button("Post again with same tag (replaces)",
-                          [&post]() -> void { post("demo-normal", au::NotificationUrgency::Normal, 6000); }),
-            gap(12),
-            au::Text{"Click the notification itself: its tag shows up in the line above. "
-                     "On Windows the temporary tray icon disappears once the balloon is gone; "
-                     "on Linux it needs an XDG notification server."},
-        }}};
+    au::Node root = au::Column({
+        GradientTitle{"System notification"},
+        gap(8),
+        au::Text{au::TextProps().set_content(*status)},
+        gap(8),
+        au::Text{au::TextProps().set_content(*activated)},
+        gap(12),
+        action_button("Post low urgency", [&post]() -> void { post("demo-low", au::NotificationUrgency::Low, 0); }),
+        gap(8),
+        action_button("Post normal urgency",
+                      [&post]() -> void { post("demo-normal", au::NotificationUrgency::Normal, 6000); }),
+        gap(8),
+        action_button("Post critical urgency",
+                      [&post]() -> void { post("demo-critical", au::NotificationUrgency::Critical, 0); }),
+        gap(8),
+        action_button("Post again with same tag (replaces)",
+                      [&post]() -> void { post("demo-normal", au::NotificationUrgency::Normal, 6000); }),
+        gap(12),
+        au::Text{"Click the notification itself: its tag shows up in the line above. "
+                 "On Windows the temporary tray icon disappears once the balloon is gone; "
+                 "on Linux it needs an XDG notification server."},
+    });
     app.scene().root_node() = std::move(root);
     app.focus().set_root(&app.scene().root());
 

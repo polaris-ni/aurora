@@ -10,9 +10,12 @@
 //   gen_api_tools aurora_api.json -> write the file directly, cross-platform (used by the CMake target aurora_api_json)
 //   gen_api_tools -               -> explicit stdout sentinel (used by tools/check/check_api_schema_sync.py)
 #include <fstream>
+#include <initializer_list>
 #include <map>
+#include <set>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "api_schema.h"
@@ -20,6 +23,8 @@
 #include "aurora/cli/args.h"
 #include "aurora/cli/command.h"
 #include "known_enums.h"
+#include "perf_api.h"
+#include "theme_literal_exemptions.h"
 
 namespace {
 // Known enums (compile-time constants, not obtainable by pure runtime reflection).
@@ -43,6 +48,15 @@ auto known_enums() -> std::map<std::string, std::vector<std::string>> { return a
     return arr;
 }
 
+/// @brief 字符串列表 -> Json array（同 `enum_values_json` 的理由：`json::Value` 无 vector 隐式构造）。
+[[nodiscard]] auto string_array(std::initializer_list<std::string_view> items) -> au::Json {
+    au::Json arr = au::Json::array();
+    for (const auto &item : items) {
+        arr.push_back(item);
+    }
+    return arr;
+}
+
 /// @brief 命令行声明表：唯一的输出路径既写又读（就地合并），`-` 与缺省均为「输出到 stdout」。
 [[nodiscard]] auto build_spec() -> const aurora::cli::CommandSpec & {
     static const aurora::cli::CommandSpec ROOT_SPEC = [] {
@@ -62,6 +76,65 @@ auto known_enums() -> std::map<std::string, std::vector<std::string>> { return a
         return root;
     }();
     return ROOT_SPEC;
+}
+
+/// @brief 判断一段文案里是否**完整**出现某枚令牌名（令牌后面不得紧跟名字字符）。
+///
+/// 边界检查是必需的：`theme.primary` 是 `theme.primary_container` 的前缀，按裸子串匹配会把
+/// 未消费的 `primary` 误判成已消费。令牌名本身来自登记表，故本函数不含任何手抄显示串。
+/// @param text 待扫描文案（default_expr 的显示串）。
+/// @param token 登记表里的完整令牌名。
+/// @return 完整出现时 true。
+auto token_appears_in(std::string_view text, std::string_view token) -> bool {
+    const auto is_name_char = [](char ch) {
+        return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_' ||
+               ch == '.';
+    };
+    std::size_t pos = text.find(token);
+    while (pos != std::string_view::npos) {
+        const std::size_t end = pos + token.size();
+        if (end == text.size() || !is_name_char(text[end])) {
+            return true;
+        }
+        pos = text.find(token, end);
+    }
+    return false;
+}
+
+/// @brief 收集全部已生成控件属性里被属性行默认值消费的令牌名（含显示串内的令牌）。
+/// @param api 已装配好 widgets 条目的 schema 骨架。
+/// @return 令牌名集合（形如 `theme.motion.medium`）。
+[[nodiscard]] auto collect_consumed_tokens(const au::Json &api) -> std::set<std::string> {
+    std::vector<std::string> exprs;
+    if (const au::Json *widgets = api.at("widgets"); widgets != nullptr) {
+        for (const au::Json &widget : *widgets) {
+            const au::Json *props = widget.at("props");
+            if (props == nullptr) {
+                continue;
+            }
+            for (const au::Json &prop : *props) {
+                const au::Json *expr = prop.at("default_expr");
+                if (expr == nullptr) {
+                    continue;
+                }
+                if (const auto text = expr->as_string(); text) {
+                    exprs.emplace_back(*text);
+                }
+            }
+        }
+    }
+    std::set<std::string> used;
+    for (const auto &group : au::theme_token_groups()) {
+        for (const auto &name : group.tokens) {
+            for (const auto &expr : exprs) {
+                if (token_appears_in(expr, name)) {
+                    used.emplace(name);
+                    break;
+                }
+            }
+        }
+    }
+    return used;
 }
 
 }  // namespace
@@ -195,6 +268,120 @@ auto main(int argc, char **argv) -> int {
         state_patterns.push_back(p3);
     }
     api.set("state_patterns", state_patterns);
+
+    // ---- theme_tokens: machine-readable token vocabulary (non-entry block, one row per registered group) ----
+    // 数据源是各令牌组头里的「成员指针 -> 短名」登记表（aurora::theme_token_groups()），故本块与
+    // schema 里各条目的 default_expr 不可能各说各话：两处读的是同一份表。
+    au::Json theme_tokens = au::Json::object();
+    {
+        theme_tokens.set(
+            "name_rule",
+            "short name = theme.<Theme field>.<member> for metric groups (shapes / spacing / controls / "
+            "motion), theme.<member> for color roles; the prefix column gives the group's prefix verbatim");
+        theme_tokens.set(
+            "usage",
+            "a token name is a display path only; property fallbacks bind the member pointer, so renaming a "
+            "token is a compile error rather than a stale string");
+        theme_tokens.set(
+            "consumed_rule",
+            "consumed=true means at least one token of the group is used as a property-row default (it appears "
+            "in some entry's default_expr); per-token wiring detail is not expressed by this bit. The groups "
+            "listed as unconsumed in specification/07-environment-modifier.md section 5.1 must equal the groups "
+            "with consumed=false; check_no_theme_color_literals judges that equality");
+        // 属性行消费面：从刚装配好的 widgets 条目反查 default_expr 里出现的令牌名，再对每组判「至少一枚」。
+        const std::set<std::string> consumed_tokens = collect_consumed_tokens(api);
+        au::Json groups = au::Json::array();
+        for (const auto &group : au::theme_token_groups()) {
+            au::Json row = au::Json::object();
+            row.set("owner", std::string{group.owner});
+            row.set("field", std::string{group.field});
+            row.set("prefix", std::string{group.prefix});
+            row.set("type", std::string{group.value_type});
+            au::Json tokens = au::Json::array();
+            bool consumed = false;
+            for (const auto &name : group.tokens) {
+                consumed = consumed || consumed_tokens.contains(std::string{name});
+                tokens.push_back(std::string{name});
+            }
+            row.set("count", au::Json{static_cast<int>(group.tokens.size())});
+            row.set("consumed", au::Json{consumed});
+            row.set("tokens", std::move(tokens));
+            groups.push_back(std::move(row));
+        }
+        theme_tokens.set("groups", std::move(groups));
+
+        // 颜色字面量豁免登记（唯一真源：tools/include/theme_literal_exemptions.h）。同一枚门禁
+        // （check_no_theme_color_literals）按本块逐条核对实际出现次数，故本块与源码不可能各说各话。
+        au::Json exemptions = au::Json::object();
+        exemptions.set("gate", "check_no_theme_color_literals");
+        exemptions.set(
+            "usage",
+            "numeric color literals still allowed in the widget layer and the CSD preset table; count is the "
+            "exact occurrence count of Color{...} / Color(...) constructions in that file, judged by the gate");
+        au::Json files = au::Json::array();
+        for (const auto &entry : aurora::tools::AURORA_THEME_COLOR_LITERAL_EXEMPTIONS) {
+            au::Json row = au::Json::object();
+            row.set("path", std::string{entry.path});
+            row.set("count", au::Json{entry.count});
+            row.set("reason", std::string{entry.reason});
+            files.push_back(std::move(row));
+        }
+        exemptions.set("files", std::move(files));
+        theme_tokens.set("exemptions", std::move(exemptions));
+    }
+    api.set("theme_tokens", theme_tokens);
+
+    // ---- accessor_rules: how a property key maps to public accessor names (non-entry block) ----
+    // 一次性的规则块，不随控件数增长：公共访问器名从不在 schema 条目里（实测 widgets[i] 只有 type /
+    // props / events / children_policy / examples），消费方按本块 + required + source 即可推全名。
+    // 逐条判据取自**已迁到权威表的 18 型**实测签名（`button.h` / `text.h` / `text_input.h` 等），未迁控件
+    // 不在本块的承诺范围内 —— 故 retired_scope 一行的措辞只收「表内行」，不把 `show.h` 一类残留具名件
+    // 说成已废止（说满即假，本块是给模型的裁决面而不是愿景）。
+    au::Json accessor_rules = au::Json::object();
+    {
+        accessor_rules.set("root", "the table key is the word root: table key, JSON key and accessor root agree");
+        accessor_rules.set("value_writer",
+                           "set_<key>(<bare value>) -> Props&   // exactly one per row, written on the XxxProps class");
+        accessor_rules.set("value_writer_parameter",
+                           "the parameter is the row's bare value type; passing form (by value or const reference) is "
+                           "written per control, so read the header for that detail");
+        accessor_rules.set("value_writer_string_conveniences",
+                           "extra (const std::string &) and (const char *) overloads appear only where the bare value "
+                           "is string-like, never for Color / float / enum rows");
+        accessor_rules.set("source_writer",
+                           "set_<key>(ReadOnlyState<T>) -> Props&   // exactly the rows whose entry carries "
+                           "source=true; rebinds the row to that source");
+        accessor_rules.set("writable_source_writer",
+                           "set_<key>(State<T>) -> Props&   // only where the field is State<T>; there the value "
+                           "writer above writes through the current source instead of replacing it");
+        accessor_rules.set("reader", "<key>() const -> T   // the row's fallback is the constant tier");
+        accessor_rules.set("reader_scoped",
+                           "<key>(const BuildContext &) const -> T   // the row's fallback is a live token or derived");
+        accessor_rules.set("reader_rule",
+                           "exactly one reader per row; the two shapes are mutually exclusive and picking the wrong "
+                           "one is a compile error, not a stale value");
+        accessor_rules.set("widget_side",
+                           "each widget publicly inherits its XxxProps class, so every writer and reader above is "
+                           "callable on the widget and returns the Props base reference; a few controls add "
+                           "widget-typed conveniences on top");
+        accessor_rules.set("bit_required",
+                           "required=true means the row's field is non-optional: clear(row) has no overload for it "
+                           "and the row always carries a value");
+        accessor_rules.set("bit_source",
+                           "source=true means the row's field is a reactive handle (ReadOnlyState<T> or State<T>); "
+                           "the bit is derived from the field shape and never written on the row");
+        accessor_rules.set("common_pieces", string_array({"clear(row)", "rows()"}));
+        accessor_rules.set("names_retired",
+                           string_array({"reset_<key>", "has_<key>", "set_<key>_source", "<key>_source"}));
+        accessor_rules.set("names_retired_scope",
+                           "retired for rows declared on the authoritative table; controls still on hand-written "
+                           "descriptors and the widget base's modifier plumbing keep their own *_source() names");
+    }
+    api.set("accessor_rules", accessor_rules);
+
+    // Downstream performance facade contract. The table lives in tools/include/perf_api.h so new
+    // entry points are registered in one place instead of hand-editing the committed JSON.
+    api.set("perf", aurora::tools::perf_api_section());
 
     // Preserve the error_codes section generated by gen_error_codes so a full rewrite does not overwrite it.
     if (!to_stdout) {

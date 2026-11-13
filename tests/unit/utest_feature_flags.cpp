@@ -26,7 +26,7 @@ struct FlagKeyPair {
     bool FeatureFlags::*field;
 };
 
-/// 全部 25 个归一化镜像字段（与 BUILD_OPTIONS.md 三层命名分组一一对应）。
+/// 全部 23 个归一化镜像字段（与 BUILD_OPTIONS.md 命名分组一一对应）。
 [[nodiscard]] auto flag_key_table() -> const std::vector<FlagKeyPair> & {
     static const std::vector<FlagKeyPair> AURORA_FLAG_KEY_TABLE = {
         {.key = "AURORA_BACKEND_HEADLESS", .field = &FeatureFlags::backend_headless},
@@ -37,9 +37,6 @@ struct FlagKeyPair {
         {.key = "AURORA_BACKEND_WAYLAND", .field = &FeatureFlags::backend_wayland},
         {.key = "AURORA_BACKEND_MACOS", .field = &FeatureFlags::backend_macos},
         {.key = "AURORA_BACKEND_WASM", .field = &FeatureFlags::backend_wasm},
-        {.key = "AURORA_ENABLE_LAYOUT_CACHE", .field = &FeatureFlags::layout_cache},
-        {.key = "AURORA_ENABLE_OCCLUSION_CULLING", .field = &FeatureFlags::occlusion_culling},
-        {.key = "AURORA_ENABLE_DISPLAY_LIST", .field = &FeatureFlags::display_list},
         {.key = "AURORA_ENABLE_SIMD", .field = &FeatureFlags::simd},
         {.key = "AURORA_ENABLE_PROFILING", .field = &FeatureFlags::profiling},
         {.key = "AURORA_ENABLE_TRACING", .field = &FeatureFlags::tracing},
@@ -47,6 +44,7 @@ struct FlagKeyPair {
         {.key = "AURORA_ENABLE_AUDIO", .field = &FeatureFlags::audio},
         {.key = "AURORA_ENABLE_AUDIO_WASAPI", .field = &FeatureFlags::enable_audio_wasapi},
         {.key = "AURORA_ENABLE_AUDIO_ALSA", .field = &FeatureFlags::enable_audio_alsa},
+        {.key = "AURORA_ENABLE_AUDIO_COREAUDIO", .field = &FeatureFlags::enable_audio_coreaudio},
         {.key = "AURORA_ENABLE_AUDIO_WEBAUDIO", .field = &FeatureFlags::enable_audio_webaudio},
         {.key = "AURORA_ENABLE_IMAGE_JPEG", .field = &FeatureFlags::image_jpeg},
         {.key = "AURORA_ENABLE_IMAGE_WEBP", .field = &FeatureFlags::image_webp},
@@ -71,9 +69,6 @@ AURORA_TEST_CASE(value_initialized_flags_are_all_false) {
     AURORA_TEST_CHECK_FALSE(defaults.backend_wayland);
     AURORA_TEST_CHECK_FALSE(defaults.backend_macos);
     AURORA_TEST_CHECK_FALSE(defaults.backend_wasm);
-    AURORA_TEST_CHECK_FALSE(defaults.layout_cache);
-    AURORA_TEST_CHECK_FALSE(defaults.occlusion_culling);
-    AURORA_TEST_CHECK_FALSE(defaults.display_list);
     AURORA_TEST_CHECK_FALSE(defaults.simd);
     AURORA_TEST_CHECK_FALSE(defaults.profiling);
     AURORA_TEST_CHECK_FALSE(defaults.tracing);
@@ -81,6 +76,7 @@ AURORA_TEST_CASE(value_initialized_flags_are_all_false) {
     AURORA_TEST_CHECK_FALSE(defaults.audio);
     AURORA_TEST_CHECK_FALSE(defaults.enable_audio_wasapi);
     AURORA_TEST_CHECK_FALSE(defaults.enable_audio_alsa);
+    AURORA_TEST_CHECK_FALSE(defaults.enable_audio_coreaudio);
     AURORA_TEST_CHECK_FALSE(defaults.enable_audio_webaudio);
     AURORA_TEST_CHECK_FALSE(defaults.image_jpeg);
     AURORA_TEST_CHECK_FALSE(defaults.image_webp);

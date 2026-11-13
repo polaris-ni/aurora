@@ -5,6 +5,10 @@
 # 第三方依赖（vendored）按二进制处理，避免触碰上游行尾。
 third_party/ -text
 
+# 模糊测试语料按字节原样保存：HTTP / WebSocket 种子里的 CRLF 是协议语义，
+# 行尾归一化会静默改写被测输入，故整个语料目录不参与文本判定。
+tests/fuzz/corpus/** binary
+
 # 二进制资源保持原样。
 *.png binary
 *.jpg binary

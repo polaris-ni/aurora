@@ -44,8 +44,10 @@
 | `set_on_frame(cb)` | 注入每帧自定义逻辑，在 `present_root` 之前调用 |
 | `set_overlay(shared_ptr<Widget>)` | 注入独立于控件树的 HUD 叠加层（典型 `PerfOverlay`），由 `Window::present_root` 在 tree paint 之后、present 之前合成。叠加层渲染到独立离屏缓冲、按 `Window::AURORA_HUD_REFRESH_MS`（500ms）重绘自身，不触发整树重绘；**且叠加层可见时帧循环在空闲期也按时唤醒**（仅刷 HUD、不重排不重绘树），读数不会停在上一次活跃时的值上 |
 | `dispatch_*` / `tick` / `render_to_png(path)` | 程序化派发与离屏渲染 |
-| `window_state()` / `window_mode()` | 响应式 `State<WindowState>&` / `State<WindowMode>&`（在 `Effect` 内读取自动订阅刷新） |
+| `window_state()` / `window_mode()` | 只读句柄 `ReadOnlyState<WindowState>` / `ReadOnlyState<WindowMode>`（在 `effect` / `computed` 内读取自动订阅刷新） |
 | `set_on_window_state(cb)` / `set_on_window_mode(cb)` | 命令式回调 |
+| `os_color_scheme_state()` | 只读句柄 `ReadOnlyState<ColorScheme>`：OS 明暗偏好的应用级当前档，**跨全部宿主聚合去重**（口径见 §6.2） |
+| `set_on_os_color_scheme(cb)` / `refresh_os_color_scheme()` | OS 明暗偏好的命令式回调（同值不触发）/ 显式 seed（现读一次系统偏好写入 State，幂等） |
 | `scheduler()` | 取应用级 `Scheduler` |
 | `animator()` | 取应用级 `Animator &`，由 `run()` 每帧按 `dt` 驱动，供注册动画控制器 |
 | `audio()` / `audio_shared()` | 应用级默认音频上下文（**惰性创建**，`media/audio.h` 图，[`03-layout-render.md`](03-layout-render.md) §9.4）：首次调用构造 `AudioContext` 并启动内置设备后端，未编译/启动失败自动静默模式；典型接线 `player.set_audio_context(app.audio_shared())` |
@@ -163,7 +165,7 @@ drain_posted → pump_all_once → on_frame_ → poll_close_requests → tick_al
 
 | 层次 | 落点 |
 |:---|:---|
-| `Surface::cancel_close()` | GLFW 用 `glfwSetWindowShouldClose(w, GLFW_FALSE)`；Win32 清 `should_close`（`handle_close` 只置位、不 `DestroyWindow`）；X11 / Wayland 清 `close_requested`；无头 `set_should_close(false)`；macOS 为骨架（清 `Impl` 标志，真实 AppKit 侧待该后端实写时一并落地）；同源面 `d3d11` / `wgpu_win32` / `wgpu_x11` / `wgpu_wayland` 逐面转发 |
+| `Surface::cancel_close()` | GLFW 用 `glfwSetWindowShouldClose(w, GLFW_FALSE)`；Win32 清 `should_close`（`handle_close` 只置位、不 `DestroyWindow`）；X11 / Wayland 清 `close_requested`；无头 `set_should_close(false)`；macOS 清 `Impl::should_close`（`windowShouldClose:` 委托只置位、不销毁窗口；窗口壳已不存在时拒绝清位）；同源面 `d3d11` / `wgpu_win32` / `wgpu_x11` / `wgpu_wayland` 逐面转发 |
 | `WindowHost::cancel_close()` | 清三枚记账位 + 转发到 `Surface` |
 | 后置复验 | 复验 `should_close()` 仍为真 ⇒ 记一次 `AURORA_LOG_WARN("app", …)` 并按**放行**处理 |
 
@@ -226,7 +228,7 @@ drain_posted → pump_all_once → on_frame_ → poll_close_requests → tick_al
 
 **跨窗通信**
 
-- **共享状态** → 直接用既有 `Store<S>`：多个窗口共享同一实例，各自 `au::connect(store, ...)` 订阅并在 `asSignal()` 上绑定控件，**无需新 API**。
+- **共享状态** → 多窗口共用同一份 `State<S>` 句柄即可：句柄按值抄给各窗口的控件（展示属性经只读降级）或 `effect`，同一来源向所有订阅者逐处刷新，**无需新 API**。
 - **一次性通知 / 命令** → `Application::bus()`（`WindowEventBus`）：`post<T>(payload, from)` 类型化发布，`on<T>(cb, filter_from)` 订阅（返回 RAII `Subscription`，析构自动取消；`filter_from` 用于点对点来源过滤）。
 - 语义：主线程**同步扇出**（与 `Application` 的同步事件派发一致）；遍历前拷贝订阅列表，订阅者可在回调内安全新增 / 取消订阅；订阅句柄内部持有共享状态，**总线先析构、句柄后析构**也安全。
 
@@ -236,7 +238,7 @@ drain_posted → pump_all_once → on_frame_ → poll_close_requests → tick_al
 |:---|:---|
 | `WindowOptions::persist_id` | 几何持久化键（空 = 不持久化），多个窗口用不同键区分 |
 | `Application::set_window_geometry_store(prefs)` | 指定 `Preferences` 存储；会对**已登记**窗口补做恢复（主窗口在构造期即已登记） |
-| `WindowGeometry{origin, size, mode, display_id}` | 坐标与尺寸为**屏幕物理像素**（与 `app::Display` 同源）——只有物理坐标跨 DPI 稳定；恢复时按当前 `scale_factor` 折回逻辑 dp。**该 `scale_factor` 与宿主内 dp ↔ 物理换算同源**（Win32 侧已收敛为 `Impl::scale` 单点真值，`scale_factor()` 读之；见 `03-layout-render.md` DPI 感知条）。**Linux 三后端（X11 / Wayland / GLFW）的缩放变化上报仍未实现**，故其 `scale_factor` 在改系统缩放或跨屏后不会自动更新，持久化恢复暂按旧值折算 |
+| `WindowGeometry{origin, size, mode, display_id}` | 坐标与尺寸为**屏幕物理像素**（与 `app::Display` 同源）——只有物理坐标跨 DPI 稳定；恢复时按当前 `scale_factor` 折回逻辑 dp。**该 `scale_factor` 与宿主内 dp ↔ 物理换算同源**（Win32 侧已收敛为 `Impl::scale` 单点真值，`scale_factor()` 读之；见 `03-layout-render.md` DPI 感知条）。**Linux 三后端的缩放变化上报均已接线**：GLFW 走 `glfwSetWindowContentScaleCallback`（`glfw_surface.cpp` 的 `on_content_scale`）、Wayland 在 `wl_surface.enter/leave` 后遍历 `entered` outputs 重算并上报（`wayland_surface.cpp` 的 `refresh_scale`）、X11 在根窗口 `RESOURCE_MANAGER`（`Xft.dpi` 所在）的 `PropertyNotify` 上重读并上报（`x11_surface.cpp`）。故改系统缩放后 `scale_factor` 会自动更新、持久化恢复按新值折算；跨屏切换能否自动跟随取决于桌面是否同步改写该资源（X11）或更新 output scale（Wayland） |
 | `save_window_geometry` / `load_window_geometry` | 读写；另有 `Preferences::Group` 重载用于**窗口组**：`prefs.group("windows")` + 各窗口键 |
 | `is_window_geometry_usable(g, displays)` | 判据：尺寸为正，且与某显示器工作区**有交集**（部分越界算可用，多屏拼接/任务栏遮挡下不应拒绝恢复） |
 
@@ -258,7 +260,7 @@ drain_posted → pump_all_once → on_frame_ → poll_close_requests → tick_al
 
 | 落盘 `mode` | 恢复行为 |
 |:---|:---|
-| `Normal` | `set_size` + `set_position`（现行为逐位保留；物理像素按当前 `scale_factor` 折回逻辑 dp） |
+| `Normal` | `set_size` + `set_position`（现行为逐位保留；物理像素按当前 `scale_factor` 折回逻辑 dp）。X11 已真实下发（`XResizeWindow` / `XMoveWindow`）；Wayland 的尺寸经 xdg_toplevel 的 min/max 约束提议、由 configure 决定是否采纳，位置在协议层不可设；Win32 / GLFW 早已实现 |
 | `Maximized` / `FullScreen` | **只追几何态，位置与尺寸都不下发**——那两档的位置由 OS / compositor 摆放，下发既无意义也可能触发多余的 `SetWindowPos` / configure |
 | `Minimized` | **恢复为 `Normal`** 并留一条 INFO。理由有二：启动即看不见（应用看起来没启动）；且 `WindowMode::Minimized` 与 `WindowState::Hidden` 耦合，而恢复腿没有设置 `WindowState` 的通道（`Window::set_window_state` 同样只是快照），硬恢复会制造「快照说最小化、可见性说可见」的分裂。用 INFO 而非 WARN：用户最小化是合法操作，不是异常 |
 
@@ -274,24 +276,28 @@ drain_posted → pump_all_once → on_frame_ → poll_close_requests → tick_al
 | 后端 | `set_window_mode` 实现 | 真机状态 |
 |:---|:---|:---|
 | Wayland | `xdg_toplevel` 的 set/unset_maximized 与 set/unset_fullscreen 按目标态组合（`Normal` 只拆当前已挂的态）；实现内立即 `notify_window_mode`，稍后到达的 configure 以相同值幂等收敛（本地态仍由 configure 单独驱动） | 真实现 |
-| X11 | EWHM `_NET_WM_STATE` **ADD / REMOVE 目标态** ClientMessage——CSD 三钮原 `_NET_WM_STATE_TOGGLE` 切换语义已一并重构为按本地 mode 快照算目标态；`Minimized` 走 `XIconifyWindow`；属性通告到达后经既有路径更新并上报 | 真实现 |
-| Win32 | `SC_RESTORE` / `SC_MAXIMIZE` / `SC_MINIMIZE` 经窗口过程（与用户走系统菜单同路径），`WM_SIZE` 回来定档上报 | 真实现 |
-| GLFW | `glfwRestoreWindow` / `glfwMaximizeWindow` / `glfwIconifyWindow`，回调回来定档上报 | 真实现 |
+| X11 | EWHM `_NET_WM_STATE` **ADD / REMOVE 目标态** ClientMessage——CSD 三钮原 `_NET_WM_STATE_TOGGLE` 切换语义已一并重构为按本地 mode 快照算目标态；`Minimized` 走 `XIconifyWindow`；属性通告到达后经既有路径更新并上报。注意这是**宿主方法**：`minimize` / `toggle_maximize` / `set_fullscreen` 三枚公共切换槽无覆写（落基类 no-op），公共切换腿另立缺口（机制在 ≠ 接线，见 §5 能力位口径） | 真实现（`set_window_mode` 槽） |
+| Win32 | `SC_RESTORE` / `SC_MAXIMIZE` / `SC_MINIMIZE` 经窗口过程（与用户走系统菜单同路径），`WM_SIZE` 回来定档上报。注意这是**宿主方法**：公共槽由 `Win32Surface` 覆写转发（`minimize` → `SC_MINIMIZE`；`toggle_maximize` 以 OS 实值 `IsZoomed` 判档；`set_window_mode` 原样转发；`set_fullscreen` 转发 `Win32Host::set_fullscreen` 做 borderless 全屏——monitor 枚举 + 还原几何 + `WM_SIZE` 定档上报） | 真实现 |
+| D3D11 | 同一 `Win32Host` 宿主，`D3D11Surface` 四枚公共槽内联转发与 `Win32Surface` 逐字同口径（此前落基类 no-op，已补） | 真实现 |
+| GLFW | `glfwRestoreWindow` / `glfwMaximizeWindow` / `glfwIconifyWindow`，回调回来定档上报。注意这是**宿主方法**：`minimize` / `toggle_maximize` / `set_fullscreen` 三枚公共切换槽无覆写（落基类 no-op），公共切换腿另立缺口 | 真实现（`set_window_mode` 槽） |
 | Headless | 记录目标态 + `notify_window_mode` 同步上报：无 OS 语义、零副作用、可断言（无头几何恢复用例的观测面） | 真实现（测试 seam） |
-| macOS | 骨架后端，保持默认空实现 | 骨架申报（未实装） |
+| macOS | `toggleFullScreen:` / `miniaturize:` / `deminiaturize:` / `zoom:` 按目标态组合（先读 `styleMask` 全屏位、`isMiniaturized`、`isZoomed` 再补差额）；立即按目标档 `notify_window_mode`，AppKit 的异步过渡完成后由窗口委托按真实态校正 | 真实现 |
 
 - **转发装饰器**：`WgpuWaylandSurface` 逐方法转发 `host_`，本原语已补转发（不补则该后端静默失效）。
 - **无头 seam 行为**：`mode != Normal` 时同样安全 no-op、不报错，也不会让宿主被判为几何不可用（否则既有无头几何用例会因几何「不可用」转红）。
 
 **与关闭闸门的交互**：几何保存点在 `reap_closed` 收集步、只对 `should_close()==true` 的宿主执行并打 `geometry_saved_` 一次性闩 ⇒ 关闭被否决的宿主不进收集步、不写快照、不打闩，下次真关时以最新几何落盘——「否决不写、下次真关写最新」由现有结构天然满足，闩语义无需放宽。
 
-**恢复时刻的可信性**：恢复发生在 `register_host` 尾部（首帧之前），该时刻 `scale_factor` 在各后端已可信（Win32 建窗期定稿、X11 构造期读 Xft.dpi、Wayland 两次 roundtrip 后 `wl_output` scale 已到、GLFW 即时查询、Headless 恒 1.0）。与「Linux 三后端缩放变化上报未实现」（改系统缩放或跨屏后不自动更新）是**两个独立偏差**，真机读数不得混为一个。
+**恢复时刻的可信性**：恢复发生在 `register_host` 尾部（首帧之前），该时刻 `scale_factor` 在各后端已可信（Win32 建窗期定稿、X11 构造期读 Xft.dpi、Wayland 两次 roundtrip 后 `wl_output` scale 已到、GLFW 即时查询、Headless 恒 1.0）。缩放上报本身也已全部接线（GLFW `on_content_scale` / Wayland `refresh_scale` / X11 根窗口 `RESOURCE_MANAGER` 的 `PropertyNotify`），故运行期改缩放后 `scale_factor` 会跟随更新。但「缩放上报」与「几何恢复」仍是**两个独立偏差**：前者证明 DPI 变化被感知，后者证明位置/尺寸真的下发到窗口，真机读数不得混为一个。
+
+**Linux 几何 setter 现状**：X11 的 `set_size` / `set_position` / `position()` 已实现（尺寸按本后端 `scale` 真值点换算、位置为屏幕物理像素；真机验收见 `tools/verify/x11_geometry_live_probe.cpp`）。Wayland 的 `set_size` 已实现为**约束提议**（把 xdg_toplevel 的 min/max 同时收窄到目标内容尺寸，configure 到达后立即还原样式约束；入参为整窗尺寸，内部扣除 CSD 阴影边距；真机验收见 `tools/verify/wayland_geometry_live_probe.cpp`），最终尺寸由合成器决定；`set_position` 在协议层由 compositor 控制、client 不可设（显式 no-op，`position()` 保持 `(0,0)`）。几何恢复与 mode 恢复是两个独立偏差，真机读数须分开记。
 
 **已知缺口（均不在本批，不得暗示已修）**：
 
-- X11 与 Wayland 的 `set_size` / `set_position` 本就未实现——位置与尺寸恢复在 Linux 上是 no-op，与 mode 恢复是两个独立偏差，真机读数须分开记；
-- Win32 与 GLFW 的 `FullScreen` 无实现（monitor 切换通道未建），调用时留一条 WRN（tag `"window"`）；
-- `WgpuX11Surface` / `WgpuWin32Surface` / `D3D11Surface` 三个同源面**不转发任何几何原语**（`minimize` / `toggle_maximize` / `set_fullscreen` 历来不转发，本批只补了转发的 `WgpuWaylandSurface`）——统一既有缺口，不在本批；
+- Wayland 的 `set_position` 在协议层不可设（见上条「Linux 几何 setter 现状」）——Wayland 上位置恢复仍是 no-op；尺寸恢复是**提议**语义（合成器可拒绝），真机读数须区分「提议已送达」与「确实按目标尺寸落地」；
+- Win32 / D3D11 的 `FullScreen` 已由 `Win32Host::set_fullscreen` 真实现（borderless 全屏：monitor 枚举 + 还原几何 + `WM_SIZE` 定档上报，退出还原到进入前几何）；GLFW 的 `FullScreen` 仍无实现（monitor 切换通道未建），调用时落基类 no-op；
+- `WgpuX11Surface` / `WgpuWin32Surface` 两个同源面**不转发任何几何原语**（`minimize` / `toggle_maximize` / `set_fullscreen` 历来不转发，此前同批补转发的还有 `WgpuWaylandSurface` 与 `D3D11Surface`——D3D11 已补四槽转发，见上表）——统一既有缺口，不在本批；
+- `X11` / `GLFW` 的三枚公共切换槽（`minimize` / `toggle_maximize` / `set_fullscreen`）无 `Surface` 覆写（落基类 no-op）：两家 `set_window_mode` 槽已真实现、CSD 钮走内部目标态路径，但应用自绘标题栏的公共切换腿未接；能力位按「公共入口是否全部接通」口径如实为 false（§5），待公共切换腿补齐后再翻位；
 - 应用级 `window_mode()` State 只聚合主窗（`register_host` 的 mode sink 仅在宿主即主窗时转发）：既有口径、非本批引入，仅在 §6.2 补记，行为不改。
 
 **统一帧循环**（`Application::run`，不再委托 `Window::run`）：
@@ -304,7 +310,7 @@ drain_posted → pump_all_once → on_frame → 逐宿主 tick → 共享 anim/s
 - **等待聚合**：每帧只等待一次，取各宿主 `decide_wait` 与最近超时看守期限的**最小正值**（任一为 `0` 则不等待；全为「无限」才无限等待）。优先交由 `waits_thread_queue()==true` 的后端（Win32/GLFW）执行；无此类后端时（X11/Wayland）封顶 8ms 轮询，避免其余窗口饥饿。
 - **回收时机**：`reap_closed()` 在**帧末**执行（不在事件派发栈内销毁宿主），并保留最后一个宿主，使 `scene()`/`window()` 等访问器在 `run()` 结束后仍可用。
 - **帧尾兜底推进 `pump_deferred_work()`**（`reap_closed` 之后、`wait_once` 之前）：排空 deferred `ThreadPool` 队列 + 扫描 `with_timeout` 到期看守。**两步同挂帧循环而非上屏路径**是刻意的——空闲帧被脏区决策整段跳过就没有 `present()`，挂那里等于把续体与超时一起饿死（同 WASM ARIA 桥自驱拍的教训）。有后台线程的构建下二者恒为空操作。
-- **跨线程回投**：`Task::set_main_poster` 唤醒**全部**窗口的等待通道，避免回投工作只唤醒其中一个窗口而延迟执行。
+- **跨线程回投**：`Application::loop_begin` 领取进程级唯一队列的前台租约（`MainQueue::on_duty`，唤醒体 `request_wake_all` 唤醒**全部**窗口的等待通道，避免回投工作只唤醒其中一个窗口而延迟执行）；帧首 `drain_posted` 以 `take_batch` 排水。队列、值班与两相失败契约见 [`01-core.md`](01-core.md) §8.2。
 
 **帧统计归属**：单窗口刻意保留写入进程级单例 `FrameStats::instance()`（既有 `PerfOverlay`、基准工具与性能集成测试直读之，行为零变化）；登记第二个窗口起，各宿主切到自有实例（`WindowHost::own_frame_stats()`）。`PerfOverlay` 经 `Application::set_overlay` 自动绑定到主窗口统计，其他窗口的叠加层请显式 `bind_frame_stats(&host->frame_stats())`。
 
@@ -314,11 +320,13 @@ drain_posted → pump_all_once → on_frame → 逐宿主 tick → 共享 anim/s
 
 ### 3.1 帧循环
 
-帧循环由 **`Application::run()` 统一驱动**（多窗口语义见 §2.4）：每帧 pump 平台事件 → 集中排空异步结果（通知激活 / 热键命中 / 系统拖放终结与在途读取，见下）→ 集中派发 → `tick` → 逐窗口 `present_root`（脏区决策）→ `present()`。`Window::run(on_frame, max_frames)` **保留**供单窗口低阶调用方（自拼帧循环、测试、demo 直驱）使用；多窗口请走 `Application::run`。所有构建、事件、重绘都在 UI 线程（单线程 UI，见 [`01-core.md`](01-core.md) §8.1）。
+帧循环由 **`Application::run()` 统一驱动**（多窗口语义见 §2.4）：每帧 pump 平台事件 → 集中排空异步结果（通知激活 / 热键命中 / 系统拖放终结与在途读取，见下）→ 集中派发 → `tick` → 逐窗口 `present_root`（脏区决策）→ `present()`。**`Window` 不再自带帧循环**：`Window::run`、其自带 `RunQueue`、`next_wait_ms_` / `set_next_wait(double)` 已随进程级唯一队列的引入而删除；单窗口低阶调用方（demo、集成与单测）同样迁移到 `Application` 驱动，不再存在两套帧序。所有构建、事件、重绘都在 UI 线程（单线程 UI，见 [`01-core.md`](01-core.md) §8.1）。
 
-> ⚠ **`Window::run` 不含「逐宿主 tick」这一步**：`Widget::tick`（长按阈值、甩动惯性、`VideoPlayer` 播放时钟等一切每帧计时）只在 `Application::run` 的帧序里被驱动。低阶自拼循环若承载这类控件，须在 `on_frame` 回调内自行 `root.widget().tick(now)`，并把帧等待的 `anim_active` 取作「本帧实际发生了渲染」（`!Window::is_idle_frame()`），否则控件恒停在首帧、且首帧后即陷入无限深睡。`examples/demos/demo_common.h` 的 `run_demo` 已按此接线。
+> `Application` 的帧序是唯一驱动面：`Widget::tick`（长按阈值、甩动惯性、`VideoPlayer` 播放时钟等每帧计时）与 `system_drag::pump_reads()` 都在其中，迁移后的低阶调用方无需再自行补这两步。`examples/demos/demo_common.h` 的 `run_demo` 已按 `Application` 驱动接线。值班租约的领取 / 归还时序见 §3.3。
 
-**异步结果排空点（帧内兑现通则）**：三类异步结果在同一时点集中排空——平台事件抽取之后、`on_frame` 回调之前：通知激活（`NotificationCenter::pump_events()`）、热键命中（`OsHotkeyRegistry::drain_pending()`）、系统拖放的终结回调与在途读取（`system_drag::pump_reads()`，契约见 §8.9）。通则：**异步结果在帧内排空兑现、不在平台消息泵内同步回调**——回调可能重建页面 / 触发重排，在消息泵内重入会把布局与绘制切到半途的状态（热键与通知激活两条既有路径同此，本批把系统拖放并入同一时点）。宿主不调用对应排空入口 ⇒ 回调不到，库**不谎报**成功（与 `NotificationCenter` 既有口径一致）。⚠ **`Window::run` 低阶路径不含拖放排空这一步**：自拼帧循环若承载拖出会话或 `read_async` 在途读取，须每帧自行调用 `system_drag::pump_reads()`（无在途项时近零开销），否则终态与读取结果永远不到；`Application::run` 已含此步。
+**控件的每帧计时去留（CHG-075）**：`Widget::tick_gestures` 经 `needs_gesture_tick_` 向帧循环申领「下一帧仍唤醒」，三条独立驱动任一在途即持续申领——收位滑动（`ScrollGlide`）、拖入滚边（`DragAutoScroll`）、Overlay 滚动条保持窗口（滚轮 / 程序化滚动后 1 秒保持，`LazyRow` 本次补齐该入口以承载）；三者都空闲才摘帧计时、回到 §3.3 的零开销 idle 口径。内核不自读时钟、时间戳由帧首 `now` 注入，故宿主可冻结 / 快进验证（见 [`05-event-navigation.md`](05-event-navigation.md) §5.2）。
+
+**异步结果排空点（帧内兑现通则）**：三类异步结果在同一时点集中排空——平台事件抽取之后、`on_frame` 回调之前：通知激活（`NotificationCenter::pump_events()`）、热键命中（`OsHotkeyRegistry::drain_pending()`）、系统拖放的终结回调与在途读取（`system_drag::pump_reads()`，契约见 §8.9）。通则：**异步结果在帧内排空兑现、不在平台消息泵内同步回调**——回调可能重建页面 / 触发重排，在消息泵内重入会把布局与绘制切到半途的状态（热键与通知激活两条既有路径同此，本批把系统拖放并入同一时点）。宿主不调用对应排空入口 ⇒ 回调不到，库**不谎报**成功（与 `NotificationCenter` 既有口径一致）。⚠ **自拼帧循环不含这一步**：不经 `Application::run` 而自行驱动的低阶循环若承载拖出会话或 `read_async` 在途读取，须每帧自行调用 `system_drag::pump_reads()`（无在途项时近零开销），否则终态与读取结果永远不到；`Application::run` 已含此步。
 
 ### 3.2 脏区追踪（默认开启）
 
@@ -349,7 +357,7 @@ drain_posted → pump_all_once → on_frame → 逐宿主 tick → 共享 anim/s
 
 ### 3.3 事件驱动帧节流
 
-`Application::run` / `Window::run` 采用「事件驱动 + 帧节流」：静态界面空闲时不忙轮询，CPU 占用趋近 0。
+`Application::run` 采用「事件驱动 + 帧节流」：静态界面空闲时不忙轮询，CPU 占用趋近 0。
 
 **决策纯函数**：
 
@@ -369,11 +377,16 @@ compute_wait_timeout(has_dirty, anim_active, next_deadline_ms, frame_budget_ms, 
 
 **`WindowOptions` 相关字段**：`int max_fps = 60`（活跃帧帧率上限，`0` = 不限）、`bool power_saving = true`（idle 阻塞等待；`false` = 忙轮询旧行为）、`RendererPreference renderer = Auto`。
 
-**`Window` 新增**：`has_pending_dirty()`、`set_next_wait(double)`；`run` 在帧末 `wait_events` 阻塞（一次性消费，未设则不等）。
+**`Window` 保留** `has_pending_dirty()`；`set_next_wait(double)` 与 `next_wait_ms_` 随 `Window::run` 一并删除——帧末等待由 `Application` 的 `wait_once` 按宿主 `decide_wait` 与看守期限聚合决策。
 
 **`Animator::has_active()`** 与 **`Scheduler::next_deadline_ms()`** 供决策判断活跃动画与最近定时任务到期。
 
-**跨线程回投**：`Application::run` 安装 `Task::set_main_poster`；`au::async` 的 `then` 回调入队 + `request_wake()` 唤醒主循环，下一帧开头主线程排水执行。单线程 UI 不变；无运行循环时在完成线程直接调用。
+**值班租约与帧循环时序**（`loop_begin` / `loop_end`，机制面见 [`01-core.md`](01-core.md) §8.2）：
+
+- **领牌**：`loop_begin` 调 `MainQueue::on_duty([this]{ request_wake_all(); })` 领取前台租约；`nullopt` ⇒ 已有循环在岗 ⇒ **拒绝并发 run**（多实例允许、并发 run 不允许），经 `on_contract_violation` 硬失败并携带前值班者的世代号。
+- **还牌与收尾**：`loop_end` 先 `Lease::release()`（世代归 0），再以 `MainQueue::closing_scope()` 守卫罩住 `drain_posted()` 收尾排空，守卫析构即关窗。收尾期无值班，一切投递拒绝（队列只减不增，一次捞即净）；收尾中的续体链式发起 `async()` 走「出生即取消」，守卫之后的无值班发起回到硬失败。
+- **重领**：租约归还后槽位可再次领取（WASM 的 `run()` 移交 rAF、末帧 `raf_tick` 调 `loop_end`，JS 侧再次 `run()` 会重新 `loop_begin` 领到**更大的新世代**）；CAS 只拒并发、不拒复用。
+- **模态共享同一队列**：`run_modal` 不再做 prev / restore 快照——外层 `run()` 在岗时复用其租约，外层无循环时自领一枚并在退出时按 `loop_end` 同口径收尾；`step_frame` 经 `take_batch` 排水照常。
 
 **`FrameStats` 观测**：`record_wait(double)`、`wakeup_count()`、`wakeups_per_sec()`、`sleep_ratio()`。停帧状态：`record_idle(double dt)`（累加空闲时长）、`is_stale()` / `stale_duration_ms()`（详见 `ARCHITECTURE.md` §10.1 的停帧陈旧语义）。
 
@@ -422,6 +435,29 @@ compute_wait_timeout(has_dirty, anim_active, next_deadline_ms, frame_budget_ms, 
 参数在**建窗时**下发而非「先可见后隐藏」，避免一帧闪烁；`NoActivate` 在 X11 / Wayland 无对应请求
 （聚焦由 WM / 合成器策略决定，Aurora 从不主动 `XSetInputFocus`），与 `Normal` 同路。
 
+**建窗档只是初值，运行期另有开关。** `Surface::set_visible(bool)` / `is_visible()` 与
+`Surface::set_always_on_top(bool)` / `is_always_on_top()` 是四枚追加在虚函数段表尾的槽（既有槽位序号
+不变，ABI 面仅新增槽、需全量重编；默认实现为「空 setter + `is_visible()` 回 true /
+`is_always_on_top()` 回 false」，自定义派生零改即编译）。`Window` 侧同名四枚 `const` 透传，无
+`surface_` 时为 no-op。口径：
+
+- **显示档不抢焦点**：Win32 落 `ShowWindow(SW_SHOWNA)`——与 `NoActivate` 档同一语义；下拉式终端「热键一按
+  就打断用户当前输入」是错的，呼出后要焦点是应用侧另调 `focus_window()`。隐藏档落 `SW_HIDE`。macOS 落
+  `orderFrontRegardless`（不激活应用与窗口，同 `NoActivate` 语义）/ `orderOut:`；且 `raise()` / `focus_window()`
+  对已隐藏窗口直接短路，不让提层或聚焦把 `orderOut:` 之后的窗口重新唤回。
+- **置顶切换零几何扰动**：`SetWindowPos(..., HWND_TOPMOST / HWND_NOTOPMOST, 0, 0, 0, 0,
+  SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)`；构造期的那一次置顶同样补了 `SWP_NOACTIVATE`（建窗档不因置顶
+  而激活）。macOS 无布尔置顶位，落 `setLevel:(NSFloatingWindowLevel / NSNormalWindowLevel)`，读回以
+  `level > NSNormalWindowLevel` 为真（外部设得更高时同样如实为真）。
+- **幂等**：两枚 setter 都以 OS 当前值先行判等，同值重复调用不重发 OS 调用（避免多余的 `WM_WINDOWPOSCHANGED`
+  与 `Present`）。
+- **读回答 OS 实值，不答应用意图**：`is_visible()` 走 `IsWindowVisible`（Win32）/ `[window isVisible]`（macOS）、
+  `is_always_on_top()` 走 `GWL_EXSTYLE & WS_EX_TOPMOST`（Win32）/ `[window level] > NSNormalWindowLevel`（macOS）。
+  最小化或被别的应用覆盖时「意图」与「实际」可以不同，框架不把二者混为一谈；读 OS 也免了新增第二份真值源。
+- **不接线不等于静默**：已接 Win32 / D3D11（共用同一宿主故同翻）与 macOS；GLFW / X11 / Wayland / WASM 保持
+  默认实现，可经 `platform().capabilities().runtime_visibility` / `runtime_always_on_top` **先查询**（§5）；
+  Wayland 的置顶在协议层根本没有核心协议对应，属「可查询的不支持」。
+
 ---
 
 ## 4 App 流式构建器
@@ -464,16 +500,46 @@ au::App().window(win ? std::move(win.value()) : nullptr)
 
 `au::platform()` 是显式运行时平台查询，跳过后端探测。返回 `Platform{ PlatformKind kind, DeviceKind device, SurfaceKind surface }`，含 `is_mobile()` / `is_desktop()` / `capabilities()`。
 
-`PlatformCapabilities` 字段：`multitouch`、`high_frequency_pointer`、`desktop`、`mobile`、`system_drag_in`、`system_drag_out`。
+`PlatformCapabilities` 字段：`multitouch`、`high_frequency_pointer`、`desktop`、`mobile`、`system_drag_in`、`system_drag_out`、`recent_documents_os_projection`、`native_menu_bar`、`runtime_visibility`、`runtime_always_on_top`、`runtime_window_mode`、`runtime_fullscreen`、`native_print_session`、`url_scheme_registration`、`file_association`、`run_at_login`。
 
-后两位表「**机制是否存在**」：支持接收系统拖入 / 支持发起系统拖出，**按方向独立翻位**（不是成对翻位）。当前 `Win32`、`D3D11`、`X11`、`Wayland` 与 `MacOS` 五类 `SurfaceKind` 两个方向均为 true（Win32 / D3D11 共用同一宿主与同一桥实例；X11 两个方向共用 `x11_drag.h` 的同一桥实例；Wayland 两个方向共用 `wayland_drag.h` 的同一桥实例；macOS 两个方向共用 `macos_drag.h` 的同一桥实例——其窗口壳仍为骨架，运行期 `install()` 因无内容视图必失败并记日志降级，能力位表机制归属、与 `multitouch` 等位的声明口径一致），其余方向与其余 `SurfaceKind` 为 false（方向级期望表由 `utest_drag_payload` 锚定，「未接线先声称」的变异对应用例转红）。能力位与运行期失败**不互相替代**：机制存在但会话建立失败、源中断等仍走 `Result` 错误（`system-drag-*` 码，`retryable = false`，机制缺失是稳态）。
+拖放两位表「**机制是否存在**」：支持接收系统拖入 / 支持发起系统拖出，**按方向独立翻位**（不是成对翻位）。当前 `Win32`、`D3D11`、`X11`、`Wayland` 与 `MacOS` 五类 `SurfaceKind` 两个方向均为 true（Win32 / D3D11 共用同一宿主与同一桥实例；X11 两个方向共用 `x11_drag.h` 的同一桥实例；Wayland 两个方向共用 `wayland_drag.h` 的同一桥实例；macOS 两个方向共用 `macos_drag.h` 的同一桥实例——内容视图登记 `NSDraggingDestination`，桥由 `MacOSSurface::Impl` 在窗口壳建好后 `install()`，运行期 install 失败如实记日志降级；能力位表机制归属，与 `multitouch` 等位的声明口径一致），其余方向与其余 `SurfaceKind` 为 false（方向级期望表由 `utest_drag_payload` 锚定，「未接线先声称」的变异对应用例转红）。能力位与运行期失败**不互相替代**：机制存在但会话建立失败、源中断等仍走 `Result` 错误（`system-drag-*` 码，`retryable = false`，机制缺失是稳态）。
+
+`recent_documents_os_projection` 表「OS 是否提供可写入的最近文档机制、且本库把桥接好了」（§8.10）。当前 `Win32`、`D3D11` 与 `MacOS` 为 true（Win32 / D3D11 共用同一宿主与同一桥实例，故同翻；macOS 走 `NSDocumentController` 的 `noteNewRecentDocumentURL:`，属应用级集合）。`X11` / `Wayland` / `Glfw` / `Wasm` / `Headless` 恒 false：OS 侧无该机制（XDG `recently-used.xbel` 是 GTK 生态的共读文件，不是 OS 机制）。能力位为 false 时 `project_to_os()` / `clear_os_projection()` 返回 `recent-documents-projection-unsupported`，**应用内列表与持久化不受影响**（口径同上：能力位表机制归属，运行期失败另走 `Result`）。期望表由 `utest_recent_documents_translate` 锚定（逐 `SurfaceKind` 断言，含 macOS 为 true 这条）。
+
+`runtime_visibility` 与 `runtime_always_on_top` 表「OS 提供运行期窗口显隐 / 置顶机制，且本库已把 §3.6 的四枚开关接到该机制」。当前 `Win32`、`D3D11` 与 `MacOS` 为 true：Win32 / D3D11 共用同一宿主（`ShowWindow(SW_SHOWNA / SW_HIDE)` 与 `SetWindowPos(HWND_TOPMOST / HWND_NOTOPMOST)`，故同翻；wgpu 是渲染偏好而非独立 `SurfaceKind`，不另列）；macOS 落 `orderFrontRegardless` / `orderOut:` 与 `setLevel:(NSFloatingWindowLevel / NSNormalWindowLevel)`。其余恒 false 且各有一句实情：`X11` 的 `XMapWindow` / `XUnmapWindow` 与 `Glfw` 的 `glfwShowWindow` / `glfwHideWindow` **机制在但本库未落桥**，`Wayland` 既没有「隐藏顶层窗口」也没有「置顶」的核心协议（只有 minimize），`Headless` 是记录值 seam 而非 OS 机制——**未接线的方向不预先声称**。缺位时 `set_visible` / `set_always_on_top` 是**可观测的 no-op**（`is_visible()` 恒为基类默认 true、`is_always_on_top()` 恒为 false），应用据此先查询再降级，而不是「按了热键窗口没反应还以为是热键坏了」。逐 `SurfaceKind` 期望表由 `utest_window_runtime_control` 锚定（「未接线先翻位」的变异对应用例转红）。
+
+`runtime_window_mode` 与 `runtime_fullscreen` 表「程序化窗控公共入口是否全部接通」——答的是**公共入口**（`Surface` 覆写），不是「OS 有没有这个机制」：`X11` 的 `_NET_WM_STATE_MAXIMIZED_*` / `_NET_WM_STATE_FULLSCREEN` 机制在；`runtime_window_mode` 因 `minimize` / `toggle_maximize` 两枚公共切换腿此前在 X11 / Glfw 未覆写曾如实 false，现已补齐覆写、与 `set_window_mode` 一并接通，翻为 true（与 Win32 / D3D11 / Wayland / MacOS 同列）；`runtime_fullscreen` 则因 `set_fullscreen` 覆写 + `set_window_mode(FullScreen)` 已在 X11（发 `_NET_WM_STATE_FULLSCREEN` 原子、WM 接管几何还原）/ Glfw（borderless 铺满所在显示器、存/还原几何与装饰态、不改视频模式）落地，翻为 true。逐位矩阵：
+
+| `SurfaceKind` | `runtime_window_mode`（`minimize` / `toggle_maximize` / `set_window_mode`） | `runtime_fullscreen`（`set_fullscreen` / 直设 `FullScreen`） |
+|:---|:---|:---|
+| `Win32` / `D3D11` | true（同一 `Win32Host` 的 `SC_*` 目标态 + `WM_SIZE` 回报定档） | true（borderless 全屏：monitor 枚举 + 还原几何 + `WM_SIZE` 定档上报，由 `Win32Host::set_fullscreen` 统一处理） |
+| `X11` / `Glfw` | true（X11 的 `minimize` 转发 `set_window_mode(Minimized)` 经 `XIconifyWindow` 收走窗口、`toggle_maximize` 按 `Impl::mode` 快照走 EWMH `_NET_WM_STATE_MAXIMIZED_*` 原子、与 CSD 钮同源；Glfw 的 `minimize` 转发 `glfwIconifyWindow`、`toggle_maximize` 按 `Impl::maximized` 走 `glfwMaximizeWindow` / `glfwRestoreWindow` 请求语义、回调定档上报；三枚公共切换腿全部接通） | true（X11 经 `set_window_mode(FullScreen)` 发 `_NET_WM_STATE_FULLSCREEN` 原子、WM 接管几何还原，`set_fullscreen` 覆写转发同源；Glfw 经 borderless 铺满所在显示器，存/还原几何 + 装饰态，不改视频模式） |
+| `Wayland` / `MacOS` | true（两家四槽原已齐全） | true（同左） |
+| `Wasm` / `Headless` | false（Headless 的 `set_window_mode` 是测试 seam，不代表 OS 能力） | false（同左） |
+
+能力位为 false 时对应公共入口是**可观测的 no-op**（`minimize` / `toggle_maximize` / `set_fullscreen` 落基类空实现），应用据此先查询再决定画不画窗控钮 / 全屏钮；Win32 / D3D11 与 X11 / Glfw 的全屏档已是真实实现（Win32 / D3D11 为 borderless 全屏、X11 发 `_NET_WM_STATE_FULLSCREEN` 原子、Glfw 为 borderless 铺满，见上表矩阵），不靠 WARN 兜底。逐 `SurfaceKind` 期望表由 `utest_window_runtime_control` 锚定；Win32 家族四槽的真接线由 `tools/verify/win32_window_mode_live_probe.cpp` 以 OS 实值（`IsIconic` / `IsZoomed` / `GetWindowRect`）真机取证（无头 CI 建不了真窗口，探针不进 CTest）；X11 / Glfw 三腿（全屏 + 最大化 + 最小化）的真接线由 `tools/verify/x11_window_mode_live_probe.cpp` / `tools/verify/glfw_window_mode_live_probe.cpp` 以 OS 实值（`_NET_WM_STATE_*` 原子 / `IsUnmapped` / `IsZoomed` / `IsIconic`）真机取证，同不进 CTest。
+
+**桌面外壳集成四枚位**（`native_print_session` / `url_scheme_registration` / `file_association` / `run_at_login`）表「OS 提供该机制、且本库已把桥接好了」。与上面各位的差别只有一处：这四个入口是**进程级自由函数**（`include/aurora/app/` 下五个新头），与 `SurfaceKind` 无关，故按编译期平台整体置位、不随 Surface 变化——Windows / Linux 上即便是 `Headless` Surface 也照常持有这些 OS 机制。逐平台取值：
+
+| 位 | Win32 / D3D11 | Linux（X11 / Wayland / Glfw / Headless） | macOS | 取值理由 |
+|:---|:---:|:---:|:---:|:---|
+| `native_print_session` | true | **false** | true | Windows 走 GDI 打印会话、macOS 走 AppKit 打印操作；**Linux 不引入 libcups**（第三方形态全为 vendored 源码，系统动态库是新开的口子），替代路径是 `export_pdf()` 后交给默认处理程序（§8.12） |
+| `url_scheme_registration` | true | true | true | Windows 写 `HKCU\Software\Classes`；Linux 写用户级桌面条目 + `mimeapps.list`；macOS 靠包内 `CFBundleURLTypes` + Launch Services（不在 `.app` 包内时调用失败并点名原因，位仍 true——机制在、桥已接）（§8.13） |
+| `file_association` | true | true | true | 同上一行的翻位口径；声明**不抢默认处理程序**（§8.14） |
+| `run_at_login` | true | true | true | Windows `HKCU` Run 值 / Linux 自动启动桌面条目 / macOS `SMAppService`（要求 bundle）；沙箱形态如实报 `Unsupported`（§8.15） |
+
+`Wasm` 与其余未覆盖平台四枚位恒 false。位与运行期失败**不互相替代**（口径同上）：机制存在但这一回没做进去（注册表写入被拒、桌面条目目录不可写、不在 `.app` 包内）仍走 `Result` 的 `*-failed`（`kind = io`，`retryable = false`），机制缺失走 `*-unsupported`（`kind = unsupported`）。逐平台取值表由 `utest_document_output` 锚定（「未接线先翻位」的变异对应用例转红）。**文档输出（PDF）不设位**：它是纯库内能力，不依赖任何 OS 机制，设位会污染「能力位 = OS 机制存在性」这条既有口径。
 
 ```cpp
 const au::Platform p = au::platform();
 if (p.is_mobile() && p.capabilities().multitouch) { /* 启用多指手势 */ }
 ```
 
-**OS 明暗偏好查询**：`Platform::color_scheme`（`ColorScheme{Unspecified, Light, Dark}`）承载 OS 档位快照，**须由调用方经 `os_color_scheme()`（`window/platform.h`）显式填充**——读偏好有文件 / 注册表访问副作用，`platform()` 不代做。各平台实现与局限见 `os_color_scheme()` 函数头：Linux 为 GTK 配置文件启发式；Win32（`AppsUseLightTheme`）与 macOS（`NSAppearance`）为**契约注记，未在本仓库无头构建内编译验证**。档位用于明暗三级优先链的最低层（见 [`07-environment-modifier.md`](07-environment-modifier.md) §5.1）。
+**OS 明暗偏好查询**：`Platform::color_scheme`（`ColorScheme{Unspecified, Light, Dark}`）承载 OS 档位快照，**须由调用方经 `os_color_scheme()`（`window/platform.h`）显式填充**——读偏好有文件 / 注册表访问副作用，`platform()` 不代做。各平台实现与局限见 `os_color_scheme()` 函数头：Linux 为 GTK 配置文件启发式；Win32（`AppsUseLightTheme`）为契约注记（未在本仓库真机验证）；macOS（`NSAppearance`）已在本仓库真机 AppKit 构建内编译验证——`os_color_scheme()` 对 Aqua / DarkAqua 双向跟随由 `aurora_verify_macos_surface` 探针实测，运行期切换经 `viewDidChangeEffectiveAppearance` 上报 `notify_os_color_scheme_change`。档位用于明暗三级优先链的最低层（见 [`07-environment-modifier.md`](07-environment-modifier.md) §5.1）。
+
+本自由函数是**无缓存的现读**（每次一记注册表 / 文件访问），供启动期解算与显式探测；运行期跟随不要以轮询它实现——`Application` 聚合后端上报（Win32 = `WM_SETTINGCHANGE`）成应用级读点 `os_color_scheme_state()` / `set_on_os_color_scheme()`，口径与聚合范围见 §6.2。
+
+**桌面外壳证据查询**：`desktop_environment()`（`window/platform.h`）返回 `DesktopEnvironment{Unknown, Gnome, Kde, Other}`，是主题风格轴的第二枚输入——`platform().kind` 表 OS 家族，分不出同一台 Linux 机器跑的是 GNOME 还是 KDE，而这两者的观感应当不同。它**不并进** `Platform` 快照：`platform()` 的口径是「编译期 OS + 自动探测 Surface」，且大量既有断言逐字段比较它的取值，扩字段会牵动它们。证据链为 `XDG_CURRENT_DESKTOP`（冒号分隔、逐段折小写做子串匹配，KDE 先于 GNOME）→ `DESKTOP_SESSION` → 两段都非空却一个也不认识记 `Other`、两段皆缺记 `Unknown`；**只有 Linux / BSD 分支读进程环境**，Windows / macOS / WASM / Android / 无头恒返回 `Unknown`——它们的外壳证据在 `kind` 那一轴，由环境变量表态反而制造假证据。`Unknown`（证据缺失）与 `Other`（环境说了但不认识）分列，探测**没有失败态**。读取口径与 `os_color_scheme()` 相反：本函数每次现读（供诊断与测试如实取数），风格解算侧的缓存落在 `Theme::default_style()`（进程级静态局部量），故换桌面外壳要重启应用；两轴差异的理由见 [`07-environment-modifier.md`](07-environment-modifier.md) §5.2。实现体全库唯一一份在 `src/aurora/theming/detail/theme_probe.cpp`，本函数只做转发——第二处 `getenv` 读取会让「主题按 KDE 解算、平台探测说没有外壳」这类矛盾各自漂移。判据表是纯函数，14 格逐格断言与环境变量四态域不变量由 `utest_theme_probe` 锚定。
 
 ---
 
@@ -512,21 +578,32 @@ au::Lifecycle(
 | `Occluded` | 可见但失焦（近似为「被其它窗口遮挡」） |
 | `Hidden` | 最小化 / 不可见 |
 
-由后端 `(minimized, active)` 经纯函数 `compute_window_state` 映射。精确像素级遮挡检测昂贵且普遍不被框架支持，故以「失焦 = 被遮挡」近似。
+由后端 `(minimized, active, on_screen)` 经纯函数 `compute_window_state` 映射；第三形参默认 `true`，故不接线「屏上可见性」概念的后端（X11 / GLFW 的两形参调用点）行为逐位不变。精确像素级遮挡检测昂贵且普遍不被框架支持，故以「失焦 = 被遮挡」近似。
+
+`on_screen` 是**推导输入而不是事后补丁**：`Hidden` 的定义本就含「不可见」，而运行期显隐开关（§3.6 的 `Surface::set_visible(false)`）在 Win32 落 `SW_HIDE` 时**还会同步带进一条失焦激活消息**——只按 `minimized` / `active` 推导会把「隐藏」报成「被遮挡」，比不报更糟。把在屏与否并入同一函数，两条通道天然归一。
 
 `WindowMode`（`window/window_state.h`）：`Normal` / `Maximized` / `Minimized` / `FullScreen`，与 `WindowState` **正交**——最大化只改变几何态，`WindowState` 仍为 `Visible`；最小化同时满足二者。纯函数 `compute_window_mode(minimized, maximized, fullscreen)` 提供映射。
 
-**后端上报**：`Win32Surface` 处理 `WM_SIZE`（MINIMIZED / MAXIMIZED / RESTORED → 几何态；最小化同时置 `WindowState::Hidden`）与 `WM_ACTIVATE`（非 `WA_INACTIVE` → `Visible`，否则 `Occluded`）；`GlfwSurface` 注册 `glfwSetWindowIconifyCallback` / `glfwSetWindowFocusCallback` / `glfwSetWindowMaximizeCallback`；`HeadlessSurface` 提供 `simulate_window_state` / `simulate_window_mode` 测试 seam。后端各自仅「**状态变化时**」经 `Surface::WindowStateHandler` / `WindowModeHandler` 上报。
+**后端上报**：`Win32Surface` 处理 `WM_SIZE`（MINIMIZED / MAXIMIZED / RESTORED → 几何态；最小化同时置 `WindowState::Hidden`）与 `WM_ACTIVATE`（非 `WA_INACTIVE` → `Visible`，否则 `Occluded`），两者的状态聚合点 `update_window_state()` 把 `IsWindowVisible(hwnd)` 作为 `on_screen` 传入 `compute_window_state`，故运行期 `set_visible(false)` 报 `Hidden`、`set_visible(true)` 按当时的 `minimized` / `active` 重算；`Win32Host` 构造尾部还会按建窗可见性档**播种**内部快照（`Hidden` 档 ⇒ `Hidden`、`NoActivate` ⇒ `Occluded`、`Normal` ⇒ `Visible`）——只写成员值不触发任何 handler（该时刻 handler 尚未安装），故上报序列与既往逐位相同，而「新建 `Hidden` 档窗口」与「运行期 `set_visible(false)`」读回同一个值（不播种则宿主以 `Visible` 起步、第一次真实变化被「与上次相同」的去重吞掉）。macOS 同口径：`MacOSSurface::Impl::sync_state()` 把 `[window isVisible]` 作为 `on_screen` 传入，构造尾部按建窗可见性档播种 `last_state`（只写成员值、不触发 handler），故 `orderOut:` 之后的失焦通知不再被改写成 `Occluded`。`GlfwSurface` 注册 `glfwSetWindowIconifyCallback` / `glfwSetWindowFocusCallback` / `glfwSetWindowMaximizeCallback`；`HeadlessSurface` 提供 `simulate_window_state` / `simulate_window_mode` 测试 seam，其 `set_visible` 记录显隐值并**同时经 `notify_window_state` 上报**（`false ⇒ Hidden`、`true ⇒ Visible`，同值重复调用不产生第二次上报），使「显隐 → `WindowState` → 应用级投影」这条链在无头 CI 可断言，不依赖真机会话。后端各自仅「**状态变化时**」经 `Surface::WindowStateHandler` / `WindowModeHandler` 上报。
 
-**上层聚合**：`Application` 暴露响应式 `State<WindowState>& window_state()` / `State<WindowMode>& window_mode()` 与命令式回调 `set_on_window_state` / `set_on_window_mode`；每帧经 `Window::present_root` 将当前快照注入根 `Environment`，子树可 `ctx.environment<WindowState>()` / `ctx.environment<WindowMode>()` 读取。
+**上层聚合**：`Application` 暴露只读句柄 `ReadOnlyState<WindowState> window_state()` / `ReadOnlyState<WindowMode> window_mode()` 与命令式回调 `set_on_window_state` / `set_on_window_mode`；每帧经 `Window::present_root` 将当前快照注入根 `Environment`，子树可 `ctx.environment<WindowState>()` / `ctx.environment<WindowMode>()` 读取。句柄只开放读取——应用不能把窗口状态写回去，快照的唯一写入者是后端上报。
 
 **聚合范围（既有口径）**：上述两枚 State 与两枚回调**只聚合主窗口**——`register_host` 安装的 state / mode sink 仅在宿主即主窗口时转发；非主窗口的可见性 / 几何态变化只落在自己的宿主快照（`Window::window_state()` / `Window::window_mode()`）上。与 §2.4 的逐窗几何持久化不冲突：几何快照逐窗独立读写（非主窗重启后同样回到自己的几何态），应用级 State 只是主窗的投影。
+
+**OS 明暗偏好是第三枚状态，聚合范围与上面两枚相反。** `ReadOnlyState<ColorScheme> os_color_scheme_state()`（命令式回调 `set_on_os_color_scheme`，显式 seed `refresh_os_color_scheme()`）走同一套「宿主上报表 → 应用级聚合」形态，但 `register_host` 对**每个**宿主都装 sink：OS 档位是**进程级事实**，N 扇窗各自收到同一次系统切换（Win32 逐窗各收一次 `WM_SETTINGCHANGE`）应当在应用级只算一次通知，而「谁是主窗」与系统深浅色无关。去重不靠跨窗记账位，靠聚合出口 `on_os_color_scheme_changed` 的**先比后设**——`State::set` 对相等值照样发信号，故比较必须在转发处（与 `on_window_state_changed` 同款）。第二扇窗收到同值时数值已相等 ⇒ 静默。
+
+三条口径：其一，**初值恒为 `Unspecified`**，构造与宿主登记不为应用级 State 隐式读注册表（与 §5 `platform()` 的「显式查询，跳过探测」同口径；宿主登记时框架自己那一读只推 `Window` 快照，不进应用级 State），启动期解算由应用显式调 `refresh_os_color_scheme()`。其二，**原样透传 OS 原值**（含 `Unspecified`），框架不替应用回落明 / 暗——「系统不表态回哪一档」是应用策略。其三，**转发排在框架那一半之后**（`WindowHost::on_os_color_scheme` 先推 `Window::set_os_color_scheme` + `force_full_redraw`，再报 sink），保证应用看到变化时本窗根主题已同值；`Surface::set_os_color_scheme_handler` 的独占单槽语义不变，应用侧旁听走 sink，不去抢那一枚槽（抢了会顶掉框架的根主题跟随）。`WindowHost::teardown()` 同步置空本表，与另两枚同款。
 
 ```cpp
 app.set_on_window_state([](au::WindowState s) {
     if (s != au::WindowState::Visible) pause_animation();
     else resume_animation();
 });
+
+// OS 深浅色跟随：seed 一次拿启动档，运行期由后端上报驱动（无需轮询注册表）。
+app.refresh_os_color_scheme();
+const au::ColorScheme active = app.os_color_scheme_state().get();  // Unspecified 时应用自行回落
+app.set_on_os_color_scheme([](au::ColorScheme s) { apply_chrome_scheme(s); });
 ```
 
 ### 6.3 无障碍桥的激活与销毁
@@ -539,15 +616,17 @@ app.set_on_window_state([](au::WindowState s) {
 
 **多窗口。** 桥与窗口一一对应（`Win32Host::Impl` 唯一持有），多窗口即多个桥同时注册；`screen_reader_active` 是**进程级**设置，任一桥激活即置 `true`、任一桥去激活即试置 `false`（多窗口下复位语义为 best-effort，见 §6.2 同类启发式约定）。
 
-**线程模型（provider 回调一律回投主人线程）。** UIA 把 in-proc provider 的**每一次**回调投递在 `UIAutomationCore.dll` 的 COM/RPC 线程上（激活时初始化 STA 套间只保证公寓模型，并不保证那就是 UI 线程），而 widget 树、`snap_`、`id_by_widget_`、`providers_` 只属于**主人线程**（= 构造桥并安装 `main_poster` 帧循环的那条）。故 `Win32UiaBridge` 把访问面劈成两半：
+**macOS 桥（NSAccessibility）。** 实现为 `src/aurora/window/detail/macos_ax_bridge.{h,cpp}` 的 `MacOSAxBridge : a11y::Provider`，由 `MacOSSurface::Impl` 唯一持有。平台查询入口不是窗口消息 / D-Bus，而是内容视图的无障碍协议：视图 `isAccessibilityElement` 回 NO、`accessibilityRole` 为 group，`accessibilityChildren` / `accessibilityHitTest:` / `accessibilityFocusedUIElement` 转发给桥（首个查询到达时才构造桥并 `activate()`，同时补喂宿主早已记下的根——与 Win32 的惰性口径同形）。查询即 `sync_if_dirty()`：语义树 → 快照 → `NSAccessibilityElement` 元素树，元素按 `runtime_id` 复用、字段按值持副本（根销毁经 `on_widget_destroying` 立即切断，控件树不在时不会留下悬垂指针），帧经内容视图 `convertRect:toView:` + `convertRectToScreen:` 换成屏幕点。反向动作按节点 id 回控件：`accessibilityPerformPress` 取 Invoke → Click → Toggle 首个可用者、`accessibilityPerformIncrement/Decrement` 以 `range.step` 步进并夹在 `[min,max]` 后走 `Value`、`setAccessibilityFocused:` 走 `Focus`。推送面 = 快照 diff 的另一种消费：焦点 → `FocusedUIElementChanged`、Name → `TitleChanged`、Value/Range → `ValueChanged`、结构 / 几何 / 状态 / 动作变化合并一条视图级 `LayoutChanged`，播报 → `AnnouncementRequested`（带 `NSAccessibilityAnnouncementKey` 与 medium 优先级）。拆除：`destroy_window` 先 `deactivate()`（注销注册表、清元素与快照）再放视图；`set_root` 恒置脏（帧是元素属性，布局每帧可动，这一点与 UIA 的「仅换根置脏」不同）。AppKit 无障碍查询本就只在主线程，故无 Win32 那套跨线程回投面。
+
+**线程模型（provider 回调一律回投主人线程）。** UIA 把 in-proc provider 的**每一次**回调投递在 `UIAutomationCore.dll` 的 COM/RPC 线程上（激活时初始化 STA 套间只保证公寓模型，并不保证那就是 UI 线程），而 widget 树、`snap_`、`id_by_widget_`、`providers_` 只属于**主人线程**（= 持有 `MainQueue` 值班租约的帧循环那条）。故 `Win32UiaBridge` 把访问面劈成两半：
 
 - **回投 + 按值副本**（provider 侧唯可用形）：`eval_on_main` / `eval_widget_on_main` 派生出的 `snapshot_copy`（属性与几何读的都是副本）、`navigate_target`、`has_scrollable_ancestor`、`hit_test_id`、`focused_id`、`visible_box`、`provider_for`、`root_provider`，以及全部动作（`Invoke` / `Toggle` / `SetValue` / `Scroll` / `ScrollIntoView` / `SetFocus`）与文本面（`ITextRangeProvider` / `ITextProvider` 的每次 `accessibility_text` / `accessibility_char_bounds` / 选区读写）。跨线程只传值，悬垂读由构造排除。
 - **主人线程裸口**（provider 侧禁用）：`sync_if_dirty` / `rebuild` / `find_node` / `snapshot()` / `id_of` / `mark_dirty` / `queue_*`。拉取式重建会整体换掉 `snap_`，任何指向它的指针出不了主人线程。
-- **就地执行的两条合法路径**（都不入队、不等待，代价与回投改造之前一致）：调用线程本就是主人线程（`WM_GETOBJECT`、帧循环、`UiaDisconnectProvider` 的同步重入），或进程级 `main_poster` 未安装（无头 / 单测，与 `Task::post_to_main` 的无回投器回退同语义）。
+- **就地执行的唯一合法路径**：调用线程本就是主人线程（`WM_GETOBJECT`、帧循环、`UiaDisconnectProvider` 的同步重入），不入队、不等待。非主人线程一律走 `MainQueue::try_post`——无值班（无头 / 已打烊）即返回 false、以零值 `R{}` 收场并映射 `UIA_E_ELEMENTNOTAVAILABLE`，**不再有「槽为空就地执行」的第二条回退**。
 - **限时等待 + 降级**：读路径预算 `AURORA_UI_READ_TIMEOUT_MS`（250ms）、动作路径 `AURORA_UI_ACTION_TIMEOUT_MS`（500ms），显著小于读屏客户端自身的秒级超时。超时即返回零值，provider 侧映射为 `UIA_E_ELEMENTNOTAVAILABLE`；「控件没有这项语义」仍回 `UIA_E_NOTSUPPORTED`，两者是不同判据，故回投结果用三态承载而非单一 `optional`。超时路径**刻意不打诊断**（`Diagnostics` 的收集器是主人线程专属），可观测性由客户端看到的错误码承担。
 - **两道闸**（队列项真正执行前逐条过）：`abandoned` —— 调用方已超时返回，则晚到的项绝不补做用户动作（Invoke/SetValue 不能事后发生）；`alive_` —— 桥已析构，则闭包绝不解引用本桥。`wait_on_main` 入队后只碰局部的 promise/future，不再访问 `this`，故桥与等待方是两条独立时间线。`rtl_` 与 `listener_count_` 因 RPC 线程也会读/写而改为原子量。
 
-回归面见 `tests/unit/utest_win32_ua_marshal`（换线程执行 / 两条就地路径 / 超时零值且丢弃晚到项 / 桥析构丢弃在途项 / provider 读经回投）。
+回归面见 `tests/unit/utest_win32_ua_marshal`（换线程执行 / 主人线程就地路径 / 无值班 `try_post` 返回零值并映射 `UIA_E_ELEMENTNOTAVAILABLE` / 超时零值且丢弃晚到项 / 桥析构丢弃在途项 / provider 读经回投）。
 
 **滚动量 → UIA `IScrollProvider` 映射（公式单一真源）。** `get_VerticalViewSize` 的 UIA 语义是「可见内容占全部内容的百分比」，唯一真源是平台中立纯函数 `core::compute_vertical_view_size(range)`（`range.viewport / range.content × 100`，夹到 `[0,100]`）；`content <= 0` 或 `viewport <= 0` 即「无内容/无视口」报 100；无任何滚动语义的控件由桥侧直接报 100（恒「全部可见」，不反推 span）。两量 `viewport`/`content` 由 `Widget::accessibility_scroll()` 的覆写方填：纵向语义下 `viewport` = 视口高、`content` = 内容总高。`LazyRow` 等横轴专用控件纵轴不可滚，报 `viewport = content` ⇒ 纵轴 100% 可见。`min`/`max`/`position` 仅用于滚动位置（`get_VerticalScrollPercent`），与 `VerticalViewSize` 的「占比」语义相互独立——`content - viewport != max - min` 时仍按 `viewport/content` 算得有几何意义的百分比。此前的反向缺陷（`max/(max+1)×100` 把「可滚跨度」误当「可见占比」，内容越大反而越接近 100%）已修复，验证见 `utest_accessibility` 的 `vertical_view_size_*` 三例 + `utest_scroll` / `utest_lazy_list` 各一例（三平台全绿，变异自证：仅把公式换回 `max/(max+1)` ⇒ 占比判据转红）。
 
@@ -612,10 +691,10 @@ app.set_on_window_state([](au::WindowState s) {
 
 `Timer`（`widget/timer.h`）是声明式、响应式为主的控件。
 
-构造 `Timer(period, TickBuilder, on_tick = {})`，其中 `TickBuilder = std::function<Node(const SignalView<int>&)>`，在构造时调用**一次**构建子树，内部经响应式绑定刷新（非每次 tick 重建）。
+构造 `Timer(period, TickBuilder, on_tick = {})`，其中 `TickBuilder = std::function<Node(ReadOnlyState<int>)>`，在构造时调用**一次**构建子树，内部经响应式派生刷新（非每次 tick 重建）。
 
 - 挂载（`on_mount`）向 `Scheduler::current()` 注册周期任务。
-- 每次 tick 自增内部 `State<int>`（经 `ticks()` 暴露为 `SignalView<int>`，计数从 1 起）驱动子 UI 自动重绘，并可选调用 `on_tick(int)`。
+- 每次 tick 自增内部 `State<int>`（经 `ticks()` 暴露为 `ReadOnlyState<int>`，计数从 1 起）驱动子 UI 自动重绘，并可选调用 `on_tick(int)`。
 - 卸载 / 析构自动 `cancel()` 句柄。
 - 降级：无运行中 App（`Scheduler::current() == nullptr`，如纯 `render_to_png`）时记 `Diagnostics::warn` 并以 `ticks() == 0` 渲染子 UI，不崩溃。
 
@@ -626,10 +705,11 @@ au::TimerHandle h = sched.set_interval(1s, [&] { poll(); });
 sched.set_timeout(5s, [&] { h.cancel(); });
 
 // 组件级声明式：子 UI 经 ticks() 响应式刷新
-au::Timer(1s, [](const au::SignalView<int> &tick) {
-    return au::Text(au::computed([&] {
+au::Timer(1s, [](au::ReadOnlyState<int> tick) {
+    auto label = au::computed([tick]() -> au::LocalizedString {
         return au::LocalizedString{ "tick: " + std::to_string(tick.get()) };
-    }));
+    });
+    return au::Text(au::TextProps().set_content(label));
 });
 ```
 
@@ -639,39 +719,53 @@ au::Timer(1s, [](const au::SignalView<int> &tick) {
 
 ### 8.1 文件对话框
 
-`app/file_dialog.h` 提供 `file_dialog::open_file` / `save_file` / `open_folder` 三个入口，签名两腿共用：`Options{title, initial_dir, filters}` + `interactive` 开关。`Options` 三键的语义在每条腿上都必须被真实消费（见下方「`Options` 消费口径」），不得像旧版非 Windows 分支那样 `(void)opts` 丢弃全部字段。
+`app/file_dialog.h` 提供 `file_dialog::open_file` / `save_file` / `open_folder` 三个入口，签名两腿共用：`Options{title, initial_dir, suggested_name, default_extension, filters}` + `interactive` 开关。`Options` 各键的语义在每条腿上都必须被真实消费，或把头注释与本节如实写成「不消费」（见下方「`Options` 消费口径」），不得像旧版非 Windows 分支那样 `(void)opts` 丢弃全部字段。
 
 #### 8.1.1 两个真实实现腿
 
-- **Win32 腿**（`src/aurora/app/file_dialog_win32.cpp`，`AURORA_PLATFORM_WINDOWS`）：经 COM 实现——`IFileOpenDialog` 多选 / `IFileSaveDialog` / `FOS_PICKFOLDERS` 文件夹选择器。钩子优先、`interactive == false` 回空、否则弹真框等用户。
-- **桌面自绘腿**（Linux / macOS，`src/aurora/app/file_dialog_selfdrawn.cpp`，`AURORA_PLATFORM_LINUX || AURORA_PLATFORM_MACOS`）：框架自绘选择器，零第三方依赖（不引入 GTK / Qt 链接期桌面库、不引入 DBus 客户端、不把「装了外部二进制」变成运行期前提）。架构为四层：
+- **Win32 腿**（`src/aurora/app/file_dialog_win32.cpp`，`AURORA_PLATFORM_WINDOWS`）：经 COM 实现——`IFileOpenDialog` 多选 / `IFileSaveDialog` / `FOS_PICKFOLDERS` 文件夹选择器。钩子优先、`interactive == false` 回空、否则弹真框等用户。意图投递集中在 `file_dialog::detail::apply_initial_dir` / `apply_save_name`（声明见 `src/aurora/app/detail/file_dialog_win32_apply.h`，内部头以 `void *` 做类型擦除、不外泄 `<windows.h>`）：`SetFolder` 接初始目录、`SetFileName` 接建议名、`SetDefaultExtension` 接缺省扩展名。`initial_dir` 先 `utf8_to_wstr`（`CP_UTF8`）再 `GetFullPathNameW` 归一，然后交 `SHCreateItemFromParsingName`——该 API 拒正斜杠写法，且其声明由 `_WIN32_IE >= 0x0700` 门控；任一步失败一律 `AURORA_LOG_WARN`（tag `file_dialog`）降级停在 OS 默认位置，不返回 `Error`（解析不了目录是位置问题，不是选择失败）。
+- **macOS 原生腿**（`src/aurora/app/file_dialog_macos.cpp`，`AURORA_PLATFORM_MACOS && AURORA_BACKEND_MACOS`）：`NSOpenPanel`（文件多选 / 目录模式）与 `NSSavePanel` 的同步 `runModal`。选择原生面板而不是自绘，是因为 macOS 用户对侧栏位置、iCloud / 网络卷可见性、沙盒授权（security-scoped URL）有明确预期，而自绘腿走 `std::filesystem` 在沙盒进程里触达不到这些系统位置。投递：`title` → `setMessage:`（面板提示行，不覆盖系统窗口标题）、`initial_dir` → 先 `std::filesystem::is_directory` 校验再 `setDirectoryURL:`（不可解析 / 不存在 ⇒ WARN 停在系统默认位置）、`filters` 的扩展名经 `file_dialog_plan::last_path_segment` + 去 `*` / 前导点折成 `UTType` 白名单（`Filter::name` 无从投递——原生面板没有命名筛选器）、`suggested_name` → `setNameFieldStringValue:`、`default_extension` 排进首选 `UTType` 并在确认后按 `with_default_extension` 兜底（与自绘腿逐字节同解）。无 `NSApplication` 上下文时 WARN 后回空（刻意不调 `sharedApplication` 创建 AppKit，避免无头进程悄悄拉起模态窗）。
+- **折算层（跨腿共用、零平台依赖）**（`src/aurora/app/detail/file_dialog_plan.{h,cpp}`，namespace `aurora::file_dialog_plan`）：末段折算、前导点 / 首尾空白削法、确认名的补全规则只有这一份，每条 CI 腿都编译它并有逐值无头单测（`tests/unit/utest_file_dialog_plan.cpp`）；OS 桥只做投递与失败归因，不再各自写一遍规则。
+- **桌面自绘腿**（Linux，以及「macOS 但未启用 AppKit 后端」的 GLFW / X11 / Headless 构建，`src/aurora/app/file_dialog_selfdrawn.cpp`；L0–L2 在 macOS 上也编译以便无头断言，L3 入口只在该腿真实生效的组合上定义）：框架自绘选择器，零第三方依赖（不引入 GTK / Qt 链接期桌面库、不引入 DBus 客户端、不把「装了外部二进制」变成运行期前提）。架构为四层：
   - L0 数据源 `DirectorySource` 概念（`list_dir` / `is_dir` / `to_absolute` / `root`），默认 `std::filesystem` 实现，测试可注入 mock 无头证；
   - L1 状态机 `FilePickerModel`：当前目录、条目、过滤匹配、选择、确认 / 取消，纯逻辑、完全无头；
   - L2 装配 `FilePickerView`：以 `Dialog`（居中内容 + 遮罩 + 焦点作用域）承载、`ListView` / `TextInput` / `Button` 装配的模态面板，**自带零帧循环**，不进 `WidgetRegistry`、不新增公共 widget；
   - L3 三入口路由：钩子优先 → `interactive == false` 回空 → 有 `Application` 上下文走 `Application::run_modal` 嵌套帧循环 → 无上下文 WARN 回空。
 - **其余平台（WASM / Android / BSD 等）**：保留 `file_dialog.h` 内联回退（钩子语义 + 等价取消回空），`AURORA_PLATFORM_WASM` 不做真实选择器（主线程不可阻塞、文件系统是 MEMFS 而非用户真实磁盘），仅在注释与本节如实申报。
 
-#### 8.1.2 钩子与 `interactive` 的优先级次序（三支共用）
+#### 8.1.2 钩子与 `interactive` 的优先级次序（各支共用）
 
 1. 三个 headless 钩子（`headless_open_result` / `headless_save_result` / `headless_folder_result`）任意非空 → 直接返回该预设，**不构造选择器**（计数可证），不消费 `Options`；
 2. `interactive == false` → 回空（等价取消），不弹 UI；
 3. 否则进入真实 / 自绘路径。
 
+观测面：三入口在**钩子判定之前**把收到的 `Options` 原样记进 `file_dialog::headless_last_options`（`std::optional<Options>`，NOLINT 进程级静态槽，测试用后须复位）。记的是原始入参（未折算），因此钩子命中、非交互、真弹三条路径都留下可断言的入参记账；折算结果另由 `file_dialog_plan` 单测逐值断。
+
 #### 8.1.3 `Options` 消费口径
 
-- `title`：作浮层标题（`open_file` / `save_file` / `open_folder` 各腿均消费；Win32 走 `SetTitle`、自绘腿作 `Dialog` 标题；空 = 形态默认标题）。
-- `initial_dir`：作初始位置（自绘腿消费；不存在 / 不可读 → 降级到数据源根并留一条可归因 `AURORA_LOG_WARN`，不挂起、不抛）。
-- `filters`：过滤文件条目（自绘腿仅影响列表展示；目录选择器形态下被忽略——目录无类型语义）；三腿统一在头注释写明「忽略」，自绘腿不消费时留 DEBUG 日志。
+逐腿真值表（「消费」= 落到该腿的真实机制；「不消费」= 头注释如实申报，不做「尽力而为」）：
+
+| 字段 | Win32 腿 | macOS 原生腿 | 桌面自绘腿 | 其余平台内联回退 |
+|:---|:---|:---|:---|:---|
+| `title` | `SetTitle`；空 = 形态默认标题 | `setMessage:`（提示行）；空 = 系统默认 | `Dialog` 标题；空 = 形态默认标题 | 不消费（无 UI） |
+| `initial_dir` | `SetFolder`（三入口共用同一条投递）；解析不了 ⇒ WARN + 停在 OS 默认位置 | `setDirectoryURL:`（先校验是目录）；不存在 / 不可读 ⇒ WARN + 停在系统默认位置 | 初始目录；不存在 / 不可读 ⇒ 降级数据源根 + 一条可归因 WARN | 不消费 |
+| `suggested_name` | **仅 `save_file`**：`SetFileName`（带目录分隔取末段并 WARN） | **仅 `save_file`**：`setNameFieldStringValue:`（同一末段折算） | **仅 `save_file`**：种进模型 `save_name_` 与名字输入框初值 | 不消费 |
+| `default_extension` | **仅 `save_file`**：`SetDefaultExtension`（削掉前导点后交 OS 补全） | **仅 `save_file`**：首选 `UTType` + 确认后 `with_default_extension` 兜底 | **仅 `save_file`**：确认时按 `with_default_extension` 补在返回名末尾 | 不消费 |
+| `filters` | `SetFileTypes`（`open_file` / `save_file`）；`open_folder` 不投 | 扩展名折成 `allowedContentTypes` 白名单；`Filter::name` 不消费（原生面板无命名筛选器）；`open_folder` 不投 | 过滤列表展示；`open_folder` 形态忽略——目录无类型语义 | 不消费 |
+
+- `suggested_name` 与 `default_extension` 是**保存形态专属**意图：`open_file` / `open_folder` 不消费，头注释与本表同口径。
+- 建议名的折算：空 = 不表达意图（不投、不留痕）；末段为空（尾随分隔符）= 指到目录而非文件名 ⇒ WARN 后按「不表达意图」处理；带目录分隔 ⇒ WARN 后取末段。
+- 扩展名的折算：前导点与首尾空白一起反复削（`.txt` 与 `txt` 同解，Win32 侧必须是**不含点**那一份，否则 OS 补出 `name..txt`）；自绘腿 `with_default_extension` 只在名字末段**没有点**时补全，用户自己打过的扩展名不改写。
 
 #### 8.1.4 取消与降级的错误语义
 
 - **取消不是失败**：用户取消、目录不可选、无可用通道三路径一律返回 `Ok(空串 / 空列表)`（调用方不必分支），**仅系统级异常回 `Error`**。
-- 桌面腿系统级失败复用既有 `platform-dialog-create-failed` 错误码（见 [`ERROR_CATALOG.md`](../../codespec/ERROR_CATALOG.md)，errors.toml 零新增）；Win32 腿复用 `PlatformComInitFailed`。
+- 错误面按腿分开：Win32 腿在 COM 初始化失败时回 `PlatformComInitFailed`、对话框创建失败时回 `platform-dialog-create-failed`（见 [`ERROR_CATALOG.md`](../../codespec/ERROR_CATALOG.md)，errors.toml 零新增）；macOS 原生腿与桌面自绘腿都不返回 `Error`——AppKit 面板与自绘浮层没有可失败的构造步骤，无 GUI / 无 `Application` 上下文如实 WARN 后按取消回空。
 - 若某平台态确实拿不出选择器，须 `AURORA_LOG_WARN`（tag `file_dialog`）留痕后回空，不弹半残浮层、不回假路径。
 
 #### 8.1.5 `run_modal` 执行模型与「无上下文即等价非交互」路由
 
-桌面自绘腿同步阻塞到用户作答（与 `QFileDialog::exec()` 同口径），真交互路径在调用线程内阻塞到用户作答。执行模型为「恰好一层嵌套模态」：
+macOS 原生腿以 `runModal` 在调用线程内阻塞到用户作答；桌面自绘腿同口径（与 `QFileDialog::exec()` 同一执行模型）。自绘腿的执行模型为「恰好一层嵌套模态」：
 
 - 选择器由菜单 / 帧回调 / 脚本化直调打开时，调用点未必在派发栈内，故 `FilePickerView::show_modal` 自包装当前焦点管理器后再 `Dialog::show`，保证焦点作用域配对；
 - **有 `Application` 上下文**（`loop_begin` 经 `Application::set_loop_application` 登记，自绘三入口据此判「有无上下文」）→ 把选择器挂上主窗口场景根、驱动 `Application::run_modal`（`run_modal` 入口保存进程级单例——`Scheduler` / `Animator` / 主回投器 / 焦点管理器 / 严格模式 / 帧循环所属应用登记——出口逐项还原，模态期新建的定时器 / 动画 / 回投归本应用，退出后外层口径与入口相等，不会半身不遂）；
@@ -704,6 +798,8 @@ au::Timer(1s, [](const au::SignalView<int> &tick) {
 | 本平台无剪贴板实现 | `GeneralNotSupported` | ❌ |
 | 图像尺寸超限或像素缓冲与维度不一致（调用方参数错） | `GeneralInvalidArgument` | ❌ |
 | 本平台无该 MIME 的读写机制（富格式族） | `ClipboardFormatUnsupported` | ❌（机制缺失是稳态） |
+| 变更订阅参数错：空回调 / 空 `kinds` / owner 非 `std::shared_ptr` 托管 | `GeneralInvalidArgument` | ❌ |
+| 变更订阅：请求 `ContentChanged` 而本平台无监听机制（只请求 `OwnershipLost` 不校验） | `ClipboardListenUnsupported` | ❌（机制缺失是稳态） |
 
 - **空内容不是失败**：「可访问但当前没有文本/图像」是正常态，返回 `Ok`，不得与「读不到」混为一谈。
 - **空写入是契约内 no-op**：空文本 / 空图像不触碰剪贴板、**保留既有内容**，返回 `Ok`。
@@ -713,10 +809,10 @@ au::Timer(1s, [](const au::SignalView<int> &tick) {
 **富格式族（files / uri-list / HTML / 自定义 MIME）**：`available_formats()`、`set_payload(mime, bytes)` / `get_payload(mime)`、`set_files(paths)` / `get_files()`、`set_html(html)` / `get_html()`。要点：
 
 - **MIME 词汇表单一真源**是 `app/mime_types.h` 的常量表（`AURORA_MIME_*`，命名空间作用域 `constexpr std::string_view`）：`text/plain`、`text/uri-list`、`image/png`、`text/html`、`aurora/widget`（应用内拖拽既有词汇），另附 `is_known_mime()`。剪贴板侧与**系统拖放**侧同引此表（拖放事件结构本身用裸 `std::string`，因为 `event/` 不依赖 `app/`；两侧取值一致由常量表保证），各处禁止就地硬编码 MIME 串。
-- **`available_formats()` 如实反映此刻能读到什么**：平台路径上是各平台既有机制覆盖的格式（文本三平台恒在列、`image/png` 仅 Windows 在列），富格式待平台机制落地后才入列；memory 测试后端下反映实际写入的格式。**不因「API 已声明」就谎报可用**。
-- **`text/uri-list` 编解码是纯逻辑**（`src/aurora/app/uri_list.h`，无平台依赖）：编码逐条路径产出 `file://` URI（空 authority 的第三个斜杠按需补出，空格等保留字符 `%XX` 大写十六进制），行以 CRLF 结尾；解码容错 CRLF / LF / CR 三种分隔符、忽略空行、`file://` 行百分号解码为本地路径并还原盘符形态（`file:///C:/x` → `C:/x`；POSIX 绝对路径的前导 `/` 保留）。**非 `file` scheme 的行（`http://` 等）不映射为路径、静默跳过**——`get_files()` 只返回可映射为本地路径的条目，完整原始行经 `get_payload(AURORA_MIME_URI_LIST)` 取得；全部条目被跳过时是 `Ok(空清单)`。`set_files` **只接受本地路径**（URL 类内容走 `set_payload`），与解码侧口径对称。
+- **`available_formats()` 如实反映此刻能读到什么**：平台路径上由已登记的后端按平台机制枚举（Win32 `EnumClipboardFormats`、macOS `NSPasteboard.types`，只列本库认识且确实持有的格式）；后端未登记时退回既有机制覆盖的档（`text/plain` 三平台、`image/png` 仅 Windows）；测试侧 memory 后端下反映实际写入的格式。**不因「API 已声明」就谎报可用**。
+- **`text/uri-list` 编解码是纯逻辑**（`src/aurora/app/uri_list.h`，无平台依赖）：编码逐条路径产出 `file://` URI（空 authority 的第三个斜杠按需补出，空格等保留字符 `%XX` 大写十六进制），行以 CRLF 结尾；解码容错 CRLF / LF / CR 三种分隔符、忽略空行、`file://` 行百分号解码为本地路径并还原盘符形态（`file:///C:/x` → `C:/x`；POSIX 绝对路径的前导 `/` 保留）。**非 `file` scheme 的行（`http://` 等）不映射为路径、静默跳过**——`get_files()` 只返回可映射为本地路径的条目，完整原始行经 `get_payload(AURORA_MIME_URI_LIST)` 取得；全部条目被跳过时是 `Ok(空清单)`。解码出口另有结构性闸门：带内嵌 NUL / 控制字节（含百分号编码后现形的 CRLF）、独立 `..` 段、空条目或非空 authority 的条目按同一口径静默跳过；反斜杠、盘符与 UTF-8 多字节序列属合法路径字符，逐字节往返契约不变。**过滤不等于授权**——库不触碰文件系统，路径是否落在允许目录内、符号链接与权限由调用方负责。`set_files` **只接受本地路径**（URL 类内容走 `set_payload`），与解码侧口径对称。
 - **空口径沿旧约**：格式不存在 = `Ok` 空值（空内容不是失败）；空串 / 空清单 / 空字节写入 = no-op，**保留既有内容**；`mime` 为空串是调用方参数错（`GeneralInvalidArgument`）。
-- **平台实现不在本批**：Win32 既有 text / image 两族零改动；富格式的平台后端（`CF_HDROP` / "HTML Format" / `RegisterClipboardFormat`、X11 / Wayland selection 目标协商、macOS `NSPasteboard`）随后续批次落地，落地前非测试路径按 `ClipboardFormatUnsupported` 报错。memory 测试后端已覆盖富格式往返。
+- **平台实现现状**：Win32 与 macOS 两腿的富格式、惰性提供与所有权通知已接线（见下两条）；X11 / Wayland 的富格式仍按 `ClipboardFormatUnsupported` 报错，接线另行安排——selection 与 `wl_data_device` 的语义与 Win32 不同源（所有者协商走 `TARGETS`、惰性提供由 selection owner 应答），不共用同一座桥。测试侧 memory 后端已覆盖富格式往返。
 
 **惰性提供、监听与清空（`ClipboardOffer` 同址扩充，不新开门面类）**：
 
@@ -724,11 +820,22 @@ au::Timer(1s, [](const au::SignalView<int> &tick) {
 - **渲染结果只生成一次并缓存**（对标平台 `WM_RENDERFORMAT` 后由系统托管）；`provide` 返回 `Error` **不缓存**，每次读取各自重试提供。重复注册以新要约**整体替换**旧要约（含其已渲染缓存）。
 - **与立即写混用合法且互不覆盖**：同一份内容上一格式走 `set_payload` 立即写、另一格式走要约惰性声明，两者都能被读到且结果各自正确；立即写的格式不触发惰性回调。同一 MIME 被随后的**非空**立即写通道写入时，该格式自要约改由立即写接管（与平台「后写者接管该格式」同款）。
 - **提供失败口径**：`provide` 返回 `Error`（或为空而该格式被真正请求）时读取侧拿到 `clipboard-provider-failed`（`retryable = false`——同一笔数据是否重试由应用决定，库不代做重试），而非既有三枚之一。
-- **`on_ownership_lost(callback)`**：所有权被夺（别的进程清空 / 覆写剪贴板；Win32 `WM_DESTROYCLIPBOARD`、X11 selection owner 被夺的平台锚）时回调一次，与 `set_offer` 成对，用于释放惰性提供所依赖的缓存与临时资源；未注册惰性要约时不触发（没有可失去的所有权的要约）。所有权丢失是**正常态不是故障**，走回调而不产出错误码。传空回调即注销；注册新回调**替换**旧回调（不叠加，避免多注册点各自持资源）。
-- **`on_change(callback)`**：内容变化监听。平台无监听机制时**注册即失败**，返回 `clipboard-listen-unsupported`（`retryable = false`，机制缺失是稳态）——宁可如实报错，也不让调用方逻辑静默失效，与 `available_formats()` 「不因 API 已声明就谎报可用」同款定调。注册新回调同样替换旧的；传空回调即注销（注销不需要监听机制）。回调在派发线程上串行调用，实现须轻量、不得触发重布局或再次读写剪贴板。
+- **`on_event(kinds, callback)`**：唯一订阅入口，`kinds` 是 `ClipboardEventKind` 位掩码（`ContentChanged` / `OwnershipLost`），**必填**且至少一类；返回既有 `Subscription` 作为注销凭证（析构或 `reset()` 即注销，注销不需要监听机制）。
+  - **纯多播**：同一回调注册几次就收几次，互不替换；派发按注册先后（FIFO）取**注册快照**逐条调用——回调内新注册的条目**下一轮**才生效，回调内取消的条目**立即**停止接收（含本轮尚未轮到的后序条目）。
+  - **owner 守卫形态** `on_event(Widget&, kinds, callback)`：owner 必须由 `std::shared_ptr` 托管（`weak_from_this()` 可用），否则注册失败 `general-invalid-argument`——弱守卫无从建立时静默退化为强引用会拖长控件生命周期。owner 销毁即停止投递；派发永远逐条判活。
+  - **入口侧惰性清扫**：维护带守卫条目计数，计数为 0 时任何入口都不清扫（纯句柄形态零开销）；计数 > 0 时**全部公共入口**按 5 秒时间窗口节流整表回收（`core::current_timestamp()`），用于释放 owner 已销毁的条目内存。`clear()` 只清内容，不注销监听。
+  - **失败口径**：空回调或空 `kinds` 为 `general-invalid-argument`；请求 `ContentChanged` 而本平台无监听机制时**注册即失败**，返回 `clipboard-listen-unsupported`（`retryable = false`，机制缺失是稳态）；只请求 `OwnershipLost` **恒成功**且不做能力校验（所有权丢失来自既有平台通知）。宁可如实报错，也不让调用方逻辑静默失效，与 `available_formats()` 「不因 API 已声明就谎报可用」同款定调。
+  - 回调在派发线程上串行调用，实现须轻量、不得触发重布局或再次读写剪贴板。
+- **所有权丢失语义**：别的进程清空 / 覆写剪贴板（Win32 `WM_DESTROYCLIPBOARD` 与 owner 窗口销毁、macOS `pasteboardFinishedWithDataProvider:` 配合 `changeCount` 区分「数据已供完」与「所有权易主」；X11 / Wayland 尚未接线）触发 `OwnershipLost`，与 `set_offer` 成对，用于释放惰性提供所依赖的缓存与临时资源；未持有惰性要约时不触发（没有可失去的所有权的要约）。所有权丢失是**正常态不是故障**，走回调而不产出错误码。
 - **`clear()` 与空写入语义相反**：`clear()` 是**主动清空**（清空后 `available_formats()` 返回 `Ok(空清单)`；错误口径 `ClipboardAccessFailed` / `ClipboardWriteFailed` / `GeneralNotSupported`）；而空文本 / 空图像 / 空字节 / 空清单的 `set_*` 是契约内 no-op、**保留既有内容**。二者并列写明以防误用。监听注册不是内容：`clear()` 清内容（要约即所有权声明，随内容一并清空），监听注册留存。
 - **两条通道要约同构**：`ClipboardOffer` 与拖出侧 `DragOffer`（§8.9）字段形态一致（格式清单 + 同签名 `provide`），MIME 取值同出 `app/mime_types.h`——同一个 `provide` 回调可同时交给两条通道；两侧不合并（`event/` 不依赖 `app/` 的分层约束），取值一致由常量表保证。
-- **立骨期边界**：惰性要约、监听与 `clear()` 在 memory 测试后端下全流程可测；平台路径如实报错（要约按 `ClipboardFormatUnsupported`、`on_change` 按 `ClipboardListenUnsupported`），`clear()` 按平台到位程度分部接线（Win32 `EmptyClipboard`、Linux `xsel --clear`，macOS 未接则如实报 `GeneralNotSupported`）。
+- **平台接线现状（Win32）**：富格式（文件清单 / HTML / 自定义 MIME / uri-list）与惰性提供、所有权通知、变更监听、`clear()` 已接至 `src/aurora/window/detail/win32_clipboard.cpp`，经**进程级后端单槽**（`src/aurora/app/detail/clipboard_backend.h`）注入门面——单槽未登记即「本进程无富格式机制」，沿用 `ClipboardFormatUnsupported` / `ClipboardListenUnsupported`，不谎报。文件清单走 `CF_HDROP`（另在同一打开态内并存 `uri-list` 注册格式，两者是同一份语义的两种线上形态），HTML 按 `CF_HTML` 组帧，自定义 MIME 经 `RegisterClipboardFormat` 注册后按名读写；`CF_HDROP` 与 `CF_HTML` 的字节布局由零平台头折算层（`src/aurora/window/detail/clipboard_win32_translate.h`）承载，可在无头 CI 上逐字节断言。
+- **平台接线现状（macOS）**：`src/aurora/app/detail/macos_clipboard.cpp` 把同一张函数表接到 `NSPasteboard` 的 general pasteboard——`text/plain` → `public.utf8-plain-text`、`image/png` → `public.png`、`text/html` → `public.html`、其余 MIME 以字面量作自定义 type；文件清单以 `NSURL` 数组写入（`public.file-url`）并在同一次写入中并存 `text/uri-list` 文本档，读取优先原生清单、缺失时回退文本档；惰性提供经 `NSPasteboardItem` + `NSPasteboardItemDataProvider`（`provide` 按请求的 MIME 逐条兑现），所有权丢失经 `pasteboardFinishedWithDataProvider:` 用写入后记录的 `changeCount` 区分「数据已全部提供」与「所有权易主」，只有后者触发 `OwnershipLost`。后端与窗口宿主无关（pasteboard 是应用级资源），门面首次查询后端时自举登记；**`NSPasteboard` 没有变更通知机制**，故 `set_change_listener` 不填、`on_event` 请求 `ContentChanged` 时在 macOS 上如实返回 `clipboard-listen-unsupported`（轮询 `changeCount` 不是通知机制）。
+- **清空语义**：`clear()` 三腿均已接线（Win32 `EmptyClipboard`、Linux `xsel --clear`、macOS `pbcopy` 空输入重写 pasteboard）；macOS 上重写 pasteboard 会使既有惰性要约失效，provider 的 finished 回调按上述 `changeCount` 判定触发一次所有权丢失。
+- **三件以 owner 窗口为投递目标**：`WM_RENDERFORMAT`（惰性提供）、`WM_DESTROYCLIPBOARD`（所有权丢失）、`AddClipboardFormatListener` / `WM_CLIPBOARDUPDATE`（变更监听）**都以剪贴板 owner 窗口为投递目标**——`OpenClipboard(nullptr)` 不建立 owner，延迟渲染因此没有投递目标。故它们随 `Win32Host` 存活而成立：owner 取**最近登记的存活窗口**（覆盖式登记），该窗口销毁即退位并触发一次 `OwnershipLost`；**无窗口时 `set_offer` 与 `on_event`（`ContentChanged`）如实报不支持**，这是平台事实而非降级。`WM_RENDERFORMAT` 处理期间剪贴板由请求方持有，本方不再 `OpenClipboard`，只提交数据。
+- **接线后 `clipboard-format-unsupported` 的适用边界收窄**：只在「该平台确实没有对应格式」时成立；「本平台有但本库没实现」与「本平台没有」是两件事，混在一起就是谎报——与 `on_event`「无机制即如实报错」同款定调。
+- **桌面四腿均已接线（Win32 / macOS / X11 / Wayland）**：X11 / Wayland 两桥落 `src/aurora/window/detail/x11_clipboard.{h,cpp}` 与 `wayland_clipboard.{h,cpp}`，与 Win32 / macOS 共用同一个进程级后端单槽与同一套门面语义，但各自按 selection 语义实现——两桥落 `src/aurora/window/detail/x11_clipboard.{h,cpp}` 与 `wayland_clipboard.{h,cpp}`，与 Win32 共用同一个进程级后端单槽与同一套门面语义，但各自按 selection 语义实现——X11 走 `TARGETS` 协商 + `SelectionRequest` 应答 + ICCCM `INCR` 双向分片，读入侧带墙钟超时（对端挂死不会永久阻塞帧循环）；变更监听靠 XFIXES 扩展，构建期要求 `libXfixes`（缺项 configure 期 FATAL），运行期扩展缺失则 `on_event` 请求 `ContentChanged` 时如实报 `ClipboardListenUnsupported`（XFIXES 事件在 `XEvent` 联合里没有成员，桥按结构体前导布局 `memcpy` 取一份，避免 union 类型双关）。Wayland 走 `wl_data_source` 写侧（非阻塞、逐帧 `tick()` 推进）与 selection 事件读侧；`wl_data_device` 每 seat 唯一，剪贴板桥复用拖放桥创建的那一枚，selection offer 的所有权转交剪贴板桥、MIME 名由拖放桥的转发器按增量送达；变更监听由 selection 事件恒支持。**Wayland 声明所有权需要真实输入事件 serial**（`set_selection` 的协议实参，libwayland 公开 API 不提供「当前 serial」查询）：表面在指针按键与键盘按键路径记录 `last_input_serial`，桥经 hooks 取用；无 serial 时 `set_payload` / `set_offer` 如实报 `ClipboardWriteFailed` 且不声明所有权——不伪造 serial 去赌协议合法性。文本 / 图像 / `clear()` 在 Linux 仍沿既有 `xsel` 路径（口径见上「清空语义」条），富格式与它们落到同一 CLIPBOARD 选择、后写者接管。
+**仍缺位的方向**：wasm 与 Headless 无 OS 剪贴板机制，`Clipboard` 只走内建最小实现，富格式在其上如实报 `ClipboardFormatUnsupported`——「本平台有但本库没实现」与「本平台没有」仍不混谈。
 
 **控件层（`TextInput` / `Text` / `RichTextEdit` 的 Ctrl+C/X/V）**：这些快捷键路径无 `Result` 出口（`on_key_event` 返回 `void`），故失败经 `Diagnostics::warn(msg, where, code)` 上报——桥接 Logger 且进 `Diagnostics::report()` 收集，机器可读，与 `widget.cpp` / `timer.h` 既有口径一致。同时快捷键语义随失败收紧：
 
@@ -736,17 +843,23 @@ au::Timer(1s, [](const au::SignalView<int> &tick) {
 - **Ctrl+V 读失败视为空剪贴板**：不插入任何内容，同时上报 `Diagnostics::warn`。
 - 只读态的降级路径（Ctrl+C/Ctrl+X 仅复制、Ctrl+V 忽略）不变。
 
-**测试注入点（test-only）**：`install_test_backend` / `reset_test_backend` / `remove_test_backend` 三个静态函数构成仓库私有测试设施（`tests/`）用于并行隔离的最小注入面——安装后 `set_text` / `get_text` / `set_image` / `get_image` 全部改走进程内 memory 后端，不触碰系统剪贴板。
+**测试侧 memory 后端（不在公共头）**：进程内 memory 后端整体位于 [`tests/framework/clipboard_memory_backend.h`](../../tests/framework/clipboard_memory_backend.h)，经内部接缝 [`clipboard_backend.h`](../../src/aurora/app/detail/clipboard_backend.h) 注册到与平台后端**同一张全通道函数表**——`set_text` / `get_text` / `set_image` / `get_image` / `clear` / `set_payload` / `get_payload` / `set_files` / `get_files` / `set_html` / `get_html` / `set_offer` / `available_formats` 全部由该表承载，不触碰系统剪贴板。公共头不再保留任何 test-only 成员，门面也不再有测试宏分支。
 
-- 声明常驻（消费端调用始终可编译）；实现体按 `AURORA_ENABLE_DEBUG && AURORA_ENABLE_TEST_HOOKS` 双宏裁切，任一关闭（含 Release 下 DEBUG AUTO 自动关闭）时返回 `false` / no-op，平台行为不变。
-- `install_test_backend()` 清空并激活后端、返回是否生效；`reset_test_backend()` 仅清内容；`remove_test_backend()` 卸载并恢复平台实现、返回是否确有后端被卸载。
-- 编译开关语义见 [`BUILD_OPTIONS.md`](../BUILD_OPTIONS.md) §4（`AURORA_ENABLE_TEST_HOOKS`）。
+- 测试侧入口：`install()` 清空内容并安装（同时模拟「有变更监听机制」）、`reset()` 仅清内容、`remove()` 卸载并清空（返回此前是否安装）、`installed()` 查询安装态、`set_listen_supported(bool)` 模拟有无监听机制（不填 `set_change_listener` 字段即无机制）、`emit_change()` / `emit_ownership_lost()` 经 `clipboard::detail::fire_change()` / `fire_ownership_lost()` 与真实平台桥共用同一条派发路径。
+- 被测的始终是产品代码本身：门面每个入口只做「表里有该字段则委托」的一次判断，不存在与平台路径并行的第二实现。
+- 该后端随测试框架编译（`tests/framework/*.cpp` 由构建自动收集），不依赖 `AURORA_ENABLE_DEBUG` / `AURORA_ENABLE_TEST_HOOKS`，Release 测试构建同样可用。
 
-**Linux/macOS 实现（及为何测试不得断言系统剪贴板）**：非 Win32 平台经 `xsel`/`xclip`（macOS `pbcopy`/`pbpaste`）外壳进程中转（`popen`），并在作用域内把 `SIGPIPE` 置为忽略，避免工具缺失或无显示时子进程立即退出导致写已关闭管道把本进程杀掉。该路径的 selection 所有权是**异步**的（xsel 二次写入依赖既有守护进程交接、xclip 常驻等待读者），内容读回还受各工具的换行约定影响——因此**仓库测试禁止用系统剪贴板做内容断言**（既非确定，也不是 aurora 自身的契约）：`itest_text_selection` 的 Ctrl+C 复制用例改为先断言环境无关的选区范围，再在 `install_test_backend()` 成功时经进程内后端断言复制内容；双测试宏未开（Release）时仅跳过内容断言，选区/焦点/按键消费断言仍生效。
+**Linux/macOS 实现（及为何测试不得断言系统剪贴板）**：非 Win32 平台经 `xsel`/`xclip`（macOS `pbcopy`/`pbpaste`）外壳进程中转（`popen`），并在作用域内把 `SIGPIPE` 置为忽略，避免工具缺失或无显示时子进程立即退出导致写已关闭管道把本进程杀掉。该路径的 selection 所有权是**异步**的（xsel 二次写入依赖既有守护进程交接、xclip 常驻等待读者），内容读回还受各工具的换行约定影响——因此**仓库测试禁止用系统剪贴板做内容断言**（既非确定，也不是 aurora 自身的契约）：`itest_text_selection` 的 Ctrl+C 复制用例改为先断言环境无关的选区范围，再经测试侧 memory 后端（`clipboard_memory::install()`）断言复制内容，用例末尾卸载；选区/焦点/按键消费断言不依赖该后端。
 
 ### 8.3 系统托盘
 
-`SystemTray`（`app/system_tray.h`）在 Win32 经 `Shell_NotifyIcon` + 隐藏消息窗口实现，支持图标、气泡与激活回调 `on_activate`；非 Win32 为 no-op（仅记录 `last_balloon_message`）。
+`SystemTray`（`app/system_tray.h`）的公共方法与状态（`last_balloon_message` / `context_menu_items`）全平台同一份（`src/aurora/app/system_tray.cpp`），平台壳按后端分派：
+
+- **Win32**：经 `Shell_NotifyIcon` + 隐藏消息窗口实现，支持图标、气泡、激活回调 `on_activate` 与右键菜单。
+- **macOS**：`NSStatusBar` 的 `NSStatusItem`（AppKit 细节在 `src/aurora/app/detail/macos_tray.cpp`）——`set_title` 映射状态按钮 tooltip；`set_icon` 映射状态栏图像（空路径回退应用图标、按 18×18 点归一）；`show` / `hide` 切换状态项可见性；`set_context_menu` 重建 `NSMenu`（子菜单、勾选、禁用、分隔符逐项映射，叶子点击按扁平索引路由回 `MenuItem::on_click`）；无菜单时状态按钮的 target-action 触发 `on_activate`。`NSMenu` 根与子菜单一律 `autoenablesItems = NO`，否则 AppKit 会按 responder chain 改写声明式的 `enabled`。
+- **其余平台**：no-op（仅记录 `last_balloon_message`）。
+
+**气泡语义的平台折算**：macOS 没有「托盘气泡」概念，`show_balloon` 复用本库系统通知（标识 `aurora-tray-balloon`，见 §8.7）；该通路要求 `.app` 包，裸可执行文件下按结构化失败记 WARN，不谎报成功。
 
 **回调 `lParam` 有两种编码，按注册版本解读**：图标以 `NIM_SETVERSION` 升到 `NOTIFYICON_VERSION_4` 后，回调消息的 `lParam` 是打包值——低 16 位才是事件（鼠标消息或 `NIN_*`），高 16 位是图标的 `uID`；未升级时 `lParam` 是整值事件。故 `on_activate` 与上下文菜单的触发判定必须先取版本再取位段（`src/aurora/app/detail/tray_events.h` 的 `classify_tray_callback`），按整值比较鼠标消息会让两条路径在真实 shell 下静默失效。一次真实左键对应 4 条回调（`NIN_POPUPOPEN`、`WM_LBUTTONDOWN`、`WM_LBUTTONUP`、`NIN_SELECT`），故版本 4 分支只认 `NIN_*` 三个事件、且须排除 `uID` 不匹配的回调，否则一次单击会重复触发。
 
@@ -754,7 +867,8 @@ au::Timer(1s, [](const au::SignalView<int> &tick) {
 
 | 头文件 | 能力 |
 |:---|:---|
-| `app/menu.h` | 菜单（`MenuBar` 控件的数据层） |
+| `app/menu.h` | 菜单（`MenuBar` 控件的数据层；`MenuModel` 单一真源） |
+| `app/native_menu_bar.h` | **原生菜单栏门面**（进程级单槽，Win32 `HMENU` / macOS `NSMenu` 桥，见下文） |
 | `app/shortcuts.h` | 快捷键注册 |
 | `commands.h` | 命令模型与注册表（快捷键 / 菜单 / 命令面板的统一真源） |
 | `widget/command_palette.h` | 命令面板（模态浮层，模糊检索并执行命令） |
@@ -770,6 +884,16 @@ au::Timer(1s, [](const au::SignalView<int> &tick) {
 - 投影函数（`app/menu.h` 声明）：`to_menu_model(const MenuItem &)`、`to_menu_model(const Menu &)`（`title` → `label`、`items` → `children` 递归）、`to_menu_models(const std::vector<Menu> &)`（菜单栏整体投影，顺序逐位保真）、`from_menu_model(const MenuModel &)`（回转，`on_click` / `icon` 为空——供原生桥按 `id` 反查命令后自行接线行为）。四者均为无副作用纯函数。
 - **`id` 是原生桥的前置条件**：自绘路径靠指针身份路由点击即可，原生路径跨菜单重建只能靠稳定标识，故 `MenuItem` 与 `Menu` 各增一个 `id` 字段（默认空串，自绘路径忽略、零参与）。
 - 自绘路径**零改动**：`MenuBar` / `ContextMenuNode` / `SystemTray` 的既有字段、构造与绘制命中逻辑一行不动，`MenuModel` 投影是新增加的消费路径。自绘与原生「二显一存」——同一份模型，任一时刻只有一条渲染路径生效。
+
+**原生菜单栏桥（`app/native_menu_bar.h`，Win32 / macOS 已落地）**：`MenuModel` 的第二条渲染路径。`NativeMenuBar::instance()` 是进程级单槽门面（懒构造单例，禁复制 / 移动）：`install(const std::vector<MenuModel> &)` 返回 `Result<void>`——**重复调用替换旧树**（先卸旧再装新，不叠加）、**空表等同清空**（成功而非错误）、平台无机制时返回结构化错误；`uninstall()` 幂等（销毁原生菜单对象、断开窗口关联）；`is_installed()` 报最近一次净结果。点击路由**只认 `MenuModel::id`**：门面持一个 `CommandRegistry *`（由 `Application` 构造期自动登记，应用无需手动接线），原生点击按 `id` 反查 `CommandRegistry::invoke`，与自绘投影共用同一个出口。分层与各层纪律：
+
+- **能力位**：`PlatformCapabilities::native_menu_bar` 取机制存在性语义（与 `system_drag_in` / `system_drag_out` 同款，只答「机制在不在」）——`Win32` / `D3D11` 为 `true`（同一 `HMENU` 宿主），`MacOS` 为 `true`（应用级 `NSMenu` 桥已接线），`X11` / `Wayland` / `Glfw` / `Wasm` / `Headless` 一律 `false`：Linux 无 OS 级菜单栏机制（GNOME 已取消全局菜单、KDE DBusMenu 需本库没有的 DBus 客户端）不落桥。能力缺位的平台 `install()` 返回 `native-menu-unsupported`（机制在但装不上返回 `native-menu-install-failed`，均 `retryable = false`），应用回落自绘 `MenuBar`，不静默也不谎报。
+- **折算层（零平台头）**：`src/aurora/window/detail/menu_bar_translate.{h,cpp}` 把 `MenuModel` 树摊成平台无关扁平项表 `FlatMenuItem{ depth, parent_index, separator, checkable, checked, enabled, label, shortcut_text, id }`——`flatten_menu_models()` 是**前序遍历纯函数**（子项紧跟父项、字段逐值透传、空 `id` 照常建出），两座平台桥共用同一份换算，不存在两套次序。该层只引 `core/result.h` 不引任何平台头，故在含无头 Linux 的全部 CI 作业上编译并被 `utest_menu_bar_translate` 逐值单测。
+- **渲染通路单槽**：折算层持可注入的 `MenuBarBackend` 函数表（`install(items, on_click)` / `uninstall()` / `is_installed()`，进程级单槽）——真机上由平台桥登记，无头单测里由伪造后端登记，**两侧走同一条代码路径**：被测的是产品代码本身而非它的复刻，这是「无头 CI 证明不了的只剩平台接缝」纪律在菜单域的落点。
+- **Win32 桥**：`src/aurora/window/detail/win32_menu_bar.{h,cpp}`——`CreateMenu` / `AppendMenu`（`MF_POPUP` 挂子菜单、`MF_STRING` 挂终端项）/ `SetMenu` 建树，`WM_COMMAND` 由 `Win32Host` 现有消息泵收下后按命令基址 `AURORA_WIN32_MENU_COMMAND_BASE` 反查 `id` 回投；桥实例由 `Win32Host::Impl` 唯一持有（与无障碍桥、输入法桥、系统拖放桥同款纪律，防多份窗口映射分裂），窗口销毁期先摘菜单再放窗口。
+- **macOS 桥**：`src/aurora/window/detail/macos_menu_bar.{h,cpp}`——装到**应用级** `NSApp.mainMenu`（macOS 的菜单栏归应用而不归窗口，故无宿主引用计数、无窗口绑定，进程内单份即为平台事实）；终端项挂 `target/action`，`MenuModel::id` 经 `representedObject` 携带、点击时取回回投；`setAutoenablesItems:NO` 让 `enabled` / `checked` 严格跟随模型（AppKit 的自动启用会按 responder 链改写状态，与「模型单一真源」冲突）；`separator` 走 `+separatorItem`，`checkable + checked` 映射 `NSControlStateValueOn` 并在点击时就地把状态与模型一起翻转；`shortcut_text` 以 `"\t"` 拼在标题后仅供显示，**不合成 `keyEquivalent`**（快捷键的真源是 `ShortcutRegistry`，菜单键位若另建一套会立刻出现两个真源）。后端在首个窗口建出时静态登记一次（`MacOSSurface::Impl::create_window`），无窗口时 `install()` 因能力位与后端双闸返回 `native-menu-unsupported`。
+- **`id` 是硬前提**：原生路径跨菜单重建只能靠稳定标识路由点击。空 `id` 的项**照常建出、照常显示，但点击不回投**，只留一条 WARN 诊断——不静默丢弃（菜单看着建好却点不动最难排查），也不伪造 id（重建后会错位）。无登记注册表（无头 / 未接线）同口径：菜单照建，点击不路由留 WARN。两座桥的 WARN 文案逐字一致（`menu item clicked but its id is empty; click ignored`）。
+- **真机接缝**：`tools/verify/win32_menu_bar_live_probe.cpp`（`AURORA_BUILD_VERIFY_TOOLS` 口径、不进 CTest）真机核验能力位、`HMENU` 建树与层级保真、点击回投、空 `id` 不回投、非本桥命令 id 不消费、重复 `install` 替换与 `uninstall` 摘除；`tools/verify/macos_menu_bar_live_probe.mm` 在 macOS 真机核验同一组语义（`NSMenu` 建树与层级、`representedObject` 回投、勾选态翻转、空 `id` 不回投、重复 `install` 替换、`uninstall` 摘除，共 23 项断言）。
 
 **接线**：`Application::commands()` 返回注册表；`app.commands().bind_shortcuts(app.shortcuts())` 一行把默认快捷键接入。绑定为**显式**而非 `run()` 内自动执行——否则 `run()` 之后注册的命令会静默失效。`Application` 在 `dispatch*` 入口统一暴露「当前焦点管理器」（`current_focus_manager()`），快捷键动作与控件回调内同样可取到，模态弹层据此完成焦点陷阱。原「命令式逃生舱」`aurora::imperative::run_raw`（`imperative.h`）与命令系统无关。
 
@@ -808,17 +932,17 @@ au::Timer(1s, [](const au::SignalView<int> &tick) {
 
 `ShortcutScope::Global` 的语义**不变**：它仍是「应用内跨焦点作用域」的标记，不因本节新增而改写为 OS 级。
 
-**触发时机 —— 排队到帧循环排空，不在消息泵内同步回调**：`WM_HOTKEY` 到达时只把命中的 ID 推进内部队列，由 `Application::step_frame()` 每帧调 `os_hotkeys().drain_pending()` 在主线程排空并调用动作。理由：动作可能重建页面 / 触发重排，在窗口过程帧内重入会把布局与绘制切到半途的状态。代价是最坏延迟一帧（约 16ms），对热键这类低频触发无感。
+**触发时机 —— 排队到帧循环排空，不在消息泵内同步回调**：`WM_HOTKEY`（macOS 为 Carbon `kEventHotKeyPressed`）到达时只把命中的 ID 推进内部队列，由 `Application::step_frame()` 每帧调 `os_hotkeys().drain_pending()` 在主线程排空并调用动作。理由：动作可能重建页面 / 触发重排，在窗口过程帧内重入会把布局与绘制切到半途的状态。代价是最坏延迟一帧（约 16ms），对热键这类低频触发无感。
 
 **平台矩阵**：
 
 | 平台 | 实现 | 状态 |
 |:---|:---|:---|
 | Windows | `RegisterHotKey` + `WM_HOTKEY`，经共享的内部隐藏消息窗口 `src/aurora/app/detail/platform_shell_win32.{h,cpp}` 收消息 | 支持 |
-| X11 | `xcb_grab_key` | 支持 |
+| macOS | Carbon `RegisterEventHotKey` + 应用事件目标上的 `kEventHotKeyPressed` 处理器（签名 `'AURA'` + 进程内 ID 路由回注册表队列）；无需辅助功能授权 | 支持 |
+| X11 | 无已落地实现（本矩阵此前误记 `xcb_grab_key`，代码中无该后端） | 运行时降级：`enabled()==false`，`add()` 返回错误 |
 | Wayland | 无全局热键协议 | 运行时降级：`enabled()==false`，`add()` 返回错误 |
 | GLFW | 无对应能力 | 不支持 |
-| macOS | — | 本轮不实现 |
 
 **失败口径一律机器可见，不做静默 no-op**：主键无法映射到原生虚拟键、组合未指定主键、注册表内重复注册、OS 侧被抢占，统一为 `ErrorCode::OsHotkeyRegisterFailed`，`detail` 给出具体成因。`remove()` 对无效 / 非本表的句柄返回 `false`（不抛、不报错）。
 
@@ -844,10 +968,13 @@ app.set_on_notification_activated([](std::string tag) { focus_pane(tag); });
 |:---|:---|:---|
 | Windows | `Shell_NotifyIconW` 按需添加隐藏托盘图标 + `NIF_INFO` 气球；超时 / 关闭 / 点击后 `NIM_DELETE` 撤掉图标 | 支持（`NIN_BALLOONUSERCLICK`） |
 | Linux | 三层运行时降级链，见下 | 前两层支持（需宿主排空 `pump_events()`） |
+| macOS | `NSUserNotificationCenter`（legacy API，弃用但可用；`tag` → `identifier` 原位替换） | 支持（delegate `didActivateNotification:` 回传 tag） |
 | Headless | 仅记录 `last_notification()`，`notify()` 返回成功 | 不支持 |
-| macOS / 其它 | 本轮不支持 | 不支持 |
+| 其它 | 本轮不支持 | 不支持 |
 
 **Win32 的托盘副作用**：应用本身没有托盘图标时，发通知会在任务栏**短暂出现一个图标**（`Shell_NotifyIcon` 气球必须依附图标）。气球消失后实现会 `NIM_DELETE` 撤掉，不长期占位。这是「零接线即可发通知」换来的可见副作用；调用方若已有 `SystemTray`，实现复用其图标、不额外增删。
+
+**macOS 的实现与边界**（`src/aurora/app/detail/macos_notification.cpp`）：经 `NSUserNotificationCenter` 投递。本机实测 `UNUserNotificationCenter` 对 ad-hoc 签名 / 无签名身份拒绝授权，而 legacy API 无需用户授权即可在 bundle 内工作；`tag` 写入 `userInfo` 并映射为 `identifier`（同 tag 原位替换）。点击由进程级 delegate 的 `userNotificationCenter:didActivateNotification:` 回传 tag。三条如实申报的限制：① 只对 **`.app` 包**可得，裸可执行文件下通知中心取不到，返回 `NotificationPostFailed` 而非静默成功；② `timeout_ms` 不受支持（系统决定驻留时长）；③ `urgency` 折算为提示音（Low 静音，Normal / Critical 默认提示音），不做横幅样式区分。delegate 消息由主运行循环递送，`Application::step_frame()` 的 `poll_platform_events()` 已覆盖，宿主无须额外排空。
 
 **Linux 三层降级链**（全部 `dlopen` / `popen`，**无构建期依赖**，也不新增 `AURORA_ENABLE_*` 开关）：
 
@@ -864,7 +991,7 @@ app.set_on_notification_activated([](std::string tag) { focus_pane(tag); });
 
 **`last_notification()` 在所有平台上维护**（含投递失败的调用），让无桌面环境也能断言「请求了什么」——这是 Headless 与自动化测试的主观测面。`install_recording_backend()` 可强制只记录、不触达系统通知服务，供开发机上的字段往返测试。
 
-**宿主排空义务**：Windows 下依附宿主消息泵（`PeekMessage` 天然覆盖）；Linux 下必须靠 `pump_events()` 驱动 GLib 主循环迭代 / libdbus 套接字读取，`Application::step_frame()` 已每帧调用一次。**宿主不排空 ⇒ 通知照常显示、回调不到**（不会虚假成功）。
+**宿主排空义务**：Windows 下依附宿主消息泵（`PeekMessage` 天然覆盖）；Linux 下必须靠 `pump_events()` 驱动 GLib 主循环迭代 / libdbus 套接字读取，`Application::step_frame()` 已每帧调用一次；macOS 的 delegate 消息由主运行循环递送，同样已覆盖。**宿主不排空 ⇒ 通知照常显示、回调不到**（不会虚假成功）。
 
 ### 8.5 输入法桥（Win32 IMM32 / X11 XIM / Wayland text-input-v3）
 
@@ -927,7 +1054,7 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 两个类型（外加一枚库内细节）：
 
 - `detail::Session`（`src/aurora/net/detail/runtime.h`，**非公共面**）：作用域式运行时 RAII。Windows 腿引用计数配对 `WSAStartup`/`WSACleanup`（首个构造初始化、末个析构清理，嵌套/并存安全）；POSIX 腿零成本占位、`ok()` 恒真。不可拷贝/移动（纯作用域 guard）。公共面不再要求使用方自备它：`aurora::net::blocking` 在创建任何句柄前先钉住一枚**进程级、只申请不归还**的运行时引用（`src/aurora/net/socket.cpp` 的 `runtime_pinned()`，理由见 §8.8.16），引擎与传输层则各持一成员随自身生命周期收敛。
-- `blocking::Listener`：`listen_loopback(port, backlog)`（只绑 `127.0.0.1`；port=0 由系统分配、`port()` 回报实际值）、`bind(endpoint, backlog)`（地址族取自 `Endpoint`，绑非回环地址即接受跨机连接，**访问控制交回调用方**）、`wait_readable(timeout) -> Result<bool>`（select 可中断等待，`false` = 纯超时非错误，两平台 nfds 差异内部消化）、`accept() -> Result<StreamSocket>`、`native_handle()`（借出原生句柄、不转移所有权，交 `wait_ready`/事件源注册口并入等待集）、`close()` 先 `shutdown(both)` 再关（唤醒并终止另一线程阻塞中的等待，`InspectorServer` 停机场径）。
+- `blocking::Listener`：`listen_loopback(port, backlog)`（只绑 `127.0.0.1`；port=0 由系统分配、`port()` 回报实际值）、`bind(endpoint, backlog)`（地址族取自 `Endpoint`，绑非回环地址即接受跨机连接，**访问控制交回调用方**）、`wait_readable(timeout) -> Result<bool>`（select 可中断等待，`false` = 纯超时非错误，两平台 nfds 差异内部消化）、`accept() -> Result<StreamSocket>`、`native_handle()`（借出原生句柄、不转移所有权，交 `wait_ready`/事件源注册口并入等待集）、`close()` 先 `shutdown(both)` 再关（唤醒并终止另一线程阻塞中的等待，`InspectorServer` 停机场径）。**并发停机是有定义的契约**：句柄与端口按原子发布，`close()` 以一次原子交换兼做「判有效」与「发布无效」，任意数量的并发调用中恰有一个执行 shutdown / close；`wait_readable()` 与 `accept()` 各取一次句柄快照、整段系统调用不重读成员，读到无效快照即按既有失败口径回报。`native_handle()` 借出的仍是未 `close()` 期间的瞬时值，并发停机期间不保证后续系统调用仍落在该监听口上。
 - `blocking::StreamSocket`：`connect_loopback(port)`、`connect(endpoint)`（地址族取自 `Endpoint`；端口 0、本机 IPC 形态、无地址占位都在发起系统调用前落 `net-endpoint-invalid`——**同步阻塞面按既有裁决只承载 TCP 流**，本机 IPC 归异步传输族（§8.8.15），把同一地址形态在两个面上做成两种结果比统一拒掉更难排查）、`set_io_timeout(milliseconds)`（**毫秒统一口径**：Winsock 收 DWORD 毫秒、POSIX 收 `timeval`，形态换算封闭在实现侧——按平台字节形态误传会把 5 秒执行成 5 毫秒，本层的存在理由）、`read_some(span) -> Result<size_t>`（**0 = 对端有序关闭**，与错误态严格区分；超时落独立码 `net-recv-timeout`）、`write_all(span)`（内部 ≤1MiB 分块写满，`send` 返回值窄化一次解决）、`is_loopback_peer()`（服务端访问控制判据：`127.0.0.0/8` 全段 + `::1` + IPv4 内嵌形态 `::ffff:127.x`）、`peer_endpoint() -> Result<Endpoint>`（`getpeername` 还原为值类型，地址族与端口都带回来）、`native_handle()`（借出原生句柄、不转移所有权，同 `Listener`）。
 
 链接面：`ws2_32` 随核心 `aurora` 目标在 Windows 无条件 `PUBLIC` 传导（见 `BUILD_OPTIONS.md`），各消费者不再散挂。Emscripten 腿经其 BSD socket shim 编译，但浏览器运行时无真实监听语义，Inspector 相关用例在 wasm 构建下按 `AURORA_TEST_SKIP` 退避。回归：`utest_net_socket`（行为契约 + 迁移期别名同体）+ `utest_inspector_client`（超时平台形态）。
@@ -945,14 +1072,14 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 
 网络栈 L0 宿主集成层的通用就绪通知底座（`include/aurora/app/event_source_registry.h` + `src/aurora/app/event_source_registry.cpp`）：把「一个可等待句柄 + 就绪回调」汇成一张待等待表，供第三方非阻塞会话（libssh2、DBus 一类）与库自带的 poll 线程引擎共同复用。**缺省驱动方是 §8.8.4 的常驻引擎线程**（本库各平台腿的统一形态）；自带等待集的宿主调 `set_host_driven(true)` 接管，引擎随即只等自己的唤醒通道。提案  §2 的逐平台并入点与 §18 定案 1 的竞态契约仍然有效，但**仓内宿主不再各自并入**（理由见 §8.8.5 与提案 §16 第 12 项）。
 
-- **平台无关且位于 `net/` 之下**：本 `.cpp` 不出现任何平台 socket/poll 头（`winsock2.h`/`poll.h` 唯一落点仍是 `src/aurora/net/socket.cpp`，不变量不破）。真正的「阻塞直到某些句柄就绪」经三枚可注入接缝表达——`set_poller(Poller)`（等待实现，由 net 引擎层或测试安装）、`set_dispatcher(Dispatcher)`（主线程投递实现，缺省为就地同步执行，与 `post_to_main` 无 poster 时的口径一致）、`set_change_notify(ChangeNotify)`（表变动与驱动方转变的通知，归常驻等待方独占，判据见 §8.8.4 投递纪律 ②）。自带等待集的宿主不装 `Poller`、改走 `sources()` 取快照 + `dispatch(ready)` 投递。无 fd 语义的腿（wasm）在**构造期**把 `event_source_supported()` 置假（编译期事实只落一处，公共头维持零 `#ifdef`），此后 `register_source` 一律回 `net-platform-unavailable`，`wait_and_dispatch` 在未装 Poller 时同码，均**不忙等、不假降级**。
+- **平台无关且位于 `net/` 之下**：本 `.cpp` 不出现任何平台 socket/poll 头（`winsock2.h`/`poll.h` 唯一落点仍是 `src/aurora/net/socket.cpp`，不变量不破）。真正的「阻塞直到某些句柄就绪」经三枚可注入接缝表达——`set_poller(Poller)`（等待实现，由 net 引擎层或测试安装）、`set_dispatcher(Dispatcher)`（主线程投递实现，缺省为就地同步执行——这是本接缝的显式缺省，宿主要「回主线程」语义须装 `MainQueue::post` 形态；库内引擎即如此）、`set_change_notify(ChangeNotify)`（表变动与驱动方转变的通知，归常驻等待方独占，判据见 §8.8.4 投递纪律 ②）。自带等待集的宿主不装 `Poller`、改走 `sources()` 取快照 + `dispatch(ready)` 投递。无 fd 语义的腿（wasm）在**构造期**把 `event_source_supported()` 置假（编译期事实只落一处，公共头维持零 `#ifdef`），此后 `register_source` 一律回 `net-platform-unavailable`，`wait_and_dispatch` 在未装 Poller 时同码，均**不忙等、不假降级**。
 - **句柄生命周期与三条竞态契约（§18-1，规范性）**：`register_source` 返回 move-only RAII 句柄 `EventSourceRegistration`，析构即注销且**幂等**、移动后源转空态、其析构不再触发二次注销。注销语义 = **停止产生新回调**：`dispatch` 在锁内只快照待投递闭包（`shared_ptr` 按值捕获令条目独立于注册表存活），**释放锁后**才逐个投递——因此已进入 `Dispatcher` 队列的一次尾批仍会抵达一次（回调载荷须由使用方以弱令牌保护宿主），但此后新的 `dispatch` 不再为该令牌产生回调。需连尾批一起作废另用 `cancel_pending()`（置条目的 `cancelled` 原子位），该调用与析构**互不隐含**：前者只作废尾批、不影响后续投递；后者只移除快照条目、不作废已入队尾批。回调内可安全再注册/注销（投递在锁外）。
 - **令牌关联**：同 `handle` 可多次登记、各自持独立令牌与回调（`next_token()` 单调、从 1 起、0 留空态）；宿主等待回来后按令牌回填 `ReadySource`，注销后重登记取新令牌、旧令牌的迟到就绪不会误触发新条目回调。
 - **进程级单例刻意不析构**：本表的存续期必须覆盖**整个静态析构阶段**。常驻引擎先构造完自己、再在 `ensure_started()` 里首次触到本表，按「构造完成逆序析构」的口径本表反而先死，而 `~PollEngine` 在退出路径上收敛线程时要经 `set_change_notify` 回收接缝——给一枚已析构的 `mutex` 加锁即未定义行为（MinGW 腿实测为退出时段错误）。表里只有 `std::function` 与计数，没有任何需要归还给操作系统的资源，故泄漏没有代价；把正确性寄托在「谁先被碰到」上才有代价。
 - 错误码：复用 `net-platform-unavailable`（本次新增，`retryable = false`；`hint` 指向 `Engine::capabilities()` 查询与能力矩阵）。
 - 回归：`utest_app_event_source_registry`（有效句柄与 `-1`/不支持腿的拒绝、就绪回调「抵达次数 == 就绪次数」、原生宿主无 Poller 走 `sources()`/`dispatch()` 的通路、`unregister` 与 `cancel_pending` 在排程 Dispatcher 下的尾批分岔、移动不双重注销、同句柄重登记取新令牌、`host_driven` 两次转变都通知常驻方）。引擎侧的互斥落地判据见 §8.8.4 的 `utest_net_engine`。
 
-**逐平台等待集并入 = 宿主可选项，仓内宿主一律走引擎线程**（裁决与理由见 §8.8.5；提案 §16 第 12 项）：本注册口对外提供的就是这条可选项——自带循环的宿主（含嵌入本库的第三方事件循环）装 `set_host_driven(true)` 后自行 `sources()`/`dispatch()`，其余腿由常驻引擎驱动，回调一律经主线程投递器回到 UI 线程。
+**逐平台等待集并入 = 宿主可选项，仓内宿主一律走引擎线程**（裁决与理由见 §8.8.5；提案 §16 第 12 项）：本注册口对外提供的就是这条可选项——自带循环的宿主（含嵌入本库的第三方事件循环）装 `set_host_driven(true)` 后自行 `sources()`/`dispatch()`，其余腿由常驻引擎驱动，回调一律经 `MainQueue` 回到值班循环。
 
 #### 8.8.3 事件驱动就绪基元（`aurora::net::wait_ready`，底座）
 
@@ -976,7 +1103,7 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 - **`Engine` 是引擎的公共面**：`instance()` / `name()` / `capabilities()` / `post()` / `post_after()` / `running()` / `shutdown()`。`name()` 回报实现名（自带引擎 `"poll"`、无 fd 语义腿 `"none"`），供 Inspector 与日志区分。查询能力**不**拉起线程；惰性启动的触发者是 `post` / `post_after`（§2「随首个需要它的对象惰性启动」）。
 - **循环节奏**：「跑已到期任务 → 快照 `sources()` → `wait_ready` → 交回 `dispatch()`」，一条线程承载任务队列与到期定时器，不为定时器另起线程。等待窗口 = `min(最早到期定时, 空闲上限 200ms)` 且**下限 1ms**（不忙等；200ms 只是「唤醒通知丢失」的延迟上界，正常路径由唤醒通道即时打断）。
 - **唤醒通道刻意不引入新平台代码**：它是一对**回环 TCP 流**（`blocking::Listener::listen_loopback` + `blocking::StreamSocket::connect_loopback` + `accept`），两平台的 poll 族都认得 socket 句柄，因此 `engine.cpp` 不出现 `poll.h` / `winsock2.h`——「平台 socket 头唯一落点是 `src/aurora/net/socket.cpp`」不变量继续成立。单轮只读一块（8 字节）且不计数：读只在 `POLLIN` 报可读后发生，故必不阻塞；残余字节让下一轮立刻返回可读。引擎另持一成员 `detail::Session`，随自身生命周期收敛运行时引用（§8.8.16 的归属 ②）。
-- **投递纪律（三条，规范性）**：① `Dispatcher` 只在宿主未装时补 `aurora::detail::post_to_main` 形态（与 `Task<T>::set_main_poster` 同一条投递器，§1 不变量），宿主已装则不改；② `ChangeNotify` 归常驻等待方（即本引擎），登记与**注销**都要通知——注销后宿主随即关闭句柄，滞留快照会让下一次系统调用撞上无效句柄；③ **一条事件源只由一个驱动方等待**：常驻引擎循环与宿主自带等待集互斥，同时启用会让一次就绪投递两次。开关就是注册口的 `set_host_driven(bool)`（缺省假 = 引擎驱动），引擎每轮等待都读它，置真即让位、置回假即接管，两种转变都经 ② 的通知立刻生效，不必等一个等待窗口或先 `shutdown()`。本库各平台腿缺省全部走引擎驱动（宿主并改为可选项，理由见 §8.8.5）。
+- **投递纪律（三条，规范性）**：① `Dispatcher` 只在宿主未装时补 `aurora::detail::post_to_main` 形态（转发到进程级唯一队列 `MainQueue::post`，§1 不变量），宿主已装则不改；② `ChangeNotify` 归常驻等待方（即本引擎），登记与**注销**都要通知——注销后宿主随即关闭句柄，滞留快照会让下一次系统调用撞上无效句柄；③ **一条事件源只由一个驱动方等待**：常驻引擎循环与宿主自带等待集互斥，同时启用会让一次就绪投递两次。开关就是注册口的 `set_host_driven(bool)`（缺省假 = 引擎驱动），引擎每轮等待都读它，置真即让位、置回假即接管，两种转变都经 ② 的通知立刻生效，不必等一个等待窗口或先 `shutdown()`。本库各平台腿缺省全部走引擎驱动（宿主并改为可选项，理由见 §8.8.5）。
 - **瞬态等待失败不终止循环**：注销与就绪同帧发生时本轮可能正持着含已关闭句柄的快照，`wait_ready` 落 `net-wait-failed` 属预期竞态；循环丢弃本轮结果并在下一轮重取快照（`utest_net_engine` 的 `unregister_during_wait_keeps_the_loop_alive` 即此判据）。
 - **停机语义**：`shutdown()` 幂等，停止接收新任务、把**已入队任务与已到期定时跑完**再 join（不丢已承诺的工作），未到期的定时**丢弃且不执行**——静默跑一个过期续体会伪造出错误的完成时序；已投进主线程队列的完成事件由宿主退出路径排空（§2）。收敛后再次 `post` 会重新惰性启动。
 - **退出收敛是显式的，进程级单例刻意不析构**：`shared_engine()` 以 `*new PollEngine()`（wasm 腿为 `NullEngine`）存储且不登记销毁函数，与 §8.8.9 里 `app::EventSourceRegistry` 的处置成对——常驻线程的收敛要加锁、`join`、关唤醒套接字、拆 `detail::Session`，而静态析构阶段这些原语已不可依赖：winpthread 的互斥体属于它自己的静态区，可能先于本单例拆除，MinGW 腿实测（进程只做一次 `post` 即返回）在 `PollEngine::shutdown()` → `detail::Session::~Session()` 的加锁处段错误。保留析构但不 `join` 更糟（`std::thread` 在 joinable 状态下析构即 `std::terminate`），改经 `std::atexit` 登记只是换到同一个拆除阶段的另一个登记处。代价是一枚不回收的进程内分配与一条随进程终止的线程；套接字与 Winsock 引用计数由操作系统在退出时收回。需要确定性收敛的调用方（宿主关闭流程、真机探针、集成用例的 `EngineGuard`）自己调 `shutdown()`，该路径不依赖拆除次序。
@@ -1022,7 +1149,7 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 
 环境变量读取器 `ProxyEnvironment::Reader` 是本件的注入接缝：每个变量先大写后小写（`HTTP_PROXY` 然后 `http_proxy`），空串视为未设置（CI 与容器里的显式清空写法），单测因此无需真实环境变量即可覆盖全部次序与例外形态。系统代理读取（Win32 WinHTTP 查询、macOS 系统配置，且只取地址与例外、不执行 PAC）见 §8.8.10；代理自身的 TLS 属非目标。
 
-- 错误码：新增 `net-proxy-config-invalid` 与 `net-proxy-unsupported`（category `io`、`retryable=false`，数据源 `codespec/errors.toml`，`ERROR_CATALOG.md` 已随生成器刷新）。§10 预留的 `net-proxy-unreachable` / `net-proxy-auth-required` 待握手切片按真实失败分支启用，本件不预支。
+- 错误码：新增 `net-proxy-config-invalid` 与 `net-proxy-unsupported`（`domain = net`，`kind` 分别 `invalid` / `unsupported`、`retryable=false`，数据源 `codespec/errors.toml`，`ERROR_CATALOG.md` 已随生成器刷新）。§10 预留的 `net-proxy-unreachable` / `net-proxy-auth-required` 待握手切片按真实失败分支启用，本件不预支。
 - 回归：`utest_net_proxy` 十例——形态与缺省端口、七类畸形值与两码分岔、凭据解码与打印掩码、结构化工厂的入参校验、域名与端口限定匹配、字面量全等与 CIDR 前缀（含 `/0` 与 `fe80::/8` 越界样本）、封闭文法的十一类拒收与「第几条」定位、大小写优先级与变量名回报、`for_target` 的完整选择次序、`source()` 不参与判等。全用例纯逻辑，三平台一致，wasm 腿同样可跑，故无 `AURORA_TEST_SKIP`。
 
 #### 8.8.8 代理握手字节层：CONNECT 与 SOCKS5 的编码、解析与落码
@@ -1038,7 +1165,7 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 
 本层不证明「隧道真的通了」（那需要一个假代理进程与真实字节往返），该判据随传输切片兑现。
 
-- 错误码：新增 `net-proxy-protocol`（category `io`、`retryable=false`），同批启用 §10 预留的 `net-proxy-unreachable`（`retryable=true`，代理侧瞬时故障值得重试）与 `net-proxy-auth-required`（`retryable=false`，凭据缺失盲目重试只会刷对端日志）；数据源 `codespec/errors.toml`，`ERROR_CATALOG.md` 与生成头随生成器刷新。
+- 错误码：新增 `net-proxy-protocol`（`domain = net`、`kind = corrupt`、`retryable=false`），同批启用 §10 预留的 `net-proxy-unreachable`（`retryable=true`，代理侧瞬时故障值得重试）与 `net-proxy-auth-required`（`retryable=false`，凭据缺失盲目重试只会刷对端日志）；数据源 `codespec/errors.toml`，`ERROR_CATALOG.md` 与生成头随生成器刷新。
 - 回归：`utest_net_proxy_wire` 七例——CONNECT 请求行的 authority-form 与 IPv6 补括号、Basic 凭据逐字节（含手算 base64 与「明文密码不出现在请求里」的反assertion）、应答头部块三态（未出现空行为缺失态、`header_bytes` 恰好停在隧道首字节、裸 LF 形态、缺原因短语）、九类畸形状态行与越上限（上限值进诊断文本）、SOCKS5 方法协商与子协商的逐字节形态（含版本字节与三例凭据长度越界）、`ATYPE` 由解析授权选路（域名 / IPv4 / IPv6 逐字节，名字未授权、256 字节域名、带作用域号三类拒收）、应答的可变地址长度（IPv4 尾随隧道字节仍只吃 10 字节并还原绑定端点、IPv6 22 字节、域名型不还原端点、未知 `ATYPE` 与错版本落 `net-proxy-protocol`、非零 `REP` 仍解析成功）、握手状态到三枚错误码的分岔（`REP` 按 `RFC 1928` §6 逐值断言，含上条纠正后归可达性码的 `X'09'`）。全用例零 socket、零平台头，三平台与 wasm 一致，故无 `AURORA_TEST_SKIP`。
 
 #### 8.8.9 主机名解析：`aurora::net::Resolver`（双栈与竞速切片第二件）
@@ -1052,7 +1179,7 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 - **三枚码的分岔是排查方向的分岔**：空主机名落 `net-endpoint-invalid`（用法错误不得报成网络故障，否则 `net-dns-failed` 的 `hint` 会让调用方去重试一个永远不会成功的入参）；查表失败与「查成功但零条可用记录」都落 `net-dns-failed`（后者等同不可用，message 必带主机名）；异步排队失败（引擎起不来）把引擎的原因原样带进回调并冠以排队说明，**不静默悬挂**——一次永不触发的回调是本类最难定位的缺陷。
 - **接缝只存在于库内**：`net::detail::lookup.h` 的 `set_lookup_hook()` 让全部次序与形态判据在无 DNS、无网络的环境下逐值可断言；它刻意不进公共 API，因为「一个会改变解析结果的公开开关」本身是安全隐患（`getaddrinfo` 结果被替换等于替换了目标主机）。真实平台腿仍有一例：`*.invalid` 是 RFC 6761 保留域，合规解析器必须回 NXDOMAIN，而完全离线的机器同样回失败，故该判据不依赖网络可达性，也不需要 `AURORA_TEST_SKIP`。
 
-- 错误码：新增 `net-dns-failed`（category `io`、`retryable = true`；`hint` 指明数字字面量永不到达本码，故 DNS 本身是被测对象时直接用字面量）。
+- 错误码：新增 `net-dns-failed`（`domain = net`、`kind = io`、`retryable = true`；`hint` 指明数字字面量永不到达本码，故 DNS 本身是被测对象时直接用字面量）。
 - 回归：`utest_net_resolver` 七例——字面量在钩子之前短路（v4 / `[::1]` / 带 zone 的 `fe80::1%2`，钩子调用次数须保持 0）、空主机名判成用法错误、去重且保首次次序（同址不同端口算独立条目）、查表失败与空回报同为 `net-dns-failed`（后者诊断含主机名）、真实平台腿对保留域失败、异步完成恰一次且查表腿与回调都不在调用线程上、空回调连查表都不发起。异步用例以 RAII 收敛引擎（`Engine::shutdown()` 幂等），不把在跑的线程留给同 runner 的后续用例——常驻循环与用例自有的事件源驱动方同时等同一注册口会造成二次投递。
 
 #### 8.8.10 系统代理读取：`ProxyEnvironment::from_system()`（代理族第三件）
@@ -1067,7 +1194,7 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 - **接缝只存在于库内**：`detail::set_system_proxy_hook()` 让全部判据在不碰真实注册表 / 动态存储的环境下逐值断言。公共 API 里放一枚「改变代理决策来源」的开关，等于让任何调用方能把企业网流量指到直连上去，与「绝不静默绕过代理」的纪律同源冲突——这与 §8.8.9 的解析钩子是同一条理由。
 - **合并次序是运维契约**：`from_environment_or_system(reader)` 先读环境变量，任一代理变量存在即**接管**（系统腿不被询问），不做逐槽位合并；容器 / CI / 代理调试现场全靠这条覆盖机器级配置，合并会让「设了却没生效」变成新的排查黑洞。系统腿回 `net-platform-unavailable` 时结果等价于纯环境变量读取（Linux 上这就是一次正常读取），回其它码时原样上抛。
 
-- 错误码：新增 `net-proxy-config-unreadable`（category `io`、`retryable = true`）。链接依赖随之扩面：Windows 加 `winhttp`、Apple 加 `-framework SystemConfiguration -framework CoreFoundation`（均 `PUBLIC` 传导，见根 `CMakeLists.txt`；口径记于 `BUILD_OPTIONS.md`）。macOS 腿在本机不可运行验证，由 CI 的 `macos-clang` 作业做编译验证。
+- 错误码：新增 `net-proxy-config-unreadable`（`domain = net`、`kind = io`、`retryable = true`）。链接依赖随之扩面：Windows 加 `winhttp`、Apple 加 `-framework SystemConfiguration -framework CoreFoundation`（均 `PUBLIC` 传导，见根 `CMakeLists.txt`；口径记于 `BUILD_OPTIONS.md`）。macOS 腿在本机不可运行验证，由 CI 的 `macos-clang` 作业做编译验证。
 - 回归：`utest_net_system_proxy` 八例——PAC/WPAD/两者并存三类都判成 `net-proxy-unsupported` 且诊断带脚本 URL、没配代理是成功的空集合（带例外清单时例外仍解析）、四类 scheme 令牌落四个槽（`source()` 为 `system:<令牌>`）、裸项归 `all` 且 `ftp=`/`gopher=` 略过（缺省端口沿用配置侧口径）、六类歧义与畸形条目分岔到两码（含 SOCKS4、TLS-to-proxy、同槽重复、`=` 位置颠倒）、`<local>` 与 `<-loopback>` 的匹配面（无限定域名命中、带点与数字字面量不命中、`127.9.9.9` 与 `::1` 命中）、采集钩子三条回报（快照 / 畸形 / 空快照判成 `net-platform-unavailable`）、合并次序四态（接管时系统腿调用次数为 0、无变量时采纳快照、无通道等价环境变量、读失败原样上抛）。全用例零平台 API、零真实环境变量，三平台与 wasm 一致，故无 `AURORA_TEST_SKIP`。
 
 #### 8.8.11 异步流传输：`StreamTransport` / `StreamListener`（传输族首件）
@@ -1192,23 +1319,23 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 - **能力位与「调用真的能成功」严格同源**：`Engine::capabilities().tls` 由 `detail::tls_backend_available()` 回答，而它读的是**注册表是否非空**——内置后端在首次访问时就地安装，安装集合由被编进来的 TU 决定，调用方注销全部内置后端或注入一枚自研后端同样改变答案。装配模块因此只保证「宏与被编进来的 TU 逐一对应」，不在这里放运行期真值；能力位先于实现点亮会诱导调用方去分支一条今天不存在的路径。
 - **口径不合在零后端处即判**（`invalid_inputs_are_decided_before_any_backend` 用例覆盖）：空 `server_name` 与 IP 字面量落 `net-endpoint-invalid`（IP 目标按证书校验语义没有可核对的名字，本层不跳过校验）、`max_version` 低于 `min_version` 落 `net-tls-version-mismatch`（允许集为空是配置矛盾，不该由协商现场去发现）、空回调不发起任何登记。危险开关 `allow_insecure_certificate` 置真时在发起处留一条 `warning` 诊断（正文点名「local testing only」），它跳过的是链与主机名判定，**不影响 SPKI pin**——「不设防」与「防错对象」是两条必须能分别表达的决策。
 - **信任判定由本层产出，系统不给「半个结论」**（Windows 腿的落码形态）：凭据恒带 `SCH_CRED_MANUAL_CRED_VALIDATION`，信任结论一律由 `verify_chain()` 经 CryptoAPI 链引擎产出。理由是追加信任根这件事在 Schannel 的自动校验通路里做不到：`trusted_certificates` 与系统 ROOT 库**合并**成内存存储后交 `CERT_CHAIN_ENGINE_CONFIG.hExclusiveRoot`（未给追加根时传空引擎 = 完全走系统缺省策略，两条通路互不遮蔽）；做成替换会让所有对接公网的用例突然不认合法证书。链的中间证书不需要本层搬运——Schannel 把对端送来的整条链挂在叶子所属的内存存储上，实测 `entries` 随对端发送的张数增长，故把它作为 `hAdditionalStore` 交出即可；`SECPKG_ATTR_REMOTE_CERT_CHAIN` **本机实测不可用**（返回结构 `cbSize=1`，按链上下文解引用即访问违例）。只认叶子会建成部分链（`CERT_TRUST_IS_PARTIAL_CHAIN`）而被读成「证书不可信」，现场指向完全错误的方向。**吊销检查不在本腿**：`CertGetCertificateChain` 的 `dwFlags` 为 0，即不拉 CRL 也不走 OCSP——离线可验证的判据集合里没有它，接进去等于给每条握手加一次外呼，记为已知边界而非疏漏。
-- **主机名核对按 SAN 优先、CN 只在 SAN 缺席时兜底**：SAN 里存在 dNSName 却没有一条命中，说明证书已明确表达「可核对的名字不在这张证书里」，再拿 CN 兜底等于把现代证书规则退回 2000 年代。通配符只允许最左标签（`name_matches`），且大小写不敏感。
+- **主机名核对按 SAN 优先、CN 只在 SAN 扩展完全不存在时兜底**：SAN 里存在 dNSName 却没有一条命中，说明证书已明确表达「可核对的名字不在这张证书里」，再拿 CN 兜底等于把现代证书规则退回 2000 年代。**「扩展存在」与「其中有 dNSName」是两件事**：SAN 扩展存在但只装了 IP / URI 等条目、一个 dNSName 都没有时同样不回看 CN，扩展存在却解码失败也按「存在」计（宁可拒绝，不静默放宽）；只有整张证书里根本没有 SAN 扩展，手写侧才按传统形态回落到 CN，并在诊断里点名目标主机。通配符只允许最左标签（`name_matches`），且大小写不敏感。这里是**唯一**一处权威表述：其余三套后端把名字判定交给各自的库内 / 平台 RFC 6125 通路，在「只有 CN、没有 SAN 扩展」的证书上按自己的现行策略裁决，与手写侧的 CN 回落可以不同——这一处平台策略分叉不强行统一为一份匹配规则，而是由 `utest_net_tls` 的跨后端对账用例按「四类证书 × 每一套注册后端」逐格记录结论、写进用例输出，每格只接受「放行」或 `net-tls-cert-rejected`，不出现无结论的空档。
 - **SPKI pin 的形态是跨后端逐值判据**：`PeerCertificate::public_key_sha256` = base64(SHA-256(DER(`SubjectPublicKeyInfo`)))，不是整证摘要也不是十六进制指纹——按整证 pin 会在证书续签（公钥不变）时无预警失配，而那是运维最常见的「换证不换钥匙」。判定在 `net/tls.cpp` 完成（与后端无关），不命中落 `net-tls-pin-mismatch` 并把命中的摘要带进 `message`。摘要计算侧有一条硬约束：`BCrypt*Hash` 的哈希长度**现问不假设**、失败一律回空串——把失败读成「一枚全零摘要」会让「pin 不命中」被静默吞掉（本函数第一版正是这样）。
 - **客户端 ALPN 宣告的通路只有一条，且不在凭据层**：`TLS_PARAMETERS` 的 `rgstrAlpnIds` 按文档是给「该组参数所适用的 ALPN 标识」划定范围，本机实测无论宽窄字符编码都协商不出结果（`SECPKG_ATTR_APPLICATION_PROTOCOL` 恒回 status=None）。可用形态是**首枚** `InitializeSecurityContextW` 随附的 `SECBUFFER_APPLICATION_PROTOCOLS` 输入缓冲，载荷布局为 `u32 长度 | u32 ext=ALPN | u16 表字节数 | (u8 单条长度 + ASCII 标识)*`（`ISC_REQ_ALPN` 请求位实测非必要，故不带）；系统只在生成 ClientHello 那一次读它，之后的调用给了也不生效。空集合必须**不产缓冲**：带着 12 字节的空表调用会回 `SEC_E_ILLEGAL_MESSAGE` 且连 ClientHello 都发不出去（本层由 5 通过/13 失败的整片回归实测出这条）。协商结果经 `SECPKG_ATTR_APPLICATION_PROTOCOL` 回读，未宣告与未选中都回 `net-option-conflict` 而**不是空串**——把「没有 ALPN」报成空串会让调用方把「未协商」误读成「协商出一个空协议」，后者的正确处置是关掉连接。
 - **mTLS 客户端身份只认带私钥登记的那一张证书**：`TlsContext::client_identity` 是 PKCS#12 的**字节内容**（口令 `client_identity_passphrase`），导入个人存储后必须逐张查 `CERT_KEY_PROV_INFO_PROP_ID`；把没有私钥的证书交给 Schannel，只会在需要客户端认证时才失败，而那次失败看起来像「对端拒了我」，现场不留任何配置信息。没有可用私钥即在工厂里落 `general-invalid-argument`。
 - **客户端身份的 PEM 形态只走 OpenSSL / mbedTLS 两条引擎腿，且配对判据走在装进会话之前**：`TlsContext::client_certificate_pem` / `client_private_key_pem`（各为 `std::optional<std::string>`）与 PKCS#12 那枚 `client_identity` **互斥**，同置即 `net-option-conflict`；只置证书不置私钥同样落这一枚——「带了身份却没私钥」的连接必然在需要客户端认证时被拒，而那次拒绝看起来像对端的问题。系统证书库两腿（Windows Schannel、Apple SecureTransport）没有「从内存里的 PEM 造一枚可导出的身份」的公开通路，置值即在起手显式落 `net-platform-unavailable`，**不回落成不带证书的连接**；该码在候选链里属于「可跳过」那一类——Auto 形态下这一枚被跳过、链继续下一枚，显式指定该后端时原样交出（两条都不等于「悄悄不带证书」）。这一条把 §16 第 20 项记下的 mbedTLS 腿 PKCS#12 缺口补成了正向能力（该腿今天装得了 PEM 身份，PKCS#12 仍缺，那枚用例据此报成缺项）。证书侧「链里到底有没有一张可用证书」是**一条事实、两型证据合一判**：`mbedtls_x509_crt_parse` 的负返回码与 `raw.p == nullptr` 交出同一句诊断，拆成两支时摘掉任一半天平线上另一半仍会说同一句话、用例照绿——**实测正是如此**（变异 M1 存活），合起来才是「摘掉就没得说」的那一处，判据由 `a_pem_client_identity_without_a_certificate_is_refused` 盯住。判空口径取 `raw.p` 而非 `next`：对刚 `init` 的空结构，第一张证书是**就地填进结构体本身**的，`next` 从第二张起才挂，按 `next` 判空会把一份合法身份读成空的。配对判据在两条腿上都走在**装入之前**（OpenSSL `X509_check_private_key`、mbedTLS `mbedtls_pk_check_pair`），失败时 ctx 上还没落下半份凭据，两腿对同一件事因此交出逐字相同的一句「the client private key does not match the client certificate」——OpenSSL 3 本来会在 `SSL_CTX_use_PrivateKey` 里顺手比对并回一句引擎自己的步骤名（`key values mismatch`），那是实现细节而不是调用方要听的诊断；`SSL_CTX_check_private_key` 留作装完之后的最后一道复核，使「本层返回成功」恒等于「ctx 自己确认过这条链配这把私钥」。加密私钥本层不解（口令形态请调用方先行解密后传入）；链里个别条目不合口味也不放行（`parse` 的回正数即「有 N 段不是证书」），调用方自己给的材料没有「半条链送出去」这一说，那只会换来对端一次无法解释的拒绝。这些诊断一律走 `make_error(code, message)` 的**覆写**形态而不是 `ErrorParams` 里的 `detail`：`general-invalid-argument` 在码表里的模板没有 `{detail}` 槽位，那份 detail 会被静默丢掉——**这是既有的系统性账，本切片只在自己这几处绕开，没有改码表**。
 - **结局纪律：每个请求恰一次，且所有分支共用同一条收尾**——登记动作在锁内、交付在锁外，分支里就地 `return` 会跳过 `fire(tasks)`，被丢弃的正是「读必须有结局」那批回调（现场表现为挂起的读永远不落地，`peer_process_disappearance_settles_a_pending_read` 抓到的就是这条）。同批修正两处：`resume_read()` **必须先解底层流的暂停**再推进会话（顺序反了就是死锁形态：本层催出的读投递被仍在生效的暂停挡回，而挡回来的请求只有恢复后才可能被满足）；`peer_certificate()` 在通道已关闭后按公共头口径回 `net-socket-failed`，而不是继续交出固化的摘要。关闭幂等、`close()` 后一切读写都有确定结局、不悬挂。
 - **三枚引擎各有唯一装配入口（Linux 系统栈缺位即无后端）**：`AURORA_ENABLE_NET_TLS_SYSTEM`（系统栈 Schannel / SecureTransport，Win32 / APPLE 缺省 `ON`，在不具备可驱动系统栈的平台置 `ON` 即 configure 期硬失败）、`AURORA_NET_TLS_PROVIDERS`（OpenSSL provider 列表，现**只承载 OpenSSL**）与 `AURORA_ENABLE_NET_TLS_MBEDTLS`（内置源码 mbedTLS，缺省 `OFF`）互相独立，任意并开即多条腿同时在案——这正是「Windows 给了 OpenSSL 安装根也保住 Schannel」的构建面。
-    - **OpenSSL provider 逐项规则**：值形如 `<static|shared>:<prefix>`，分隔符接受 `;` 与 `,`；`prefix` **只接受安装根**（不做向上猜测或递归搜索，写错路径时诊断打印实际检查过的 `include/` 与 `lib/` 组合）。种类判定只看头：`<prefix>/include/openssl/ssl.h` 命中即 OpenSSL；该根只探到 `<prefix>/include/mbedtls/ssl.h` 而无 OpenSSL 头 → configure 期硬失败并指向 `AURORA_ENABLE_NET_TLS_MBEDTLS`（mbedTLS 已不再是 provider）；两者皆无同样硬失败而不是静默降级成「无 TLS」。`AURORA_ENABLE_NET_TLS_OPENSSL` 由探测推导、**不接受手工设置**。库定位只查 OpenSSL 自己的库名 `ssl` / `crypto`（不再取 ssl/mbedtls 并集——并集会让「头推导出 mbedTLS、却链上 OpenSSL 的库」在混挂两套库的安装根里成立），除 `lib/` 外还查 `lib/<三元组>`（Debian multiarch 的实际位置，属「安装根」口径之内）。**至多一枚 OpenSSL provider**（两个 OpenSSL 根没有可区分的语义，重复命中即硬失败）；探测通过后建 `aurora::net::tls.openssl`，`shared` 的运行期寻址交宿主部署、不写 RPATH。旧单值 `AURORA_NET_TLS_PROVIDER` 保留为 OpenSSL 的别名，新旧同设即 configure 期硬失败。
+    - **OpenSSL provider 逐项规则**：值形如 `<static|shared>:<prefix>`，分隔符接受 `;` 与 `,`；`prefix` **只接受安装根**（不做向上猜测或递归搜索，写错路径时诊断打印实际检查过的 `include/` 与 `lib/` 组合）。种类判定只看头：`<prefix>/include/openssl/ssl.h` 命中即 OpenSSL；该根只探到 `<prefix>/include/mbedtls/ssl.h` 而无 OpenSSL 头 → configure 期硬失败并指向 `AURORA_ENABLE_NET_TLS_MBEDTLS`（mbedTLS 已不再是 provider）；两者皆无同样硬失败而不是静默降级成「无 TLS」。`AURORA_ENABLE_NET_TLS_OPENSSL` 由探测推导、**不接受手工设置**。库定位只查 OpenSSL 自己的库名 `ssl` / `crypto`（不再取 ssl/mbedtls 并集——并集会让「头推导出 mbedTLS、却链上 OpenSSL 的库」在混挂两套库的安装根里成立），除 `lib/` 外还查 `lib/<三元组>`（Debian multiarch 的实际位置，属「安装根」口径之内）。**至多一枚 OpenSSL provider**（两个 OpenSSL 根没有可区分的语义，重复命中即硬失败）；探测通过后建 `aurora::net::tls.openssl`，`shared` 的运行期寻址交宿主部署、不写 RPATH。
     - **mbedTLS 由仓库内置源码构建**：`AURORA_ENABLE_NET_TLS_MBEDTLS=ON` 即 `add_subdirectory(third_party/mbedtls … EXCLUDE_FROM_ALL)` 编出 `mbedtls` / `mbedx509` / `mbedcrypto`，按 GNU ld 左到右序聚合成 `aurora::net::tls.mbedtls`（x509 排在 crypto 之前，否则静态链会把 `mbedtls_pk_parse_subpubkey` 报成未定义）；缺省 `OFF`，子项目自带的 `install()` 由 `SKIP_INSTALL_RULES` 抑制以免污染本库手写的 AuroraConfig 导出包，`CMAKE_POLICY_VERSION_MINIMUM` 抬到 3.10 以免上游 `cmake_minimum_required(3.5.1)` 在 CMake 4.x 下升级成硬错误。旧「provider 安装根挂 mbedTLS」的写法废弃。
     - 探测 / 内置通过后各引擎按种类目标聚合进 `aurora::net::tls`（本体 / 测试 / 工具 / 安装侧引用点名字不随枚数变化），`target_link_libraries(aurora PRIVATE …)` 传导；引擎宏一律 `PRIVATE` 作用域（公共头零 `#ifdef`，消费者编译不需要它）。系统栈腿的链接面（`secur32 crypt32 bcrypt` / `-framework Security -framework CoreFoundation`）只由 `AURORA_ENABLE_NET_TLS_SYSTEM` 决定、PUBLIC 传导，与其余两枚是否存在无关。仓库**自带 mbedTLS 源码、不自带 OpenSSL**（许可证随各自上游 LICENSE 登记进 `THIRD_PARTY_LICENSES.md`）。
 - 错误码：本切片启用 §10 已规划的 `net-tls-handshake-failed` / `net-tls-cert-rejected` / `net-tls-version-mismatch` / `net-tls-engine-unavailable` / `net-tls-pin-mismatch` 五枚，**无新增码**；失败 `message` 一律携带后端原生状态码的十六进制形态（`status=0x80090326` 一类），因为「谁拒了我」只有原生码能区分。
 - **对端 fatal alert 与记录层失败同码**：三腿都没有可依赖的 alert 描述符出口（Schannel 只回 `SEC_E_*`、OpenSSL 回 `SSL_get_error` + reason 文本、mbedTLS 回握手返回码与 `mbedtls_ssl_get_verify_result`），故不补「收到致命告警」的第六枚码——那会让调用方以为能按告警类型分支，而今天只能读文本。告警一律落 `net-tls-handshake-failed` 并把平台成因写进 `detail`；离线判据（「对端在 `ClientHello` 之后回 fatal alert」）在 §8.8.17 的故障目录里以 `net-tls-handshake-failed` + 不悬挂 + 事件源已释放三条收口。裁决理由与顺延见提案 §16 第 22 项。
 - **「服务端要求客户端证书」的拒绝时机随协议版本分岔，公共侧只承诺「匿名会话拿不到回显」**：TLS 1.2 及以下是握手内事件（服务端在 `CertificateRequest` 后直接告警终止），TLS 1.3 是**握手后**事件——客户端的 `SSL_connect` / `SSLHandshake` 已经成功，致命告警在第一次记录交换时才抵达（`RFC 8446` §4.3.2 / §4.4.2 的时序）。故「握手返回成功」不蕴含「服务端已接受客户端证书」，判据也不能写成「匿名握手必须失败」。实测：OpenSSL / mbedTLS 两条腿先成功后落败、Windows（Schannel）在握手内即拒，用例按腿无关形态收口（匿名半只断言「不得取得回显且必须有结局」）。见提案 §16 第 19 项。
 - **OpenSSL / mbedTLS 两条引擎腿的字节推拉各自贴合自家形态**：OpenSSL 用两枚 memory BIO（收发各一，所有权随 `SSL_set_bio` 移交，此后由 `SSL_free` 释放），mbedTLS 用 `mbedtls_ssl_set_bio()` 挂本层的 `bio_send` / `bio_recv` 回调、取不到字节时回 `MBEDTLS_ERR_SSL_WANT_READ`。两者与 Schannel 的 `SECBUFFER_STREAM` 就地消费、SecureTransport 的 `SSLSetIOFuncs` + `errSSLWouldBlock` 一起，构成同一接缝（后端持密文缓冲）的四种实现——接缝只承诺「上层交付底层流」，不承诺后端内部形态一致。mbedTLS 侧另两条口径如实记账：熵源走 PSA（`psa_generate_random()`，无返回码故失败不可见）、**不装** `mbedtls_threading_set_alt()`（那是全进程的一次性决定），串行化完全依赖本接缝的每连接互斥量。
-- **macOS 系统栈腿的四处形态与一处已知不重合**：信任判定经 `kSSLSessionOptionBreakOnServerAuth` 交回本层（该开关一设即关闭系统栈的自动校验，文档写明），追加根经 `SecTrustSetAnchorCertificates` + `SecTrustSetAnchorCertificatesOnly(false)` **合并**进系统根、判定用 `SecTrustEvaluateWithError`，校验完再调一次 `SSLHandshake` 续跑；主机名判定交 `SecPolicyCreateSSL(true, hostname)`（与 OpenSSL 腿交 `SSL_set1_host` 同口径），因此本腿**不做** CN 回落，而 Schannel 腿的手工校验通路必须自己实现、对「只有 CN 没有 SAN」的证书回落到 CN——这一处跨腿差异属平台现行策略，记为已知不重合；`PeerCertificate::public_key_sha256` 在本腿由证书 DER 内切 SPKI 段再取 SHA-256（`SecKeyCopyExternalRepresentation` 对 RSA 回 PKCS#1、对 EC 回 X9.63，都不是 SPKI，取它算 pin 会与其他腿永久失配）；危险开关 `allow_insecure_certificate` 跳过的是**结论**不是**动作**（仍评估一次，因为 `SecTrustGetCertificate*` 要求先评估，否则「设了开关反而读不到对端证书」）。该腿本机只有编译级证据（无 Apple SDK；clang-format + 对手写声明头的语法检查通过），运行裁决方是 CI 的 `macos-securetransport-system` 腿。见提案 §16 第 21 项。
-- 测试设施：`tests/framework/tls_peer.h` 用宿主现成的 `openssl` 命令行拉起真实 TLS 服务端（`s_server`，只绑 `127.0.0.1`，`-rev` 回显形态）并按用例现签自签资产（SAN=`DNS:localhost`），私钥存活期不长于用例、随 `isolation::end_case()` 删除；命令行缺失时走 `AURORA_TEST_SKIP` 报成环境缺项而不是逻辑失败。参数一律 argv 直送不经 shell（MSYS 会把 `/CN=localhost` 当路径改写）。与 `scripted_peer.h` 的分工：那一份接管**明文**对端字节，这一份接管 TLS 层对端（加密、证书、记录），「取消落在未完成的握手」这类用例仍用 `scripts::silent()`。
-- 回归：`utest_net_tls_backend` **20 例**（注册拒空 id 与空工厂 / 重复 id 不覆盖原实现 / 注销报命中与落空 / 注销内置 id 后表面不再列它 / 缺省链按优先级再按注册次序 / 显式置链原样取用不再排序 / 置链只校验形态 / 不可用候选被跳过而下一枚接手 / 链内未知 id 跳过 / `net-tls-engine-unavailable` 同样继续下一枚 / 配置错误终止整条链 / 指名后端绝不回落 / 指名的未知 id 不查链 / 空链在任何工厂跑之前判定 / 指名覆盖空链 / 全链不可用报最后一枚跳过原因 / 能力位随注册表空与非空翻转 / 工厂逐字收到握手入参 / 表面每枚 id 都可指名且可构造 / 表面与缺省链在配置前同源）。本套件只测注册表与解析、不触网，且注册表是进程级状态——用例内以库内的快照 / 还原钩子（`detail::snapshot_tls_backend_registry()` 与 `restore_tls_backend_registry()`，同一枚互斥量守护）收口，`--shuffle 7 --repeat 3` 与真实握手套件同进程复跑均一例不红。`utest_net_tls` **26 例**（原 23 例 + 指名的未知后端恰一次结局且不回落 + 通道回报实际生效的后端 + **逐枚在案后端各完成一次真握手**）。各腿口径：**Windows（MinGW，Schannel 系统栈）22 通过 + 4 跳过**、**WSL 共存腿（`-DAURORA_ENABLE_NET_TLS_MBEDTLS=ON -DAURORA_NET_TLS_PROVIDERS=shared:/usr`，内置 mbedTLS 与 OpenSSL provider 同时在案）25 通过 + 1 跳过**（本批实测，注册表表面为 `openssl, mbedtls`）——跳过的第一枚是 `absent_backend_reports_engine_unavailable`（有后端的构建里按环境缺失跳过，各腿同因），Windows 腿另三枚是**全部 PEM 判据**（系统证书腿不能从内存 PEM 造身份，起手落 `net-platform-unavailable`，用例把它报成缺项而不是伪造一次成功——这正是「显式拒绝而不是回落成不带证书的连接」的可执行形态）。此前单枚 provider 装配下的两腿口径（WSL OpenSSL 22 + 1、WSL mbedTLS 21 + 2）在共存形态下合并：mbedTLS 那条 PKCS#12 缺口不再出现，因为候选链先取 OpenSSL 那一枚接手，同一判据在共存腿上仍逐枚走一遍 mbedTLS 的真握手（`every_registered_backend_completes_a_real_handshake` 逐 id 指名各成功一次）——「共存 + 回落只发生在握手前」把单腿能力缺口变成整链能力，这就是它的可执行形态。另有一枚**无 OpenSSL provider、内置 mbedTLS 未开、系统栈也关**的 Linux 构建（configure 成功，日志里除 `TLS backend: system stack disabled (AURORA_ENABLE_NET_TLS_SYSTEM=OFF)` 外没有任何 `TLS backend:` 行）：同套件 `utest_net_tls` **5 通过 + 21 跳过**、`utest_net_tls_backend` **18 通过 + 2 跳过**（后一枚跳过的两例逐字报 `this build carries no builtin tls backend, the case inspects the builtin surface only`——它们只看内置集合，无内置腿时无从判定），且 `absent_backend_reports_engine_unavailable` 在该腿转为实跑通过——「未给 provider 时 configure 成功但能力位为假、TLS 构造报 `net-tls-engine-unavailable`」的可执行形态。同批 `utest_net_test_double` **14 例全通过**（含随本切片补进目录的第七类故障），离线套件在各腿**失败数为 0**。「系统栈引擎与 provider 引擎各跑通一次」就此闭合，且共存腿上两枚 provider 引擎各跑通一次（provider 两枚都跑过；离线组里的过期证书判据由 `tests/framework/tls_peer.h` 的 `Lifetime::Expired` 现签一张有效期整体落在过去的自签证书来造，宿主 `openssl` 无回填日期的旋钮时该例报成环境缺项而不是伪造一次拒绝；macOS 系统栈腿只有编译级证据，见提案 §16 第 21 项）。真机探针 `aurora_verify_tls_live` 在各腿同口径 PASS，且**同一张真实证书的两类摘要逐字相同**（`CN=example.com` 的叶子与签发者）：SPKI 摘要各腿都是 `toyMGpiThuoVaTygu6QeCcnum2PKJknnGOsHalH7BzU=`（pin 计算跨腿可移植的唯一证据），可分辨名文本各腿都是 `C=US, O=SSL Corporation, CN=Cloudflare TLS Issuing ECC CA 3`。后者是本轮由实测纠正的形态：OpenSSL 腿原先用 `XN_FLAG_RFC2253`，而它按 RFC 2253 **逆序**展开且分隔不带空格，与 Schannel（CryptoAPI）/ mbedTLS（`mbedtls_x509_dn_gets`）两腿的 DER 正序形态不一致——`TC-NET-006` 的跨腿逐值判据据此不成立，故该腿改为自己按 DER 条目次序渲染（短名 + `, ` 连接），macOS 腿的实现本来就按 DER 走一遍故同形（其一致性属代码形态层面，运行判据由 CI 的 `macos-securetransport-system` 腿补）。本批为可插拔装配新增的三处探针判据同口径实测：`backends on this leg:` 行在 WSL 共存腿打印 `openssl, mbedtls`（内置 mbedTLS 与 OpenSSL provider 同时在案的唯一直接证据），`--backend mbedtls` 与 `--backend openssl` 各以指名那一枚完成一次真握手、`backend :` 注记与指定值逐字相同（Windows 腿 `--backend schannel` 同形），不带 `--backend` 时判据换成「回报的 id 确在注册表表面」、缺省链取走排在前的 `openssl`；指名一枚本腿未编入的 id 时明确落 `net-tls-engine-unavailable` 并在 detail 里点出在案的那几枚（`tls backend 'no-such' is not registered (in the registry: openssl, mbedtls)`），**一次都不尝试别的后端**。
+- **macOS 系统栈腿的四处形态与一处已知不重合**：信任判定经 `kSSLSessionOptionBreakOnServerAuth` 交回本层（该开关一设即关闭系统栈的自动校验，文档写明），追加根经 `SecTrustSetAnchorCertificates` + `SecTrustSetAnchorCertificatesOnly(false)` **合并**进系统根、判定用 `SecTrustEvaluateWithError`，校验完再调一次 `SSLHandshake` 续跑；主机名判定交 `SecPolicyCreateSSL(true, hostname)`（与 OpenSSL 腿交 `SSL_set1_host` 同口径），因此本腿**不做** CN 回落，而 Schannel 腿的手工校验通路必须自己实现、对「只有 CN 没有 SAN」的证书回落到 CN——这一处跨腿差异属平台现行策略，唯一权威表述见本节「主机名核对按 SAN 优先」条，逐格结论见跨后端对账用例；`PeerCertificate::public_key_sha256` 在本腿由证书 DER 内切 SPKI 段再取 SHA-256（`SecKeyCopyExternalRepresentation` 对 RSA 回 PKCS#1、对 EC 回 X9.63，都不是 SPKI，取它算 pin 会与其他腿永久失配）；危险开关 `allow_insecure_certificate` 跳过的是**结论**不是**动作**（仍评估一次，因为 `SecTrustGetCertificate*` 要求先评估，否则「设了开关反而读不到对端证书」）。该腿本机只有编译级证据（无 Apple SDK；clang-format + 对手写声明头的语法检查通过），运行裁决方是 CI 的 `macos-securetransport-system` 腿。见提案 §16 第 21 项。
+- 测试设施：`tests/framework/tls_peer.h` 用宿主现成的 `openssl` 命令行拉起真实 TLS 服务端（`s_server`，只绑 `127.0.0.1`，`-rev` 回显形态）并按用例现签自签资产（缺省 SAN=`DNS:localhost` 且 CN 同名；名字形态参数另可造「只有 CN、没有 SAN 扩展」与「SAN 扩展存在但只有一条 IP、没有 dNSName」两张，缺省形态令既有全部用例零改动），私钥存活期不长于用例、随 `isolation::end_case()` 删除；命令行缺失时走 `AURORA_TEST_SKIP` 报成环境缺项而不是逻辑失败。参数一律 argv 直送不经 shell（MSYS 会把 `/CN=localhost` 当路径改写）。与 `scripted_peer.h` 的分工：那一份接管**明文**对端字节，这一份接管 TLS 层对端（加密、证书、记录），「取消落在未完成的握手」这类用例仍用 `scripts::silent()`。
+- 回归：`utest_net_tls_backend` **20 例**（注册拒空 id 与空工厂 / 重复 id 不覆盖原实现 / 注销报命中与落空 / 注销内置 id 后表面不再列它 / 缺省链按优先级再按注册次序 / 显式置链原样取用不再排序 / 置链只校验形态 / 不可用候选被跳过而下一枚接手 / 链内未知 id 跳过 / `net-tls-engine-unavailable` 同样继续下一枚 / 配置错误终止整条链 / 指名后端绝不回落 / 指名的未知 id 不查链 / 空链在任何工厂跑之前判定 / 指名覆盖空链 / 全链不可用报最后一枚跳过原因 / 能力位随注册表空与非空翻转 / 工厂逐字收到握手入参 / 表面每枚 id 都可指名且可构造 / 表面与缺省链在配置前同源）。本套件只测注册表与解析、不触网，且注册表是进程级状态——用例内以库内的快照 / 还原钩子（`detail::snapshot_tls_backend_registry()` 与 `restore_tls_backend_registry()`，同一枚互斥量守护）收口，`--shuffle 7 --repeat 3` 与真实握手套件同进程复跑均一例不红。`utest_net_tls` **28 例**（原 26 例 = 23 例 + 指名的未知后端恰一次结局且不回落 + 通道回报实际生效的后端 + **逐枚在案后端各完成一次真握手**；本批再补「SAN 无 dNSName 恒拒 + 同名 SAN 对照组」与「四类证书 × 每套注册后端逐格对账」两例，后者的逐格结论写进用例输出、CN-only 一格只记录不强制同色）。各腿口径：**Windows（MinGW，Schannel 系统栈）22 通过 + 4 跳过**、**WSL 共存腿（`-DAURORA_ENABLE_NET_TLS_MBEDTLS=ON -DAURORA_NET_TLS_PROVIDERS=shared:/usr`，内置 mbedTLS 与 OpenSSL provider 同时在案）25 通过 + 1 跳过**（本批实测，注册表表面为 `openssl, mbedtls`）——跳过的第一枚是 `absent_backend_reports_engine_unavailable`（有后端的构建里按环境缺失跳过，各腿同因），Windows 腿另三枚是**全部 PEM 判据**（系统证书腿不能从内存 PEM 造身份，起手落 `net-platform-unavailable`，用例把它报成缺项而不是伪造一次成功——这正是「显式拒绝而不是回落成不带证书的连接」的可执行形态）。此前单枚 provider 装配下的两腿口径（WSL OpenSSL 22 + 1、WSL mbedTLS 21 + 2）在共存形态下合并：mbedTLS 那条 PKCS#12 缺口不再出现，因为候选链先取 OpenSSL 那一枚接手，同一判据在共存腿上仍逐枚走一遍 mbedTLS 的真握手（`every_registered_backend_completes_a_real_handshake` 逐 id 指名各成功一次）——「共存 + 回落只发生在握手前」把单腿能力缺口变成整链能力，这就是它的可执行形态。另有一枚**无 OpenSSL provider、内置 mbedTLS 未开、系统栈也关**的 Linux 构建（configure 成功，日志里除 `TLS backend: system stack disabled (AURORA_ENABLE_NET_TLS_SYSTEM=OFF)` 外没有任何 `TLS backend:` 行）：同套件 `utest_net_tls` **5 通过 + 21 跳过**、`utest_net_tls_backend` **18 通过 + 2 跳过**（后一枚跳过的两例逐字报 `this build carries no builtin tls backend, the case inspects the builtin surface only`——它们只看内置集合，无内置腿时无从判定），且 `absent_backend_reports_engine_unavailable` 在该腿转为实跑通过——「未给 provider 时 configure 成功但能力位为假、TLS 构造报 `net-tls-engine-unavailable`」的可执行形态。同批 `utest_net_test_double` **14 例全通过**（含随本切片补进目录的第七类故障），离线套件在各腿**失败数为 0**。「系统栈引擎与 provider 引擎各跑通一次」就此闭合，且共存腿上两枚 provider 引擎各跑通一次（provider 两枚都跑过；离线组里的过期证书判据由 `tests/framework/tls_peer.h` 的 `Lifetime::Expired` 现签一张有效期整体落在过去的自签证书来造，宿主 `openssl` 无回填日期的旋钮时该例报成环境缺项而不是伪造一次拒绝；macOS 系统栈腿只有编译级证据，见提案 §16 第 21 项）。真机探针 `aurora_verify_tls_live` 在各腿同口径 PASS，且**同一张真实证书的两类摘要逐字相同**（`CN=example.com` 的叶子与签发者）：SPKI 摘要各腿都是 `toyMGpiThuoVaTygu6QeCcnum2PKJknnGOsHalH7BzU=`（pin 计算跨腿可移植的唯一证据），可分辨名文本各腿都是 `C=US, O=SSL Corporation, CN=Cloudflare TLS Issuing ECC CA 3`。后者是本轮由实测纠正的形态：OpenSSL 腿原先用 `XN_FLAG_RFC2253`，而它按 RFC 2253 **逆序**展开且分隔不带空格，与 Schannel（CryptoAPI）/ mbedTLS（`mbedtls_x509_dn_gets`）两腿的 DER 正序形态不一致——`TC-NET-006` 的跨腿逐值判据据此不成立，故该腿改为自己按 DER 条目次序渲染（短名 + `, ` 连接），macOS 腿的实现本来就按 DER 走一遍故同形（其一致性属代码形态层面，运行判据由 CI 的 `macos-securetransport-system` 腿补）。本批为可插拔装配新增的三处探针判据同口径实测：`backends on this leg:` 行在 WSL 共存腿打印 `openssl, mbedtls`（内置 mbedTLS 与 OpenSSL provider 同时在案的唯一直接证据），`--backend mbedtls` 与 `--backend openssl` 各以指名那一枚完成一次真握手、`backend :` 注记与指定值逐字相同（Windows 腿 `--backend schannel` 同形），不带 `--backend` 时判据换成「回报的 id 确在注册表表面」、缺省链取走排在前的 `openssl`；指名一枚本腿未编入的 id 时明确落 `net-tls-engine-unavailable` 并在 detail 里点出在案的那几枚（`tls backend 'no-such' is not registered (in the registry: openssl, mbedtls)`），**一次都不尝试别的后端**。
 
 ---
 
@@ -1225,18 +1352,18 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 
 工具链面：伞头 `aurora/aurora.h` 与 `tools/check/umbrella_manifest.txt` 收录 `net/http.h`；`Method` 登记 `tools/include/known_enums.h` 并在 `itest_known_enums` 加编译期锚点、刷新 `aurora_api.json` 的 `enums` 段；**初件无新增错误码**（复用切片首件已落的 `http-request-invalid` 与既有 `net-url-invalid`），§12 charset 解码补齐时**新增 `http-charset-unsupported`**（`text()` 启用；其定义随之下沉 `http.cpp` 并 include 库内 `core/utf8.h`，公共面无新头 / 新枚举），`http-content-encoding-unsupported` 已随 §8.8.20 的透明解压接入启用。配套 `utest_net_http`（6 例：方法换算往返、目标解析失败延后到 `render_head`、`Host` / `Content-Length` 补齐、`HEAD` 弃体与链式字段 / 选项、应答取值口径、`text()` 按 charset 解码的六型分岔）。
 
-**本切片其余部分已全部落地（无预留项）**：交换钩子（`Client::use()` 与 `net/http_hook.h` 的四枚类型）已随 §8.8.40 落地。`open_sse` 已随 §8.8.33 落地（事件流订阅面与自带三型行终止的解析器）。`Session` 的 Cookie Jar 与连接池已随 §8.8.31 落地（`Client::pool()` 挂池、`Session` 身份层，见该节）。§12 的其余语义补齐件已各自收口：进度节流与分段超时随 `Client::send` 落地（见 §8.8.20）；流式接收随 `Client::open_stream` 落地（见 §8.8.21）；失败分型随 `HttpErrorClass` 落地（见 §8.8.22）；重试策略随 `RetryPolicy` 落地（见 §8.8.23）；条件请求与 `RFC 9111` 最小集缓存校验随 `Client::cache()` 落地（见 §8.8.24）；发起侧的代理接入随 `Client::proxy()` 落地（见 §8.8.25）；§12 / §13 的声明式安全策略随 `NetPolicy` 落地（见 §8.8.26，同批把「`Url::is_secure()` 供 `NetPolicy` 拒明文」那条预留口径兑现）；链路标识随 `Client::request_id()` 落地（见 §8.8.27）；上传便捷面（`BodySource` 流式请求体、`MultipartWriter`、字节范围、`Expect: 100-continue`）随 §8.8.28 落地；认证便捷件（`Bearer` / `Basic` 与 `Authenticator`，含 401 / 407 的凭据重放）随 §8.8.29 落地；WebSocket 客户端（`Client::connect_websocket`、库内分帧与握手、会话句柄与心跳关闭）随 §8.8.34 落地，其声明式接线 `deliver_ws` 随 §8.8.35 落地，共用的进程级熵源随 §8.8.27 的公共面升级落地。可观测性已随 §8.8.36—§8.8.39 收口（事件总线与进程级活动存储、请求时间线与活动条目、凭据分级脱敏与进程级 `ExportPolicy`、Inspector 路由注册表化与 `network` 端点 + MCP 工具）。交换钩子随 §8.8.40 收口，§12 与 §17 至此无剩余项。charset 解码已随 `Response::text()` 落地并启用 `http-charset-unsupported`；内容编码已升级为 core 级通用能力 `aurora::compression` 落地，见 [`01-core.md`](01-core.md) §12，并由 HTTP 物化管线接入、`http-content-encoding-unsupported` 随之启用，见 §8.8.20。契约引用提案  §6 / §10 / §12 / §17。
+**本切片其余部分已全部落地（无预留项）**：交换钩子（`Client::use()` 与 `net/http_hook.h` 的四枚类型）已随 §8.8.40 落地。`open_sse` 已随 §8.8.33 落地（事件流订阅面与自带三型行终止的解析器）。`Session` 的 Cookie Jar 与连接池已随 §8.8.31 落地（`Client::pool()` 挂池、`Session` 身份层，见该节）。§12 的其余语义补齐件已各自收口：进度节流与分段超时随 `Client::send` 落地（见 §8.8.20）；流式接收随 `Client::open_stream` 落地（见 §8.8.21）；失败分型随 `HttpErrorClass` 落地（见 §8.8.22）；重试策略随 `RetryPolicy` 落地（见 §8.8.23）；条件请求与 `RFC 9111` 最小集缓存校验随 `Client::cache()` 落地（见 §8.8.24）；发起侧的代理接入随 `Client::proxy()` 落地（见 §8.8.25）；§12 / §13 的声明式安全策略随 `NetPolicy` 落地（见 §8.8.26，同批把「`Url::is_secure()` 供 `NetPolicy` 拒明文」那条预留口径兑现）；链路标识随 `Client::request_id()` 落地（见 §8.8.27）；上传便捷面（`BodySource` 流式请求体、`MultipartWriter`、字节范围、`Expect: 100-continue`）随 §8.8.28 落地；认证便捷件（`Bearer` / `Basic` 与 `Authenticator`，含 401 / 407 的凭据重放）随 §8.8.29 落地；WebSocket 客户端（`Client::connect_websocket`、库内分帧与握手、会话句柄与心跳关闭）随 §8.8.34 落地，其声明式接线 `deliver_ws` 随 §8.8.35 落地，共用的进程级熵源随 §8.8.27 的公共面升级落地。可观测性已随 §8.8.36—§8.8.39 收口（事件总线与进程级活动存储、请求时间线与活动条目、凭据分级脱敏与进程级 `ExportPolicy`、Inspector 路由注册表化与 `network` 端点 + MCP 工具）。交换钩子随 §8.8.40 收口，§12 与 §17 至此无剩余项。链路态监听（`net/connectivity.h`，见 §8.8.41）是本句收口之后新增的能力，不改该句对 §12 / §17 既有范围的判定。charset 解码已随 `Response::text()` 落地并启用 `http-charset-unsupported`；内容编码已升级为 core 级通用能力 `aurora::compression` 落地，见 [`01-core.md`](01-core.md) §12，并由 HTTP 物化管线接入、`http-content-encoding-unsupported` 随之启用，见 §8.8.20。契约引用提案  §6 / §10 / §12 / §17。
 
 #### 8.8.20 HTTP 发起侧客户端：`Client::send`（§6 / §12 发起侧·核心闭环）
 
 新增公共头 `include/aurora/net/http_client.h`（命名空间 `aurora::net::http`）与实现 `src/aurora/net/http_client.cpp`，回调→协程桥接落库内 `src/aurora/net/detail/http_await.h`（不占公共 API、不进伞头）。`Client` 把一份 `Request` 送出去、拿回物化的 `Response`：`http://` 直连 `StreamTransport`、`https://` 先在流上 `TlsTransport::handshake()` 再套读写（L3 对底下是否加密无感），写出 `render_head()` + 体、逐段喂 §8.8.19 的接收侧 `wire::ResponseAssembler` 按分帧物化，物化完毕再按 `Content-Encoding` 透明解压，按 `Location` 跟随重定向，三档超时（`Timeouts{connect, read_idle, total}`）任一到点落 `http-timeout`。落码口径：
 
 - **协程出口 `CoroTask<Result<Response>>`、参数按值**：L1 传输刻意只给回调出口（把 `Task` 写进 L1 公共头会让下层反向依赖 L4，见 `net/transport.h`），协程形态归上层给出——本发起侧即那「上层」。§6 草图写 `send(const Request &) -> Task<Result<Response>>`，落地改两处并记此：返回 `CoroTask`（仓内既有协程任务型；线程池的 `Task<T>` 只能由 `async(fn)` 在池上 resolve，无法被事件驱动回调填充），参数改**按值**（协程引用参数不安全——帧不延长引用生命期，`cppcoreguidelines-avoid-reference-coroutine-parameters`）。成败一律以 `Result` 表达，绝不抛异常穿越协程帧（§18-4）。
-- **桥接在库内、续体恒回主线程**：`net/detail/http_await.h` 的 `CallbackAwaiter` 把 connect / handshake / read / write 的完成回调经 `post_to_main` 恢复续体，与 `state::co_async` 同一条回投通道，故调用方在 `co_await` 之后可安全触碰响应式状态。awaiter 不外露。
+- **桥接在库内、续体恒回主线程**：`net/detail/http_await.h` 的 `CallbackAwaiter` 把 connect / handshake / read / write 的完成回调经 `post_to_main` 恢复续体，与 `state::co_async` 同一条回投通道，故调用方在 `co_await` 之后可安全触碰响应式状态。awaiter 不外露。**完成决议跨线程串行**：`post_after` 的到期任务在引擎线程执行，故完成回调可能在引擎线程写结果、读「发起器已返回」的闸；结果落地与闸发布收在一枚共享决议态、由一把互斥量串行化，「写结果 + 读闸」与「写闸 + 读结果」各自成临界区，两次裁决成全序、恰好一次恢复，不出现双重 resume。这与 §8.8 编排纪律「每连接一枚互斥量、回调一律在锁外触发」同形；`post_to_main` 恒在锁外调用，同步完成仍就地前进、不得投递。决议态以共享所有权承载而非把互斥量直接作成员，是为保住等待体的默认移动。
 - **连接生命周期由池口径裁决**：每（重定向）跳新建连接、应答物化后关闭是 `PoolOptions{}` 缺省关时的口径；连接池与 keep-alive 复用已随 §8.8.31 落地（`Client::pool()` 挂池、复用资格五判据、排队计入 `connect` 档），`Session` 的 Cookie Jar 同批落地（见该节），本件绝不为「复用」预先牺牲正确性。重定向按 `Location` 相对当前目标解析：`303` 把非 `HEAD` 改判 `GET`、`301` / `302` 对 `POST` 转 `GET`、`307` / `308` 严格保留方法与体，次数超 `Request::max_redirects()` 落 `http-redirect-limit`；`UntilClose` 形态经对端 FIN 判全，其余形态提前收摊落 `http-protocol-error`。
 - **三档超时各自独立**：`connect` 覆盖建连（含 TLS 握手）、`read_idle` 是相邻两次读交付之间的滑动空闲上限、`total` 覆盖整请求全程；步骤 2 的单一 `Request::timeout()` 现等价 `total` 档（向后兼容保留）。各以一枚 `StageTimer`（引擎 `post_after` + 共享 `Cancellation`）实现，阶段结束即停表——`post_after` 不可撤销，故把共享 `live` 标志置假令尚未到期的闭包 no-op、不误伤后续；任一档先触发即记档号并取消令牌，收尾统一改道 `http-timeout` 并在 `detail` 标明是哪一档。新增公共类型 `Timeouts`（三枚 `optional<std::chrono::milliseconds>`）落 `net/http.h`，经 `Request::timeouts()` 存取。
 
-- **内容编码在物化之后、值层之前**：应答体按分帧物化完毕，才依 `Content-Encoding` 逐级还原，因此 `Response::body()` 恒交未解码的（已解压）原始字节、`text()` 只管 charset。宣告与支持集同源——`AURORA_HTTP_ACCEPT_ENCODING` 就是解码器认得的那两枚（`gzip, deflate`），core 注册表的 gzip / zlib / deflate 三槽均已注册且调用方未自设 `Accept-Encoding` 时由 `send` 注入，已设则不覆盖；三槽未全部注册（内置解码器仅在 `AURORA_ENABLE_COMPRESSION=ON` 的构建编入，应用可自注册补位）时既不宣告、应答又带编码即落 `http-content-encoding-unsupported`，绝不把压缩字节当明文交出。编码链**书写次序是应用次序、解压走反序**（`RFC 9110 §8.4`：`gzip, deflate` 表示载荷先经 gzip 再经 deflate 加工，还原从右往左逐层剥），链上出现支持集之外的名字即整链拒绝并报出该名字；`deflate` 名义是 zlib（RFC 1950）但存在历史服务器发裸流（RFC 1951）的歧义，先试 `Zlib`、仅在其报「字节损坏」时回落 `Deflate`，两试皆坏才把 zlib 那条判定原样上报——这一消歧属 HTTP 层编排，不进 core 通用 API。`Content-Encoding` 落在无体应答（`framing == None`，含 `HEAD` / 1xx / 204 / 304）上不参与校验，那字段描述的是不存在的载荷。core 侧三枚 `compression-*` 在 HTTP 出口**全部有映射**：`compression-unavailable` → `http-content-encoding-unsupported`、`compression-output-too-large` → `http-body-too-large`（`detail` 写明越的是 `max_decompressed_bytes` 而非 `max_body_bytes`，两道闸各管一段：前者管解压产物、后者管线上传来字节）、`compression-data-corrupt` 及其余一律 → 新增 `http-body-corrupt`。解压产物另有独立上限 `Client::max_decompressed_bytes()`，未设则跟随 `max_body_bytes`——这是解压炸弹的唯一显式闸。文法解析、链序、逐层解码与错误映射全落库内 `src/aurora/net/detail/http_encoding.{h,cpp}`（不占公共 API、不进伞头），故零 socket 即可逐值断言。
+- **内容编码在物化之后、值层之前**：应答体按分帧物化完毕，才依 `Content-Encoding` 逐级还原，因此 `Response::body()` 恒交未解码的（已解压）原始字节、`text()` 只管 charset。宣告与支持集同源——`AURORA_HTTP_ACCEPT_ENCODING` 就是解码器认得的那两枚（`gzip, deflate`），core 注册表的 gzip / zlib / deflate 三槽均已注册且调用方未自设 `Accept-Encoding` 时由 `send` 注入，已设则不覆盖；三槽未全部注册（内置解码器仅在 `AURORA_ENABLE_COMPRESSION=ON` 的构建编入，应用可自注册补位）时既不宣告、应答又带编码即落 `http-content-encoding-unsupported`，绝不把压缩字节当明文交出。编码链**书写次序是应用次序、解压走反序**（`RFC 9110 §8.4`：`gzip, deflate` 表示载荷先经 gzip 再经 deflate 加工，还原从右往左逐层剥），链上出现支持集之外的名字即整链拒绝并报出该名字；`deflate` 名义是 zlib（RFC 1950）但存在历史服务器发裸流（RFC 1951）的歧义，先试 `Zlib`、仅在其报「字节损坏」时回落 `Deflate`，两试皆坏才把 zlib 那条判定原样上报——这一消歧属 HTTP 层编排，不进 core 通用 API。`Content-Encoding` 落在无体应答（`framing == None`，含 `HEAD` / 1xx / 204 / 304）上不参与校验，那字段描述的是不存在的载荷。core 侧三枚 `compression-*` 在 HTTP 出口**全部有映射**：`compression-unavailable` → `http-content-encoding-unsupported`、`compression-output-too-large` → `http-body-too-large`（`detail` 写明越的是 `max_decompressed_bytes` 而非 `max_body_bytes`，两道闸各管一段：前者管解压产物、后者管线上传来字节）、`compression-data-corrupt` 及其余一律 → 新增 `http-body-corrupt`。解压产物另有独立上限 `Client::max_decompressed_bytes()`：在物化路径未设则跟随 `max_body_bytes`——这是该路径上解压炸弹的唯一显式闸；流式路径不跟随该旋钮，见 §8.8.21。文法解析、链序、逐层解码与错误映射全落库内 `src/aurora/net/detail/http_encoding.{h,cpp}`（不占公共 API、不进伞头），故零 socket 即可逐值断言。
 
 - **两腿逐值回归实测到一处悬空视图（已修）**：同一份 `scan_transfer_encoding`（`net/detail/http_wire.cpp`）在 Win32（MinGW）腿把 `Transfer-Encoding: chunked` 判成 chunked、在 WSL（GCC 15 / POSIX）腿判成「本构建不解的传输编码」，四条走 chunked 的用例随之整片转红。根因不在逻辑而在**生命周期**：那里迭代的是 `std::vector<std::string>`，`raw.substr()` 产出的是临时 `std::string`，而 `trim_ows` 返回 `string_view`——视图指向已析构的临时量。短值走 SSO、字节就躺在临时对象的栈槽里，是否仍可读到原文取决于优化级别与栈复用次序，一腿侥幸、一腿翻车，正是「推断代替实测」会漏掉的那类跨腿差异。现切段一律从 `std::string_view{text}` 上做，`text` 指向的字节活在入参容器里、有效期覆盖整个循环。判据不新造用例：原有的 chunked 分帧用例就是这条缺陷的回归口径。
 
@@ -1250,7 +1377,7 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 
 - **完成事实是 `StreamOutcome` 而非 `Response`**：`response` 携最终一跳的头部块且 `body()` 恒空，另交两枚**不同口径**的计数——`wire_bytes` 是分帧解出后线上真到达的字节（跨全部重定向跳、透明解压前），`delivered_bytes` 是实际交给 `on_data` 的明文（只算终跳、解压后）。两枚并存而不是合成一枚，是因为进度回调只能报线上口径（还原发生在逐段之后，中途给不出「总共多少明文」），而调用方判断「收了多少」要的是交付口径；`stream_abandons_the_body_of_a_redirect_hop` 把两枚分别钉成 `4` 与 `1`，正是为了证明它们不是同一个数换了名字。
 - **接收侧是抽象基类而不是三枚 `std::function`**：`on_head` / `on_data` / `on_end` 共享的是同一个宿主对象的状态（打开的文件句柄、已累计的偏移、要不要中途收摊），拆成三个回调就得让调用方自己把那份状态缝三次；生命周期同样由对象表达——协程帧按引用持有 Sink（`cppcoreguidelines-avoid-reference-coroutine-parameters` 就地豁免，理由写明「由调用方持有、帧只借用」），故契约要求 Sink 存活到 `is_done()` 之后。调用次序恒为 `on_head`（一次）→ `on_data`（零或多次、恒非空段）→ `on_end`（恰一次），**失败结局不调 `on_end`**：那时字节流断在半途，收尾该由调用方按 `Result` 分流，而不是库替它假装「收完了」。段的切分由分帧边界、读缓冲与解码器内部窗口共同决定，不是一段的应用语义单元，故头文件明确要求宿主自行缓冲行 / 记录边界——本库不猜载荷的分隔形态。
-- **线上字节不设限，解压产物照 `max_decompressed_bytes()` 限**：`max_body_bytes()` 是物化路径的内存闸，流式路径不物化、没有内存可闸；更要紧的是它**不再被当作解压上限的缺省**——`send` 那边「未显式收紧即跟随 `max_body_bytes`」的最小口径搬到流式路径，会让「流式下载一个大压缩包」必须去调大一枚与内存无关的旋钮，等于把不设限 promise 又收回去。故 `open_stream` 只取 `max_decompressed_bytes()`，未设即逐层不限；越限仍落 `http-body-too-large` 且 `detail` 点名这一枚旋钮（`stream_ignores_the_materialized_body_ceiling` 与 `stream_enforces_the_decompressed_ceiling` 一侧证「物化闸无效」、一侧证「解压闸有效」）。
+- **线上字节不设限，解压产物照 `max_decompressed_bytes()` 限**：`max_body_bytes()` 是物化路径的内存闸，流式路径不物化、没有内存可闸；更要紧的是它**不再被当作解压上限的缺省**——`send` 那边「未显式收紧即跟随 `max_body_bytes`」的最小口径搬到流式路径，会让「流式下载一个大压缩包」必须去调大一枚与内存无关的旋钮，等于把不设限 promise 又收回去。故 `open_stream` 只取 `max_decompressed_bytes()`，未设即逐层不限（公共头按路径分别申报此口径，调用方不得据 setter 的通用措辞推断流式路径有解压闸；处理不可信对端或压缩应答时须显式设限）；越限仍落 `http-body-too-large` 且 `detail` 点名这一枚旋钮（`stream_ignores_the_materialized_body_ceiling` 与 `stream_enforces_the_decompressed_ceiling` 一侧证「物化闸无效」、一侧证「解压闸有效」）。
 - **`deflate` 的两型按包装头判定，不按「先试再回落」**：物化路径手里有全部字节，解不开可以换一种格式重播；流式路径的字节一旦交给宿主就收不回来，重播等于让宿主重写已写下那段。故 `Deflate` 环节只看**本环节最前两枚输入字节**是否构成合法 zlib 头（`RFC 1950 §2.2` 的三条硬约束：CM 低四位为 8、CINFO ≤ 7、`(CMF<<8|FLG) % 31 == 0`），据此把格式锁死到整条流；不足两枚时按住该段不交，判定完成再把前缀补喂进解码器。代价是一条「头恰好通过 zlib 校验、体却按裸流编」的病态载荷会被判损坏而不是被回落救回——两型的首两字节由编码器写出，现实中不会同时满足另一型的校验，而被省下的正是「把整条流留在内存里再试一次」这笔开销。
 - **重定向跳的消息体不读**：头部一判定为重定向即弃该跳载荷、发起下一跳（一条连接一个跳，收摊由连接对象的作用域完成）。`send` 逐跳物化，本入口不为注定被丢弃的体继续读字节；宿主因而**只见最终一跳**的头部与体（`on_head` 恰一次，中间跳不进 `on_head`）。上限判据同 `send`：超 `max_redirects()` 落 `http-redirect-limit` 且失败结局不宣告收摊。
 - **宿主回 `Stop` 是正常结局**：`open_stream` 交**成功**的 `Result<StreamOutcome>` 并把事实写进 `stopped_by_sink`，剩余字节不再读取也不再交付，绝不落成取消类错误码——「够了 / 用户取消了 / 校验和不符」是调用方的判定，不是本库做不到。停读之后有两条连带纪律：链内**不得再调 `finish()`**（那是在宣告一条被自己掐断的流「应当完整」，只会凭空造出一枚损坏错误），以及链的 abort 态里 `Stop` 优先于错误（同一轮 `push` 里先交出的段先被宿主拒掉，故 Stop 在字节次序上总是更早的那个事实）。`on_end` 在停读路径上仍恰一次，它是「把缓冲刷下去、把句柄关掉」的时机。
@@ -1264,7 +1391,7 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 
 新增公共面全部落在 §8.8.19 的值层头 `include/aurora/net/http.h`（映射表在 `src/aurora/net/http.cpp`）：`enum class HttpErrorClass : std::uint8_t`（九档，`Invalid = 0`）、`error_class_of(ErrorCode) -> HttpErrorClass`、`error_class_of_status(std::uint16_t) -> HttpErrorClass`、`error_class_text(HttpErrorClass) -> std::string_view`。它回答的是「这次失败该往哪儿排查」，与「能不能重试」分属两枚事实。
 
-- **档位与 `retryable` 正交，不新造重试口径**：重试与否仍逐码读 `Error::retryable`（与 `codespec/errors.toml` 同源，`aurora::retryable(ErrorCode)` 亦已存在）。同一档里两种取值并存是刻意的——`Unreachable` 档内 `net-connect-failed` 可重试、`net-send-failed` 不可重试；把动作折进档位就得为每枚码另立一档，档数会被重试口径牵着走，而这条的存在理由恰是让界面能问「这是网络的事还是我的代码的事」。之所以不直接用生成表的 `ErrorCategory`：那是全库粗分类，本族 47 枚全在 `io` 下，分不出「名字解析不了」与「对端把字节写坏了」。
+- **档位与 `retryable` 正交，不新造重试口径**：重试与否仍逐码读 `Error::retryable`（与 `codespec/errors.toml` 同源，`aurora::retryable(ErrorCode)` 亦已存在）。同一档里两种取值并存是刻意的——`Unreachable` 档内 `net-connect-failed` 可重试、`net-send-failed` 不可重试；把动作折进档位就得为每枚码另立一档，档数会被重试口径牵着走，而这条的存在理由恰是让界面能问「这是网络的事还是我的代码的事」。业务域已是一等元数据：界面问那一句时直接读 `Error::domain`（`ErrorDomain::Net` / `Http` / `Ws` 精确聚合，不再需要靠归因档反推），`HttpErrorClass` 因此不再兼做域归类。之所以仍要它而不是改用生成表的 `ErrorKind`：性质轴答「什么坏了」（12 档，本族 47 枚铺开在 `io` / `invalid` / `denied` / `timeout` / `corrupt` 等多档上），却不答「失败落在网络栈的哪一跳」——同一枚 `corrupt` 既可能是对端把 HTTP 报文写坏，也可能是代理握手不成帧；同一枚 `denied` 既可能是代理拒了凭据，也可能是 TLS 链拒了证书，而排查方向恰由这一跳决定。两轴各司其职：`domain` 管归属，`error_class` 管跳位。
 - **九档而非八档**：§6 草图的八档装不下本族里 19 枚「动作在代码或配置里而不在网络上」的码（`net-url-invalid` / `http-request-invalid` / `net-endpoint-invalid` / `net-platform-unavailable` / `net-tls-engine-unavailable` / `net-option-failed` / `net-option-conflict` / `net-timeout-option-failed` / `net-proxy-config-invalid` / `net-proxy-unsupported` / `net-framer-config-invalid` / `net-buffer-limit` / `net-framer-overflow` / `net-policy-violated` / `http-body-too-large` / `http-charset-unsupported` / `http-content-encoding-unsupported` / `http-body-not-replayable` / `ws-send-queue-full`），故补第 9 枚 `Invalid` 作兜底并取零值，使默认构造与「未归类」同一口径。归类的判据是**失败发生的跳**：`Dns` → `Unreachable` → `Proxy` → `Tls` → `Timeout` → `Protocol` → `Cancelled` 先具体后兜底，同一枚码恒只进一档。
 - **两处边界归类值得点名**：`net-proxy-config-unreadable` 归 `Proxy` 而同族的 `net-proxy-config-invalid` 归 `Invalid`——「读不到系统代理」的动作在环境，「代理配置写错了」的动作在调用点，压成一档会让排查方向反掉；`http-redirect-limit` 归 `Protocol`（对端把重定向写成了环）而 `http-body-too-large` 归 `Invalid`（越的是本库上限旋钮）。
 - **`ws-*` 四枚按同一条「失败发生的跳」折算进来**（随 §8.8.34 的 WebSocket 切片同批复核本表，本节 43 枚的计数与那份逐码清单当时都只覆盖 HTTP 两族，本批四枚到位后是 **43 → 47 枚**（`Protocol` 档 +2、`Unreachable` 档 +1、`Invalid` 档 +1），`utest_net_http` 的期望表同批 43 → **47 行**、完整性闸同步收紧，按此纠回、旧数字留此可追）：`ws-handshake-rejected` 与 `ws-protocol-error` 归 `Protocol`——前者是**对端**对「要不要升级」给的答案（说的还是这条对话，不是链路通不通），后者是帧流被对端写坏，与 `http-protocol-error` 同档同判据；`ws-closed` 归 `Unreachable`——三种产出（对端 close、`pong_timeout` 到点、本侧掐句柄）都只陈述「这条连接不在了」，它 `retryable = true` 而 `net-send-failed` 标假，两枚同档不同动作，正是本节「档位与动作正交」那条的运行样本；`ws-send-queue-full` 归 `Invalid`——拒的是「这一条先别发」，动作在调用方的生产节奏与 `WebSocketOptions` 的额度上；它 `retryable = true`，与同档的 `net-buffer-limit`（越的也是本库上限）一样属于「稍后再试同一件事」而非「改代码」，故 `Invalid` 档的名字说的是**排查方向**（往代码与配置里找）而不是「别重试」，重试与否仍归 `Error::retryable` 那半。
@@ -1331,7 +1458,7 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 - **闸门的位置：起手先于缓存，其后逐跳，且一律在发出之前**：判定在任何 `co_await` 之前完成，被拒的那一跳一条连接都不发起、一个字节都不写出，`net-policy-violated` 的 message 里 `before any byte went out` 就是这件事的字面承诺。起手那次问在查缓存**之前**——策略先于「少打一次网络」这条优化，命中缓存照样是一次交付，不能因为它就没被问过。`plan_route()` 把代理决策与策略判定放在同一处（`require_proxy` 那一维读的就是本跳的实际决策，先有答案再问，库里因此没有第二个「有没有经代理」的答案）；URL 解析不出或端口不可得时起手闸放行，那是 `render_head()` / 发起处原有判据要报的错，策略不抢它们的活、更不替畸形目标编一条。三条维度按「明文 → 版本下限 → 是否必须经代理」的次序问，第一个不合的交出错误；判定不看方法、不看路径、不看端口（策略管的是信道，不是请求内容）。
 - **证书固定不在本类型里**：SPKI pin 随 TLS 切片落在 `TlsContext::pinned_public_keys`（§8.8.18），与信任根、校验开关同属一次握手的口径；提案 §13 曾写「经 `NetPolicy{ pin_spki }` 开启」，落地按本条纠回（原文就地改写、编号不动，见 §16 第 31 项）。策略层管「能不能谈、谈的话版本下限多少」，不管谈成之后认哪张证书；把它挪进 `NetPolicy` 会让同一份握手口径存在两处真值。
 
-工具链面：**新增错误码 `net-policy-violated`**（`category = io`、`severity = error`、`retryable = false`,插在 `net-proxy-config-unreadable` 之后，全表 124 → **125** 枚，经 `codespec/errors.toml` → `error_codes.gen.h` + `codespec/ERROR_CATALOG.md` + `aurora_api.json` 生成器刷新）；`aurora_api.json` 本切片的变化就是 error_codes 段那一条——`NetPolicy` 是结构体、`net::` 的类型本就不进 `enums` 段，`check_api_schema_sync` 复核为绿。§8.8.22 的失败分型同批改口径：本族 42 枚全在 `io` 下、`net-*` / `http-*` 两族 42 枚逐码有档，`net-policy-violated` 归 `Invalid` 兜底档（**策略闸掐在发起之前：拒的是这份声明与这个目标的组合，不是链路**，动作在代码与配置里而不在网络上），`utest_net_http` 的期望表加一行、完整性闸从 41 收到 42。配套两套同源判据：新增 `utest_net_policy`（11 例，纯判定、零 socket 零时钟零线程——缺省构造就是那组保守口径、裸条目只匹配该注册名（大写写法与带尾点写法各命中一次、子域不命中）、前导点条目打开该域与任意深层子域（`xample.com` / `notexample.com` 这类半截后缀不命中）、`*` 打开这一维而空条目什么都不打开、无隐含回环例外、版本下限拒「能谈到下限以下」的上下文（含 `max_version` 落在下限之下那型）且只判不改（判定后重读上下文两枚仍为原值）、明文目标不参与版本维度、`require_proxy` 拒一切直连跳、三维按定案次序发问、不看方法 / 路径 / 端口、进程级默认往返与清除），`utest_net_http_proxy` 的后 5 例管发起侧接入口径（起手闸在一条连接都不发起的前提下同时拒住 `send` 与 `open_stream`、闸先于缓存、逐跳重问、三级取定、在途快照）。**一处连带后果记此**：缺省拒明文让仓内每一条约回环 `http://` 的既有用例都变红（`utest_net_http_client` 39 例、`utest_net_http_stream` 20 例起手即落 `net-policy-violated`），处置不是给回环开后门而是**逐文件显式点名**——两套件各写一枚 `allow_test_cleartext(Client &)` 助手（清单里就是 `127.0.0.1`），触网用例逐条调用（client 42 处、stream 20 处，含两条有名客户端各一处）。删掉助手的调用会让该套件全部触网用例转红，这同时是「闸门确实在建连之前起作用」的自证；策略不给测试环境留隐含例外，正是上一条定案的第一次兑现。判据非空转已五处变异自证：把裸条目也按后缀匹配 → `a_bare_list_entry_matches_only_that_exact_name` 转红；版本维度只查 `max_version`（等于放过「能把版本谈到下限以下」的上下文）→ 下限那例与三维次序那例两例转红；在 `allows_cleartext_host` 开头补一条回环放行 → `no_implicit_loopback_exception` 转红；把 `require_proxy` 提到判定次序最前 → `the_three_dimensions_are_asked_in_order` 转红；摘掉起手闸两处调用（`send` 与 `open_stream` 各一）→ **只有** `the_gate_runs_before_the_cache` 转红，`the_policy_gate_refuses_before_any_connection` 照常绿——逐跳判定独立兜住「拒绝」这条事实，故起手闸的**唯一**独立职责是「先于缓存」那条次序。起手闸与逐跳闸因此不是重复设闸而是各管一件事；这与 §8.8.24 那处「只有合并摘除才现形」的冗余闸是相反的形态——那条不可由单点变异证明，这条不可由拒绝类用例证明。两腿回归与门禁口径同 §8.8.20 末段。裁决与形态来源见提案 §16 第 31 项。
+工具链面：**新增错误码 `net-policy-violated`**（`domain = net`、`kind = denied`、`severity = error`、`retryable = false`,插在 `net-proxy-config-unreadable` 之后，全表 124 → **125** 枚，经 `codespec/errors.toml` → `error_codes.gen.h` + `codespec/ERROR_CATALOG.md` + `aurora_api.json` 生成器刷新）；`aurora_api.json` 本切片的变化就是 error_codes 段那一条——`NetPolicy` 是结构体、`net::` 的类型本就不进 `enums` 段，`check_api_schema_sync` 复核为绿。§8.8.22 的失败分型同批改口径：本族 42 枚全在 `io` 下、`net-*` / `http-*` 两族 42 枚逐码有档，`net-policy-violated` 归 `Invalid` 兜底档（**策略闸掐在发起之前：拒的是这份声明与这个目标的组合，不是链路**，动作在代码与配置里而不在网络上），`utest_net_http` 的期望表加一行、完整性闸从 41 收到 42。配套两套同源判据：新增 `utest_net_policy`（11 例，纯判定、零 socket 零时钟零线程——缺省构造就是那组保守口径、裸条目只匹配该注册名（大写写法与带尾点写法各命中一次、子域不命中）、前导点条目打开该域与任意深层子域（`xample.com` / `notexample.com` 这类半截后缀不命中）、`*` 打开这一维而空条目什么都不打开、无隐含回环例外、版本下限拒「能谈到下限以下」的上下文（含 `max_version` 落在下限之下那型）且只判不改（判定后重读上下文两枚仍为原值）、明文目标不参与版本维度、`require_proxy` 拒一切直连跳、三维按定案次序发问、不看方法 / 路径 / 端口、进程级默认往返与清除），`utest_net_http_proxy` 的后 5 例管发起侧接入口径（起手闸在一条连接都不发起的前提下同时拒住 `send` 与 `open_stream`、闸先于缓存、逐跳重问、三级取定、在途快照）。**一处连带后果记此**：缺省拒明文让仓内每一条约回环 `http://` 的既有用例都变红（`utest_net_http_client` 39 例、`utest_net_http_stream` 20 例起手即落 `net-policy-violated`），处置不是给回环开后门而是**逐文件显式点名**——两套件各写一枚 `allow_test_cleartext(Client &)` 助手（清单里就是 `127.0.0.1`），触网用例逐条调用（client 42 处、stream 20 处，含两条有名客户端各一处）。删掉助手的调用会让该套件全部触网用例转红，这同时是「闸门确实在建连之前起作用」的自证；策略不给测试环境留隐含例外，正是上一条定案的第一次兑现。判据非空转已五处变异自证：把裸条目也按后缀匹配 → `a_bare_list_entry_matches_only_that_exact_name` 转红；版本维度只查 `max_version`（等于放过「能把版本谈到下限以下」的上下文）→ 下限那例与三维次序那例两例转红；在 `allows_cleartext_host` 开头补一条回环放行 → `no_implicit_loopback_exception` 转红；把 `require_proxy` 提到判定次序最前 → `the_three_dimensions_are_asked_in_order` 转红；摘掉起手闸两处调用（`send` 与 `open_stream` 各一）→ **只有** `the_gate_runs_before_the_cache` 转红，`the_policy_gate_refuses_before_any_connection` 照常绿——逐跳判定独立兜住「拒绝」这条事实，故起手闸的**唯一**独立职责是「先于缓存」那条次序。起手闸与逐跳闸因此不是重复设闸而是各管一件事；这与 §8.8.24 那处「只有合并摘除才现形」的冗余闸是相反的形态——那条不可由单点变异证明，这条不可由拒绝类用例证明。两腿回归与门禁口径同 §8.8.20 末段。裁决与形态来源见提案 §16 第 31 项。
 
 #### 8.8.27 链路标识：`X-Request-Id` 的三级取定、一次交换一枚与共用的系统熵源
 
@@ -1353,7 +1480,7 @@ Xlib 桥没有独立的 detail 类（与 Win32 的 `Win32ImeBridge` 不同）：
 
 - **体的线上形态只有一个决策点**：`detail::plan_request_body()` 判一次，`Request::render_head()`（声明侧）与 `detail::RequestBodyPump`（字节侧）各问一次拿同一份计划。之所以收成一处：头部里那句 `Content-Length` 与实际流出去的字节必须说同一件事，两处各自判一遍时任何一次改动（新增体形态、允许自报长度、源改判总长）都会让「声明五个字节却发出分块」成为可能，而那种错位对端无从报错、只能等超时或错读下一段。四条裁决：**调用方写过的字段永远优先**（`Content-Length` / `Transfer-Encoding` 只要出现就照它定，与 `Accept-Encoding`、`X-Request-Id`、条件头是同一条纪律的第五个落点）；**两枚并存即拒**（`RFC 9110 §8.6` 让转发方删长度替别人收拾报文，发起侧自己声明两枚是调用点写错，当场 `http-request-invalid` 比替它猜哪枚算数更有价值）；**零长内存体不补 `Content-Length: 0`**（「没有体」与「体长为零」在线上等价，前者不必让一条 `POST` 多出一种对端可能另有解读的写法）；**分块只由「总长未知的源」触发**（本库绝不把一条有确切长度的请求主动改写成 `chunked`——那会改变中间层的转发行为，而它不是调用方要求的事）。
 - **`BodySource` 三方法，`restart()` 是重放资格的唯一判据**：`next_chunk()` 交出成功且为空即「体已发完」（不用 `optional`——「本段为空但后面还有段」在线上根本没有对应形态，留着只多一条测不到的分支）；`total_size()` 交出确切长度或 `nullopt`（后者走分块）；`restart()` 能否回到原点决定本次交换进不进重试环、重定向带不带体重发。不可回退的体被自动挡在重放之外：重放半截体等于交付一份数据损坏的请求，且这个代价在失败现场无从判定，故不为此再开一枚旋钮。接口同步、被逐段问、一次调用不得等待外部事件（它跑在续体恢复所在的那条线程，缺省即主线程），拷贝与移动一律删除——`Request` 只持引用，搬动一枚已挂上的源会让那次搬运无人知晓。
-- **重放闸有三处，各自问同一句 `restart()`**：起手资格判定（`send` 与 `open_stream` 各一处：挂了不可回退的源就不进重试环）、每一次尝试真正开始之前（`attempts > 1` 时复核一遍，防「源在起手说能回退、之后改了主意」）、`follow()` 里 `307` / `308` 带体重发之前。前两处各管一件事：起手那一处是「要不要套重试环」的准入，尝试之前那一处只有在源答真后又答假时才看得见。第三处失败时新增错误码 **`http-body-not-replayable`** 交出（`category = io`、`retryable = false`），而前两处不报错只是不重放——不可回退的体退出重试是资格，不是故障。
+- **重放闸有三处，各自问同一句 `restart()`**：起手资格判定（`send` 与 `open_stream` 各一处：挂了不可回退的源就不进重试环）、每一次尝试真正开始之前（`attempts > 1` 时复核一遍，防「源在起手说能回退、之后改了主意」）、`follow()` 里 `307` / `308` 带体重发之前。前两处各管一件事：起手那一处是「要不要套重试环」的准入，尝试之前那一处只有在源答真后又答假时才看得见。第三处失败时新增错误码 **`http-body-not-replayable`** 交出（`domain = http`、`kind = unsupported`、`retryable = false`），而前两处不报错只是不重放——不可回退的体退出重试是资格，不是故障。
 - **写出泵一段一问**：每次 `next_segment()` 至多问源要一段，内存体按 `detail::AURORA_HTTP_WRITE_CHUNK`（64 KiB，与传输层写块粒度同值）切片，源交出超上限的段则泵替它切开——分块形态切开只多几个长度行，定长形态切开不改变字节序列；不切会撞上 `StreamOptions::max_pending_bytes` 当场失败，「体不必整份进内存」这条承诺只在分段成立时兑现。分块终止块 `0\r\n\r\n` 由泵在源说结束之后补，绝不留给对端猜一条流什么时候算完。`payload_bytes()` 只数正文不含框架：上传进度回答的是「我的数据送到哪儿了」，不是「线上跑了多少字节」。
 - **`Expect: 100-continue` 的等待窗口是库内置常量，不占 `Timeouts` 任何一档**（缺省关，窗口 300 ms）。开着且确有待发体时，头部写完后先等一小段：回 `1xx` 就立刻发体，到点没人应就**盲发**——后者是 `RFC 9110 §10.1.1` 明确允许的形态，且是现实里的常见路径（多数中间层压根不回 `100`）。这段等待刻意不借用本次交换的取消令牌与 `StageTimer`：令牌是连接级的，`cancel()` 会顺带掐掉这条连接，而「对端没回 100」是一条可以继续往下走的事实，不是一次取消。故 `detail::await_read_within()` 让读与窗口两路各跑各的、由一枚原子闸裁决，先到者承接结局、失者只把字节交给暂存队列绝不触碰可能已销毁的 awaiter；被放弃那次读的字节按传输层 FIFO 必然早于后续读的回调落地，故发起侧每轮先喂暂存队列再判结局，线上次序不乱。关掉时逐字节与「本功能从未存在」同型；无体的请求设了也不写 `Expect` 字段（问了也没有待发的体，只会让对端多等一个判定）。
 - **装配器读的是「一条最终应答，加上它之前的信息应答」**：`100` / `102` / `103` 恒无体，收进待取队列并回到头部阶段继续读，`head()` 与 `complete()` 说的始终是最终那一条；`101 Switching Protocols` 是唯一被拒的 1xx——升级之后这条连接归谁不属 HTTP 客户端的判定，当场落 `http-protocol-error` 留给 WebSocket 切片。**该切片（§8.8.34）按原样保留了这一句判定**：握手那条腿不共用这枚装配器，而是逐段读后经 `wire::parse_response_head` 只吃头部块自身占用的字节、只认 101；「升级之后归谁」由会话句柄回答，不由 HTTP 客户端回答，装配器若改成认识 101，它的契约就得裂成两段。流水线不在本库面内（提案 §15），故一条最终应答装配完整后再收到字节即判畸形，与 `ChunkedDecoder`「终止块之后不收字节」是同一条纪律。
@@ -1572,6 +1699,7 @@ wasm 腿没有 fd 语义，`Engine` 维持 `NullEngine`（传输能力全 false�
 - **方法闸统一收在派发处**：先匹配路由，再判该方法是否在条目的位掩码里；不在即 `405`，`label` 由条目在登记时说出（精确项就是 pattern，前缀项**不带尾斜杠**）。通过方法闸后才进 handler，handler 里的「路径退化」检查（如 `/api/widget/` 的空余段）继续回 `400`。行为差异面只有「动词本就不被支持 **且** 路径恰好退化」这一个交集（`DELETE /api/widget/`、`/api/widget//` 一类）由 400 变 405——405 说的是「这个端点不接受这个动词」，路径形状对错改变不了动词不被支持这一更基本的事实。404 兜底仍用含查询串的原样 path；405 文案仍为 `Method not allowed for <label>`；匹配前剥 query（`/api/tree?x=1` 不再误 404）。其余状态码与响应体逐值不变。
 - **`GET /api/network`**：按 `InspectorJson` 面取全量快照后再过滤、再截断——`limit` 是调用方视野的上限，不是过滤前的窗口取舍。`limit` 0 = 全部、非负整数；`host` 精确、ASCII 大小写不敏感、空串回 400；`status` 整数 0..65535，越界或非整数回 400。响应 `{available, count, dropped, truncated, entries}`，`entries` 最新在前；`limit` 只影响返回条数、不影响 `dropped` / `truncated`。先过滤再 `limit` 是有意的：按一枚罕见状态码找一条记录，若先截断再过滤，答案会随表里更新的无关流量消失。
 - **`GET /api/network/request?id=<X-Request-Id>`**：缺 `id` 或空串回 400；未知 id 回 404，**不把调用方给的 id 回显进文案**（任意输入都不进响应体）；命中时回 `{available, request_id, entry, timelines}`——`entry` 是该 id 最新一条活动条目（含 path / host / status / 失败归因），`timelines` 按 `exchange_id` 升序展开全部跳。`id` 来自 `X-Request-Id` 的原文；被显式关闭或熵不可得的交换没有可寻址标识，只能从 `/api/network` 看见（§8.8.37）。
+- **`connectivity` 对象是 `/api/network` 顶层的新增字段**（§8.8.41 落地）：六枚 `state` / `source` / `generation` / `stale` / `since_ms` / `last_failure`，令牌一律经 `network_state_text()` 与 `connectivity_source_text()` 换算，`last_failure` 缺席写 `null`（不是空串），`since_ms` 是距当前 `state` 起始时刻的毫秒数（同一次应答内的读数，不做跨请求比较）。**正常形状与 Release 早退形状由同一枚构造器产出**，故 `{available:false, reason}` 那一支也带这枚对象——链路态公共面按 [`BUILD_OPTIONS.md`](../BUILD_OPTIONS.md) §1.2 不随 `AURORA_ENABLE_DEBUG` 裁切，AI 排障的第一问在 Release 构建下同样能读到。既有字段逐值不变、MCP 工具数 24 不变（两枚网络工具交回的就是同一份 Inspector 文档）。
 - **Release 两枚端点都回 `{available:false, reason:"AURORA_ENABLE_DEBUG not enabled"}`**：与既有调试门面的 unavailable JSON 形状一致，状态码 200（端点存在，只是观测面在该构建下不存在）。
 - **不新增 `aurora::debug` 门面函数**：两枚查询自身在 Release 已有确定形态，Inspector 直接调 `aurora::net::http` 即可；加门面只会多一条同义的 Release 分支，还要改 `debug_api.toml` 与生成器。Inspector 已依赖 net，分层方向不变。MCP 侧 `tools/servers/aurora_mcp.cpp` 有两处登记点——`tool_definitions()` 的声明表与 `execute_tool()` 的派发链，两枚新工具同改两处：`list_network_activity{limit?, host?, status?}` 与 `describe_network_request{request_id}`，22 → **24**；工具把 Inspector 的 JSON 原文交回，不另开一面。两枚工具沿用既有 `session` 形参（`"6280"` 或 `"127.0.0.1:6280"`，缺省读 `AURORA_INSPECTOR_PORT`，再缺省 6280）。
 
@@ -1617,6 +1745,29 @@ wasm 腿没有 fd 语义，`Engine` 维持 `NullEngine`（传输能力全 false�
 
 工具链面：新公共头 `net/http_hook.h` 已进伞头 `include/aurora/aurora.h` 与 `tools/check/umbrella_manifest.txt`；公共枚举 `ExchangeLeg` 登记 `tools/include/known_enums.h` 并在 `itest_known_enums` 的编译期锚点里加一行，`aurora_api.json` 的 `enums` 段随之 +1；`ExchangeHook` / `ExchangeHookRegistration` / `ExchangeRequestView` 分别是抽象类 / move-only 句柄 / 只读视图类，都不进 `known_enums.h`。**无新增错误码**、**无新增构建宏与缓存变量**（`BUILD_OPTIONS.md` 不动），`debug_api.toml` 与生成器不动；本件不落手工用例——四腿落点、双闸、保留头与触点差异在零出站的回环夹具上全覆盖，没有「必须出站」或「必须有宿主帧循环」的现场（`codespec/manual-test/23-net.md` §1.1 的现行两类准入都不收它）。契约与裁决见网络栈提案 §16 追加条。 已进伞头 `include/aurora/aurora.h` 与 `tools/check/umbrella_manifest.txt`；公共枚举 `ExchangeLeg` 登记 `tools/include/known_enums.h` 并在 `itest_known_enums` 的编译期锚点里加一行，`aurora_api.json` 的 `enums` 段随之 +1；`ExchangeHook` / `ExchangeHookRegistration` 与 `ExchangeRequestView` 分别是抽象类 / move-only 句柄 / 只读视图类，都不进 `known_enums.h`。**无新增错误码**、**无新增构建宏与缓存变量**（`BUILD_OPTIONS.md` 不动），`debug_api.toml` 与生成器不动；本件不落手工用例——四腿落点、双闸、保留头与触点差异在零出站的回环夹具上全覆盖，没有「必须出站」或「必须有宿主帧循环」的现场（`codespec/manual-test/23-net.md` §1.1 的现行两类准入都不收它）。契约与裁决见网络栈提案 §16 追加条。
 
+#### 8.8.41 链路态监听：同步采集腿、不对称状态机与变更订阅（`NetworkState` / `ConnectivitySource` / `ConnectivityChangeCause` / `ConnectivityFact` / `ConnectivityChange` / `ConnectivityOptions` / `ConnectivityMonitor` / `ConnectivityRegistration`）
+
+公共面新增 `include/aurora/net/connectivity.h`（命名空间 `aurora::net`，只含标准头与 `core/result.h`：**零平台头、零 `#ifdef`、不依赖 `Task` / 协程 / `state/`**），实现分三枚 TU：`src/aurora/net/connectivity.cpp`（公共面、投递与令牌换算）、`src/aurora/net/connectivity_probe.cpp`（三平台采集腿与 `compiled_source()`）、`src/aurora/net/detail/connectivity_state.cpp`（判据层状态机与进程级运行时）；库内头 `net/detail/connectivity_probe.h` / `net/detail/connectivity_state.h` 不进伞头、不占公共 API。八个公共类型：枚举 `NetworkState` / `ConnectivitySource` / `ConnectivityChangeCause`，结构体 `ConnectivityFact` / `ConnectivityChange` / `ConnectivityOptions`，类 `ConnectivityMonitor` 与 move-only 句柄 `ConnectivityRegistration`；三枚自由函数 `network_state_text()` / `connectivity_source_text()` / `connectivity_change_cause_text()` 是 REST 与 MCP 侧拼令牌的唯一出处（理由同 `http_stage_text()`）。落码口径：
+
+- **`Online` 只表示「存在可用的缺省链路」，不承诺互联网可达**，故三档而非四档。「有链路、无外网」这一档三平台语义各不相同（macOS 的全局 IPv4/IPv6 键只说明缺省服务、Windows 的连通性提示与 wininet 连接态分处两枚 API、Linux 只能靠旁证推断），开一档等于承诺一份只有个别平台说得清的语义；captive portal、VPN 策略路由与 DNS 可用性都不在三态语义内，需要细节的场合读 `source` / `cause` / `generation` / `since` / `stale` / `last_failure`。
+- **采集原语统一为一句话：是否存在一条经非回环、operational 接口的缺省路由。** Windows 腿落在 `socket.cpp` 的 `probe_default_route_win32()`（`GetIfTable2` + `GetIpForwardTable2`：目的前缀长 0、接口非回环、`IfOperStatusUp`；任一调用失败回 `nullopt`）——**平台 socket 头唯一落点不因本件放宽**，`<winsock2.h>` 与 `iphlpapi` 链接面仍只在既有落点；Linux 腿读 `/proc/net/route`（Destination 全零、标志含 `RTF_UP` 且不含 `RTF_REJECT`）与 `/proc/net/ipv6_route`（目的前缀长 0、标志含 `RTF_UP`），再按接口名读 `/sys/class/net/<if>/operstate` 与 `flags`（`flags` 以 `0x` 前缀的十六进制文本给出，须含 `IFF_UP`），`operstate` 的聚合规则写死——`up` 与 `unknown` 视为 operational，`down` / `dormant` / `lowerlayerdown` / `notpresent` / `testing` 不视为，**任一文件读不到 ⇒ 该腿回「读不到」（`nullopt`），绝不折算成离线**，`lo` 排除；macOS 腿读 `SystemConfiguration` 动态存储的两张全局键 `State:/Network/Global/IPv4` 与 `.../IPv6`——键存在即「有该族缺省路由」（configd 在主服务拿到地址并装好路由时发布，含 VPN 的 utun 主接口），store 建不出来 ⇒ 读不到，store 可建而两键都不在 ⇒ 明确离线（不把「没有缺省路由」折算成「读不到」）。
+- **`ConnectivitySource` 是编译期令牌**：构造后不随读数成败变化，它表的是「本构建有没有这条腿」而不是「上次读成功没有」；**不设 `Injected`**——替身只经库内钩子 `detail::set_connectivity_probe_hook()` 安装，公共面不出现实现态。
+- **阈值不对称，且只有探测腿能判离线**：转入 `Offline` 需 `offline_evidence` 枚合格的**探测**读数（缺省 1），`Unknown→Online` 一枚正证即可，`Offline→Online` 需 `online_evidence` 枚一致正证（缺省 2）。等价的三条合法组合各成立：连续两次采样在线、一次采样在线加一次成功建连、两次成功建连。代价论证写在案上：误判离线只是界面多一枚不准的提示，宿主请求照发、失败照旧按九档归因，事实不丢；误判在线会让宿主**停止退避并立刻重试**，在真断链窗口里把一次故障放大成一片刷屏失败——两侧代价不等，故阈值不等。计数规则四条规定死、实现不得自由解释：反向证据清零对方计数、状态转换清零两侧、`stale` 翻转清零两侧、读失败（`nullopt`）**不计数也不清零**。
+- **`Unknown` 是一条独立的态**，既不向 `Online` 也不向 `Offline` 折算（同「PAC / WPAD 一律回 `net-proxy-unsupported`、绝不回空集合」那条既有纪律）。无源腿分两类写死：**wasm 无腿且无证据通路**（fetch 腿不经过建连出口），`subscribe()` 与 `refresh()` 都回 `net-platform-unavailable`，绝不回 OK 后永不通知；**BSD / Android 一类无腿但有旁证**，`subscribe()` 可成功、状态可经非回环成功建连 `Unknown→Online`，但**永不可能转 `Offline`**，`refresh()` 仍回 `net-platform-unavailable`。两类下 `snapshot()` 都恒可读——错误只发生在要求动作的口上。
+- **旁证四行证据表，不走事件总线**：库内单点入口 `detail::note_connection_outcome(connected, loopback_peer, code)` 由全库唯一建连出口 `detail::await_connect_via` 的结局处调用一处（四条腿都从这一个函数经过）。四行是：成功且非回环计一枚正证；成功但回环**不计正证也不采样**（本机自连不证明外链）；任何非 `Cancelled` / `Invalid` 失败**只触发合并采样并写 `last_failure`**，不计负证；`Cancelled` / `Invalid` 无动作。分类复用 `error_class_of`（只用来筛触发与排除取消），不新造第二套归因。失败不作负证的理由：`Dns` 同时覆盖 NXDOMAIN 与解析器故障、`Unreachable` 的 `NetConnectFailed` 同时覆盖 ECONNREFUSED 与 ENETUNREACH、`Proxy` 覆盖 407 / 协议错误 / 配置读不到，任一类当负证都会造出假离线。**旁证不走事件总线**是因为总线在 `AURORA_ENABLE_DEBUG=OFF` 下整类裁为空壳，而本件公共面按 [`BUILD_OPTIONS.md`](../BUILD_OPTIONS.md) §1.2 恒在——共用一条通道会让 Release 下的链路态变钝，且判据要写两遍。
+- **定时复用引擎自己的 `post_after`，无撤销口下用 epoch + pending 合并**：`post_after` 不支持取消，故每登记一拍 `epoch` +1，旧闭包到期时见 epoch 不符或共享 live 标志已假即整拍 no-op；单一 `sample_pending` 标记让插队合并、**首因保留**——断链瞬间几十次失败只采一次、最多两枚存活登记（一枚作废的周期拍加一枚证据拍），采样结束后只登记下一枚周期拍。周期拍**只在至少一枚订阅存在时**登记；末枚订阅注销后不再有周期拍；证据拍可在无订阅者时跑一次（那正是「有交换」的场合）。**登记失败必须清 pending**：`post_after` 回 `net-platform-unavailable` 时按 epoch 守卫把标记清零，否则此后每一拍都合并进一枚不存在的定时器，链路永久停在首态。`set_options()` 与 `refresh()` 同样只「请求一次采样」，返回值只表请求已受理，结果经 `snapshot()` 或订阅回调抵达。
+- **探测 I/O 在运行时互斥量之外**：采样体先在锁内校验 epoch / live，**锁外**读 OS 表与伪文件，再回锁内复核一遍后落状态机；`snapshot()` 的加锁拷贝因此不会排在一次 I/O 后面。发布变更与调用订阅者一律在锁外。本件只有一把互斥量，**持锁期间不调 `post_to_main`、不调探针、不调用户回调**。
+- **线程与投递纪律**：采样体只在引擎线程执行；订阅回调经 `aurora::detail::post_to_main` 回投进程级唯一队列（`MainQueue`），**只在值班循环排水时于主线程执行**（无值班则投递被打烊取消：丢弃并计数，绝不就地执行），**不新增第三种排队**；抛出型订阅者被摘除并记恰好一条 WARN，不中断采样循环、不改变任何在途交换；`subscribe()` **返回前绝不回调**（live 标志在返回前一瞬才置真，故并发发布抢不了跑）。响应式一侧到此为止：不提供 `Resource` / 流式信号形态（持续态没有「一次落定」可折算，且引擎线程直接写响应式状态会撞「引擎线程绝不触碰 widget / `State`」那条不变量）。
+- **`stale` 是派生读数、`generation` 只标已发布序列**：`stale` = 距上次成功采样或合格正证超过 3× `sample_interval`（阈值写死、**不设旋钮**，否则两枚旋钮能配出自相矛盾的组合），`snapshot()` 按同一公式重算，读取不触发 I/O、不发布通知；`StalenessMarked` 只在采样循环观察到 false→true 时发布一次。`generation` 只在对外发布的变更上 +1（状态转换或 `stale` 翻转）；`last_failure` 是冻结错误码 slug（**不含主机名与 URL**），静默更新、不推进代际、不单独通知，转入 `Online` 时清空。`since` 只在 `state` 变化时更新，初值取 monitor 建立时刻、**不是** epoch 零点。
+- **句柄三条契约逐字沿用 `EventSourceRegistration`**：析构即注销且幂等（双析构不双重摘除）、移动后源句柄转为空态（`is_registered()` 假且 `token()` 归 0，故 `= default` 的移动不够用）、已入队的一次尾批仍抵达且 `cancel_pending()` 与析构互不隐含。首条变更的 `previous` 等于订阅时刻的 `snapshot()`；合并待投递变更时以最后一次为准、`previous` 仍锚在**该订阅者**已见值上。
+- **明确不做**：不做发起侧闸门（闸仍在 `NetPolicy` 与能力闸两处，本件只交事实与通知——拿探测当闸等于把可交付请求变成库侧自己发起的失败，那类失败对端不留痕、时间线看不出根因）、不做链路级重连编排、不做第四档、不给 `Resource` / 流式信号形态、不加 `Capabilities` 字段、**不新增错误码**（不可得与无源一律复用 `net-platform-unavailable`）、**不新增 feature 宏且不随 `AURORA_ENABLE_DEBUG` 裁切**、不引 netlink / COM / 任何 vendored 依赖、不起新线程、探测**不主动打一个包**（零出站是本件的硬判据）、不把任何连接失败当链路负证、不导出任何拓扑事实（接口名 / 网关 / SSID / 链路本地地址连内部快照都不留，`ProbeReading` 只含 `optional<bool>`）。
+
+判据：新增 `utest_net_connectivity_state`（17 例，纯内存逐值钉判据层：首态 `Unknown` + `stale`、一枚合格离线读数即转 `Offline`、`Unknown→Online` 一枚正证、`Offline→Online` 的三种组合各一例、回环成功不计正证也不采样、已在线时正证不再采样、读失败不计数不转换、反向证据清零对方计数、`Timeout` 只触发采样并写 `last_failure`、`Cancelled` 无动作、连接失败永不产生离线、`stale` 越过 3× 周期只翻转一次且清零两侧、选项两端钳位、`set_options()` 不重置在途计数也不立即转换）与 `utest_net_connectivity`（7 例，公共面与投递：首快照形态、订阅后一个周期交付 `Online` 且只探测一次、50 次失败合并为 1 次探测 0 条通知、登记失败清 pending 后可重新登记、句柄三条契约含空态令牌归 0、停机后快照仍可读、旋钮往返）。`utest_inspector_server` 补两种形状的 `connectivity` 断言（正常形状与 Release 早退形状同源、字段集合固定、令牌经三枚换算函数）。真机探针 `tools/verify/net_connectivity_live_probe.cpp`（`--expect auto|offline|online`、`--timeout` 1..300 s）登记于 `cmake/AuroraVerify.cmake`，人工用例见 [`manual-test/23-net.md`](../manual-test/23-net.md) 的 TC-NET-009。2026-10-28 实测：Windows 腿 `--expect auto` 21 条判据全 `[PASS]`（`source=ip_helper`、首条变更 `cause=subscription_start state=online`、`generation=1`、`stale` 转假，`since_ms` 约 5.0 s）。WSL Ubuntu 腿首轮 `--expect auto` 在读得到缺省路由时误报 `offline`，暴露并同批修复两处缺陷：`sysfs` 的 `flags` 带 `0x` 前缀而解析器只认纯十六进制字符（接口被误判「读不到」）、以及「接口状态读不到」先于「两族文件可读 ⇒ 离线」返回（把「读不到」折算成了离线，违反本节「绝不把读不到当成 down」的约定）。修复后四跑全 `PASS`：`--expect auto`（`source=link_files`、`state=online`）、`--expect online`、删掉 v4+v6 缺省路由后的 `--expect offline`（`landed ... state=offline ... generation=1`，无任何出站交换）、按原值加回路由后的 `--expect online`；真实接口为 `eth3`。macOS 腿的 `SCDynamicStore` 读数由本机 AppKit 构建真跑 `--expect auto` 取证（`source=dynamic_store`）。
+
+变异自证四处（摘掉即红）：把 `Offline→Online` 的阈值改成对称（一枚即可）→ `offline_to_online_needs_online_evidence_positives` 转红；把回环成功计成正证 → `loopback_success_does_not_count` 转红；把连接失败计为负证 → `connect_failure_never_counts_negative` 转红；摘掉 `post_after` 失败时的 pending 清零 → `failed_registration_clears_pending` 转红。
+
+工具链面：新公共头 `net/connectivity.h` 已进伞头 `include/aurora/aurora.h` 与 `tools/check/umbrella_manifest.txt`；三枚公共枚举登记 `tools/include/known_enums.h` 并在 `itest_known_enums` 的编译期锚点各加一行，`aurora_api.json` 的 `enums` 段随之 +3；三枚结构体、两枚类与三枚自由函数都不进 `known_enums.h`。**无新增错误码**（`codespec/errors.toml` 与生成的 `ERROR_CATALOG.md` 不动）、**无新增构建宏与缓存变量**（`BUILD_OPTIONS.md` 只在 §1.2 追加覆盖面）；Windows 顶层链接面补 `iphlpapi`。契约与裁决见网络栈提案 §16 第 48 项。
+
 ---
 
 ### 8.9 系统拖放（跨进程）
@@ -1628,15 +1779,15 @@ wasm 腿没有 fd 语义，`Engine` 维持 `NullEngine`（传输能力全 false�
   - **已接线范围**：`Win32`、`D3D11`、`X11` 与 `Wayland` 四类 `SurfaceKind` 的**双向**（`system_drag_in` 与 `system_drag_out` 均翻 true；Win32 拖出会话跑在库自管拖拽线程上，UI 线程帧循环在会话期间照常推进；X11 两个方向共用同一桥实例，拖出走 Xdnd 源侧消息序列，全程在 UI 线程帧循环内；Wayland 两个方向共用同一桥实例，拖出走 `wl_data_source` + `start_drag`，同样全程在 UI 线程帧循环内——Wayland 没有「库自管拖拽线程」的对应物，落点由合成器按指针下的表面决定，客户端只应答协议请求）。`Glfw` 恒 false（零 `#ifdef` 公共头无法按宿主 OS 分叉，且 GLFW 自持 drop 不承载四态协商）；macOS 两个方向共用同一桥实例（拖出走 `NSDraggingSource` + `beginDraggingSessionWithItems:event:source:`，全程在 UI 线程帧循环内；AppKit 没有公开的程序化中止 API，取消意图由 `system_drag::cancel()` 就地登记）。
   - **能力位只表机制存在**：`OleInitialize` 或 `RegisterDragDrop` 的运行期失败不翻转能力位（机制确实存在），按「会话建立失败」落 `system-drag-session-failed` 并如实日志——不谎报有通路、也不备一条语义更弱的备胎。X11 侧同口径：桥 `install` 失败（`XInternAtom` 不达 / 取不到属主）只 `reset()` 并如实日志，不翻能力位也不留半装状态。
   - **旧窄路径已移除**：原 `WM_DROPFILES`（`DragAcceptFiles` + HDROP 解析）是 OLE 的真子集（无四态 / 无格式清单 / 无动作协商），OLE 桥落地后一并移除、不留 fallback（git 历史即归档）。
-  - **载荷**：小载荷走同步通道（`DragPayload::from_bytes`）；首批可兑现 `CF_HDROP`（uri-list）与 `CF_UNICODETEXT`（文本）两档——`formats` 声明即能兑现，`CF_DIBV5` → PNG 待转码落地后再列入。大载荷异步通道（`read_async` + `pump_reads`）属后续批次，阈值常量已在折算层锚定。
+  - **载荷（跨进程一律延迟取数）**：跨进程拖入（资源管理器 / 其它进程拖来）走**延迟取数通道**——`Drop` 回调只登记「有哪些格式」（`supported_formats_of` 的 `QueryGetData` 结果），字节在 `system_drag::pump_reads()` 的排空阶段才经 `fetch` 从 `IDataObject` 产出；载荷句柄经 `DragPayload::from_lazy(formats, fetch)` 构造。数据对象由桥自持一份 COM 引用（RAII）：延迟取数跨帧，而 OLE 在 `Drop` 返回后即收回它给出的指针，不持引用就是排空期的 use-after-free。**为什么不分叉阈值**：折算层那枚 `AURORA_DRAG_SYNC_PAYLOAD_LIMIT`（64 KiB）的语义是「≤ 阈值走同步、> 阈值走异步」，而 Win32 上**无法在取数前预判载荷大小**——`QueryGetData` 只答「给不给得出」，`GlobalSize` 只能在 `GetData` 之后问（那时阻塞已经发生），故阈值在跨进程路径上不参与分叉，与其留一个永不生效的分支，不如让「一律延迟」成为唯一形态。本进程自拖放（落点即源、在途要约就是数据本身）仍走内存直取（`DragPayload::from_bytes`）——那份数据本来就在本进程，且经 `IDataObject::GetData` 取它会与拖拽线程互等。首批可兑现 `CF_HDROP`（uri-list）与 `CF_UNICODETEXT`（文本）两档——`formats` 声明即能兑现，`CF_DIBV5` → PNG 待转码落地后再列入。取不到一律按空口径交出（与同步路径既有的「跳过该格式」同口径）；把「广告了却取不出」升级为 `system-drag-read-failed` 是判据变更，另行安排。
   - **X11 侧的大载荷与格式名**：超过阈值（同一枚 `AURORA_DRAG_SYNC_PAYLOAD_LIMIT`，四平台共用单一真源）的载荷走 ICCCM `INCR`——拖入侧由请求方删属性启动、属主逐块替换、零长收尾，桥在 `PropertyNotify` 里逐块收齐后一次性兑现；拖出侧对称地在 `SelectionRequest` 里逐块发（块大小 16KB）。**阈值分叉对上层不可见**：两条路径收齐后都是同一个 `DragPayload`。目标名 ↔ MIME 的映射由折算层登记（`text/plain;charset=utf-8` / `UTF8_STRING` / `text/plain` → `text/plain`，`text/uri-list`，`image/png`；`STRING` / `TEXT` 不登记——它们是 latin1 的历史名，收进来无法无损解释）；拖入时只索取自己登记的那一个目标名，不对源侧清单逐项试取。
-  - **Wayland 侧的载荷与修饰态**：Wayland 没有 X11 selection 那样的「超限走 `INCR` 分块」分叉——`receive` 给的是管道写端，桥在本端以非阻塞读 + 逐帧 tick 收齐，大小载荷走同一条路径，`AURORA_DRAG_SYNC_PAYLOAD_LIMIT` 在 Wayland 侧只作同步便利读取的判据，不产生第二种传输形态。修饰态的真值源与另两平台都不同：协议**不随指针事件送修饰态**，故桥经 hooks 从 seat 的 xkb 缓存（`on_modifiers` 维护的 depressed / latched / locked / group → `ModifierKey`）取，与键盘 / 鼠标事件同一份缓存、同一折算入口——控件侧仍只读 `proposed`（`system_drag::proposed_action_for` 是唯一翻译点）。macOS 同款：`NSDraggingInfo` 不携带修饰态，桥经 hooks 从宿主键盘路径缓存取（骨架期无该缓存，hooks 如实报 `ModifierKey::None`）；`NSDraggingSource` 侧另以 `ignoreModifierKeysForDraggingSession:` 返回 YES 把修饰键让渡回库内唯一的翻译点，AppKit 不自行改写 operation。
+  - **Wayland 侧的载荷与修饰态**：Wayland 没有 X11 selection 那样的「超限走 `INCR` 分块」分叉——`receive` 给的是管道写端，桥在本端以非阻塞读 + 逐帧 tick 收齐，大小载荷走同一条路径，`AURORA_DRAG_SYNC_PAYLOAD_LIMIT` 在 Wayland 侧只作同步便利读取的判据，不产生第二种传输形态。修饰态的真值源与另两平台都不同：协议**不随指针事件送修饰态**，故桥经 hooks 从 seat 的 xkb 缓存（`on_modifiers` 维护的 depressed / latched / locked / group → `ModifierKey`）取，与键盘 / 鼠标事件同一份缓存、同一折算入口——控件侧仍只读 `proposed`（`system_drag::proposed_action_for` 是唯一翻译点）。macOS 同款：`NSDraggingInfo` 不携带修饰态，桥经 hooks 从宿主键盘路径缓存取（`MacOSSurface::Impl` 已把键盘事件的修饰位缓存经 hooks 传入）；`NSDraggingSource` 侧另以 `ignoreModifierKeysForDraggingSession:` 返回 YES 把修饰键让渡回库内唯一的翻译点，AppKit 不自行改写 operation。
 - **拖出（事件驱动执行模型）**：`system_drag::begin(DragOffer, on_end)` 是会话入口——**发起即返回**，不阻塞到会话结束。理由：本库是单线程 UI + 帧循环，阻塞期间不泵帧循环则终结回调无从派发、泵则引入嵌套循环的重入面；**UI 线程上的嵌套模态循环不取**（原「接线期设计项」就此收敛为「不引入」）——Win32 的 `DoDragDrop` 模态循环改跑在**库自管拖拽线程**（自持 `OleInitialize` 的自有 STA，与 UI 线程拖入桥的单元互不相干）上，UI 线程帧循环在会话期间照常泵平台消息，终态由拖拽线程经注册接缝登记、帧循环投递。返回值语义收窄为「会话是否发起成功」（`Ok` **不等于**落放成功）；最终结局与动作经 `on_end(SystemDragOutcome, DragAction)` 投递，由帧循环 `system_drag::pump_reads()` 兑现（插入位置与排空通则见 §3.1；宿主不排空 ⇒ 回调不到，不谎报）。`SystemDragOutcome{Succeeded, Cancelled, Rejected, Failed}` 与 `DragAction`「谈成了什么」分工：把三种非成功结局折叠成同一个 `DragAction::None` 时，控件层三条路径的回调序列逐字相同（都是 begin → end(None)），等于没补。控件侧入口 `Widget::begin_system_drag()`（取 `on_provide_drag()` 的要约）；`on_provide_drag()` 返回 `std::nullopt`（控件自称无要约）时不发起、也不派发终态；发起失败（无后端 / 能力位 false / 要约不合法 / 在途会话未结束）则直接派发 `on_system_drag_end(Failed, None)` 或在途拒绝报 `system-drag-session-failed`——「失败同样要收尾」：会话结束是控件清理拖出态的唯一时机。源侧回调族与四条结局序列的完整契约见 [`05-event-navigation.md`](05-event-navigation.md) §5.2。
 - **拖出后端判优与在途闸**：`begin` 的判优序为「inert 测试后端（安装期间）→ 真实后端 → `system-drag-not-supported`」——inert 安装期间由 inert 接管（只记录要约、不触达真实后端），未安装才落真实后端分支。进程级在途闸：会话登记即置位、终态投递即清除；闸内在途时第二次 `begin` 被拒（`system-drag-session-failed`，引擎侧在途标志为第二道闸，发起失败即回滚会话态、不悬挂后续 begin）。取消路径就地收口在途读取后**先**登记 `Cancelled`，拖拽线程迟到的终态登记被「首登记者赢」规则作废。
 - **会话取消**：`system_drag::cancel()` 调用时机不受限——事件驱动下任意时刻可调：会话外为 no-op、不影响后续会话；会话内取消，终态 `Cancelled` 仍经帧循环投递。同时**就地收口全部在途读取**（有数据即兑现数据，否则按 `system-drag-read-failed` 兑现），不悬挂。程序化取消与 Esc 语义共用同一条路径。
 - **非阻塞读取契约**：`DragPayload` 双通道——`bytes()` 一族同步读取（小载荷、无头测试、同步后端），`read_async(mime, callback)` 与 `SystemDropEvent::{text,image,bytes,files}_async` 非阻塞：登记在途项后立即返回，结果经 `pump_reads()` 帧内排空兑现、**不在平台消息泵内同步回调**（回调可能重建页面 / 触发重排，重入会把布局与绘制切到半途状态）。同一 const 句柄可被并发读取——每次调用各自独立登记、各自兑现一次，不共享结果、不互相取消；回调只被调用一次。源侧迟迟不给数据时按墙钟超时（生产路径固定时长，测试可调）兑现 `system-drag-read-failed`；会话收口时就地兑现，不悬挂。事件层便利读取与 `DragPayload` 直连两条路结果一致。
 - **错误口径**（`ERROR_CATALOG.md`，全表 140 → **146** 枚）：既有两枚——`system-drag-not-supported`（无机制 / 能力位为 false；`retryable = false`，机制缺失是稳态，重试无意义）与 `system-drag-session-failed`（协商破裂 / 源数据中断；稳态定稿，瞬态重试由调用方按 hint 自行决策）；新增四枚——`system-drag-read-failed`（读取失败 / 墙钟超时；`retryable = true`，瞬态——同一格式二次尝试可能成功）、`system-drag-decode-failed`（字节到达但按该 MIME 解码失败；`retryable = false`，源侧数据缺陷）、`system-drag-cancelled`（用户取消；`severity = info`——用户意图不是故障，不进错误分支）、`system-drag-move-rollback`（Move 落放后源侧删除失败；`retryable = true`——目标侧数据保持权威，稍后重试删除而非重新复制）。剪贴板侧同批新增 `clipboard-provider-failed` 与 `clipboard-listen-unsupported` 两枚（§8.2）。要约不合法（空 `formats` / 空 `provide`）是调用方参数问题，走 `general-invalid-argument`，与「平台没机制」分开报。**反馈要求**：读取失败、取消与被拒绝在 UI 上须给出非光标的可见反馈（颜色 / 高亮 / 文案），放置反馈不得只靠光标形态表达。
-- **测试注入**：`system_drag::install_test_backend()` / `reset_test_backend()` / `remove_test_backend()` 三件套（同 `Clipboard::install_test_backend` 范式，`AURORA_ENABLE_DEBUG && AURORA_ENABLE_TEST_HOOKS` 双宏裁切，Release 下零副作用）。安装后 `begin` 不触碰平台、登记在途会话（终态由 `emit_session_end(outcome, action)` 驱动，经下一拍 `pump_reads()` 投递；`Move` 时先调 `DragOffer::on_move_confirmed` 确认，失败则终态改写为 `Failed` 并上报 `system-drag-move-rollback`），使拖出分支在无头环境可测。载荷侧由 `DragPayload::from_bytes` 直接构造内存载荷，drop 态的往返不依赖平台。测试专用接缝另四件：`test_withhold_format(mime)`（扣留某格式的读取以覆盖墙钟超时）、`test_set_read_timeout(ms)`（生产路径固定、测试可调）、`test_in_drain_phase()`（断言回调在帧内排空兑现而非消息泵内同步回调）、`test_last_session_error()` / `test_last_offer()`（终态错误与要约字段往返断言）。
+- **测试注入**：`system_drag::install_test_backend()` / `reset_test_backend()` / `remove_test_backend()` 三件套（经内部接缝注入的范式，`AURORA_ENABLE_DEBUG && AURORA_ENABLE_TEST_HOOKS` 双宏裁切，Release 下零副作用）。安装后 `begin` 不触碰平台、登记在途会话（终态由 `emit_session_end(outcome, action)` 驱动，经下一拍 `pump_reads()` 投递；`Move` 时先调 `DragOffer::on_move_confirmed` 确认，失败则终态改写为 `Failed` 并上报 `system-drag-move-rollback`），使拖出分支在无头环境可测。载荷侧由 `DragPayload::from_bytes` 直接构造内存载荷，drop 态的往返不依赖平台。测试专用接缝另四件：`test_withhold_format(mime)`（扣留某格式的读取以覆盖墙钟超时）、`test_set_read_timeout(ms)`（生产路径固定、测试可调）、`test_in_drain_phase()`（断言回调在帧内排空兑现而非消息泵内同步回调）、`test_last_session_error()` / `test_last_offer()`（终态错误与要约字段往返断言）。
 - **拖入注入面（与上一条对称）**：`system_drag::ingress::dispatch(event, sink)`（`src/aurora/event/detail/system_drag_ingress.h`，**内部头**、不进 `include/`）是宿主投拖入事件的唯一入口——生产路径也走它，返回派发器写定的 `allowed`；槽由调用方持有而非全局登记（多窗口下进程级单槽会让后登记者覆盖先登记者）。配套的 inert 拖入后端 `install_test_drag_in()` / `reset_test_drag_in()` / `remove_test_drag_in()` / `test_drag_in_active()` 同受 `AURORA_ENABLE_DEBUG && AURORA_ENABLE_TEST_HOOKS` 双宏裁切：接管期间 `dispatch` **抑制真实派发**（返回 `None`、槽不被调用），于是测试能完整接管拖入链而不被真机后端叠加干扰；卸载即恢复。该面不新增公共 API 符号（`aurora_api.json` 零差异），使用方只有平台桥与 `tests/`（二者都能 include src 内部头，同 `utest_ime_composition` 覆盖 `ime_composition` 的先例）。
 - **热路径与无障碍**：`Over` 态按指针采样频率到达，accept 查询须常量级、禁在拖放路径触发重布局；拖放不是唯一路径，粘贴 / 文件对话框等非拖拽入口在 UI 上须可达，放置反馈不得只靠光标形态。可接收拖放的控件须同时提供 `system_drag_alternative_path()`（可达性契约见 [`05-event-navigation.md`](05-event-navigation.md) §5.2）。
 
@@ -1650,13 +1801,96 @@ wasm 腿没有 fd 语义，`Engine` 维持 `NullEngine`（传输能力全 false�
 
 - `instance()`（进程级单例，懒构造）、`AURORA_MAX_ENTRIES = 16`（容量上限，声明处可见；**无运行期 setter**，避免「设置与容量不一致」的第二真源）、`AURORA_GROUP_NAME = "recent_documents"`（持久化分组名）。
 - 会话内读写：`add(path)`（同路径去重并置顶、超容量淘汰最旧；空路径 no-op）、`list()`（新 → 旧序值拷贝）、`clear()`（清内存并打墓碑）、`size()`、`clear_all()`（测试与重置用）。
+- OS 投影读写：`project_to_os()`（把当前列表折成投影计划后整体投递给 OS；空计划是成功的 no-op，幂等由平台侧记录去重）、`clear_os_projection()`（撤销本进程投影记录内的条目）。两者都**只**动 OS 侧，不改内存列表、不写 `Preferences`。
 - **路径口径：只做字符串级存取**——不校验文件是否存在、不做路径规范化（`..` / 相对路径 / 大小写差异一律按原样字符串比较）。理由：本类在主线程且不触碰文件系统，读存在性会引入不可测的 IO 副作用与竞态；「最近文档里留着已删文件要不要显示」是应用侧决策。
 - **持久化信封**：分组下单键 JSON 数组 `{"documents":[...]}`。与 `ScrollStorage` 的「每键一条目」是**有意分歧**：最近文档是有序集合、顺序即语义，用索引当键会把顺序编码进键名，墓碑与重排逻辑都不必要地复杂。`sync()` 只写 `Preferences` 内存并通知订阅者，**落盘由 `App` 的 `flush()` 决定**（与 `ScrollStorage` 同口径）；读取懒回读，不做全量预热。
 - **宽容降级**：读缺失或信封损坏（值非数组、元素非字符串）得到空列表，不抛错、不清除用户数据。
 - **无内置变更通知**：本类只管存取，菜单刷新由调用方在 `add` / `clear` 后自行驱动（同 `ScrollStorage` 口径，避免引入第二套通知机制）。
-- **OS 级投影不在本批**：Windows JumpList / macOS `NSDocumentController` 消费 `list()`，Linux 无 OS 级机制（能力位申报同属后续批次）；落地前应用内列表已全平台一致。
+- **OS 投影是显式动作**：`add` / `clear` **不**触碰 OS 侧，推送只由 `project_to_os()` 发起、撤销只由 `clear_os_projection()` 发起（两者均返回 `Result<void>`）。理由：投影改的是 OS 状态（可能被系统审计或同步），而撤销一条已推给 OS 的记录比不推麻烦得多——文档「打开成功」才该进最近列表，而打开失败也常常已经走过 `add` 的调用点。时机归应用。
+- **投影计划（`src/aurora/window/detail/recent_documents_translate.h`，零平台头）**：`build_projection_plan(list, max_entries)` 把内存列表折成平台无关的投递清单——去空串、按 `max_entries` **从尾部（最旧）截断**（新→旧序下保住最近的那几条）、按首次出现去重、空列表得空计划；**不做路径规范化**（与上方路径口径同源：相对路径与不存在的路径原样进计划，由应用在 `add` 前自行决定）。折算层另持进程级**后端单槽**（`ProjectionBackend{max_entries, project, clear}` + `register` / `unregister` / `projection_backend()`），槽的登记与注销由平台桥负责，折算层不含任何 OS 调用，因此计划规则可无头单测。
+- **Win32 桥（`src/aurora/window/detail/win32_recent_documents.h`，内部头）**：`SHAddToRecentDocs(SHARD_PATHW, path)` 逐条投递，资源管理器「快速访问 → 最近使用」与任务栏跳转列表同源。三条如实申报的平台事实：① 该 API 返回 `void`、无回执（`GetLastError` 也不是它的约定失败通道），故「成功」的确切含义是**已投递给 OS**，不等于 OS 已落记录；② 快捷方式的实际写出**晚于**返回（实测毫秒级迟到），所以任何「调用后立即读 OS」的判据都要有界轮询，撤销侧也据此**只销「确认删掉了」的账**、其余留账待下次撤销认领；③ 用户在系统设置里关掉「在跳转列表中显示最近打开的项目」（`HKCU\...\Explorer\Advanced\Start_TrackDocs=0`）时该 API **静默无操作**，桥读这条注册表作为可证旁证、如实返回 `platform-unavailable`，不谎报成功。可证的失败只有三处：UTF-8→UTF-16 转换失败、用户 Recent 目录取不到 / 枚举失败、上述追踪开关关闭。
+- **撤销没有 OS API**：OS 侧最近文档是**用户级全局集合**，既无「清空」也无逐条撤销标志。落地形态是桥维护一份**本进程投影记录**，撤销时枚举 `%APPDATA%` 下的 `Microsoft\Windows\Recent\*.lnk`、经 `IShellLinkW` 解析每条的真实目标、只删目标命中记录的条目（按大小写不敏感比较，Windows 路径本不敏感），并 `SHChangeNotify` 通知壳刷新。两条边界：同一文件若也被别的应用打开过，那条快捷方式属**共享记录**，撤销对它同样生效；注册表侧按扩展名的 MRU（`HKCU\...\Explorer\RecentDocs`）是用户全局的二进制 MRU，改写需自备 `MRUListEx` 重排、写坏会污染别的应用的记录，**本库不碰**。
+- **macOS 桥（`src/aurora/window/detail/macos_recent_documents.h`，内部头）**：`NSDocumentController` 的 `noteNewRecentDocumentURL:` 逐条投递——macOS 上「最近打开」的一等入口，Dock 的「最近使用的文稿」与应用内系统菜单同源。四条如实申报的平台事实：① 投递**没有回执**（返回 void），成功的含义是「已交给 NSDocumentController」，不是「OS 已落盘」；② `clearRecentDocuments:` 清的是**整个应用**的最近文档集合（AppKit 无逐条移除 API），作用域比 Win32 桥「只删本进程记账的 .lnk」更宽；③ 条目上限取 `NSRecentDocumentsLimit` 的系统默认 10，小于本库 store 的 16，由折算层按新 → 旧截断；④ `NSDocumentController` 只对**已签名的 `.app` 包**真正记录，裸可执行文件调用成功但集合恒空——真机探针因此封装为 ad-hoc 签名的 `.app`，裸形态按环境不可用申报。可证的失败只有 UTF-8 → `NSString`/`NSURL` 形态转换失败与 controller 不可用。
+- **失败隔离**：投影 / 撤销的失败**不回滚、不改动应用内列表**，也不触发 `Preferences` 写入——`list()` 在投影前后同源同值（判据见 `utest_recent_documents_translate` 与真机探针）。能力位缺位的平台返回 `recent-documents-projection-unsupported`（`retryable = false`），应用内一致列表照常可用；Linux 三形态因此保持「应用内一致、OS 侧缺位」形态（macOS 桥已落地，不在此列）。
+- **宿主持有**：桥以引用计数守卫（`Win32RecentDocumentsBridge`）由 `Win32Host::Impl` 持有，销毁期先散守卫再放窗口（与输入法桥 / 拖放桥同款纪律）；通路本身与 `HWND` 无关，故无宿主进程（纯命令行 / 无窗应用）由 `project_to_os()` 侧的按需自举取得同一条通路——「先记文档、后建窗口」同样能投影。macOS 同款：`MacOSRecentDocumentsBridge` 由 `MacOSSurface::Impl` 持有，无窗口宿主由 `macos_recent_documents_ensure_registered()` 自举。
 
-回归：`utest_recent_documents`（去重置顶 / 容量淘汰 / 顺序 / 持久化往返 / 空口径 / 损坏信封降级）。
+回归：`utest_recent_documents`（去重置顶 / 容量淘汰 / 顺序 / 持久化往返 / 空口径 / 损坏信封降级）+ `utest_recent_documents_translate`（投影计划四规则、能力位矩阵（含 macOS 为 true）、显式性、后端失败隔离、无后端时报 `projection-unsupported`）。真机：`aurora_verify_win32_recent_documents`（独立取证「投影后 OS 出现条目 / 重复投影幂等 / 撤销后消失 / 撤销不碰 store」，见 [`../BUILD_OPTIONS.md`](../BUILD_OPTIONS.md) §2.4）与 `aurora_verify_macos_recent_documents`（同一组判据的 macOS 形态，封装为 ad-hoc 签名 `.app`，经 `recentDocumentURLs` 独立取证）。
+
+---
+
+### 8.11 文档输出（`app/document_output.h`）
+
+`PageMargins` / `PageSpec` / `page_content_raster()` / `export_pdf()` 是跨平台、无 OS 依赖的文档合成层：**每页先按纸张几何用软件 `Painter` 光栅化，再作为图像嵌入 PDF**。它与 §8.12 的打印会话共用同一份页面描述，但不依赖任何平台桥——任何能把文件写出去的环境都能导出（含无头 CI）。
+
+五条约束是硬条款，任一条含糊都会产出「看起来对、形体错位」的 PDF：
+
+- **页边长用物理单位，不用 dp**：`width_mm` / `height_mm` / `PageMargins.*_mm` 一律毫米，`dpi` 只决定栅格密度。A4 210×297mm 折到 96 dpi 是 793.7 dp，**整数 dp 表达不了**；写成 `size_dp` 等于先在纸张几何上损失约 0.4% 再一路传到每页像素。内容侧仍走 dp 绘制路径，由本层把 dp 映射到页内容区的物理像素。
+- **物理像素数以 Painter 的读回值为唯一真源**：`page_content_raster()` 走 `set_scale(dpi / 96.0F)` → `begin(内容区 dp)` → 读 `width()` / `height()`（`Painter` 按 dp × scale 四舍五入）。本层不另算一套 `ceil` / `round`——两套规则会差一个像素，而这种差错在肉眼走查里看不出来。
+- **先合成到不透明底色再嵌入**：`Painter` 帧缓冲是 RGBA8 直色，未绘制区域是透明黑，而 `DeviceRGB` 图像 XObject 不带 alpha 通道；直接嵌等于丢掉 alpha，未覆盖区域会印成黑块。`export_pdf()` 在回调之前先铺 `PageSpec::background`（默认纸白），回调之后再合成一次——**进入写出器的位图 alpha 恒为 255**，这一条由单测逐像素断言，不是纸面承诺。
+- **多页落在签名上**：`export_pdf(path, spec, page_count, draw)` 收「页数 + 逐页绘制回调」；回调每收到一枚已 `begin()` 的内容区 `Painter` 就画一页，页边界由调用方决定。只收一棵树的 `export_pdf(scene, spec)` 形态与「多页边界由调用方决定」自相矛盾，故不提供。
+- **不复用既有离屏通道**：`render::offscreen` 的 `render_to_image` 明写「逻辑像素 = 设备像素」、无 device pixel ratio 形参、缩放恒为 1，出不了 600 dpi 的页；`Application::render_to_png` / `Scene::render_to_png` 是**屏幕密度快照**，不是文档路径。两条通道不混为一谈。
+
+PDF 写出器（`src/aurora/render/detail/pdf_writer.h`，内部头）产 PDF 1.4：Catalog / Pages / Page / 内容流 / 图像 XObject（`/DeviceRGB`、8 bpc、`/Filter /FlateDecode`）+ xref 表与 trailer，输出**确定性**（同输入逐字节一致）。内容流只做一次 `cm` + `/Im0 Do`（垂直翻转放在矩阵里），**没有文本操作符**——这是栅格入 PDF 的机械证据，单测遍历内容流断言无 `BT` / `ET` / `Tj` / `TJ` / `Tf`，后续提案不得把它顺手宣称成矢量能力。`FlateDecode` 按 ISO 32000 是 **zlib 包装**（RFC 1950 两字节头 + Adler-32 尾），由写出器自带的 stored DEFLATE 块（RFC 1951 BTYPE=00）编码器产出，不链 zlib；压缩率不是本通道的目标（真源是帧缓冲）。
+
+三条局限如实申报：**文本不可选择、不可搜索**（页面里只有图像 XObject，没有字形与 ToUnicode 映射）；**放大会失真**（位图按页 DPI 采样，超出即插值放大）；**文件体积随页数线性膨胀**（每页一幅独立图像）。要做矢量文本须给 `Painter` 增加记录式后端，并把 DisplayList 语义映射到 PDF 操作集（渐变、bidi 重排后的字形 advance、`.notdef` 回退、CIDFontToWidth 与 ToUnicode CMap），代价远超「打印出来是对的」这个主诉求，本批如实申报局限，不暗示超越实际的能力。
+
+**为什么不设能力位**：文档输出是纯库内能力，不依赖任何 OS 机制；设位会污染「能力位 = OS 机制存在性」这条既有口径。它缺依赖时走既有的 `io-image-encode-failed`，目标文件写不出去走 `io-file-not-found`，参数非法（页尺寸 / 边距 / DPI / 页数 / 页尺寸漂移）走 `general-invalid-argument`，不新开错误域。
+
+回归：`utest_document_output`（页面折算三组：96 dpi / 600 dpi / A4 内容区在 96 dpi 下非整数；PDF 头标识与版本、对象与 xref 偏移、`FlateDecode` 流解压回读等于输入 RGBA8、无文本操作符、逐页 alpha 恒 255、逐页回调升序）。
+
+### 8.12 打印会话（`app/document_output.h`）
+
+`print_targets()` 返回 `Result<std::vector<PrintTarget>>`（`id` / `name` / `is_default`）；`PrintSession` 是移动语义的 RAII 会话：`open(target_id, spec)` → 逐页 `submit_page(const Image &)` → `finish()` / `abort()`，`is_open()` 可查。
+
+- **空集合不是错误**：机器上没有任何打印机时 `print_targets()` 返回**空列表配 `Ok`**——上层据此弹「没有可用打印机」；`print-session-unsupported` 只在机制缺位时出现，两者不互相顶替。
+- **页尺寸与不透明度**：`submit_page` 要求位图尺寸等于 `page_content_raster(spec)` 的读回值、像素为 RGBA8；提交前自动合成到 `PageSpec::background`，后端只会收到不透明位图。`finish()` 幂等（已结束 / 空会话为空操作），`abort()` 与析构都会收口未完成会话；提交失败不改会话状态，调用方可继续提交或中止。
+- **打印面板一律自绘**：本库是 UI 库，目标选择与页面预览由应用用 `Painter` 自绘（`print_targets()` 提供候选、`export_pdf` 同款页面描述提供预览），**不弹系统打印对话框**。理由有二：避免为 Linux 引入 GTK 依赖（本库迄今零 GTK 依赖），且保证三平台观感一致。macOS 侧显式 `setShowsPrintPanel:NO` / `setShowsProgressPanel:NO`，不是漏了系统面板。
+- **三平台落法不对称，并如实说出来**：Windows 用打印后台处理程序（`EnumPrintersW(PRINTER_ENUM_LOCAL | PRINTER_ENUM_CONNECTIONS)` 枚举、`GetDefaultPrinterW` 标默认、`CreateDCW("WINSPOOL", ...)` + `StartDocW` / `StartPage` / 位图传输 / `EndPage` / `EndDocW` 提交页）；macOS 用 AppKit（`NSPrinter.printerNames`、`NSPrinter` 按名取目标、`NSPrintInfo` + 自绘 `NSView` 的 `NSPrintOperation`）；**Linux 不声称原生打印会话**——本库不引入 libcups（第三方形态全是 vendored 源码，系统动态库是第一次开的口子，为此换来一段打印会话这笔账本批不认），能力位如实为 `false`，替代路径是 `export_pdf()` 后交给默认处理程序。**未决项已收口**：本批不引 CUPS；若日后引入，须先在本文与 [`../BUILD_OPTIONS.md`](../BUILD_OPTIONS.md) 登记 CMake 变量与能力位翻位口径，不得先翻位再找补。
+- **错误口径**：机制缺位 `print-session-unsupported`（`kind = unsupported`，`retryable = false`）；机制在但这一回没成 `print-session-failed`（`kind = io`，`retryable = false`，detail 点名打印机 / 后台处理程序 / 页面被拒）。枚举失败与「没有打印机」分开报。
+
+回归：`utest_document_output`（空系统为 `Ok(空)`、目标清单透传、无后端报 `unsupported`、页尺寸不符与参数非法被拒、提交前合成不透明）。真机：`aurora_verify_document_output`（导出 PDF 并复核结构、枚举目标、打开会话提交页；见 [`../BUILD_OPTIONS.md`](../BUILD_OPTIONS.md) §2.4）。
+
+### 8.13 URL 方案注册与单实例转交（`app/url_scheme.h`、`app/single_instance.h`）
+
+`register_url_scheme(scheme, display_name, identity)` / `unregister_url_scheme(scheme, identity)` / `is_url_scheme_registered(scheme)` / `registered_url_scheme_owner(scheme)`。折算层（`src/aurora/app/detail/shell_integration_translate.h`，零平台头）负责 RFC 3986 方案文法（`ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )`）与保留方案拒收（`http` / `https` / `file` / `mailto` / `ftp` / `ftps` / `tel` / `sms` / `data` / `javascript` / `about` / `ws` / `wss` / `ssh` / `urn` / `ldap` / `gopher` / `news`），三平台桥共用同一份判定；文法非法与保留方案都落 `general-invalid-argument`，但 message 分别点名「不符文法」与「属保留方案」，而不是同一句笼统失败。
+
+- **注册落点全为用户级**：Windows 写 `HKCU\Software\Classes\<scheme>`（`URL Protocol` 标记 + `DefaultIcon` + `shell\open\command` 的 `"<exe>" "%1"`），不碰需要提权的 `HKLM`；Linux 写 `$XDG_DATA_HOME/applications/aurora-url-<scheme>.desktop`（`MimeType=x-scheme-handler/<scheme>`）并在 `$XDG_CONFIG_HOME/mimeapps.list` 的 `[Default Applications]` 登记 `x-scheme-handler/<scheme>=<desktop id>`——方案处理器按定义就是「该方案唯一的处理器」，这条与 §8.14 文件关联的「不抢默认」边界不冲突；macOS 的 `CFBundleURLTypes` 是**包内静态声明**，运行期只在已声明时刷新 Launch Services 登记，不在 `.app` 包内或未声明时返回 `url-scheme-failed` 并点名 `CFBundleURLTypes`（能力位仍 true——机制在、桥已接）。
+- **撤销先验归属**：`unregister_url_scheme` 先查当前归属——归属为空视为**幂等成功**；归属是别的应用则**一个字节都不改**并返回 `url-scheme-failed`、message 带上对方的命令模板 / desktop id。「撤销」不得越过别人的登记。macOS 没有按方案撤销的公开 API，故撤销在验明归属后如实返回 `url-scheme-unsupported` 并提示从 `CFBundleURLTypes` 删条目重建包。
+- **单实例是深链的另一半**：只补注册不补转交，用户点链接的观感就是「闪一个新的空窗口」。`SingleInstance::instance().acquire(identity)` 返回 `Primary` / `Forwarded` / `FallbackNewInstance`；`set_on_uri_received(cb)` 供首实例在存续期内接收后续唤起（重复登记替换旧回调），`poll()` 排空平台通道（**Linux 必须由应用每帧调用**；Windows / macOS 由消息泵推进、此函数为空操作），`release()` 幂等，`is_primary()` / `instance_key()` 可查。未登记回调时收到的 URI 留在队列里、不丢。
+- **交付必须有人负责后果**：`Forwarded` 的语义是「已送达并确认」。Windows 用 `Local\AuroraInstance_<key>` 有名互斥量判首实例、隐藏消息窗上的 `WM_COPYDATA` 送 URI 并等 `Local\AuroraInstanceAck_<key>` 事件（3 秒超时）；Linux 把 URI 写进首实例的用户私有 Unix 套接字（4 字节长度前缀 + URI）并逐条等 `'A'` 确认。确认超时 / 对端已退出 / 找不到首实例窗口时**回落为 `FallbackNewInstance`**，「第二实例默默退出」这条路径被禁——它表现为「点了链接什么都没发生」。macOS 由 Launch Services 保证同一 `.app` 只有一个运行实例、唤起经 `kAEGetURL` 直接投递到本进程，故此平台 `acquire` 恒报 `Primary`（没有第二个进程可转交，「已转发」在这一平台不存在）。
+- **本机通道要挡住同机其他用户**：Linux 的目录取 `$XDG_RUNTIME_DIR`（缺失时退回 `$HOME/.cache/aurora/runtime`），以 `0700` 创建；锁文件 `flock`、套接字 `chmod 0600`，服务端还会用 `SO_PEERCRED` 复核对端 uid——**不得用 `/tmp` 下的可预测名字**（否则同机其他用户可以预先占住该名字做拒绝服务，或抢先监听那个套接字接收本应用的 URI）。Windows 有名互斥量落在 `Local\` 命名空间、macOS 唤起通道由 OS 兜底，无需额外处理；这一不对称在头注释里写明。
+- **转交来的 URI 是不可信输入**：本层只从命令行参数（不含 argv[0]）里提取第一条合法 URI（方案文法合法、长度 ≥ 2 以避开 Windows 盘符 `C:`、`:` 后不是反斜杠），**只交给既有的 `Navigator::open_uri` 走路由注册表**；命中不到路由的行为沿用导航层现状（本层不替它兜底），也**不把 URI 拼进任何待执行的命令行**。
+- **实例键必须稳定**：`derive_instance_key(executable_path)` 规范化分隔符、词法消解 `.` / `..`、Windows / macOS 大小写折叠、存在时解析符号链接，然后取 FNV-1a 64 的 16 位十六进制；**不混入版本号、mtime 或命令行内容**——键一变，互斥量与锁文件就认不出自己，表现为「每次都当成首个实例」。`AppIdentity.instance_key` 显式给出时以调用方值为准（可用于同一可执行文件按配置区分实例）。
+
+回归：`utest_url_scheme`（文法通过 / 数字开头 / 下划线 / 冒号被拒；保留方案点名拒因；注册 / 归属 / 幂等撤销；异主撤销零改动且报出对方；无后端 `unsupported`）+ `utest_single_instance`（三种结局互不顶替、首实例命令行 URI 入队、回调替换、`poll` 按到达序交付、实例键稳定性与规范化、通道故障不改状态、`release` / `clear_all` 幂等）+ `utest_shell_integration_translate`（方案文法与保留名单、命令行 URI 提取、`Exec=` 引用、桌面条目与 INI 解析）。真机：`aurora_verify_url_scheme`（注册后系统查询承认归属、异主撤销被拒且原登记不变、撤下后归属回空、二次撤销幂等）。
+
+### 8.14 文件关联（`app/file_association.h`）
+
+`associated_application(extension)`（当前实际生效的归属：`application` + `source`）、`register_file_association(declaration, identity)`（声明本应用可处理某扩展名与 MIME 类型）、`unregister_file_association(extension, identity)`（撤销本应用的声明）。
+
+- **立场是「查询 + 声明候选」，不是「抢占默认」**。默认处理程序属用户偏好且抢占不可逆，是越界动作；这也与本仓库既有的同源判例一致（`tools/servers/aurora_mcp.cpp` 明确拒绝写入自启动目录以防 confused deputy——「写到 OS 会自动生效的位置」是需要显式授权的事，不是库该代劳的事）。具体到各平台：
+  - **Windows**：只写**用户级** `HKCU`——ProgID（`HKCU\Software\Classes\Aurora.<stem>.<ext>`，含 `shell\open\command` 与 `DefaultIcon`）、应用级 `HKCU\Software\AuroraApplications\<stem>\Capabilities\FileAssociations` 与 `HKCU\Software\RegisteredApplications` 的登记值，写完调 `SHChangeNotify(SHCNE_ASSOCCHANGED)` 刷新壳缓存。**只写 ProgID 不行**：Windows 自 Win8 起不允许以编程方式设置默认处理程序，且不登记 Capabilities 时本应用根本不会出现在「打开方式」列表里——只写 ProgID 的实施会得到「注册成功但列表里没有我」的假阴性。
+  - **macOS**：由 UTI + Launch Services 查询（`LSCopyDefaultApplicationURLForContentType`，`source = "launch-services"`）；声明侧要求 `CFBundleDocumentTypes` 已有静态条目，运行期只能刷新 Launch Services 登记（`LSRegisterURL`），不在 `.app` 包内或未声明时返回 `file-association-failed` 并点名 `CFBundleDocumentTypes`；撤销同理如实报「从包内删条目重建」（没有运行期撤销 API）。
+  - **Linux**：归属取决于桌面条目数据库——查询读 `$XDG_CONFIG_HOME/mimeapps.list` 的 `[Default Applications]`（`source = "mimeapps.list"`）；声明写 `$XDG_DATA_HOME/applications/aurora-file-<stem>.desktop`（`MimeType=` 合入）并在 `mimeapps.list` 的 **`[Added Associations]`（候选）**登记，**绝不写 `[Default Applications]`**（默认归用户）；撤销只从 `[Added Associations]` 摘掉本应用并把本应用桌面条目的 `MimeType` 减掉该项，别人的条目零改动。
+- **查询只答「当前实际生效的归属」，并在 `source` 里点明来源**（`windows-assocquery` / `launch-services` / `mimeapps.list`）。系统默认与用户另层偏好（Windows 的用户选择、macOS 的历史关联列表）不混成一次查询——混了就必须回答「谁覆盖谁」，而那在不同 Windows 版本上还不是同一个答案。**空集合不是错误**：没有关联时返回空 `AssociationInfo` 配 `Ok`。
+- **词汇表不另起炉灶**：`include/aurora/app/mime_types.h` 是剪贴板与系统拖放共用的 MIME 唯一真源；本层只补「扩展名 → MIME」这一方向（`mime_type_for_extension`，`constexpr`），未登记扩展名可让调用方在声明里自带 MIME。两张表若各自演化，同一扩展名迟早查出两个 MIME。
+- **扩展名规范化**（折算层）：去掉一个前导点、ASCII 小写；空串、孤立点、含路径分隔符或内嵌点一律拒收（`general-invalid-argument` 并点名原值）。`.PNG` / `png` / `PNG` 折叠为同一键。
+- **撤销先验归属**：本应用没声明过该扩展名 → 幂等成功；别的应用声明过 → 本函数只摘本应用的登记，不动别人的。缺失可执行路径时无法拼出命令模板 / 无法验归属，直接 `general-invalid-argument`。
+
+错误：能力缺位 `file-association-unsupported`；机制在但没落地 `file-association-failed`（detail 点名注册表 / Launch Services / 目录不可写）。两者都 `retryable = false`。
+
+回归：`utest_file_association`（规范化折叠与非法拒收、MIME 方向映射与显式覆盖、缺身份拒收、桥原样透传、无后端 `unsupported`、撤销验归属）+ `utest_shell_integration_translate`。真机：`aurora_verify_file_association`（声明后可查、撤销后回基线、`[Default Applications]` / 系统默认处理程序逐字节不变、探针自建的应用级登记收尾删除）。
+
+### 8.15 登录项（`app/run_at_login.h`）
+
+`RunAtLoginStatus{Enabled, Disabled, Unsupported}`、`RunAtLoginState{status, detail}`、`run_at_login(identity)` 与 `set_run_at_login(bool, identity)`。
+
+- **三态不能压成布尔**：「OS 侧此刻没让我自启」至少有四种成因——从未设置、用户手动禁用、该平台无此机制、查询本身失败。布尔会把后三种并成同一个 `false`，应用就分不清「我调一下就能开」和「这台机器不可能」。
+- **`Disabled` 是「机制在、条目在 / 未设，但此刻不生效」**，与 `Unsupported` 互不顶替：用户手工禁用时条目**仍然存在且带禁用标记**，查询应报 `Disabled`（Windows 的 `StartupApproved\Run` 首字节 bit0 为 0 即属此形态，detail 点明「在 Windows 启动设置里被禁用」），写入也不该把它当成「没设置过」而抹掉。`Unsupported` 必带 detail 点名成因；`Enabled` 的 detail 为空；`Disabled` 可按平台附一句成因。
+- **平台落法**：Windows 写 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`（值名为可执行文件 stem，命令模板是「exe + 逐参数安全引用的命令行快照」）——**不用 `HKLM`**（需要提权，属动用户机器的越界动作）；显式开启会清掉 `StartupApproved\Run` 里的禁用记录（否则 Run 值写了也不生效），关闭只删 Run 值、**保留** StartupApproved 记录。Linux 写 `$XDG_CONFIG_HOME/autostart/aurora-autostart-<stem>.desktop`，启用与禁用**表达在同一个文件里的开关键**（`Hidden=`，若原文件带 `X-GNOME-Autostart-enabled` 则同向同步），**不做「删文件当禁用」**——删掉会同时抹掉用户手工禁用留下的那条记录；两态的差异只在开关键，其余行原样保留。macOS 经 `SMAppService`（macOS 13+，要求 bundle）；沙箱形态如实报 `Unsupported` 并点名原因；`RequiresApproval`（已登记但用户尚未在系统设置里放行）按 `Disabled` 报——OS 此刻确实不会启动本应用。
+- **身份前提**：`set_run_at_login` 要求 `AppIdentity` 至少有可执行路径或 bundle identifier；都缺时 `general-invalid-argument`（不能盲写一个没有命令的条目）。机制缺位 `run-at-login-unsupported`，机制在但这一回没写进去 `run-at-login-failed`（detail 点名注册表被拒 / 登录项服务拒绝 / 自动启动目录不可写）。
+
+回归：`utest_run_at_login`（三态互不顶替、`Unsupported` 必带 detail、查询与写入原样走桥、空身份拒写、平台失败透传、无桥如实 `Unsupported`）+ `utest_shell_integration_translate`（桌面条目开关键翻转只改键、不删文件）。真机：`aurora_verify_run_at_login`（启用后 OS 侧出现、用户禁用形态报 `Disabled` 且条目仍在、关闭后删除且不碰其它条目、逐值还原基线——Windows 侧另核对命令行快照里带空格的参数仍被正确引用）。
 
 ---
 
@@ -1664,7 +1898,7 @@ wasm 腿没有 fd 语义，`Engine` 维持 `NullEngine`（传输能力全 false�
 
 ### 9.1 Preferences
 
-`Preferences`（`preferences/preferences.h`）是键值持久化门面，类型化读写并带响应式绑定。
+`Preferences`（`preferences/preferences.h`）是键值持久化门面：类型化读写，`watch<T>` 返回只读句柄 `ReadOnlyState<T>`。
 
 | 成员 | 说明 |
 |:---|:---|
@@ -1677,9 +1911,16 @@ wasm 腿没有 fd 语义，`Engine` 维持 `NullEngine`（传输能力全 false�
 | `group(name) -> Group` | 命名空间分组（`:181`） |
 | `flush()` / `reload()` | 写盘 / 重载，返回 `Result<void>`（`:210` / `:213`） |
 | `keys()` / `contains(key)` / `remove(key)` / `clear()` | 键集合操作（`:218`–`:227`） |
-| `get<T>(key, fallback)` / `watch<T>(...)` / `binding<T>(...)` | 类型化读取；`watch` 返回订阅，`binding` 返回 `Binding<T>` |
+| `get<T>(key, fallback)` / `set(key, value)` | 类型化读写；`get` 在键缺失或类型不符时回退 `fallback`，`set` 只更新内存并推送订阅者 |
+| `watch<T>(key, fallback)` | 惰性创建并缓存该键的只读句柄 `ReadOnlyState<T>`；初始值为当前存储值或 `fallback`，此后 `set` / `reload` 自动推送 |
 
 未绑定文件时为**内存模式**，写盘返回 `prefs-not-persistent` 错误（slug 见 [`ERROR_CATALOG.md`](../ERROR_CATALOG.md)）。
+
+**`watch` 是只读通道，不是双向绑定。** 同键同类型重复调用返回**同一来源**（多处 watch 共享推送）；同键换类型（`watch<int>` → `watch<std::string>`）则重建来源，旧句柄停在旧类型、不再收到推送。推送方向只有一个：`set` / `remove` / `clear` / `reload` 改存储后写回句柄，句柄本身没有写入口——修改配置只走这些命令，落盘仍须 `flush()`。表单草稿由应用自己的 `State` 保存，提交时显式 `set(key, value)` 再 `flush()`；本类不提供读写双向绑定。
+
+两条交付口径：① 推送在**写入调用方线程**上、`Preferences` 互斥锁**外**同步发生——订阅回调里可以安全地再调 `get` / `set`，不会自锁；② 推送值按该句柄注册时的 `T` 宽容读——存储侧换成不兼容类型或键被删除时，句柄收到的是注册时的 `fallback`（不抛错、不清存储），故「删除 + 旧句柄」表现为回退默认值而非句柄失效。
+
+`flush()` 把内存快照写盘（写临时文件 + 原子 `rename`，期间持 `<file>.lock` 跨进程文件锁）；`reload()` 从文件重读、按「版本化 LWW + 墓碑 + 全局清空纪元」合并后推送到全部已订阅句柄。两者都返回 `Result<void>`，内存模式下返回错误；`set` 从不隐式写穿文件。
 
 ### 9.2 Storage
 
@@ -1774,13 +2015,13 @@ wasm 腿没有 fd 语义，`Engine` 维持 `NullEngine`（传输能力全 false�
 
 | 能力 | 说明 |
 |:---|:---|
-| `CaptureSource{ Framebuffer, OnScreenWindow }` | 截图源。`Framebuffer` = 软件帧缓冲（全后端通用、确定性）；`OnScreenWindow` = 真实屏幕窗口（含 OS 装饰，Wayland / Headless 不支持） |
+| `CaptureSource{ Framebuffer, OnScreenWindow }` | 截图源。`Framebuffer` = 软件帧缓冲（全后端通用、确定性）；`OnScreenWindow` = 真实屏幕窗口（含 OS 装饰，尽力；macOS 原生后端取内容视图、不含标题栏；Wayland / Headless 不支持） |
 | `capture(Surface&, path, src = Framebuffer) -> Result<bool>` | 自动建父目录后转发 `Surface::save_snapshot` 或 `Surface::capture_window` |
 | `set_output_directory(dir)` / `output_directory()` / `resolve_output_path(path)` | 输出目录 API（无调试内部依赖，始终可用）；默认 `current_path()/aurora_debug` |
 | `feature_flags() -> FeatureFlags` / `feature_flags_json() -> Json` | 编译期 feature 宏开关运行时查询（始终可用，编译期常量快照）。强类型结构体字段 + JSON 导出（键 = 完整宏名）。C++ 侧宏镜像单点收口于 `src/aurora/debug/feature_flags.cpp`，应用代码零 `#ifdef`（需求 SPEC.PLATFORM.ZERO-IFDEF.001） |
-| `surface_state(const Surface&) -> Json` | `width` / `height` / `scale_factor` / `frame_count` / `clear_color` / `should_close` / `has_native_window`。`frame_count` = 该 Surface 的已上屏帧数，各后端在自身 `present()` 内自增：Headless / Win32 / Glfw / D3D11 / X11 / Wayland / WASM 与三个 wgpu 型有值，仅 macOS 未覆写故恒报 0（基类默认），跨后端比对读数前须先确认该后端是否计数 |
+| `surface_state(const Surface&) -> Json` | `width` / `height` / `scale_factor` / `frame_count` / `clear_color` / `should_close` / `has_native_window`。`frame_count` = 该 Surface 的已上屏帧数，各后端在自身 `present()` 内自增：Headless / Win32 / Glfw / D3D11 / X11 / Wayland / macOS / WASM 与三个 wgpu 型均有值，跨后端比对读数前须先确认该后端是否计数 |
 
-**门控与 ODR 安全**：API 头**始终声明**，调试能力函数的 `.cpp` 体按 `AURORA_ENABLE_DEBUG` 裁切（例外：输出目录三函数的定义不裁切、无条件编译，与「始终可用」一致）；`Surface::save_snapshot` / `capture_window` 默认实现按运行时 `data()` 判空（宏无关），后端专属截图体门控。两函数在 `Surface` 上**始终声明**（vtable 槽稳定，属 `Surface` 契约）。Win32 家族两路（`Win32Surface` GDI 上屏 / `D3D11Surface` GPU 上屏，共用 `Win32Host` 宿主，经共享 `detail::capture_window_by_hwnd` 走 PrintWindow 路径）、X11、GLFW 在 `AURORA_ENABLE_DEBUG` + 对应后端下覆写 `capture_window`（GLFW：Windows 经原生 HWND 走 PrintWindow 含非客户区；X11/Wayland/Mac 走 GL 帧缓冲读回——软件路径先重放上一帧再 `glReadPixels`，GPU 路径经 `GpuGlRhi::read_pixels`，得客户区 framebuffer 尺寸画面，须在某次 present 之后调用）；Headless/Wayland 保持 unsupported（Wayland 客户端无法截图，属安全限制）。
+**门控与 ODR 安全**：API 头**始终声明**，调试能力函数的 `.cpp` 体按 `AURORA_ENABLE_DEBUG` 裁切（例外：输出目录三函数的定义不裁切、无条件编译，与「始终可用」一致）；`Surface::save_snapshot` / `capture_window` 默认实现按运行时 `data()` 判空（宏无关），后端专属截图体门控。两函数在 `Surface` 上**始终声明**（vtable 槽稳定，属 `Surface` 契约）。Win32 家族两路（`Win32Surface` GDI 上屏 / `D3D11Surface` GPU 上屏，共用 `Win32Host` 宿主，经共享 `detail::capture_window_by_hwnd` 走 PrintWindow 路径）、X11、GLFW 在 `AURORA_ENABLE_DEBUG` + 对应后端下覆写 `capture_window`（GLFW：Windows 经原生 HWND 走 PrintWindow 含非客户区；X11/Wayland/Mac 走 GL 帧缓冲读回——软件路径先重放上一帧再 `glReadPixels`，GPU 路径经 `GpuGlRhi::read_pixels`，得客户区 framebuffer 尺寸画面，须在某次 present 之后调用）；macOS 原生 `MacOSSurface` 走内容视图缓存位图（`bitmapImageRepForCachingDisplayInRect:` + `cacheDisplayInRect:toBitmapImageRep:` → PNG，客户区、不含标题栏；不经 WindowServer 抓屏，故背景图形会话可用且无需屏幕录制授权）；Headless/Wayland 保持 unsupported（Wayland 客户端无法截图，属安全限制）。
 
 `Surface` 另新增虚函数 `framebuffer_size()`（默认返回逻辑 `size()`）：`save_snapshot` 以它作 PNG 宽高；按 DPI 物理分辨率分配缓冲的后端须覆写返回物理像素，避免缩放比 ≠ 1 时 PNG 尺寸与像素数据错位。`native_handle()` 为 `const`（只读查询），**基类默认返回 `nullptr`**；真实窗口后端必须覆写为宿主原生句柄——Win32 家族两路（`Win32Surface` GDI 上屏 / `D3D11Surface` GPU 上屏，共用同一 `Win32Host` 宿主）**均**覆写为 `hwnd()`。上表 `surface_state()` 的 `has_native_window` 即由它非空判定，漏覆写会让真实窗口后端**恒报 false**，故由 `utest_native_surfaces` 的 `windows_family_native_handle_contract` 类型级守门。
 
@@ -1874,5 +2115,6 @@ if (au::platform().is_mobile()) { /* 移动端适配 */ }
 - 事件模型统一（触摸 / 鼠标 / 键盘统一抽象）。
 - 配套**跨平台布局测试套件**与**黄金文件验证**，确保同布局在各平台结果一致。
 - AI 生成的代码无需为不同平台微调。
+- **能力缺位以显式令牌表达，不以静默分岔表达**：某条腿未落地或被裁掉时，公共面回能力位 `false` 或状态令牌而不是让形状随平台变化——形状跨平台一致、只有取值不同。链路态监听即此读法的一例（§8.8.41：无腿构建 `source=None`、`state=Unknown`，而 `snapshot()` 的字段集合与调用方式三平台逐字相同）。
 
 **验收标准：** 同一棵树在各后端下产出相同的逻辑快照（Level 1 / Level 2）；黄金文件比对零差异。逻辑快照黄金文件由 `utest_offscreen` 承担（11 个固定尺寸布局场景对 `tests/golden/logical_snapshots.json` 逐字段比对，见 [`03-layout-render.md`](03-layout-render.md) §10.1）；像素级 golden 由 `itest_image_view` / `utest_offscreen` 对 `tests/golden/*.png` 比对。

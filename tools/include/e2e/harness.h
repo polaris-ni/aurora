@@ -59,6 +59,7 @@ enum class Backend : std::uint8_t {
     X11,  ///< X11/Xlib（Linux 桌面）
     Wayland,  ///< 原生 Wayland（Linux 桌面）
     Wgpu,  ///< wgpu GPU 栅格上屏（宿主按编译期择一）
+    MacOS,  ///< AppKit 原生窗口（macOS 默认后端）
 };
 
 /// @brief 后端标识的稳定短名（用于错误消息与期望集声明，如 `AURORA_E2E_EXPECT=glfw`）。
@@ -80,6 +81,8 @@ enum class Backend : std::uint8_t {
             return "wayland";
         case Backend::Wgpu:
             return "wgpu";
+        case Backend::MacOS:
+            return "macos";
     }
     return "unknown";
 }
@@ -118,6 +121,10 @@ enum class Backend : std::uint8_t {
 #endif
 #ifdef AURORA_BACKEND_GPU_WGPU
         case Backend::Wgpu:
+            return true;
+#endif
+#ifdef AURORA_BACKEND_MACOS
+        case Backend::MacOS:
             return true;
 #endif
         default:
@@ -594,6 +601,11 @@ class Session {
         host_ = std::make_unique<WindowHost>(next_host_window_id(), Scene{Node{}}, std::move(created.value()));
         host_->attach_surface();
         window_ = host_->window();  // 非拥有别名：既有窗口/表面访问面保持原签名
+        // 钉住风格档：golden 比对与采样点断言都是绝对色判据，按 `codespec/specification/07-environment-modifier.md`
+        // §5.2 的测试约定须显式固定主题。两轴模型落地后，未钉的根主题会随 runner 的 OS 家族落到各自的原生
+        // 风格档，而基线 PNG 是一次性生成的静态资产——不钉就会把「换了 runner」与「改了控件」两种原因混进
+        // 同一条像素差异里。明暗轴不在此钉：它由 `Application` / 宿主推入，各场景沿用既有口径。
+        window_->set_theme_style(ThemeStyle::Material);
     }
 
     /// @brief 首帧前把本会话的驱动器挂为进程内当前实例（`Animator::current()` 是 mount 期注册点）。
@@ -726,6 +738,15 @@ class Session {
     (defined(AURORA_BACKEND_WIN32) || defined(AURORA_BACKEND_X11) || defined(AURORA_BACKEND_WAYLAND))
         else if (spec.backend == Backend::Wgpu) {
             WgpuOptions opts;
+            opts.size = size;
+            opts.title = spec.title;
+            opts.visibility = spec.visibility;
+            session.adopt(create_window(opts));
+        }
+#endif
+#ifdef AURORA_BACKEND_MACOS
+        else if (spec.backend == Backend::MacOS) {
+            MacOSOptions opts;
             opts.size = size;
             opts.title = spec.title;
             opts.visibility = spec.visibility;

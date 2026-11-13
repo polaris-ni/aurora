@@ -1,6 +1,7 @@
 # perf 模块人工测试用例
 
-> **文档状态：临时**
+> **文档状态：人工执行记录**
+> 门槛、结果契约与统计判定的权威口径已收口到 `specification/08-tooling.md` 的工具规格章节；本文件只保留人工用例与历史执行记录，历史读数按既有约定只加注、不改写。
 > 本文件按固定格式编写，供程序解析：字段顺序、字段名、值域与分隔符均为约定的一部分，见 §1.5。
 > 格式规范与首份示例见 `codespec/manual-test/01-core.md`。
 
@@ -19,6 +20,7 @@
 | `perf_session.h` | 会话：多轮采样与汇总 |
 | `trace_writer.h` | 轨迹写出 |
 | `scroll_bench.h` | 滚动基准场景 |
+| `frame_monitor.h` | 恒开的下游订阅门面（帧回调 / 命名指标 / 结构化快照） |
 
 本模块的人工增益集中在**数量级与相对关系的合理性**：基准能给出精确到微秒的数值，而人来判断的是「这个数值关系是否符合架构预期」——例如「局部脏区重绘比全量重绘快两个数量级」是不是真的成立。这类判断程序做不了，因为它需要知道**预期应该是什么**。
 
@@ -37,9 +39,10 @@
 
 `bench_render` 的输出为 Markdown 表格并经 `AURORA_LOG_RAW` 写到 **stdout**，因此可直接重定向为文件留档与逐行比较。
 
-**关于门槛的分工**（2026-09-26 修订：2026-09-25 实测曾发现原口径「G-1 至 G-8 八项且计数类已锁定 CTest」与仓库现状不符（TC-PERF-007 记 FAIL），现已按该结论补齐实物，本节改写为实测现状）：`tools/check/perf_gates.json` 现有 **14 项门槛**，按口径分两类。
+**关于门槛的分工**（2026-09-26 修订：2026-09-25 实测曾发现原口径「G-1 至 G-8 八项且计数类已锁定 CTest」与仓库现状不符（TC-PERF-007 记 FAIL），现已按该结论补齐实物，本节改写为实测现状）：`tools/check/perf_gates.json` 现有 **14 项门槛**，按口径分三类。阈值登记册仍是唯一权威，本机判定脚本与 CTest 读取方都不改；测量与判定口径收口到 `specification/08-tooling.md` 的工具规格章节。
 
-- **时间类 10 项**：G-1 至 G-4（滚动 p99 / 最差帧 / 抖动 / 长任务，`counted` 为 true）、G-9 至 G-11（帧阶段 layout / paint / present 峰值，`counted` 为 false，仅记录不判红灯）、G-12 至 G-14（`text_cjk_12lines` / `linear_gradient_full` / `radial_gradient_full` 三场景 @1080p，`counted` 为 true）。由 `tools/check/check_perf_gates.ps1` 消费（CMake 自定义目标 `perf_gates`），**不进 CI**，仅用于本地趋势对照（该文件 `source` 字段自陈）。
+- **时间类 7 项**：G-1 至 G-4（滚动 p99 / 最差帧 / 抖动 / 长任务，`counted` 为 true）、G-12 至 G-14（`text_cjk_12lines` / `linear_gradient_full` / `radial_gradient_full` 三场景 @1080p，`counted` 为 true）。由 `tools/check/check_perf_gates.ps1` 消费（CMake 自定义目标 `perf_gates`），**不进 CI**；三次独立进程取最小值只作本地趋势对照，不是统计判定来源，统计判定由同机交错对照承担。
+- **帧阶段读数 3 项**：G-9 至 G-11（帧阶段 layout / paint / present 峰值，`counted` 为 false，仅记录不判红灯，且只在打开插桩的构建下才有值）。
 - **计数类 4 项**：G-5 至 G-8（滚动帧的 `layout_nodes` / `dl_records` / 整帧重绘帧数 / `dirty_rect_count` 峰值，`counted` 为 true）。计数在 Headless 下逐帧可复现，因此**锁定进 CTest**：`tests/unit/utest_scroll.cpp` 的用例 `scroll_regression_counter_gates` 对固定场景（`Scroll` 套 40 行 300x40 内容，视口 300x200，预热 5 帧 + 采样 60 帧，关闭落定阶段）逐字段取峰值，再与 JSON 阈值对照。阈值只登记在 JSON 一处，测试按 `id` 读取；条目缺失即致命失败，避免「门槛被删空而断言仍在空转」。该用例仅在 `AURORA_ENABLE_PROFILING` 为 ON 时真正断言（宏关闭时 `RenderCounters` 被编译掉、读数恒为 0，属假通过），否则注册为 skip 桩；CI 由 `profiling-tracing-debug-on` 作业（Release + PROFILING=ON）实跑。
   G-8 取 `dirty_rect_count` 而非 `counters.h` 点名的 `dirty_area_ratio`：滚动帧的脏区本就覆盖整个视口，该比值逐帧恒为 1.0，任何阈值要么空转要么必红；取舍理由同样记在 JSON 的 `note` 字段。
 
@@ -160,6 +163,7 @@
 | `perf_session.h` | 会话的多轮汇总与统计为确定性数值处理；其**结果解读**由 TC-PERF-002 至 TC-PERF-005 覆盖 | `utest_perf_session` |
 | `trace_writer.h` | 轨迹序列化为确定性 | `utest_trace_writer` |
 | `scroll_bench.h` | 滚动基准场景的构造为确定性；其**指标与门槛对照**由 TC-PERF-005 覆盖 | `utest_scroll_bench` `utest_scroll` |
+| `frame_monitor.h` | 恒开订阅门面的多订阅、注销、背压与零开销计数均为确定性逻辑 | `utest_frame_monitor` |
 | `tools/bench/*` 的计数类读数 | 计数指标（`draw_calls` / `dirty_rect_count` / 缓存命中率等）的算术与阈值判定属确定性逻辑，已由单测覆盖；G-5 至 G-8 四项计数门槛的阈值判定也不由人工重复执行——由 CTest 读 `perf_gates.json` 逐项对照（见 §1.2） | `utest_counters` `utest_scroll_bench` `utest_scroll` `itest_perf_display_list` |
 
 ## 2 用例清单
@@ -274,7 +278,7 @@
 | TC-PERF-002 | 2026-09-25 | Qoder Agent | PASS | | 逻辑尺寸 1280x720 档：scale 1.0 时 tree_full_redraw 6.687 ms 对 tree_dirty_one_chip 0.034 ms，比值 196.7；scale 2.0 时 14.973 对 0.083，比值 180.4。两轮比值均在两个数量级附近，未出现「缩放一高脏区优势即消失」 | | 首轮带后台负载时读得 167.1 倍，量级不变；§2.2 的参照值随负载波动，按 §1.7 第 3 条逐轮登记 |
 | TC-PERF-003 | 2026-09-25 | Qoder Agent | PASS | | fill_alpha_full 由 scale 1.0 的 1.406 ms 增至 1.5 的 3.141 ms，比值 2.23，与物理像素数比值 2.25 相称；tree_full_redraw 由 6.687 增至 10.499，比值 1.57，略低于像素增长 | | 首轮在后台负载下读得 4.02 倍，恰贴该条「超过 4 倍即 FAIL」的线；按 §1.7 第 2 条在关负载后复跑得 2.23，故不以单次结果定论。文档内 1.566→3.790 的参照值同轮已随实测更新，未逐条改文 |
 | TC-PERF-004 | 2026-09-25 | Qoder Agent | PASS | | scale 1.0 档 fill_opaque_full 0.087 ms 对 fill_alpha_full 1.406 ms（16.2 倍，半透明逐像素混合属预期）；hit_test_x1000 0.026 ms，低于一次全屏不透明填充且为全表最快项之一 | | 命中测试不构成滚动瓶颈的结论与 TC-PERF-005 的滚动实测（p99 小于 1 ms）相互印证 |
-| TC-PERF-005 | 2026-09-25 | Qoder Agent | PASS | | 按 JSON 口径（scene 为 google_play、repeat 为 3）起三个独立 `bench_scroll --scene google_play --format csv --frames 300` 进程：p99 依次 0.994 / 0.899 / 0.951 ms（best-of 0.899，G-1 阈 16.67）、worst 依次 1.242 / 1.000 / 1.568 ms（最大 1.568，G-2 阈 33.3）、jitter 依次 0.080 / 0.067 / 0.087 ms（G-3 阈 2.0）、long_task_count 三轮均为 0（G-4 阈 3），三行 trustworthy 字段均为 1 | | 测量时机器负载：Windows 本机、会话锁屏、无编译与浏览器任务，时间类门槛仅本地趋势对照。随记：G-12 至 G-14 三项绘制场景门槛按同轮 bench_render 实测 1.693 / 3.001 / 3.34 ms，对 3.0 / 8.0 / 8.0 全通过，不属本用例步骤；lazy_list 与 grid 两个隔离场景 p99 约 39~44 ms，属大尺寸重场景，不在 G-1 的 google_play 口径内 |
+| TC-PERF-005 | 2026-09-25 | Qoder Agent | PASS | | 按 JSON 口径（scene 为 google_play、repeat 为 3）起三个独立 `bench_scroll --scene google_play --format csv --frames 300` 进程：p99 依次 0.994 / 0.899 / 0.951 ms（best-of 0.899，G-1 阈 16.67）、worst 依次 1.242 / 1.000 / 1.568 ms（最大 1.568，G-2 阈 33.3）、jitter 依次 0.080 / 0.067 / 0.087 ms（G-3 阈 2.0）、long_task_count 三轮均为 0（G-4 阈 3），三行 trustworthy 字段均为 1 | | 测量时机器负载：Windows 本机、会话锁屏、无编译与浏览器任务，时间类门槛仅本地趋势对照。随记：G-12 至 G-14 三项绘制场景门槛按同轮 bench_render 实测 1.693 / 3.001 / 3.34 ms，对 3.0 / 8.0 / 8.0 全通过，不属本用例步骤；lazy_list 与 grid 两个隔离场景 p99 约 39~44 ms，属大尺寸重场景，不在 G-1 的 google_play 口径内。加注（按既有约定只加注、不改写读数）：该场景已退役，本行数值仍是当时代码形态下的历史观测；现行门槛分工与统计判定口径见 `specification/08-tooling.md` 的工具规格章节 |
 | TC-PERF-006 | 2026-09-25 | Qoder Agent | PASS | | idle 段输出 cpu 0.5%、render fps 0.3、wakeup/s 3.7 并自报 PASS 行；active 段 cpu 1.6%、fps 35.6 夹在 max_fps 60 之下 | | 与 `specification/08-tooling.md` §7.4.1 的无叠加层基线（0.5% / 0.3 fps / 4.3 wakes）同量级，唤醒次数由 4.3 降至 3.7 属负载波动 |
 | TC-PERF-007 | 2026-09-26 | Qoder Agent | PASS | | 步骤 2：`perf_gates.json` 共 14 项门槛，时间类 10 项（G-1 至 G-4 滚动、G-9 至 G-11 帧阶段、G-12 至 G-14 绘制场景）、计数类 4 项（G-5 layout_nodes 峰值阈 0、G-6 dl_records 峰值阈 6、G-7 整帧重绘帧数阈 0、G-8 dirty_rect_count 峰值阈 2），counted 为 true 的 11 项、false 的 3 项。步骤 4：`utest_scroll.cpp` 的 `scroll_regression_counter_gates` 逐项引用 G-5 至 G-8 四个 id，阈值经 `gate_threshold()` 从该 JSON 读取、代码内无复写；变异自证两轮——先把四项阈值分别压到 0 以下、2、0 以下、0，四条断言逐条报红（实测读数 0 对 -1、3 对 2、0 对 -1、1 对 0），再删掉 G-6 条目，用例以「gate G-6 is not declared in perf_gates.json」致命失败而非静默跳过。步骤 5：PROFILING 为 ON 的 `build-prof`（Release）打印四项峰值读数 layout_nodes_max 0、dl_records_max 3、full_redraw_frames 0、dirty_rect_count_max 1 并判 PASS；同一用例在 WSL Linux 构建（Debug，PROFILING 经 AUTO 取 ON）读数逐项相同（`counters_max` 整段 JSON 与 Windows 完全一致，含 pixels_filled 243900 与 scroll_buffer_bytes 720000），门槛不随机型与编译器漂移；PROFILING 为 OFF 的 `build`（Release）记 SKIPPED 且原因为「RenderCounters compiled out」，该构建下 `utest_scroll` 其余 20 条全通过。步骤 6：全仓检索 G-5 至 G-8 与 scroll_regression，四处复述（JSON 的 note、`check_perf_gates.ps1` 约定段、`bench_render.cpp` 注释与收尾输出、`itest_perf_display_list.cpp` 头部注释）均指向该用例与 JSON 登记处，与实物一致 | | 本行覆盖 2026-09-25 那次 FAIL（当时步骤 5：JSON 无 G-5 至 G-8 条目、测试无该段，四处散文空转，原文见提交 `7c4ddbb`）——本轮补齐实物后按修订过的六步重跑。两处口径变更须知悉门槛维护者——① G-8 取 `dirty_rect_count` 而非 `counters.h` 点名的 `dirty_area_ratio`，因为滚动帧的脏区本就覆盖整个视口、该比值逐帧恒为 1.0，任何阈值要么空转要么必红（理由同时记在 JSON 的 note）；② 阈值只登记在 JSON，测试按 id 读取且缺条目即失败，杜绝门槛被删空后断言空转。`check_perf_gates.ps1` 仍只解析时间类条目，新增四项对它是惰性数据，不改变该脚本判定 |
 | TC-PERF-010 | 2026-10-02 | Aurora Agent | PASS | | 步骤 1/3：本机为 150% 缩放（非 100%）。步骤 2/3：`measured scale_factor (host) = 1.500000`、`measured scale (system DC, independent) = 1.500000`，两者逐位相等。步骤 4：判据 (a) 客户区 1200×900 == 逻辑 800×600 × 1.5；(b) 宿主逻辑 800×600 × 1.5 == 客户区物理 1200×900；(c) 物理落点 (600,450) → 事件 position (400,300) == ÷1.5；(d) `WM_GETMINMAXINFO` min track 300 == 逻辑 min 200 × 1.5，与 `set_size` 同一换算；环境自证断言 PASS。步骤 5：退出码 0 | | **这是任务书要求的「≠100% DPI 环境真验收」**，非 CI 空转。变异自证：删掉 `win32_host.cpp` 建窗后的 `refresh_scale()`（回到「构造期 `hwnd==nullptr` ⇒ `GetDeviceCaps` 回 96 ⇒ scale 恒 1.0」的原始缺陷形态）后重编重跑，判据 (a)–(d) **仍自洽地全 PASS**（三方都退化成 1.0），唯有环境自证断言转红（host=1.000000 vs system=1.500000）、退出码 1 —— 该缺陷的隐蔽性正在于此。判据 (c) 曾一度报 `-6666.67`：原因是探针取末条鼠标记录，而注入的 `WM_MOUSEMOVE` 触发 `TrackMouseEvent(TME_LEAVE)` 后系统补发 `WM_MOUSELEAVE`，宿主把它合成为 `(-10000,-10000)` 的离开 Move（`-10000/1.5 = -6666.67`）；改取首条（注入的那次）后通过，非库缺陷。判据 (e) 以「a11y 桥与宿主同源」间接验证，UIA provider 树的实际投影矩形由 `tools/verify/win32_ua_live_probe.cpp` 那一层覆盖 |

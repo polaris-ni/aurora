@@ -8,15 +8,15 @@
 
 ### 1.1 被测模块
 
-`app/` —— 应用与窗口聚合层（20 个公共头），在实测依赖分层中位于 L7（最上层之一）。
+`app/` —— 应用与窗口聚合层（31 个公共头），在实测依赖分层中位于 L7（最上层之一）。
 
-该模块把「一个或多个窗口」「场景树与焦点」「帧循环」「事件总线」「系统级集成（托盘、热重载、剪贴板、无头测试控制器）」收束为一个可启动的应用单元。它的可观测行为大多落在**真实窗口与真实桌面**上：窗口可见性、多窗口独立性、模态拦截、通知区域图标与气泡、系统剪贴板互操作——这些都无法在无头单测中复现。
+该模块把「一个或多个窗口」「场景树与焦点」「帧循环」「事件总线」「系统级集成（托盘、热重载、剪贴板、无头测试控制器、桌面外壳集成）」收束为一个可启动的应用单元。它的可观测行为大多落在**真实窗口与真实桌面**上：窗口可见性、多窗口独立性、模态拦截、通知区域图标与气泡、系统剪贴板互操作、PDF 在本机阅读器里的观感、点链接是否唤起已运行的实例、文件管理器「打开方式」里的候选——这些都无法在无头单测中复现。
 
-公共头清单：`application.h` `clipboard.h` `display.h` `file_dialog.h` `generate_ui.h` `hot_reload.h` `menu.h` `perf_overlay.h` `scene.h` `scheduler.h` `scroll_storage.h` `shortcuts.h` `system_tray.h` `test_controller.h` `ui_prompt.h` `validate.h` `validate_ui.h` `window_bus.h` `window_geometry.h` `window_host.h`。
+公共头清单：`application.h` `clipboard.h` `display.h` `document_output.h` `event_source_registry.h` `file_association.h` `file_dialog.h` `generate_ui.h` `hot_reload.h` `menu.h` `mime_types.h` `native_menu_bar.h` `notification.h` `os_hotkey.h` `perf_overlay.h` `recent_documents.h` `run_at_login.h` `scene.h` `scheduler.h` `scroll_storage.h` `shortcuts.h` `single_instance.h` `system_tray.h` `test_controller.h` `ui_prompt.h` `url_scheme.h` `validate.h` `validate_ui.h` `window_bus.h` `window_geometry.h` `window_host.h`。
 
 ### 1.2 执行载体
 
-复用既有示例程序，并**新增**两个载体。全部载体统一在 `TC-APP-001` 步骤 1 一次构建：
+复用既有示例程序，并**新增**两个 demo 载体。八个 demo 统一在 `TC-APP-001` 步骤 1 一次构建；桌面外壳集成另用四个真机探针（`AURORA_BUILD_VERIFY_TOOLS=ON` 的独立构建目录，按需目标、不进 CTest），各自在 `TC-APP-015` 至 `TC-APP-018` 内构建。
 
 | 载体 | 构建目标 | 状态 | 用途 |
 |:---|:---|:---|:---|
@@ -28,6 +28,10 @@
 | `examples/demos/demo_system_tray.cpp` | `demo_system_tray` | **新增** | 通知区域图标、气泡、右键菜单与激活回调 |
 | `examples/demos/demo_timers.cpp` | `demo_timers` | 复用 | 无 `Scheduler` 时定时器的降级契约 |
 | `examples/demos/demo_rich_text_edit.cpp` | `demo_rich_text_edit` | 复用 | 真实系统剪贴板与外部应用互操作 |
+| `tools/verify/document_output_live_probe.cpp` | `aurora_verify_document_output` | **新增** | 多页 PDF 的独立结构核对与外部阅读器观感、打印目标枚举 |
+| `tools/verify/url_scheme_live_probe.cpp` | `aurora_verify_url_scheme` | **新增** | URL 方案注册 / 归属 / 撤销与异主撤销拒绝 |
+| `tools/verify/file_association_live_probe.cpp` | `aurora_verify_file_association` | **新增** | 文件关联声明候选与「不抢默认」的独立取证 |
+| `tools/verify/run_at_login_live_probe.cpp` | `aurora_verify_run_at_login` | **新增** | 登录项三态、用户手动禁用与其它登录项不受触碰 |
 
 **新增载体的理由**：`demo_hot_reload` 与 `demo_system_tray` 是本次为本系列新增——「编辑文件即时生效」与「通知区域图标 / 气泡 / 右键菜单」这两项能力此前**无任何交付载体**，且在人工判定上不可替代：前者需观察「保存文件 → 界面刷新」的因果链，后者需在真实桌面通知区域观察图标是否出现、气泡是否弹出、右键菜单是否可点。
 
@@ -38,6 +42,8 @@
 - `demo_system_tray` 的真实实现是 **Win32 专有**（`Shell_NotifyIcon` + 隐藏消息窗口）；非 Windows / Headless 下 `SystemTray` 全部方法为 no-op。
 - `demo_timers` 经 `run_demo` 只建窗口、**不建** `Application`，故没有 `Scheduler`，其定时器不触发；库的表现为「降级 + 明确诊断」。
 - `demo_hot_reload` 读写**当前工作目录**下的 `ui.json`，文件不存在时自动写入一份默认内容。
+
+四个真机探针的分工：自动段把程序可判的部分（**独立于被测桥**的注册表 / XDG 目录 / Launch Services 读取、PDF 对象表与 xref 偏移解析、zlib 流校验）逐条打印，人工段只留真正需要人看的项（PDF 页面观感、系统 UI 里的「打开方式」候选与登录项）。四者只写用户级位置，并在运行内把基线还原；macOS 的 URL 方案 / 文件关联 / 登录项要求 `.app` 包内静态声明，裸可执行文件按退出码 2 报环境不可用——这是如实降级，不记 FAIL。
 
 ### 1.3 执行环境
 
@@ -51,6 +57,10 @@
 | 桌面通知区域 | TC-APP-010 与 TC-APP-011 需要 Windows 通知区域可用；非 Windows / Headless 环境下这两条记 `SKIP` |
 | 系统剪贴板 | TC-APP-012 需要真实系统剪贴板，且本机装有记事本 |
 | 文件访问 | TC-APP-007 至 TC-APP-009 需可读写当前工作目录下的 `ui.json` |
+| 真机探针构建 | TC-APP-015 至 TC-APP-018 需另建一个 `-DAURORA_BUILD_VERIFY_TOOLS=ON` 的构建目录，并先行构建对应探针目标 |
+| PDF 阅读器 | TC-APP-015 需本机装有 PDF 阅读器；打印会话段另需至少一台可用打印机（无打印机时该段记 `SKIP`） |
+| 用户级 Shell 数据库 | TC-APP-016 至 TC-APP-018 会临时写用户级注册表 / XDG 数据目录 / Launch Services 并自行撤销，需当前用户对相应位置有写权限；Linux 另需可用的 `$XDG_RUNTIME_DIR` 或可写的 `$HOME/.cache` |
+| 系统设置界面 | TC-APP-017 需文件管理器的「打开方式」入口；TC-APP-018 需任务管理器（Windows）或桌面环境的自启动配置（Linux） |
 
 ### 1.4 用例编号规则
 
@@ -124,7 +134,7 @@
 
 ### 1.8 覆盖取舍
 
-本模块按「人工判定是否优于程序判定」取舍，只覆盖人工判定占优的子域，不追求对 20 个头的全覆盖。
+本模块按「人工判定是否优于程序判定」取舍，只覆盖人工判定占优的子域，不追求对 31 个头的全覆盖。
 
 **纳入人工测试的子域**：
 
@@ -140,6 +150,10 @@
 | 系统托盘 | 通知区域图标是否出现、气泡是否弹出、右键菜单是否可点，只能在真实桌面观察 |
 | 系统剪贴板互操作 | 「复制到记事本、从记事本粘贴回来」验证的是**系统**剪贴板边界，进程内缓冲测不出 |
 | 定时器降级 | 「无 `Scheduler` 时不触发并打印诊断」是降级契约，需确认进程不静默、不崩溃 |
+| 打印面板与页面观感 | 导出的 PDF 是否被本机阅读器逐页接受、打印出来是否与屏幕观感一致，只有阅读器与真实打印机可判 |
+| 点链接唤起已运行实例 | 「第二次启动被转交给首个实例、不新开空窗」是跨进程事实，进程内单测测不出 |
+| 文件管理器「打开方式」候选 | 声明是否进了 OS 候选数据库、默认处理程序是否原样不动，只有系统 UI 与独立数据库读取可证 |
+| 登录项开关兑现 | 系统启动项清单里条目是否出现、用户手动禁用后是否仍报 `Disabled`，属 OS 状态而非库内状态 |
 
 **不纳入人工测试的头及其理由**：
 
@@ -151,6 +165,9 @@
 | `shortcuts.h` | 键组合匹配语义由单测全覆盖；端到端按键派发的人工覆盖原以调试载体模块承担，该模块随载体退役取消 | `tests/unit/utest_shortcuts.cpp` |
 | `scene.h` `window_host.h` `window_geometry.h` `display.h` | 结构与几何模型，可观测行为已由 window 模块文档覆盖；多显示器迁移在本机单显示器环境不可复现（载体明确日志 `single display; nothing to move to`） | `codespec/manual-test/10-window.md` |
 | `menu.h` | `MenuItem` 语义（含分隔符）由单测覆盖；其端到端表现由托盘用例 TC-APP-011 在真实通知区域观察 | `tests/unit/utest_system_tray.cpp` |
+| `notification.h` `os_hotkey.h` `native_menu_bar.h` `recent_documents.h` | 四者各有真机探针（通知中心、全局热键、原生菜单栏、OS 最近文档），系统侧判据由探针的自动段与人工段承担，未在本模块另立用例 | `tests/unit/utest_notification.cpp`、`utest_os_hotkey.cpp`、`utest_menu_bar.cpp`、`utest_recent_documents.cpp`；`BUILD_OPTIONS.md` §2.4 的四枚对应探针 |
+| `event_source_registry.h` | 事件源注册口的语义由单测覆盖；网络完成事件的投递面见网络相关规格 | `tests/unit/utest_app_event_source_registry.cpp` |
+| `single_instance.h` `mime_types.h` | 可观测面分别由 TC-APP-016（跨进程转交）与 TC-APP-017（扩展名到 MIME 的候选声明）覆盖，进程内语义由单测锁定 | `tests/unit/utest_single_instance.cpp`、`tests/unit/utest_file_association.cpp` |
 | `perf_overlay.h` | 叠层绘制与性能门禁由 perf 模块文档覆盖 | `codespec/manual-test/17-perf.md` |
 | `application.h` 的异步/音频接线 | 异步任务与音频设备接线分别由 state 与 media 模块文档覆盖 | `codespec/manual-test/07-state.md`、`codespec/manual-test/16-media.md` |
 
@@ -330,6 +347,54 @@
 | 操作步骤 | 1. 在交互模式（`interactive == true` 默认）下以空钩子调用 `file_dialog::open_file({.title="选择文件", .initial_dir="/tmp", .filters={{"图像", {"*.png","*.jpg"}}}})`（纯执行，无预期结果）<br>2. 观察是否弹出居中模态浮层、标题栏是否为 `选择文件`、初始目录是否定位到 `/tmp`、条目列表是否仅含目录与 `*.png` / `*.jpg` 文件<br>3. 在列表内双击一个目录项，观察当前路径是否下钻一层；点「Up」观察是否回退一层<br>4. 选中一个图片文件点「Open」，观察调用点是否拿回该文件绝对路径、浮层是否关闭<br>5. 重新弹出同一选择器，点「Cancel」，观察调用点是否拿回空串、浮层是否关闭 |
 | 预期结果 | 2. 浮层居中弹出，标题栏为 `选择文件`，初始目录落在 `/tmp`，列表只列目录与匹配筛选的图片文件（状态机由 `utest_file_dialog.cpp` 的无头用例锁定，此步仅核对真实渲染）<br>3. 双击目录项当前路径下钻一层、内容刷新；「Up」回退一层、停在根时不可再退<br>4. 确认返回所选项的绝对路径、浮层关闭（与 `utest_file_dialog.session_confirm_returns_picked_paths` 同路径）<br>5. 取消返回空串、浮层关闭；取消 / 确认期间点主窗不会把活动窗口记账翻面（模态期派发抑制） |
 
+### 2.10 桌面外壳集成（真机走查）
+
+本节四条用例覆盖 `document_output.h` / `url_scheme.h` / `single_instance.h` / `file_association.h` / `run_at_login.h` 的真实桌面行为。判据分两段：探针自动段负责可程序判定的部分（且独立于被测桥取证），人工段只保留真正需要人看的项；跨进程转交与宿主侧调用另外用一个按公开 API 编出的最小宿主，四条用例共用同一形态。
+
+#### TC-APP-015 导出的多页 PDF 观感与打印会话真机走查
+
+| 项目 | 内容 |
+|:---|:---|
+| 用例编号 | TC-APP-015 |
+| 测试目的 | 确认 `export_pdf()` 产出的三页文档被本机阅读器逐页接受，且打印目标枚举与 `PrintSession` 在真实打印服务上按能力位与契约工作 |
+| 前置条件 | 解锁桌面会话；已建 `-DAURORA_BUILD_VERIFY_TOOLS=ON` 的构建目录；本机装有 PDF 阅读器；打印会话段需至少一台可用打印机 |
+| 依赖用例 | 无 |
+| 操作步骤 | 1. 在探针构建目录执行 `cmake --build <build-verify> --target aurora_verify_document_output`（纯执行，无预期结果）<br>2. 运行 `aurora_verify_document_output.exe --interactive`（纯执行，无预期结果）<br>3. 观察自动段的 `[capability]` / `[print]` / `[pdf]` 各行与打印出的 PDF 路径<br>4. 用本机 PDF 阅读器打开该路径，逐页翻看<br>5. 在交互段回答 `y`，记录进程退出码<br>6. 有打印机时，用公开 API 编一个小宿主：`print_targets()` 取默认目标 → `PrintSession::open` → 用 `page_content_raster()` 的尺寸画一页含透明区域的位图 → `submit_page` → `finish`，观察打印队列与出纸 |
+| 预期结果 | 3. `[capability] native_print_session == true`（Windows / macOS）或 `== false`（Linux）；有位平台 `[print]` 段落为 `Ok` 且目标清单可读（空清单亦合法，`printer count = 0`），无位平台恰一行 `print-session-unsupported`；`[pdf]` 段全为通过项，末行 `[pdf] output: <路径>`<br>4. 三页依次为红 / 绿 / 蓝三色内框（A4 纵向、10mm 边距，内框逐页内缩），无空白页、无乱码、无错位<br>5. 交互段打印 `[PASS] an external reader opened the exported PDF`，退出码 0<br>6. 出纸内容与页面观感一致；透明区域印成页面底色而非黑块；全程不弹出系统打印对话框（目标选择与预览由宿主自绘） |
+
+#### TC-APP-016 URL 方案注册与跨进程转交真机走查
+
+| 项目 | 内容 |
+|:---|:---|
+| 用例编号 | TC-APP-016 |
+| 测试目的 | 确认 URL 方案注册 / 归属 / 撤销按契约落地，且第二个进程被唤起时把 URI 转交给已运行实例而非新开空窗 |
+| 前置条件 | 解锁桌面会话；已建探针构建目录；当前用户对用户级方案库有写权限；已有一个按 `single_instance.h` 头注释示例编出的最小宿主：获取为首实例时打印 `PRIMARY`，经 `set_on_uri_received` 打印收到的 URI，Linux 每帧调用 `poll()` |
+| 依赖用例 | 无 |
+| 操作步骤 | 1. 构建 `aurora_verify_url_scheme`（纯执行，无预期结果）<br>2. 运行 `aurora_verify_url_scheme.exe --interactive`（纯执行，无预期结果）<br>3. 观察自动段与交互段各行<br>4. 启动最小宿主：它先注册一枚临时方案，再 `acquire` 并等待<br>5. 在另一终端经系统入口触发 `<scheme>://manual-check`（Windows `start`、macOS `open`、Linux `xdg-open`），观察两个进程<br>6. 关闭首个实例后再次触发同一链接 |
+| 预期结果 | 3. `[capability] url_scheme_registration is true`；`mailto` 被拒且 detail 含 `reserved`，`1bad` / `a_b` / 空串被拒；注册后归属非空且指向本探针；Windows 追加异主撤销被拒、点名当前归属且登记未被改动；撤销后归属回空、二次撤销成功；macOS 如实返回 `url-scheme-unsupported`（静态声明不可运行期撤销）；交互段 `[PASS] human confirmed the URL-scheme association`，退出码 0<br>4. 宿主打印 `PRIMARY` 并保持运行<br>5. 第二个进程打印 `Forwarded` 后退出（或未收到事件即退出），首个实例打印收到的 `URI <scheme>://manual-check`，且宿主**没有新建窗口**；若对端超时则第三档 `FallbackNewInstance` 如实出现，不得静默退出<br>6. 链接由 OS 直接拉起宿主，宿主以 `PRIMARY` 启动并打开 URI 对应的初始页面（冷启动路径） |
+
+#### TC-APP-017 文件关联候选与默认处理程序不变真机走查
+
+| 项目 | 内容 |
+|:---|:---|
+| 用例编号 | TC-APP-017 |
+| 测试目的 | 确认声明后文件管理器「打开方式」出现本应用候选、默认处理程序不变，撤销后候选消失 |
+| 前置条件 | 解锁桌面会话；探针构建目录已配置；可用文件管理器；已有一个最小宿主：`register_file_association("log", identity, "Aurora Manual")` 后等待回车，再 `unregister_file_association` |
+| 依赖用例 | 无 |
+| 操作步骤 | 1. 构建 `aurora_verify_file_association`（纯执行，无预期结果）<br>2. 运行 `aurora_verify_file_association.exe`，观察自动段<br>3. 启动最小宿主声明 `.log` 候选并保持运行（纯执行，无预期结果）<br>4. 在文件管理器里对一个 `.log` 文件走「打开方式 → 选择其他应用」，并双击该文件<br>5. 在宿主里按回车撤销声明后，重新打开「打开方式」清单<br>6. 结束宿主并记录退出码 |
+| 预期结果 | 2. 能力位为 true；空串 / 孤立点 / 内嵌点扩展名被拒且不触碰 OS；基线记录、声明、独立取证（Windows `RegisteredApplications` + Capabilities `FileAssociations`、Linux 桌面条目 + `[Added Associations]`）逐条通过；默认处理程序证据在声明前后逐字节一致；撤销后独立取证确认消失、二次撤销幂等；退出码 0<br>4. 候选清单出现显示名 `Aurora Manual`；双击 `.log` 仍由原默认处理程序打开（默认未被抢占）<br>5. 候选清单不再含 `Aurora Manual`<br>6. 宿主退出码 0，用户级关联库回到声明前状态 |
+
+#### TC-APP-018 登录项三态与系统启动项兑现真机走查
+
+| 项目 | 内容 |
+|:---|:---|
+| 用例编号 | TC-APP-018 |
+| 测试目的 | 确认登录项三态在 OS 上兑现：启用后条目出现、用户手动禁用报 `Disabled` 且记录保留、关闭后不抹用户记录、其它登录项不受触碰 |
+| 前置条件 | 解锁桌面会话；探针构建目录已配置；当前用户可写用户级登录项库；可用任务管理器（Windows）或桌面环境的自启动设置（Linux）；已有一个最小宿主：调用 `set_run_at_login(true)` 后循环打印 `run_at_login()` 三态并等待回车，再 `set_run_at_login(false)` |
+| 依赖用例 | 无 |
+| 操作步骤 | 1. 构建 `aurora_verify_run_at_login`（纯执行，无预期结果）<br>2. 运行 `aurora_verify_run_at_login.exe`，观察自动段<br>3. 启动最小宿主并让它启用登录项（纯执行，无预期结果）<br>4. 在系统启动项清单里核对条目的显示名与状态<br>5. 在该清单里手动禁用条目，回到宿主观察三态读数<br>6. 在宿主里按回车关闭登录项后再核对系统清单<br>7. 核对机器上其它启动项与执行前一致，结束宿主并记录退出码 |
+| 预期结果 | 2. 能力位为 true；基线记录、启用后独立数据库确有指向本应用（含命令行快照）的条目、模拟用户禁用后报 `Disabled` 且条目实体仍在、经 API 关闭后启用项消失而用户禁用记录保留、再次开启覆盖禁用记录、其它登录项快照逐字节不变、基线还原，全部通过；退出码 0（macOS 裸可执行按退出码 2 报环境不可用）<br>4. 启动项清单出现该条目且状态为已启用<br>5. 宿主读数由 `Enabled` 变为 `Disabled`，条目仍在清单中（`Disabled` 不等于不存在）<br>6. 启用态消失，系统清单不再把该条目列为自启项<br>7. 其它启动项与执行前一致，宿主退出码 0 |
+
 ## 3 执行记录表
 
 | 用例编号 | 执行日期 | 执行人 | 结果 | 失败步骤号 | 实际现象 | 缺陷编号 | 备注 |
@@ -343,8 +408,12 @@
 | TC-APP-007 | 2026-09-27 | Qoder Agent | PASS | | 步骤 2：标题 `Hot reload · Aurora Demo`，客户区 640x300 像素；首次启动且 `ui.json` 不存在时载体自动写入默认内容，`err.txt` 恰 1 行 `INF` 且消息 `[hot_reload] wrote default ui.json -- edit it to trigger a reload`。步骤 3：`ui.json` 顶层为 `Column`，子节点 0 是 `Text` 且 `content` 为 `Edit ui.json, save, and this text is rebuilt live.`，子节点 1 是 `TextInput` 且只声明 `placeholder` 为 `Type here first, then edit ui.json`，确未声明 `value`。步骤 5：改文保存后窗口内 `Text` 变为 `First edit: rebuilt live text V1`，`err.txt` 新增**恰 1 行** `[hot_reload] tree rebuilt from ui.json`。步骤 7：第二次改文后 `Text` 变为 `Second edit: rebuilt live text V2`，同样恰新增 1 行重建日志。退出码 0 | | 载体每帧轮询 `HotReload::try_sync`，一次文件变化对应恰好一行重建日志，故行数即「变化被消费次数」的度量。为确认该契约不被取证通道污染，另跑一次不开 inspector 的对照运行（标签 `APP_007x`），其 stderr 全文仍是「默认写入 1 行加每次编辑 1 行」的原始形态。该载体不经 `run_demo`，未开 DPI 感知，故客户区像素数等于逻辑尺寸（150% 缩放下由 DWM 位图放大）。截图 `APP_007_1_default.png` 等三张 |
 | TC-APP-008 | 2026-09-27 | Qoder Agent | PASS | | 步骤 2/3：经 `/api/input/click` 聚焦 `TextInput`（树路径 1）后经 `/api/input/text` 键入 `Aurora`，回读 `value` 为 `Aurora`、占位符仍为 `Type here first, then edit ui.json`。步骤 4/5：只改 `Text` 子节点并保存后，`Text` 已重建为 `Reloaded while input kept its value`，而 `TextInput` 的读数**仍是键入的 `Aurora`**（未被重建抹去），`err.txt` 新增**恰 1 行** `[hot_reload] tree rebuilt from ui.json`。退出码 0 | | 首轮执行时 `TextInput` 的占位符读数为空串：根因是 `src/aurora/widget/serialization.cpp` 把 `TextInput` 注册成 `reg_no_props`（整类丢弃 JSON 属性），使 §1.2 声称的属性往返契约与「ui.json 声明的属性生效」这一前提根本不成立；已改为 `reg_default` 并补 `utest_serialization.textinput_rebuilds_declared_props_from_json` 锁定（提交 `56fff37`），上述读数为修复后复跑结果。按树路径回填的运行态保留逻辑在 `HotReload::try_sync` 的 `preserve_state` 与 `restore_state`，且跳过 JSON 已声明的键。输入经 inspector 进程内派发而非真实键盘，键入内容与真实键入在该控件的 `value` 上同构。截图 `APP_008_1_typed.png`、`APP_008_2_after_reload.png` |
 | TC-APP-009 | 2026-09-27 | Qoder Agent | PASS | | 步骤 2：先以一次合法编辑把基线钉为 `Text = Baseline before invalid write`，此时 `err.txt` 业务行 2 行（默认写入 1 行加重建 1 行）。步骤 3/4：把 `ui.json` 整份覆盖为缺失闭合括号的非法 JSON 并等待约 3 秒，窗口内 `Text` **保持基线不变**，进程始终存活，业务行数仍为 2 且无新增行，`ERR` 与 `FTL` 级行数为 0。步骤 5：关闭窗口，退出码 0 | | 附加复核（超出 §2 步骤）：非法内容之后再写回合法内容，树仍能重建（新增恰 1 行重建日志且 `Text` 更新为 `Recovered after invalid content`），即「不重建」只是跳过本次变化，文件监视器并未停摆。载体注释把「解析失败不抛错、旧树不动」列为刻意观察点（`examples/demos/demo_hot_reload.cpp` 的帧回调）。非法文件由脚本直接整份写入，不经载体的 JSON 读回路径。截图 `APP_009_invalid.png` |
-| TC-APP-010 | 2026-09-28 | Qoder Agent | PASS | | 步骤 2：标题 `System tray · Aurora Demo`，客户区 780x510 像素（即 520x340 逻辑）；`err.txt` 恰 1 行 `INF` 且消息 `[tray] window shown; look for the icon in the notification area`；通知区域的溢出面板（顶层窗 `TopLevelWindowForOverflowXamlIsland`）内出现名为 `Aurora tray demo` 的图标，中心 (3448,1972)。步骤 3：三枚按钮依次为 `Show balloon`、`Hide tray icon`、`Show tray icon`，首行回显 `(no balloon yet)`。步骤 4/5：点 `Show balloon` 后回显变为 `Balloon from the window`，`err.txt` 恰新增 1 行 `[tray] balloon shown`。步骤 6/7：以真实指针左键单击该图标，`err.txt` 恰新增 1 行 `[tray] balloon shown` 加 1 行 `[tray] activated`，窗口回显变为 `Icon activated`（气泡正文即该串，标题 `Aurora` 由载体 `show_balloon("Aurora", msg)` 的固定入参给出） | | 本轮为解锁会话下的复跑，判由 SKIP 改 PASS，且**依赖一处产品修复**：`Shell_NotifyIcon` 以 `NOTIFYICON_VERSION_4` 注册后，回调 `lParam` 是打包编码（低 16 位为事件、高 16 位为 `uID`），旧实现按整值与鼠标消息比较，故真实系统下一次左键单击收到 4 条回调却零命中，`on_activate` 从不触发、右键菜单也从不展开——首轮记为 SKIP 时看到的正是这条坏路径。修复落在 `src/aurora/app/detail/tray_events.h`（版本感知的分类函数）与 `src/aurora/app/system_tray_win32.cpp`，回归由 `tests/unit/utest_system_tray.cpp` 的两条分类用例锁定；一次单击恰新增一对日志行（而非两对）即「不重复触发」的判据。气泡本体由 shell 呈现，正文以载体回显与 `last_balloon_message` 为观测量。截图 `APP_010_flyout.png`（面板内图标在位），日志 `APP_010_011_err.txt` |
+| TC-APP-010 | 2026-09-28 | Qoder Agent | PASS | | 步骤 2：标题 `System tray · Aurora Demo`，客户区 780x510 像素（即 520x340 逻辑）；`err.txt` 恰 1 行 `INF` 且消息 `[tray] window shown; look for the icon in the notification area`；通知区域的溢出面板（顶层窗 `TopLevelWindowForOverflowXamlIsland`）内出现名为 `Aurora tray demo` 的图标，中心 (3448,1972)。步骤 3：三枚按钮依次为 `Show balloon`、`Hide tray icon`、`Show tray icon`，首行回显 `(no balloon yet)`。步骤 4/5：点 `Show balloon` 后回显变为 `Balloon from the window`，`err.txt` 恰新增 1 行 `[tray] balloon shown`。步骤 6/7：以真实指针左键单击该图标，`err.txt` 恰新增 1 行 `[tray] balloon shown` 加 1 行 `[tray] activated`，窗口回显变为 `Icon activated`（气泡正文即该串，标题 `Aurora` 由载体 `show_balloon("Aurora", msg)` 的固定入参给出） | | 本轮为解锁会话下的复跑，判由 SKIP 改 PASS，且**依赖一处产品修复**：`Shell_NotifyIcon` 以 `NOTIFYICON_VERSION_4` 注册后，回调 `lParam` 是打包编码（低 16 位为事件、高 16 位为 `uID`），旧实现按整值与鼠标消息比较，故真实系统下一次左键单击收到 4 条回调却零命中，`on_activate` 从不触发、右键菜单也从不展开——首轮记为 SKIP 时看到的正是这条坏路径。修复落在 `src/aurora/app/detail/tray_events.h`（版本感知的分类函数）与 `src/aurora/app/system_tray.cpp`，回归由 `tests/unit/utest_system_tray.cpp` 的两条分类用例锁定；一次单击恰新增一对日志行（而非两对）即「不重复触发」的判据。气泡本体由 shell 呈现，正文以载体回显与 `last_balloon_message` 为观测量。截图 `APP_010_flyout.png`（面板内图标在位），日志 `APP_010_011_err.txt` |
 | TC-APP-011 | 2026-09-28 | Qoder Agent | PASS | | 步骤 3：在图标上真实右键单击，弹出 `#32768` 上下文菜单（250x168 像素），自上而下为 `Show balloon`、分隔符、`Hide icon`、`Show icon`、分隔符、`Quit`，与声明序一致。步骤 5：点菜单 `Show balloon` 后窗口回显为 `Balloon from the tray context menu`，`err.txt` 恰新增 1 行 `[tray] balloon shown`。步骤 7：点 `Show icon` 新增 1 行 `[tray] icon shown`；点 `Hide icon` 新增 1 行 `[tray] icon hidden`，且溢出面板的图标名清单不再含 `Aurora tray demo`（其余 8 项仍在）；随后点窗口内 `Show tray icon`，清单恢复含该项。步骤 9：点 `Quit` 新增 1 行 `[tray] quit requested from tray menu`，进程随即结束，退出码 0 | | 判由 SKIP 改 PASS，同样依赖 TC-APP-010 备注里的版本 4 `lParam` 修复（修复前右键根本不展开菜单，项序只能核到代码声明）。步骤 7 的字面读法「Hide 之后由菜单里的 Show icon 恢复」在真实系统上不可执行——图标一旦隐藏便无从右键，故 `[tray] icon shown` 改由图标仍在位时点击同一菜单项取证，「图标重新出现」另经窗口 `Show tray icon` 按钮取证，两者合起来覆盖该预期。窗口按钮不记日志这一载体设计（`examples/demos/demo_system_tray.cpp` 第 89 与 91 行仅调 `tray.hide()` 与 `tray.show()`）首轮已记录，本轮复核仍成立。取证纪律：菜单为 `TrackPopupMenu` 模态循环，PowerShell 冷启动约 6 秒后自动收起，故「展开菜单—定位行—点击」必须在同一次进程内完成，跨进程补点会得到静默失败的假阴性（本轮实测两次）。截图 `APP_011_menu.png`、`APP_011_flyout_hidden.png`，清单 `flyout_icons_visible.txt` 与 `flyout_icons_hidden.txt`，退出码 `APP_011_quit_exit_code.txt` |
 | TC-APP-012 | 2026-09-28 | Qoder Agent | PASS | | 步骤 1/2：载体按修复后的库重新链接并启动（`AURORA_INSPECTOR_PORT=39212`），标题 `RichTextEdit · Aurora Demo`，客户区 960x600 像素（640x400 逻辑 @150%）；`err.txt` 业务行恰 1 行 `INF` 且消息 `[run_demo] window shown: RichTextEdit · Aurora Demo(close window to exit)`；`/api/tree` 第 3 个子节点即 `RichTextEdit`，初值为 `Aurora RichTextEdit` 换行加一行 Ctrl 快捷键说明。剪贴板可用性先单独验证：另一个互不相干的 PowerShell 进程写入 `AURORA_PROBE_123` 并读回成功，即首轮记 SKIP 时的 `OpenClipboard` 失败确系锁屏会话所致。步骤 3：真实指针单击文本区定光标后 `type_text` 键入 10 字符 `AuroraClip`（落在 `redo (Ctrl+Y` 之后、句点之前），先把系统剪贴板重置为哨兵 `SENTINEL_BEFORE`，再按 Ctrl+A 与 Ctrl+C，独立进程读回 LEN=120 且内容等于整篇文档（含刚键入的 `AuroraClip`）——哨兵已被覆盖，故 Ctrl+C 写入的是**系统**剪贴板而非进程内缓冲。步骤 4：记事本（`C:\Windows\System32\notepad.exe`，pid 4736）Ctrl+V 粘出同一段，截图可见首行 `Aurora RichTextEdit` 与第二行开头，行宽截断处之后的尾巴以剪贴板 120 字符读数为准。步骤 5：记事本清空后键入 `FromNotepad`，Ctrl+A 与 Ctrl+C，独立进程读回 LEN=11 且内容即 `FromNotepad`（外部应用写入可被读回）。步骤 6：回编辑器 Ctrl+End 后 Ctrl+V 两次，随后 Ctrl+A 与 Ctrl+X 读回 LEN=142，恰为原 120 字符文档加两份 `FromNotepad` 拼接，即两次粘贴都进了模型。步骤 7：该次剪切后编辑器已空（再键入 `AFTER_CUT` 后 Ctrl+A 与 Ctrl+C 只读回 LEN=9 的这 9 字符），另一次 Ctrl+A 与 Ctrl+X 后独立进程读回 LEN=9 内容 `AFTER_CUT`；记事本清空并 Ctrl+V 后画面显示 `AFTER_CUT`、状态栏「行 1, 列 10」与「9 个字符」，与编辑器中被移除的那段一致且编辑器不再含它 | | 本轮判由 SKIP 改 PASS，解锁的是两件事：真实输入落地，与系统剪贴板本身可用。组合键通道仍需留意——computer-use 的 `press_key` chord 在约 1ms 内投完 4 个 SendInput 事件，而 aurora 在派发时刻以 `GetAsyncKeyState` 采样修饰键（`src/aurora/window/win32_host.cpp:41`），实测首轮 Ctrl+C 之后哨兵原样在位（键被丢）；改用自写脚本按住 Ctrl 140ms 再投主键后稳定命中，与 TC-RENDER-013 的「真键盘按住 Ctrl」口径一致。观测缺口（另立任务追查）：快捷键驱动的编辑不刷新 `RichTextEdit` 的 UIA `Value` 与画面（`/api/tree` 与窗口截图停在初值），故本例的内容断言一律以系统剪贴板为模型 oracle，未采信树读数与像素读数。更正首轮记录的一条库侧结论：`Clipboard::set_text` 在 `OpenClipboard` 失败时并非静默，`src/aurora/app/clipboard.cpp:136` 有 `AURORA_LOG_WARN`；但同函数在 `text.empty()` 时确实静默早退，故「复制空内容可清空剪贴板」不成立。截图 `APP_012_notepad_pasted.png`、`APP_012_notepad_cut_pasted.png`，探针回读 `clip_probe.txt`（LEN 依次为 15、120、11、142、9 五轮）。2026-09-28 更新：上文「组合键通道仍需留意」所指派发时刻采样竞态已修为宿主自跟踪，投递键与批量 `SendInput` 的 chord 均稳定命中，本记录里「按住 Ctrl 140 ms」的绕法不再是命中的必要条件；本记录的读数仍按当时形态成立。<br>2026-09-28 二次更新（`Clipboard` 改 `Result` 口径）：本记录末段「`Clipboard::set_text` 在 `OpenClipboard` 失败时并非静默，`clipboard.cpp` 有 `AURORA_LOG_WARN`」一句已随本次改口径失效——该 `WARN` 分支取消，失败改由 `Err(ClipboardAccessFailed)` 机器可见（见 [`06-app-platform.md`](../specification/06-app-platform.md) §8.2）；「`text.empty()` 时静默早退」则由隐晦行为升格为明文契约（no-op 且保留既有内容，返回 `Ok`），并由 `tests/unit/utest_clipboard.cpp` 锁定。该段读数是**改前代码**的形态，本例各步的剪贴板内容读数（LEN 15/120/11/142/9）系行为无关的观测，不需复跑。另：本例步骤 7 的「剪切后编辑器已空」在新口径下多一道守卫——`Ctrl+X` 仅在剪贴板写入成功后才删选区；本例剪刺全部成功，故预期结果不变。 |
 | TC-APP-013 | 2026-09-27 | Qoder Agent | PASS | | 步骤 2：标题 `Timer · Aurora Demo`，客户区 780x660 像素（即 520x440 逻辑）。步骤 3：`err.txt` **共 4 行**，首行为 `INF` 级 `[run_demo] window shown: Timer · Aurora Demo(close window to exit)`，其余**恰 3 行**均为 `WRN` 级诊断 JSON。步骤 4：三条 JSON 的 `where` 字段完全一致，均为 `Timer mounted without a running Scheduler (Scheduler::current() == nullptr); ticks will not fire.`，`category` 为 general、`severity` 为 warning。步骤 5：约 2 秒与约 5.4 秒两次抓取窗口表面（各 802x716 像素）逐像素比对，**差异像素 0**——时钟停在 `clock: --:--:--`、倒计时停在 `countdown: 10`、`auto-revealed after 2s!` 从未浮现；进程全程存活，关窗退出码 0 | | 「始终不出现」必须以像素为准：`au::Show` 门的子节点即使门关着也仍会在 `/api/tree` 里回读出 `content`，故树读数对该断言是假证据；两帧整幅 0 差异同时排除了「整屏位移造成的假阳性」，并一并证明计时器未触发。三行诊断对应载体声明的 3 个 `Timer`（各产 1 条）。该载体经 `run_demo` 只建窗口、不建 `Application`，故 `Scheduler::current()` 为空，表现为「降级加明确诊断」而非中止。取证通道开启的那次运行 stderr 多出 inspector 行，故步骤 3 的「共 4 行」取自不开该通道的原始运行。截图 `APP_013_win.png`，差分两帧 `APP_013_frame1.png`、`APP_013_frame2.png` |
 | TC-APP-014 | 2026-10-22 | WorkBuddy | SKIP | | | | 真机弹框走查需在解锁桌面会话下由人工执行（脚本化点击越过 GUI 交互测试约定，本库 `file_dialog.h` 自述亦不引入 GUI 交互测试）；L1 状态机与 L2 离屏快照已由 `tests/unit/utest_file_dialog.cpp` 的无头用例全量覆盖（含 `session_*` 系列经 `Application::run_modal` 的真实帧驱动，验证挂载 / 返回 / 单例还原 / 一层嵌套），故本例仅作真实渲染与导航手势的保留走查项，待桌面会话下补跑 |
+| TC-APP-015 | | | | | | | |
+| TC-APP-016 | | | | | | | |
+| TC-APP-017 | | | | | | | |
+| TC-APP-018 | | | | | | | |

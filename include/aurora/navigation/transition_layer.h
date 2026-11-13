@@ -4,7 +4,6 @@
 #include <functional>
 #include <memory>
 #include <unordered_set>
-#include <vector>
 
 #include "aurora/animation/timeline.h"
 #include "aurora/core/types.h"
@@ -57,7 +56,7 @@ class TransitionLayer : public Widget {
     }
 
     /// @brief 不自行订阅 progress_：由宿主（NavigatorHost）统一订阅，避免重复绑定同一信号。
-    auto collect_signals(std::vector<SignalViewBase *> & /*out*/) -> void override {}
+    auto collect_signals(StateSink & /*out*/) -> void override {}
 
     /// @brief 枚举两棵子页：旧页在前、新页在后（与绘制层序一致；空页跳过）。
     /// @param fn 对每个在场子页以 const 引用回调一次。

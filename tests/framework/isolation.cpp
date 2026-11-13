@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-#include "aurora/app/clipboard.h"
+#include "aurora/app/detail/clipboard_backend.h"
 #include "aurora/core/platform.h"
 #include "death_test.h"
 
@@ -301,7 +301,7 @@ auto begin_case() -> void {
         state.temp_dir.clear();
     }
     // 防御性卸载上一用例可能遗留的剪贴板注入（end_case 正常已卸）。
-    (void)aurora::Clipboard::remove_test_backend();
+    clipboard::detail::remove_backend();
 
     state.temp_dir = make_unique_temp_dir();
     if (!state.temp_dir.empty()) {
@@ -322,7 +322,7 @@ auto end_case() -> void {
         }
         state.temp_dir.clear();
     }
-    (void)aurora::Clipboard::remove_test_backend();
+    clipboard::detail::remove_backend();
     // 还原进程原始临时目录 env：临时目录已被删除，env 不得继续指向它。
     set_env("TMPDIR", state.saved_tmpdir);
     set_env("TMP", state.saved_tmp);

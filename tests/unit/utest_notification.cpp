@@ -194,7 +194,7 @@ AURORA_TEST_CASE(pump_events_is_safe_without_a_backend) {
 AURORA_TEST_CASE(unsupported_platform_reports_a_structured_error) {
 // Headless 构建（含 macOS CI）按契约 `notify()` 直接成功，不属于「不支持」路径，故一并跳过。
 #if defined(AURORA_PLATFORM_WINDOWS) || (defined(AURORA_PLATFORM_LINUX) && !defined(AURORA_PLATFORM_ANDROID)) || \
-    defined(AURORA_BACKEND_HEADLESS)
+    defined(AURORA_PLATFORM_MACOS) || defined(AURORA_BACKEND_HEADLESS)
     AURORA_TEST_SKIP(
         "this machine has a desktop notification backend (or headless build); "
         "posting a real notification belongs to the live probe, not to the unit suite");

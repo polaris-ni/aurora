@@ -14,7 +14,9 @@
 #include "aurora/render/font_engine.h"
 #include "aurora/render/painter.h"
 #include "aurora/state/state.h"
+#include "aurora/theming/theme.h"
 #include "aurora/theming/theme_scope.h"
+#include "aurora/theming/type_scale.h"  // 未显式设字号时取字阶正文档；非正字号的兜底也来自它的声明默认值
 #include "aurora/widget/descriptor.h"
 #include "aurora/widget/widget.h"
 
@@ -86,21 +88,21 @@ class RadioGroup : public Widget {
                      .json_type = "boolean"},
                     {.name = "active_color",
                      .type = "Color",
-                     .default_value = "theme.primary",
+                     .default_value = theme_token_expr<&ColorRoles::primary>(),
                      .required = false,
                      .note = "Selected ring and dot color (defaults to theme primary)",
                      .json_type = "array"},
                     {.name = "border_color",
                      .type = "Color",
-                     .default_value = "{140,140,146,255}",
+                     .default_value = theme_token_expr<&ColorRoles::outline_variant>(),
                      .required = false,
-                     .note = "Unselected ring color",
+                     .note = "Unselected ring color (defaults to theme outline_variant)",
                      .json_type = "array"},
                     {.name = "text_color",
                      .type = "Color",
-                     .default_value = "{30,30,30,255}",
+                     .default_value = theme_token_expr<&ColorRoles::on_surface>(),
                      .required = false,
-                     .note = "Option text color",
+                     .note = "Option text color (defaults to theme on_surface)",
                      .json_type = "array"},
                     {.name = "dot_size",
                      .type = "float",
@@ -120,9 +122,9 @@ class RadioGroup : public Widget {
                      .min_value = "0"},
                     {.name = "font_size",
                      .type = "float",
-                     .default_value = "13.0",
+                     .default_value = "type_scale.body_medium",
                      .required = false,
-                     .note = "Option font size (pt)",
+                     .note = "Option font size (pt; follows the theme body type scale when unset)",
                      .json_type = "number",
                      .enum_values = {},
                      .min_value = "0"},
@@ -145,7 +147,7 @@ class RadioGroup : public Widget {
 
     /// @brief 收集可观察信号：登记选中值 `selected_`。
     /// @param out 收集输出容器，追加选中值信号视图。
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&selected_); }
+    auto collect_signals(StateSink &out) -> void override { out.push(selected_); }
 
     /// @brief 选项个数。
     /// @return 选项列表长度。
@@ -186,7 +188,7 @@ class RadioGroup : public Widget {
         return *this;
     }
 
-    /// @brief 设置未选中圆环色（链式）。
+    /// @brief 设置未选中圆环色（链式）。不调用则跟随主题 `Theme::outline_variant`。
     /// @param c 圆环颜色。
     /// @return 自身引用（链式调用）。
     auto set_border_color(Color c) -> RadioGroup & {
@@ -195,7 +197,7 @@ class RadioGroup : public Widget {
         return *this;
     }
 
-    /// @brief 设置选项文本色（链式）。
+    /// @brief 设置选项文本色（链式）。不调用则跟随主题 `Theme::on_surface`。
     /// @param c 文本颜色。
     /// @return 自身引用（链式调用）。
     auto set_text_color(Color c) -> RadioGroup & {
@@ -223,12 +225,21 @@ class RadioGroup : public Widget {
     }
 
     /// @brief 设置选项字号 pt（链式）。
-    /// @param s 字号；非正值回落默认 13pt。标脏布局。
+    /// @param s 字号；> 0 才记为显式表态，<= 0 视作清除表态、回落主题字阶。标脏布局。
     /// @return 自身引用（链式调用）。
     auto set_font_size(float s) -> RadioGroup & {
-        font_size_ = s > 0.0F ? s : 13.0F;
+        font_size_ = s > 0.0F ? std::optional<float>{s} : std::nullopt;
         mark_needs_layout();
         return *this;
+    }
+
+    /// @brief 解析生效字号：未显式设字号时经 ctx 取主题字阶**正文档**（风格档基准与无障碍字号缩放
+    ///        都只在这一处生效，控件侧不再乘第二次）。
+    /// @param ctx 构建上下文：供主题取字阶；无注入时 `inherit_theme` 回落 light。
+    /// @return 生效字号（pt）。主题正文档被写成非正数时兜底取 `TypeScale{}` 的声明默认值。
+    [[nodiscard]] auto effective_font_size(const BuildContext &ctx) const -> float {
+        const float pt = font_size_.value_or(inherit_theme(ctx).type_scale.body_medium.size_pt);
+        return pt > 0.0F ? pt : TypeScale{}.body_medium.size_pt;
     }
 
     /// @brief 设置是否启用（链式）；禁用态灰化绘制并忽略点击。
@@ -280,11 +291,18 @@ class RadioGroup : public Widget {
         if (active_color_.has_value()) {
             props.set("active_color", color_to_json(*active_color_));  // 未设置不输出：保留「跟随主题」语义
         }
-        props.set("border_color", color_to_json(border_color_));
-        props.set("text_color", color_to_json(text_color_));
+        if (border_color_.has_value()) {
+            props.set("border_color", color_to_json(*border_color_));  // 未设置不输出：保留「跟随主题」语义
+        }
+        if (text_color_.has_value()) {
+            props.set("text_color", color_to_json(*text_color_));  // 未设置不输出：保留「跟随主题」语义
+        }
         props.set("dot_size", dot_size_);
         props.set("row_height", row_height_);
-        props.set("font_size", font_size_);
+        // 字号「只写意图」：缺键 ≡ 未表态 ≡ 取主题字阶正文档（旧 JSON 里显式的 13.0 仍逐字复原）
+        if (font_size_.has_value()) {
+            props.set("font_size", *font_size_);
+        }
         props.set("enabled", Json{enabled_});
     }
 
@@ -323,7 +341,8 @@ class RadioGroup : public Widget {
             row_height_ = props.at("row_height")->as_or<float>(0.0F);
         }
         if (props.contains("font_size")) {
-            font_size_ = props.at("font_size")->as_or<float>(0.0F);
+            const auto s = props.at("font_size")->as_or<float>(0.0F);
+            font_size_ = s > 0.0F ? std::optional<float>{s} : std::nullopt;  // 非法值 ⇒ 退出表态，回落主题字阶
         }
         if (props.contains("enabled")) {
             enabled_ = props.at("enabled")->as_or<bool>(false);
@@ -331,9 +350,11 @@ class RadioGroup : public Widget {
     }
 
   protected:
-    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
+    auto on_layout(const Constraints &c, const BuildContext &ctx) -> Size override {
+        layout_font_size_ =
+            effective_font_size(ctx);  // 命中路径没有 BuildContext，按这份缓存取值（见 layout_font_size_）
         Font f;
-        f.size_pt = font_size_;
+        f.size_pt = layout_font_size_;
         if (horizontal_) {
             float w = 0.0F;
             for (const auto &o : options_) {
@@ -353,16 +374,19 @@ class RadioGroup : public Widget {
     /// @param bounds 绘制区域。
     /// @param ctx 构建上下文（用于主题解析）。
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
+        // 每帧必过的主写入点：`on_layout` 在布局缓存命中时整段被跳过，不可作为唯一写入点。
+        layout_font_size_ = effective_font_size(ctx);
         Font f;
-        f.size_pt = font_size_;
-        // 状态色解析：显式设置优先，否则跟随主题 primary；禁用态统一灰化。
+        f.size_pt = layout_font_size_;
+        // 状态色解析：显式设置优先，否则跟随主题角色；禁用态统一灰化。
         Color accent = active_color_.value_or(inherit_theme(ctx).roles.primary);
-        Color idle = border_color_;
-        Color text = text_color_;
+        Color idle = border_color_.value_or(inherit_theme(ctx).roles.outline_variant);
+        Color text = text_color_.value_or(inherit_theme(ctx).roles.on_surface);
         if (!enabled_) {
-            accent = Color{176, 176, 180, 255};
-            idle = Color{200, 200, 204, 255};
-            text = Color{168, 168, 172, 255};
+            const auto &roles = inherit_theme(ctx).roles;
+            accent = roles.outline;
+            idle = roles.outline_variant;
+            text = roles.outline;
         }
         float x = bounds.origin.x;
         float y = bounds.origin.y;
@@ -433,7 +457,7 @@ class RadioGroup : public Widget {
     /// @return 命中的选项序号；不落在任何行时为 -1。
     [[nodiscard]] auto hit_index_horizontal(float x) const -> int {
         Font f;
-        f.size_pt = font_size_;
+        f.size_pt = layout_font_size_;  // 本路径没有 BuildContext：用布局/绘制期解好的字号，与量宽同源
         float acc = 0.0F;
         for (std::size_t i = 0; i < options_.size(); ++i) {
             const float w = item_width(render::FontEngine::measure_width(options_[i], f));
@@ -452,12 +476,14 @@ class RadioGroup : public Widget {
     bool horizontal_ = false;  ///< 是否水平排列
     std::function<void(int)> on_change_;  ///< 选中变化回调（参数为新序号）
     std::optional<Color> active_color_;  ///< 选中态圆环/圆点色；空 = 跟随主题 primary
-    Color border_color_ = Color{140, 140, 146, 255};  ///< 未选中圆环色
-    Color text_color_ = Color{30, 30, 30, 255};  ///< 选项文本色
+    std::optional<Color> border_color_;  ///< 未选中圆环色；空 = 跟随主题 outline_variant
+    std::optional<Color> text_color_;  ///< 选项文本色；空 = 跟随主题 on_surface
     float dot_size_ = 16.0F;  ///< 圆点外径 dp
     float row_height_ = 28.0F;  ///< 行高 dp
-    float font_size_ = 13.0F;  ///< 选项字号 pt
+    std::optional<float> font_size_;  ///< 选项字号 pt；空 = 跟随主题字阶正文档 `type_scale.body_medium`
     bool enabled_ = true;  ///< 禁用态灰化并忽略点击
+    float layout_font_size_ =
+        TypeScale{}.body_medium.size_pt;  ///< 布局/绘制期解出的字号（pt）：供无 ctx 的命中路径复用
     // NOLINTEND(*-non-private-member-variables-in-classes)
 };
 
@@ -554,27 +580,27 @@ class SpinBox : public Widget {
                      .min_value = "0"},
                     {.name = "background",
                      .type = "Color",
-                     .default_value = "Color::white()",
+                     .default_value = theme_token_expr<&ColorRoles::surface_container_lowest>(),
                      .required = false,
-                     .note = "Background color",
+                     .note = "Background color (defaults to theme surface_container_lowest)",
                      .json_type = "array"},
                     {.name = "border_color",
                      .type = "Color",
-                     .default_value = "{200,200,205,255}",
+                     .default_value = theme_token_expr<&ColorRoles::outline_variant>(),
                      .required = false,
-                     .note = "Border color",
+                     .note = "Border color (defaults to theme outline_variant)",
                      .json_type = "array"},
                     {.name = "text_color",
                      .type = "Color",
-                     .default_value = "{30,30,30,255}",
+                     .default_value = theme_token_expr<&ColorRoles::on_surface>(),
                      .required = false,
-                     .note = "Value text color",
+                     .note = "Value text color (defaults to theme on_surface)",
                      .json_type = "array"},
                     {.name = "arrow_color",
                      .type = "Color",
-                     .default_value = "{100,100,105,255}",
+                     .default_value = theme_token_expr<&ColorRoles::on_surface_variant>(),
                      .required = false,
-                     .note = "Arrow color",
+                     .note = "Arrow color (defaults to theme on_surface_variant)",
                      .json_type = "array"},
                     {.name = "corner_radius",
                      .type = "float",
@@ -586,9 +612,9 @@ class SpinBox : public Widget {
                      .min_value = "0"},
                     {.name = "font_size",
                      .type = "float",
-                     .default_value = "13.0",
+                     .default_value = "type_scale.body_medium",
                      .required = false,
-                     .note = "Value font size (pt)",
+                     .note = "Value font size (pt; follows the theme body type scale when unset)",
                      .json_type = "number",
                      .enum_values = {},
                      .min_value = "0"},
@@ -611,7 +637,7 @@ class SpinBox : public Widget {
 
     /// @brief 收集可观察信号：登记当前值 `value_`。
     /// @param out 收集输出容器，追加数值信号视图。
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&value_); }
+    auto collect_signals(StateSink &out) -> void override { out.push(value_); }
 
     /// @brief 响应式当前值（可订阅观察）。
     /// @return 值状态引用。
@@ -677,7 +703,7 @@ class SpinBox : public Widget {
         return *this;
     }
 
-    /// @brief 设置背景色（链式）。
+    /// @brief 设置背景色（链式）。不调用则跟随主题 `Theme::surface_container_lowest`。
     /// @param c 背景颜色。标脏绘制。
     /// @return 自身引用（链式调用）。
     auto set_background(Color c) -> SpinBox & {
@@ -686,7 +712,7 @@ class SpinBox : public Widget {
         return *this;
     }
 
-    /// @brief 设置边框色（链式）。
+    /// @brief 设置边框色（链式）。不调用则跟随主题 `Theme::outline_variant`。
     /// @param c 边框颜色。标脏绘制。
     /// @return 自身引用（链式调用）。
     auto set_border_color(Color c) -> SpinBox & {
@@ -695,7 +721,7 @@ class SpinBox : public Widget {
         return *this;
     }
 
-    /// @brief 设置数值文本色（链式）。
+    /// @brief 设置数值文本色（链式）。不调用则跟随主题 `Theme::on_surface`。
     /// @param c 文本颜色。标脏绘制。
     /// @return 自身引用（链式调用）。
     auto set_text_color(Color c) -> SpinBox & {
@@ -704,7 +730,7 @@ class SpinBox : public Widget {
         return *this;
     }
 
-    /// @brief 设置箭头颜色（链式）。
+    /// @brief 设置箭头颜色（链式）。不调用则跟随主题 `Theme::on_surface_variant`。
     /// @param c 箭头颜色。标脏绘制。
     /// @return 自身引用（链式调用）。
     auto set_arrow_color(Color c) -> SpinBox & {
@@ -723,12 +749,21 @@ class SpinBox : public Widget {
     }
 
     /// @brief 设置数值字号 pt（链式）。
-    /// @param s 字号；非正值回落默认 13pt。标脏绘制。
+    /// @param s 字号；> 0 才记为显式表态，<= 0 视作清除表态、回落主题字阶。标脏绘制。
     /// @return 自身引用（链式调用）。
     auto set_font_size(float s) -> SpinBox & {
-        font_size_ = s > 0.0F ? s : 13.0F;
+        font_size_ = s > 0.0F ? std::optional<float>{s} : std::nullopt;
         mark_needs_paint();
         return *this;
+    }
+
+    /// @brief 解析生效字号：未显式设字号时经 ctx 取主题字阶**正文档**（风格档基准与无障碍字号缩放
+    ///        都只在这一处生效，控件侧不再乘第二次）。
+    /// @param ctx 构建上下文：供主题取字阶；无注入时 `inherit_theme` 回落 light。
+    /// @return 生效字号（pt）。主题正文档被写成非正数时兜底取 `TypeScale{}` 的声明默认值。
+    [[nodiscard]] auto effective_font_size(const BuildContext &ctx) const -> float {
+        const float pt = font_size_.value_or(inherit_theme(ctx).type_scale.body_medium.size_pt);
+        return pt > 0.0F ? pt : TypeScale{}.body_medium.size_pt;
     }
 
     /// @brief 设置是否启用（链式）；禁用态灰化绘制并忽略交互。
@@ -805,12 +840,23 @@ class SpinBox : public Widget {
         props.set("prefix", prefix_);
         props.set("suffix", suffix_);
         props.set("decimals", decimals_);
-        props.set("background", color_to_json(background_));
-        props.set("border_color", color_to_json(border_color_));
-        props.set("text_color", color_to_json(text_color_));
-        props.set("arrow_color", color_to_json(arrow_color_));
+        if (background_.has_value()) {
+            props.set("background", color_to_json(*background_));  // 未设置不输出：保留「跟随主题」语义
+        }
+        if (border_color_.has_value()) {
+            props.set("border_color", color_to_json(*border_color_));  // 未设置不输出：保留「跟随主题」语义
+        }
+        if (text_color_.has_value()) {
+            props.set("text_color", color_to_json(*text_color_));  // 未设置不输出：保留「跟随主题」语义
+        }
+        if (arrow_color_.has_value()) {
+            props.set("arrow_color", color_to_json(*arrow_color_));  // 未设置不输出：保留「跟随主题」语义
+        }
         props.set("corner_radius", corner_radius_);
-        props.set("font_size", font_size_);
+        // 字号「只写意图」：缺键 ≡ 未表态 ≡ 取主题字阶正文档（旧 JSON 里显式的 13.0 仍逐字复原）
+        if (font_size_.has_value()) {
+            props.set("font_size", *font_size_);
+        }
         props.set("enabled", Json{enabled_});
     }
 
@@ -852,7 +898,8 @@ class SpinBox : public Widget {
             corner_radius_ = props.at("corner_radius")->as_or<float>(0.0F);
         }
         if (props.contains("font_size")) {
-            font_size_ = props.at("font_size")->as_or<float>(0.0F);
+            const auto s = props.at("font_size")->as_or<float>(0.0F);
+            font_size_ = s > 0.0F ? std::optional<float>{s} : std::nullopt;  // 非法值 ⇒ 退出表态，回落主题字阶
         }
         if (props.contains("enabled")) {
             enabled_ = props.at("enabled")->as_or<bool>(false);
@@ -871,20 +918,23 @@ class SpinBox : public Widget {
         return c.constrain(Size{.width = 120.0F, .height = AURORA_BOX_HEIGHT});
     }
 
-    /// @brief 绘制：解析状态色（禁用态统一灰化）后依次绘框、文本与箭头。
+    /// @brief 绘制：解析状态色（显式设置优先，否则跟随主题角色；禁用态统一灰化）后依次绘框、文本与箭头。
     /// @param p 绘制器。
     /// @param bounds 绘制区域。
-    /// @param ctx 构建上下文（当前实现未使用）。
-    auto on_paint(Painter &p, const Rect &bounds, [[maybe_unused]] const BuildContext &ctx) -> void override {
-        Color bg = background_;
-        Color border = border_color_;
-        Color text = text_color_;
-        Color arrow = arrow_color_;
+    /// @param ctx 构建上下文（用于主题解析）。
+    auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
+        // 每帧必过的主写入点：`paint_value` 是可覆写扩展点、没有 BuildContext，字号只能由这里递过去。
+        layout_font_size_ = effective_font_size(ctx);
+        Color bg = background_.value_or(inherit_theme(ctx).roles.surface_container_lowest);
+        Color border = border_color_.value_or(inherit_theme(ctx).roles.outline_variant);
+        Color text = text_color_.value_or(inherit_theme(ctx).roles.on_surface);
+        Color arrow = arrow_color_.value_or(inherit_theme(ctx).roles.on_surface_variant);
         if (!enabled_) {
-            bg = Color{235, 235, 237, 255};
-            border = Color{215, 215, 219, 255};
-            text = Color{168, 168, 172, 255};
-            arrow = Color{190, 190, 194, 255};
+            const auto &roles = inherit_theme(ctx).roles;
+            bg = roles.surface_container_high;
+            border = roles.outline_variant;
+            text = roles.outline;
+            arrow = roles.outline_variant;
         }
         paint_box(p, bounds, bg, border);
         paint_value(p, bounds, text);
@@ -912,7 +962,7 @@ class SpinBox : public Widget {
     /// @param text 文本色。
     virtual auto paint_value(Painter &p, const Rect &bounds, Color text) -> void {
         Font f;
-        f.size_pt = font_size_;
+        f.size_pt = layout_font_size_;  // 与 on_paint 同源：本扩展点没有 BuildContext，不再另解一次字号
         const Rect text_box{
             .origin = Point{.x = bounds.origin.x + 8.0F, .y = bounds.origin.y + 8.0F},
             .size = Size{.width = bounds.size.width - AURORA_ARROW_ZONE - 12.0F, .height = bounds.size.height - 16.0F}};
@@ -953,13 +1003,14 @@ class SpinBox : public Widget {
     std::string suffix_;
     int decimals_ = 0;
     std::function<void(double)> on_change_;
-    Color background_ = Color{255, 255, 255, 255};  ///< 背景色
-    Color border_color_ = Color{200, 200, 205, 255};  ///< 边框色
-    Color text_color_ = Color{30, 30, 30, 255};  ///< 数值文本色
-    Color arrow_color_ = Color{100, 100, 105, 255};  ///< 箭头颜色
+    std::optional<Color> background_;  ///< 背景色；空 = 跟随主题 surface_container_lowest
+    std::optional<Color> border_color_;  ///< 边框色；空 = 跟随主题 outline_variant
+    std::optional<Color> text_color_;  ///< 数值文本色；空 = 跟随主题 on_surface
+    std::optional<Color> arrow_color_;  ///< 箭头颜色；空 = 跟随主题 on_surface_variant
     float corner_radius_ = 4.0F;  ///< 圆角半径 dp；0 = 直角
-    float font_size_ = 13.0F;  ///< 数值字号 pt
+    std::optional<float> font_size_;  ///< 数值字号 pt；空 = 跟随主题字阶正文档 `type_scale.body_medium`
     bool enabled_ = true;  ///< 禁用态灰化并忽略交互
+    float layout_font_size_ = TypeScale{}.body_medium.size_pt;  ///< 绘制期解出的字号（pt）：供无 ctx 的扩展点复用
     // NOLINTEND(*-non-private-member-variables-in-classes)
 };
 

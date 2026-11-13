@@ -26,17 +26,17 @@ auto main() -> int {
     std::vector<au::Node> rows;
     for (int i = 0; i < 30; ++i) {
         au::Text line{au::LocalizedString{"item " + std::to_string(i)}};
-        line.modifier.set(
+        line.set_modifier(
             au::Modifier{}.padding(6.0F).background(pal::AURORA_SURFACE).border(1.0F, pal::AURORA_BORDER));
         rows.emplace_back(std::move(line));
     }
-    au::Scroll scroll{au::ScrollProps{.child = au::Node{au::Column{au::ColumnProps{.children = std::move(rows)}}}}};
-    scroll.modifier.set(au::Modifier{}.size(340.0F, 240.0F));
+    au::Scroll scroll{au::Node{au::Column(std::move(rows))}};
+    scroll.set_modifier(au::Modifier{}.size(340.0F, 240.0F));
 
     auto pull = std::make_shared<au::PullToRefresh>(au::Node{std::move(scroll)});
-    pull->modifier.set(au::Modifier{}.border(1.0F, pal::AURORA_BORDER));
+    pull->set_modifier(au::Modifier{}.border(1.0F, pal::AURORA_BORDER));
 
-    std::weak_ptr<au::PullToRefresh> weak_pull = pull;
+    std::weak_ptr<au::PullToRefresh> const weak_pull = pull;
     pull->on_refresh([status, weak_pull]() -> void {
         // CJK-LITERAL: on-screen-demo - painted window text, not console output
         status->set(au::LocalizedString{"刷新中…（异步取数）"});
@@ -54,7 +54,7 @@ auto main() -> int {
         }
     });
 
-    au::Text status_line{au::TextProps{.content = au::Reactive<au::LocalizedString>{status}}};
+    au::Text status_line{au::TextProps().set_content(*status)};
 
     au::Node root = au::Column{
         GradientTitle{"PullToRefresh"}, gap(12), std::move(status_line), gap(8), Card{au::Node{pull}},

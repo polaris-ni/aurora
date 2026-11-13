@@ -55,9 +55,11 @@ using aurora::bench::time_ms;
 
 // NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int {
+    aurora::bench::process_result().identify("bench_win32_present", "present-split");
 #ifndef AURORA_BACKEND_WIN32
     AURORA_LOG_RAW("bench", "bench_win32_present: no Win32 backend, skip\n");
-    return 0;
+    aurora::bench::process_result().skip("backend-unavailable");
+    return aurora::bench::finalize_process("bench_win32_present", "present-split") ? 0 : 1;
 #else
     enable_dpi_awareness();
 
@@ -69,7 +71,8 @@ auto main() -> int {
     auto win_res = create_window(Win32Options{wopts});
     if (!win_res) {
         AURORA_LOG_RAW("bench", "bench_win32_present: window creation failed (", win_res.error().message, "), skip\n");
-        return 0;
+        aurora::bench::process_result().skip("window-creation-failed");
+        return aurora::bench::finalize_process("bench_win32_present", "present-split") ? 0 : 1;
     }
     auto win = std::move(win_res.value());
 
@@ -80,17 +83,18 @@ auto main() -> int {
         "beyond the quiet hills and the pale moon rises above the sleeping town. "
         "The quick brown fox jumps over the lazy dog while a silent river flows "
         "beyond the quiet hills and the pale moon rises above the sleeping town.";
-    auto para = std::make_shared<Text>(TextProps{
-        .content = k_para, .font = Font{.size_pt = 15.0F}, .text_align = TextAlign::Justify, .soft_wrap = true});
+    auto para = std::make_shared<Text>(
+        TextProps().set_content(k_para).set_font_size(15.0F).set_text_align(TextAlign::Justify).set_soft_wrap(true));
     std::vector<Node> kids;
     kids.reserve(9);
     for (int i = 0; i < 8; ++i) {
         kids.emplace_back(std::make_shared<Text>(
-            TextProps{.content = LocalizedString{"line " + std::to_string(i) + " · sample line content"},
-                      .font = Font{.size_pt = 16.0F}}));
+            TextProps()
+                .set_content(LocalizedString{"line " + std::to_string(i) + " · sample line content"})
+                .set_font_size(16.0F)));
     }
     kids.emplace_back(para);
-    Node root{std::make_shared<Column>(ColumnProps{.children = std::move(kids)})};
+    Node root{std::make_shared<Column>(std::move(kids))};
 
     (void)win->present_root(root);  // First frame full paint (mount + layout + paint + present)
     const Size logical = win->size();
@@ -256,6 +260,6 @@ auto main() -> int {
 #endif  // AURORA_BACKEND_D3D11
 
     AURORA_LOG_RAW("bench", "\n", AURORA_BENCH_DISCLAIMER, "\n");
-    return 0;
+    return aurora::bench::finalize_process("bench_win32_present", "present-split") ? 0 : 1;
 #endif
 }

@@ -87,9 +87,13 @@ using aurora::test::scripts::write_then_hold;
 }
 
 /// @brief 取协程结果的外层（协程本身不抛，外层恒成功）。
+///
+/// 先 REQUIRE「协程已收尾」再读：未收尾时 `result()` 读的是空结果槽（帧外内存），直接读会
+/// 段错误而不是报出一条失败判据。
 [[nodiscard]] auto inner(CoroTask<Result<SseOutcome>> &task) -> Result<SseOutcome> {
+    AURORA_TEST_REQUIRE_MSG(task.is_done(), "coro task not finished when result was read");
     const auto outer = task.result();
-    AURORA_TEST_REQUIRE_MSG(bool(outer), outer ? std::string{} : outer.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(outer), outer ? std::string{} : outer.error().message);
     return outer.value();
 }
 
@@ -304,7 +308,7 @@ auto allow_test_cleartext(Client &client) -> void {
 AURORA_TEST_CASE(sse_parser_delivers_a_single_event_with_the_default_type) {
     Recorder recorder;
     const auto parsed = feed(recorder, {"data: hello\n\n"});
-    AURORA_TEST_REQUIRE_MSG(bool(parsed), parsed ? std::string{} : parsed.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(parsed), parsed ? std::string{} : parsed.error().message);
     AURORA_TEST_CHECK_EQ(recorder.types.size(), std::size_t{1});
     AURORA_TEST_CHECK_EQ(recorder.types.at(0), "message");  // 服务端没写 `event:` 时的规范折值
     AURORA_TEST_CHECK_EQ(recorder.datas.at(0), "hello");
@@ -313,7 +317,7 @@ AURORA_TEST_CASE(sse_parser_delivers_a_single_event_with_the_default_type) {
 AURORA_TEST_CASE(sse_parser_joins_multiple_data_lines_with_lf) {
     Recorder recorder;
     const auto parsed = feed(recorder, {"data: first\ndata: second\ndata:\n\n"});
-    AURORA_TEST_REQUIRE_MSG(bool(parsed), parsed ? std::string{} : parsed.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(parsed), parsed ? std::string{} : parsed.error().message);
     AURORA_TEST_CHECK_EQ(recorder.datas.size(), std::size_t{1});
     // 三行 `data` 折成一条消息体：LF 是连接符而不是第二条事件；空的那行也参与（尾部多一枚 LF）。
     AURORA_TEST_CHECK_EQ(recorder.datas.at(0), "first\nsecond\n");
@@ -323,7 +327,7 @@ AURORA_TEST_CASE(sse_parser_accepts_all_three_line_terminators) {
     Recorder recorder;
     // 裸 CR、CRLF、LF 三型同时在场，且最后那条空行用 CR 收尾：`Framer` 的行型不认第一型，本层必须认。
     const auto parsed = feed(recorder, {"event: tick\rdata: a\r\ndata: b\n\n"});
-    AURORA_TEST_REQUIRE_MSG(bool(parsed), parsed ? std::string{} : parsed.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(parsed), parsed ? std::string{} : parsed.error().message);
     AURORA_TEST_CHECK_EQ(recorder.types.size(), std::size_t{1});
     AURORA_TEST_CHECK_EQ(recorder.types.at(0), "tick");
     AURORA_TEST_CHECK_EQ(recorder.datas.at(0), "a\nb");
@@ -334,7 +338,7 @@ AURORA_TEST_CASE(sse_parser_pairs_a_crlf_split_across_two_segments_into_one_term
     // CR 落在第一段尾、LF 落在第二段首：这是同一枚终止符的两半，不是一条空行。判据若松，宿主会多收到
     // 一条凭空出现的派发（甚至两条事件）。
     const auto first = feed(recorder, {"data: a\r", "\ndata: b\n\n"});
-    AURORA_TEST_REQUIRE_MSG(bool(first), first ? std::string{} : first.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(first), first ? std::string{} : first.error().message);
     AURORA_TEST_CHECK_EQ(recorder.types.size(), std::size_t{1});
     AURORA_TEST_CHECK_EQ(recorder.datas.at(0), "a\nb");
 }
@@ -343,7 +347,7 @@ AURORA_TEST_CASE(sse_parser_dispatches_only_when_the_data_buffer_has_bytes) {
     Recorder recorder;
     // 注释之后的一条空行不派发；只有 `event:` / `id:` 的那一段空行也不派发（那是心跳的常见形态）。
     const auto parsed = feed(recorder, {": ping\n\n", "event: keepalive\nid: 3\n\n", "data: real\n\n"});
-    AURORA_TEST_REQUIRE_MSG(bool(parsed), parsed ? std::string{} : parsed.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(parsed), parsed ? std::string{} : parsed.error().message);
     AURORA_TEST_CHECK_EQ(recorder.types.size(), std::size_t{1});
     AURORA_TEST_CHECK_EQ(recorder.datas.at(0), "real");
     AURORA_TEST_CHECK_EQ(recorder.comments.size(), std::size_t{1});
@@ -357,12 +361,12 @@ AURORA_TEST_CASE(sse_parser_dispatches_only_when_the_data_buffer_has_bytes) {
 AURORA_TEST_CASE(sse_parser_strips_one_leading_space_after_the_colon) {
     Recorder recorder;
     const auto parsed = feed(recorder, {"data:  x\n\n"});  // 冒号后两枚空格：第一枚是分隔符，第二枚是正文
-    AURORA_TEST_REQUIRE_MSG(bool(parsed), parsed ? std::string{} : parsed.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(parsed), parsed ? std::string{} : parsed.error().message);
     AURORA_TEST_CHECK_EQ(recorder.datas.at(0), " x");
 
     Recorder valueless;
     const auto bare = feed(valueless, {"data\n\n"});  // 没带冒号的字段行：字段名整行、值为空
-    AURORA_TEST_REQUIRE_MSG(bool(bare), bare ? std::string{} : bare.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(bare), bare ? std::string{} : bare.error().message);
     AURORA_TEST_CHECK_EQ(valueless.datas.size(), std::size_t{1});
     AURORA_TEST_CHECK_EQ(valueless.datas.at(0), "");  // 空值也参与连接：那条事件是「有一行 data」
 }
@@ -371,7 +375,7 @@ AURORA_TEST_CASE(sse_parser_ignores_unknown_fields_instead_of_refusing_the_event
     Recorder recorder;
     // 未知字段是 `text/event-stream` 的向后兼容机制：服务端将来加什么字段，本层无权替它作废整条事件。
     const auto parsed = feed(recorder, {"trace-id: 42\ndata: x\n\n"});
-    AURORA_TEST_REQUIRE_MSG(bool(parsed), parsed ? std::string{} : parsed.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(parsed), parsed ? std::string{} : parsed.error().message);
     AURORA_TEST_CHECK_EQ(recorder.types.size(), std::size_t{1});
     AURORA_TEST_CHECK_EQ(recorder.datas.at(0), "x");
     AURORA_TEST_CHECK_EQ(recorder.ids.size(), std::size_t{0});
@@ -384,7 +388,7 @@ AURORA_TEST_CASE(sse_parser_drops_an_id_field_containing_a_nul) {
     static constexpr char POLLUTED_RAW[] = "id: a\0b\ndata: x\n\n";
     const std::string polluted{POLLUTED_RAW, std::size(POLLUTED_RAW) - std::size_t{1}};
     const auto parsed = feed(recorder, {polluted, "id: 9\ndata: y\n\n"});
-    AURORA_TEST_REQUIRE_MSG(bool(parsed), parsed ? std::string{} : parsed.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(parsed), parsed ? std::string{} : parsed.error().message);
     AURORA_TEST_CHECK_EQ(recorder.ids.size(), std::size_t{1});
     AURORA_TEST_CHECK_EQ(recorder.ids.at(0), "9");
 }
@@ -392,14 +396,14 @@ AURORA_TEST_CASE(sse_parser_drops_an_id_field_containing_a_nul) {
 AURORA_TEST_CASE(sse_parser_adopts_a_retry_field_only_when_it_is_all_digits) {
     Recorder recorder;
     const auto parsed = feed(recorder, {"retry: 1500\ndata: x\n\n", "retry: later\ndata: y\n\n"});
-    AURORA_TEST_REQUIRE_MSG(bool(parsed), parsed ? std::string{} : parsed.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(parsed), parsed ? std::string{} : parsed.error().message);
     AURORA_TEST_CHECK_EQ(recorder.retry_reports, 1);  // 非数字那行「当没给」：不报错也不上报
     AURORA_TEST_CHECK(recorder.retry.has_value());
     AURORA_TEST_CHECK_EQ(recorder.retry.value_or(std::chrono::milliseconds{-1}).count(), 1500);
 
     Recorder empty;
     const auto blank = feed(empty, {"retry: \ndata: x\n\n"});
-    AURORA_TEST_REQUIRE_MSG(bool(blank), blank ? std::string{} : blank.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(blank), blank ? std::string{} : blank.error().message);
     AURORA_TEST_CHECK_EQ(empty.retry_reports, 0);
 }
 
@@ -407,7 +411,7 @@ AURORA_TEST_CASE(sse_parser_strips_a_byte_order_mark_even_across_segments) {
     Recorder direct;
     const auto whole = feed(direct, {"\xEF\xBB\xBF"
                                      "data: x\n\n"});
-    AURORA_TEST_REQUIRE_MSG(bool(whole), whole ? std::string{} : whole.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(whole), whole ? std::string{} : whole.error().message);
     AURORA_TEST_CHECK_EQ(direct.datas.size(), std::size_t{1});
     AURORA_TEST_CHECK_EQ(direct.datas.at(0), "x");
 
@@ -416,7 +420,7 @@ AURORA_TEST_CASE(sse_parser_strips_a_byte_order_mark_even_across_segments) {
     const auto halves = feed(split, {"\xEF\xBB",
                                      "\xBF"
                                      "data: y\n\n"});
-    AURORA_TEST_REQUIRE_MSG(bool(halves), halves ? std::string{} : halves.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(halves), halves ? std::string{} : halves.error().message);
     AURORA_TEST_CHECK_EQ(split.datas.size(), std::size_t{1});
     AURORA_TEST_CHECK_EQ(split.datas.at(0), "y");
 }
@@ -425,12 +429,12 @@ AURORA_TEST_CASE(sse_parser_discards_an_event_the_peer_never_finished) {
     Recorder recorder;
     // 服务端写完 `data:` 那行就断了：那条事件没有空行收尾，库不补发半条消息。
     const auto parsed = feed(recorder, {"data: half\n"});
-    AURORA_TEST_REQUIRE_MSG(bool(parsed), parsed ? std::string{} : parsed.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(parsed), parsed ? std::string{} : parsed.error().message);
     AURORA_TEST_CHECK_EQ(recorder.types.size(), std::size_t{0});
 
     Recorder no_terminator;
     const auto tailless = feed(no_terminator, {"data: x"});  // 末行连终止符都没有：结算成一行，仍不派发
-    AURORA_TEST_REQUIRE_MSG(bool(tailless), tailless ? std::string{} : tailless.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(tailless), tailless ? std::string{} : tailless.error().message);
     AURORA_TEST_CHECK_EQ(no_terminator.types.size(), std::size_t{0});
 }
 
@@ -438,7 +442,7 @@ AURORA_TEST_CASE(sse_parser_reports_the_builtin_line_limit_once_and_keeps_report
     Recorder recorder;
     const std::string too_long(AURORA_SSE_MAX_LINE_BYTES + std::size_t{2}, 'a');
     const auto first = feed(recorder, {too_long + "\n"}, false);
-    AURORA_TEST_REQUIRE_FALSE(bool(first));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(first));
     AURORA_TEST_CHECK_EQ(first.error().code_enum, aurora::ErrorCode::NetFramerOverflow);
     AURORA_TEST_CHECK_NE(first.error().code_enum, aurora::ErrorCode::NetBufferLimit);  // 越的是哪一枚要说得清
     AURORA_TEST_CHECK(first.error().message.find("1 MiB") != std::string::npos);
@@ -446,9 +450,9 @@ AURORA_TEST_CASE(sse_parser_reports_the_builtin_line_limit_once_and_keeps_report
     // 终态之后重复喂交出同一枚错误：那批字节属于谁已经不可知，继续切行只会造出更多假事件。
     SseStreamParser parser{recorder.sinks()};
     const auto again = parser.push(std::string_view{too_long});
-    AURORA_TEST_REQUIRE_FALSE(bool(again));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(again));
     const auto second = parser.push("data: x\n\n");
-    AURORA_TEST_REQUIRE_FALSE(bool(second));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(second));
     AURORA_TEST_CHECK_EQ(second.error().code_enum, again.error().code_enum);
     AURORA_TEST_CHECK_EQ(recorder.types.size(), std::size_t{0});
 }
@@ -464,7 +468,7 @@ AURORA_TEST_CASE(sse_parser_reports_the_builtin_record_limit) {
     }
     segments.emplace_back("\n");
     const auto parsed = feed(recorder, segments, false);
-    AURORA_TEST_REQUIRE_FALSE(bool(parsed));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(parsed));
     AURORA_TEST_CHECK_EQ(parsed.error().code_enum, aurora::ErrorCode::NetBufferLimit);
     AURORA_TEST_CHECK(parsed.error().message.find("4 MiB") != std::string::npos);
     AURORA_TEST_CHECK_EQ(recorder.types.size(), std::size_t{0});
@@ -475,7 +479,7 @@ AURORA_TEST_CASE(sse_parser_hands_over_bytes_it_cannot_decode) {
     // 事件流的字节属于载荷：本层不替换非法序列、也不报错（charset 解码是物化路径 `Response::text()` 的事）。
     const std::string raw{"data: \xFF\xFE\n\n"};
     const auto parsed = feed(recorder, {raw});
-    AURORA_TEST_REQUIRE_MSG(bool(parsed), parsed ? std::string{} : parsed.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(parsed), parsed ? std::string{} : parsed.error().message);
     AURORA_TEST_CHECK_EQ(recorder.datas.size(), std::size_t{1});
     AURORA_TEST_CHECK_EQ(recorder.datas.at(0), "\xFF\xFE");
 }
@@ -484,7 +488,7 @@ AURORA_TEST_CASE(sse_parser_stops_dispatching_after_the_host_declines) {
     Recorder recorder;
     recorder.decline_at = 1;  // 第一条起宿主收摊
     const auto parsed = feed(recorder, {"data: a\n\ndata: b\n\n"});
-    AURORA_TEST_REQUIRE_MSG(bool(parsed), parsed ? std::string{} : parsed.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(parsed), parsed ? std::string{} : parsed.error().message);
     AURORA_TEST_CHECK_EQ(recorder.types.size(), std::size_t{1});  // 收摊之后一条都不再派发
 }
 
@@ -500,7 +504,7 @@ AURORA_TEST_CASE(sse_subscription_delivers_events_and_reports_one_exchange) {
     RecordingSink sink;
     const auto outcome =
         subscribe_and_drive(client, Request::get(loopback_url(peer.port())).sse(single_stream()), sink);
-    AURORA_TEST_REQUIRE_MSG(bool(outcome), outcome ? std::string{} : outcome.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(outcome), outcome ? std::string{} : outcome.error().message);
 
     AURORA_TEST_CHECK_EQ(sink.opens, 1);
     AURORA_TEST_CHECK_TRUE(sink.head_body_empty);  // 建流交出的是头部块，体的字节属于事件
@@ -532,7 +536,7 @@ AURORA_TEST_CASE(sse_subscription_refuses_a_non_get_request_without_touching_the
     RecordingSink sink;
     const auto outcome =
         subscribe_and_drive(client, Request::post(loopback_url(peer.port())).sse(single_stream()), sink);
-    AURORA_TEST_REQUIRE_FALSE(bool(outcome));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(outcome));
     AURORA_TEST_CHECK_EQ(outcome.error().code_enum, aurora::ErrorCode::HttpRequestInvalid);
     AURORA_TEST_CHECK(outcome.error().message.find("GET") != std::string::npos);
     AURORA_TEST_CHECK_EQ(peer.accepts(), 0);  // 一条连接都没发起：方法闸在建连之前
@@ -554,7 +558,7 @@ AURORA_TEST_CASE(sse_subscription_refuses_a_plain_text_response_and_does_not_rec
     RecordingSink sink;
     const auto outcome =
         subscribe_and_drive(client, Request::get(loopback_url(peer.port())).sse(immediate_reconnect(3)), sink);
-    AURORA_TEST_REQUIRE_FALSE(bool(outcome));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(outcome));
     AURORA_TEST_CHECK_EQ(outcome.error().code_enum, aurora::ErrorCode::HttpProtocolError);
     AURORA_TEST_CHECK_EQ(sink.events, 0);
     AURORA_TEST_CHECK_EQ(sink.opens, 0);  // 没过闸的流不叫 `on_open`
@@ -577,7 +581,7 @@ AURORA_TEST_CASE(sse_subscription_accepts_an_event_stream_with_a_charset_paramet
     RecordingSink sink;
     const auto outcome =
         subscribe_and_drive(client, Request::get(loopback_url(peer.port())).sse(single_stream()), sink);
-    AURORA_TEST_REQUIRE_MSG(bool(outcome), outcome ? std::string{} : outcome.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(outcome), outcome ? std::string{} : outcome.error().message);
     AURORA_TEST_CHECK_EQ(sink.events, 1);
     AURORA_TEST_CHECK_EQ(sink.datas.at(0), "x");
 }
@@ -595,7 +599,7 @@ AURORA_TEST_CASE(sse_subscription_refuses_a_non_success_status) {
     RecordingSink sink;
     const auto outcome =
         subscribe_and_drive(client, Request::get(loopback_url(peer.port())).sse(immediate_reconnect(2)), sink);
-    AURORA_TEST_REQUIRE_FALSE(bool(outcome));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(outcome));
     AURORA_TEST_CHECK_EQ(outcome.error().code_enum, aurora::ErrorCode::HttpProtocolError);
     AURORA_TEST_CHECK(outcome.error().message.find("503") != std::string::npos);  // detail 点名状态码
     AURORA_TEST_CHECK_EQ(peer.accepts(), 1);
@@ -617,7 +621,7 @@ AURORA_TEST_CASE(sse_subscription_reconnects_with_the_last_event_id) {
     RecordingSink sink;
     const auto outcome =
         subscribe_and_drive(client, Request::get(loopback_url(peer.port())).sse(immediate_reconnect(1)), sink);
-    AURORA_TEST_REQUIRE_MSG(bool(outcome), outcome ? std::string{} : outcome.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(outcome), outcome ? std::string{} : outcome.error().message);
 
     AURORA_TEST_CHECK_EQ(sink.opens, 2);  // 每条流各叫一次：那是宿主唯一能知道「流断过」的出口
     AURORA_TEST_CHECK_EQ(sink.events, 2);
@@ -648,7 +652,7 @@ AURORA_TEST_CASE(sse_subscription_clears_the_resume_token_when_the_peer_writes_a
     RecordingSink sink;
     const auto outcome =
         subscribe_and_drive(client, Request::get(loopback_url(peer.port())).sse(immediate_reconnect(2)), sink);
-    AURORA_TEST_REQUIRE_MSG(bool(outcome), outcome ? std::string{} : outcome.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(outcome), outcome ? std::string{} : outcome.error().message);
     AURORA_TEST_CHECK_EQ(outcome.value().last_event_id, "");
     AURORA_TEST_CHECK_TRUE(request_contains(recorded, guard, 1, "Last-Event-ID: 7"));
     AURORA_TEST_CHECK_FALSE(request_contains(recorded, guard, 2, "Last-Event-ID"));
@@ -669,7 +673,7 @@ AURORA_TEST_CASE(sse_subscription_adopts_the_retry_window_the_peer_wrote) {
 
     RecordingSink sink;
     const auto outcome = subscribe_and_drive(client, Request::get(loopback_url(fast.port())).sse(slow), sink);
-    AURORA_TEST_REQUIRE_MSG(bool(outcome), outcome ? std::string{} : outcome.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(outcome), outcome ? std::string{} : outcome.error().message);
     AURORA_TEST_CHECK_EQ(outcome.value().exchanges, std::uint32_t{2});
     AURORA_TEST_CHECK_EQ(sink.events, 2);
 
@@ -694,7 +698,7 @@ AURORA_TEST_CASE(sse_subscription_adopts_the_retry_window_the_peer_wrote) {
                           .satisfied);
     // 取消落在退避等待里：结局是 `net-cancelled` 而不是「等到 4 s 到期后重连上」。
     const auto settled = inner(task);
-    AURORA_TEST_REQUIRE_FALSE(bool(settled));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(settled));
     AURORA_TEST_CHECK_EQ(settled.error().code_enum, aurora::ErrorCode::NetCancelled);
     // 对照组里那条窗口从未到期：对端只被连上一次，第二次连接压根没发起。
     AURORA_TEST_CHECK_EQ(slow_peer.accepts(), 1);
@@ -714,7 +718,7 @@ AURORA_TEST_CASE(sse_subscription_stops_reading_when_the_sink_stops) {
     sink.stop_after = 2;
     const auto outcome =
         subscribe_and_drive(client, Request::get(loopback_url(peer.port())).sse(immediate_reconnect(8)), sink);
-    AURORA_TEST_REQUIRE_MSG(bool(outcome), outcome ? std::string{} : outcome.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(outcome), outcome ? std::string{} : outcome.error().message);
     AURORA_TEST_CHECK_EQ(sink.events, 2);  // 停在收摊那一条，之后一条都不交
     AURORA_TEST_CHECK_EQ(sink.ends, 1);
     const auto &done = outcome.value();
@@ -736,7 +740,7 @@ AURORA_TEST_CASE(sse_subscription_stops_at_the_head_when_the_sink_stops_there) {
     RecordingSink sink;
     sink.stop_at_open = true;
     const auto outcome = subscribe_and_drive(client, Request::get(loopback_url(peer.port())), sink);
-    AURORA_TEST_REQUIRE_MSG(bool(outcome), outcome ? std::string{} : outcome.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(outcome), outcome ? std::string{} : outcome.error().message);
     AURORA_TEST_CHECK_EQ(sink.opens, 1);
     AURORA_TEST_CHECK_EQ(sink.events, 0);
     AURORA_TEST_CHECK_EQ(sink.ends, 1);
@@ -764,7 +768,7 @@ AURORA_TEST_CASE(sse_subscription_surfaces_the_last_failure_when_the_budget_runs
     RecordingSink sink;
     const auto outcome =
         subscribe_and_drive(client, Request::get(loopback_url(peer.port())).sse(immediate_reconnect(2)), sink);
-    AURORA_TEST_REQUIRE_FALSE(bool(outcome));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(outcome));
     AURORA_TEST_CHECK_EQ(outcome.error().code_enum, aurora::ErrorCode::NetRecvFailed);
     AURORA_TEST_CHECK(outcome.error().message.find("reconnect budget of 2") != std::string::npos);
     AURORA_TEST_CHECK_EQ(outcome.error().retryable, false);  // 旗位来自错误表，本件没改写它
@@ -797,7 +801,7 @@ AURORA_TEST_CASE(sse_subscription_cancellation_ends_the_stream_without_reconnect
                           .satisfied);
 
     const auto outcome = inner(task);
-    AURORA_TEST_REQUIRE_FALSE(bool(outcome));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(outcome));
     AURORA_TEST_CHECK_EQ(outcome.error().code_enum, aurora::ErrorCode::NetCancelled);
     AURORA_TEST_CHECK_EQ(sink.events, 1);  // 取消之后不再交付
     AURORA_TEST_CHECK_EQ(sink.ends, 0);
@@ -817,7 +821,7 @@ AURORA_TEST_CASE(sse_subscription_refuses_a_leg_without_streaming_semantics) {
                           "open_sse done", [&task] { return task.is_done(); }, std::chrono::milliseconds{1000})
                           .satisfied);
     const auto outcome = inner(task);
-    AURORA_TEST_REQUIRE_FALSE(bool(outcome));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(outcome));
     AURORA_TEST_CHECK_EQ(outcome.error().code_enum, aurora::ErrorCode::NetPlatformUnavailable);
     AURORA_TEST_CHECK_EQ(sink.opens, 0);  // 绝不退化成「物化一份应答再慢慢切行」
     AURORA_TEST_CHECK_EQ(sink.ends, 0);
@@ -846,19 +850,21 @@ AURORA_TEST_CASE(sse_subscription_neither_reads_nor_writes_the_cache) {
     AURORA_TEST_REQUIRE(peer.valid());
 
     const auto url = loopback_url(peer.port());
+    // 本例的 seed/probe 两次物化交换不经 `subscribe_and_drive`（那自带 HostDriven），值班替身就地自领。
+    const aurora::test::net::MainQueueLoop duty;
     auto seed = client.send(Request::get(url));
     AURORA_TEST_CHECK(aurora::test::net::drive_until(
                           "seed send done", [&seed] { return seed.is_done(); }, std::chrono::milliseconds{3000})
                           .satisfied);
     const auto seeded = seed.result();
-    AURORA_TEST_REQUIRE(bool(seeded));
-    AURORA_TEST_REQUIRE(bool(seeded.value()));
+    AURORA_TEST_REQUIRE(static_cast<bool>(seeded));
+    AURORA_TEST_REQUIRE(static_cast<bool>(seeded.value()));
     AURORA_TEST_CHECK_FALSE(seeded.value().value().from_cache());  // 表还空着：这份是从对端取回来的
     AURORA_TEST_CHECK_EQ(peer.accepts(), 1);
 
     RecordingSink sink;
     const auto subscribed = subscribe_and_drive(client, Request::get(url).sse(single_stream()), sink);
-    AURORA_TEST_REQUIRE_MSG(bool(subscribed), subscribed ? std::string{} : subscribed.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(subscribed), subscribed ? std::string{} : subscribed.error().message);
     AURORA_TEST_CHECK_FALSE(subscribed.value().response.from_cache());
     AURORA_TEST_CHECK_EQ(peer.accepts(), 2);  // 表里那条新鲜副本没被拿来充当订阅的答案
     AURORA_TEST_CHECK_EQ(sink.events, 1);  // 收到的是流里那一条，不是副本的载荷
@@ -868,8 +874,8 @@ AURORA_TEST_CASE(sse_subscription_neither_reads_nor_writes_the_cache) {
                           "probe send done", [&probe] { return probe.is_done(); }, std::chrono::milliseconds{3000})
                           .satisfied);
     const auto materialized = probe.result();
-    AURORA_TEST_REQUIRE(bool(materialized));
-    AURORA_TEST_REQUIRE(bool(materialized.value()));
+    AURORA_TEST_REQUIRE(static_cast<bool>(materialized));
+    AURORA_TEST_REQUIRE(static_cast<bool>(materialized.value()));
     const auto &copied = materialized.value().value();
     AURORA_TEST_CHECK_TRUE(copied.from_cache());
     // 表里仍是那条副本：一次订阅没有往表里写过任何东西
@@ -892,13 +898,13 @@ AURORA_TEST_CASE(sse_subscription_declares_accept_and_leaves_a_written_one_alone
 
     RecordingSink sink;
     const auto plain = subscribe_and_drive(client, Request::get(loopback_url(peer.port())).sse(single_stream()), sink);
-    AURORA_TEST_REQUIRE_MSG(bool(plain), plain ? std::string{} : plain.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(plain), plain ? std::string{} : plain.error().message);
     AURORA_TEST_CHECK_TRUE(request_contains(recorded, guard, 0, "Accept: text/event-stream"));
 
     RecordingSink other;
     const auto written = subscribe_and_drive(
         client, Request::get(loopback_url(peer.port())).header("Accept", "*/*").sse(single_stream()), other);
-    AURORA_TEST_REQUIRE_MSG(bool(written), written ? std::string{} : written.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(written), written ? std::string{} : written.error().message);
     AURORA_TEST_CHECK_TRUE(request_contains(recorded, guard, 1, "Accept: */*"));
     AURORA_TEST_CHECK_EQ(std::ranges::count(recorded[1], '\0'), std::string::size_type{0});  // 没重复追加第二枚
 }

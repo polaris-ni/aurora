@@ -75,6 +75,57 @@ test_create_from_blob_using (const void *user_data)
   hb_face_destroy (face);
 }
 
+static void
+test_create_or_fail_named_instance_index (void)
+{
+  hb_blob_t *blob = hb_blob_create_from_file_or_fail (font_file);
+  g_assert_nonnull (blob);
+
+  unsigned index = face_index | (1u << 16);
+  hb_face_t *face = hb_face_create_or_fail (blob, index);
+  g_assert_nonnull (face);
+  g_assert_cmpuint (hb_face_get_index (face), ==, index);
+  test_face (face);
+  hb_face_destroy (face);
+
+  face = hb_face_create_or_fail (blob, hb_face_count (blob) | (1u << 16));
+  g_assert_null (face);
+
+  hb_blob_destroy (blob);
+}
+
+static void
+test_default_loader_environment (void)
+{
+  /* Exercise the HB_FACE_LOADER default-loader path (loader == NULL).  The
+   * value is read from the environment and duplicated once, then held for
+   * the process lifetime, so loading must succeed and must not depend on the
+   * environment storage staying valid afterwards. */
+  char *saved_loader = g_strdup (g_getenv ("HB_FACE_LOADER"));
+  g_assert_true (g_setenv ("HB_FACE_LOADER", "ot", TRUE));
+
+  hb_blob_t *blob = hb_blob_create_from_file_or_fail (font_file);
+  g_assert_nonnull (blob);
+
+  hb_face_t *face = hb_face_create_from_file_or_fail_using (font_file, face_index, NULL);
+  g_assert_nonnull (face);
+  test_face (face);
+  hb_face_destroy (face);
+
+  face = hb_face_create_or_fail_using (blob, face_index, NULL);
+  g_assert_nonnull (face);
+  test_face (face);
+  hb_face_destroy (face);
+
+  hb_blob_destroy (blob);
+
+  if (saved_loader)
+    g_assert_true (g_setenv ("HB_FACE_LOADER", saved_loader, TRUE));
+  else
+    g_unsetenv ("HB_FACE_LOADER");
+  g_free (saved_loader);
+}
+
 int
 main (int argc, char **argv)
 {
@@ -92,6 +143,8 @@ main (int argc, char **argv)
 
   font_file = hb_test_resolve_path (font_file);
 
+  hb_test_add (test_create_or_fail_named_instance_index);
+  hb_test_add (test_default_loader_environment);
   hb_test_add_flavor ("", test_create_from_file_using);
   hb_test_add_flavor ("", test_create_from_blob_using);
   for (const char **loaders = hb_face_list_loaders (); *loaders; loaders++)

@@ -16,7 +16,7 @@ namespace {
 /// 固定尺寸宿主容器：虚拟列表按父约束取视口尺寸，故须给它一个明确高度才会滚动。
 auto fixed(float w, float h, const au::Node &child) -> au::Node {
     auto box = std::make_unique<au::Column>();
-    box->modifier.set(au::Modifier{}.size(w, h).background(pal::AURORA_SURFACE).border(1.0F, pal::AURORA_BORDER));
+    box->set_modifier(au::Modifier{}.size(w, h).background(pal::AURORA_SURFACE).border(1.0F, pal::AURORA_BORDER));
     box->add(child);
     std::shared_ptr<au::Widget> holder = std::move(box);
     return au::Node{std::move(holder)};
@@ -28,7 +28,7 @@ auto feed(std::shared_ptr<au::LazyList> &out, const char *key, int count, au::Co
         count,
         [accent](int i) -> au::Node {
             auto row = std::make_unique<au::Row>();
-            row->modifier.set(au::Modifier{}.padding(8.0F).background(pal::AURORA_SURFACE).border(1.0F, accent));
+            row->set_modifier(au::Modifier{}.padding(8.0F).background(pal::AURORA_SURFACE).border(1.0F, accent));
             row->add(au::Node{std::make_shared<au::Text>(au::LocalizedString{"item " + std::to_string(i)})});
             std::shared_ptr<au::Widget> holder = std::move(row);
             return au::Node{std::move(holder)};

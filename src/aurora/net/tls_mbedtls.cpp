@@ -1,7 +1,7 @@
 // Aurora net — mbedTLS provider 后端。
 //
-// 本 TU 只在构建配置把 `AURORA_NET_TLS_PROVIDERS=<static|shared>:<prefix>` 指到一枚 mbedTLS 安装根时被编译
-// （`cmake/AuroraNetTls.cmake` 由 `include/mbedtls/ssl.h` 的存在性推导宏，不接受手工设置），Linux 等「没有
+// 本 TU 只在构建配置把 `AURORA_ENABLE_NET_TLS_MBEDTLS` 打开时被编译（源码来自仓库内置的
+// `third_party/mbedtls`，由 `cmake/AuroraNetTls.cmake` 直接构建，不再走 provider 安装根），Linux 等「没有
 // 缺省系统栈」的平台因此由它回答 `capabilities().tls`。
 //
 // 与 Schannel 腿（`net/tls_schannel.cpp`）的分工是**同一套接缝语义、两套平台事实**，故下面每一条差异都
@@ -12,8 +12,10 @@
 //     不等待、不部分交付，因此 mbedTLS 内部那些「阻塞直到有数据」的循环在这里一律以 WANT_* 立即返回，
 //     会话状态机不会卡在本层（这是本腿存在的全部理由：mbedTLS 默认的 `net_sockets` bio 会阻塞）。
 //   - **信任判定交回库内**（与 Schannel 相反）：`mbedtls_ssl_set_hostname()` 一次同时表达 SNI 与主机名
-//     核对，`mbedtls_ssl_conf_ca_chain()` 的根列表天然是「系统根 ∪ 追加根」的合并形态，故不需要 Schannel
+//     核对——名字由库内的证书校验器按自己的 RFC 6125 口径裁决，本层不另写一套匹配规则；
+//     `mbedtls_ssl_conf_ca_chain()` 的根列表天然是「系统根 ∪ 追加根」的合并形态，故不需要 Schannel
 //     那套手工链引擎——那边做不到合并，这边不需要分开。校验结论仍按同一口径归 `net-tls-cert-rejected`。
+//     CN-only 证书上的结论可能与 Schannel 的手写回落不同，这是平台策略分叉，由跨后端对账用例记录。
 //   - **本腿没有 OS 信任库**：mbedTLS 不读任何平台证书存储，也没有把「系统根」做成 API。缺省只读一枚
 //     该平台的常规 CA bundle 文件（`AURORA_SYSTEM_TRUST_BUNDLES`）——读不到即**非致命**：追加根照样可用，只是没有
 //     公有 CA 的缺省信任。把 `trusted_certificates` 做成「替换」是本层最不该犯的那种静默语义漂移。

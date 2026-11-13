@@ -86,9 +86,9 @@ AURORA_TEST_CASE(image_view_from_file_missing_path_is_safe) {
 }
 
 AURORA_TEST_CASE(image_view_source_props_serialization) {
-    // source 序列化：props 含 source / image_width / image_height。
-    aurora::ImageViewProps props{.bitmap = make_image(32, 24), .source = std::string("logo.png")};
-    aurora::ImageView iv_src{std::move(props)};
+    // source 序列化：属性对象只持有源路径（位图是控件面运行期载荷，不入属性面）。
+    aurora::ImageView iv_src{make_image(32, 24)};
+    iv_src.set_source("logo.png");
     aurora::Json js = aurora::Json::object();
     iv_src.serialize_props(js);
     AURORA_TEST_CHECK_EQ(require_field<std::string>(js, "source"), std::string{"logo.png"});

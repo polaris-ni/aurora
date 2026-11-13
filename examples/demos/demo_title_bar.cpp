@@ -37,9 +37,6 @@ auto main() -> int {
         au::Text{"Window actions dispatched via WindowChrome; hover maximize button to try Snap popup"},
     };
 
-    au::FocusManager fm;
-    fm.set_root(&root.widget());
-
     au::WindowOptions wopts;
     wopts.size = au::Size{.width = w, .height = h};
     wopts.title = "TitleBar · Aurora Demo";
@@ -62,21 +59,10 @@ auto main() -> int {
     }
 
     auto win = std::move(win_res.value());
-    win->surface().set_event_handler([&](au::Event &e) -> void {
-        auto &wd = root.widget();
-        if (auto *me = dynamic_cast<au::MouseEvent *>(&e)) {
-            au::EventDispatcher::dispatch(wd, *me, &fm);
-        } else if (auto *ke = dynamic_cast<au::KeyEvent *>(&e)) {
-            au::EventDispatcher::dispatch(wd, *ke, fm);
-        } else if (auto *se = dynamic_cast<au::ScrollEvent *>(&e)) {
-            au::EventDispatcher::dispatch(wd, *se);
-        } else if (auto *te = dynamic_cast<au::TextInputEvent *>(&e)) {
-            au::EventDispatcher::dispatch(wd, *te, fm);
-        }
-    });
 
+    // 帧循环统一由 `Application` 驱动（接管事件派发、焦点、脏区呈现与等待决策）。
     AURORA_LOG_INFO("demo", "[demo_title_bar] window shown (close window to exit)");
-    // 与 run_demo 同款事件驱动帧循环（present_root 内部按需 begin，勿手调 begin_frame）。
-    win->run([&]() -> void { (void)win->present_root(root); });
+    au::Application app{au::Scene{root}, std::move(win), wopts};
+    app.run();
     return 0;
 }

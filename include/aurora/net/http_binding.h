@@ -1,7 +1,7 @@
 #pragma once
 
 /// @brief HTTP 交换的声明式交付面：把一次交换接成 `Task` / `Resource` / `StreamResource`（§12）。
-/// @file net/http_binding.h
+/// @file http_binding.h
 ///
 /// 本头回答一个问题：**「发起侧的协程出口，怎么直接落到 widget 能读的信号上」**。`Client::send` 交出的是
 /// `CoroTask<Result<Response>>`——它只能被轮询（`is_done()` / `result()`），而响应式状态要的是「落定那一刻
@@ -54,8 +54,6 @@
 #include "aurora/net/cancellation.h"
 #include "aurora/net/http.h"
 #include "aurora/net/http_client.h"
-#include "aurora/net/http_sse.h"
-#include "aurora/net/http_stream.h"
 #include "aurora/net/websocket.h"
 #include "aurora/state/async.h"
 #include "aurora/state/resource.h"
@@ -143,7 +141,7 @@ namespace detail {
 template <typename T>
 auto settle_job(const std::shared_ptr<aurora::detail::AsyncState<T>> &state, Result<T> outcome) -> void {
     {
-        std::scoped_lock<std::mutex> lock(state->mutex);
+        std::scoped_lock<std::mutex> const lock(state->mutex);
         state->result = std::move(outcome);
     }
     std::function<void(const Result<T> &)> to_call;

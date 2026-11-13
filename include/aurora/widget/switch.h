@@ -10,9 +10,8 @@
 #include "aurora/core/accessibility.h"
 #include "aurora/core/color.h"
 #include "aurora/render/painter.h"
-#include "aurora/state/binding.h"
-#include "aurora/state/reactive.h"
-#include "aurora/state/signal_view.h"
+#include "aurora/state/state.h"
+#include "aurora/theming/theme.h"
 #include "aurora/theming/theme_scope.h"
 #include "aurora/widget/widget.h"
 
@@ -20,7 +19,7 @@ namespace aurora {
 
 /// @brief 开关（叶控件）：布尔状态 `bool`，点击切换；绘制为圆角轨道 + 圆形滑块。
 ///
-/// 值来源与 `Checkbox` 一致（`Reactive<bool>` / `Binding<bool>` + `onChanged`）。
+/// 值来源与 `Checkbox` 一致：可写句柄 `State<bool>`（自有或与调用方共享）+ `onChanged`。
 ///
 /// 视觉（对标 Material 3 Switch / Fluent ToggleSwitch）：
 /// - 开启：激活色轨道（`active_color` 未显式设置时跟随主题 `Theme::primary`）；
@@ -36,17 +35,11 @@ class Switch : public LeafWidget {
   public:
     Switch() = default;
 
-    /// @brief 以响应式布尔值构造开关；on_changed 非空时在每次值变化后回调。
-    /// @param value 初始状态与响应式数据源
+    /// @brief 以值句柄构造开关：传字面量创建自有来源，传外部 `State<bool>` 则共享同一来源。
+    /// @param value 开关态句柄
     /// @param on_changed 值变化回调（可空）
-    explicit Switch(Reactive<bool> value, std::function<void(bool)> on_changed = {})
+    explicit Switch(State<bool> value, std::function<void(bool)> on_changed = {})
         : value_(std::move(value)), on_changed_(std::move(on_changed)) {}
-
-    /// @brief 以绑定 `Binding<bool>` 构造开关，初值取自 `binding.get()`，读写均经由该绑定。
-    /// @param binding 布尔状态绑定源
-    /// @param on_changed 值变化回调（可空）
-    explicit Switch(Binding<bool> binding, std::function<void(bool)> on_changed = {})
-        : binding_(std::move(binding)), value_(binding_.get()), on_changed_(std::move(on_changed)) {}
 
     /// @brief 替换值变化回调（链式）。
     /// @param cb 新回调（可空，空则切换时不回调）
@@ -124,16 +117,14 @@ class Switch : public LeafWidget {
     /// @return 当前是否启用
     [[nodiscard]] auto enabled() const -> bool { return enabled_; }
 
-    /// @brief 读取当前开关态：已绑定时读绑定值，否则读内部响应值。
+    /// @brief 读取当前开关态（实时读取来源，不缓存）。
     /// @return 当前布尔状态
-    [[nodiscard]] auto value() const -> bool { return binding_.bound() ? binding_.get() : value_.get(); }
+    [[nodiscard]] auto value() const -> bool { return value_.get(); }
 
-    /// @brief 设置开关态：写入绑定/响应值，触发 on_changed，请求重绘并派发无障碍 ValueChanged 事件。
+    /// @brief 设置开关态：提交到来源（外部共享时即写回调用方）、触发 on_changed、
+    ///        请求重绘并派发无障碍 ValueChanged 事件。
     /// @param v 新状态
     auto set_value(bool v) -> void {
-        if (binding_.bound()) {
-            binding_.set(v);
-        }
         value_ = v;
         if (on_changed_) {
             on_changed_(v);
@@ -142,14 +133,9 @@ class Switch : public LeafWidget {
         notify_accessibility_event(AccessibilityEvent{.kind = AccessibilityEventKind::ValueChanged, .target = this});
     }
 
-    /// @brief 收集本控件订阅的信号：内部 `value_`；已绑定时追加绑定目标。
-    /// @param out 输出数组，信号视图指针追加到尾部
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override {
-        out.push_back(&value_);
-        if (binding_.bound()) {
-            out.push_back(binding_.target());
-        }
-    }
+    /// @brief 收集本控件订阅的信号：唯一的值句柄 `value_`。
+    /// @param out 采集出口
+    auto collect_signals(StateSink &out) -> void override { out.push(value_); }
 
     /// @brief 控件类型名（自描述）。
     /// @return 字面量 "Switch"
@@ -197,15 +183,15 @@ class Switch : public LeafWidget {
                      .json_type = "boolean"},
                     {.name = "active_color",
                      .type = "Color",
-                     .default_value = "theme.primary",
+                     .default_value = theme_token_expr<&ColorRoles::primary>(),
                      .required = false,
                      .note = "Track color when on (defaults to theme primary)",
                      .json_type = "array"},
                     {.name = "inactive_color",
                      .type = "Color",
-                     .default_value = "{180,180,180,255}",
+                     .default_value = theme_token_expr<&ColorRoles::surface_container_highest>(),
                      .required = false,
-                     .note = "Track color when off",
+                     .note = "Track color when off (defaults to theme surface_container_highest)",
                      .json_type = "array"},
                     {.name = "thumb_color",
                      .type = "Color",
@@ -322,7 +308,8 @@ class Switch : public LeafWidget {
         }
     }
 
-    /// @brief 序列化开关属性；active_color/border_color/border_width 仅在显式设置时输出，保留「跟随主题」语义。
+    /// @brief 序列化开关属性；active_color/inactive_color/border_color/border_width 仅在显式设置时输出，
+    ///        保留「跟随主题」语义。
     /// @param props 输出的 JSON 对象，属性键值追加到其上
     auto serialize_props(Json &props) const -> void override {
         Widget::serialize_props(props);
@@ -330,7 +317,9 @@ class Switch : public LeafWidget {
         if (active_color_.has_value()) {
             props.set("active_color", color_to_json(*active_color_));  // 未设置不输出：保留「跟随主题」语义
         }
-        props.set("inactive_color", color_to_json(inactive_color_));
+        if (inactive_color_.has_value()) {
+            props.set("inactive_color", color_to_json(*inactive_color_));  // 未设置不输出：保留「跟随主题」语义
+        }
         props.set("thumb_color", color_to_json(thumb_color_));
         props.set("track_width", track_width_);
         props.set("track_height", track_height_);
@@ -389,27 +378,28 @@ class Switch : public LeafWidget {
 
     auto on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void override {
         const bool on = value();
-        // 状态色解析：显式设置优先，否则跟随主题 primary；禁用态统一灰化。
-        Color active = active_color_.value_or(inherit_theme(ctx).roles.primary);
-        Color inactive = inactive_color_;
+        // 状态色解析：显式设置优先，否则跟随主题 primary；禁用态统一按主题中性档灰化。
+        const auto &roles = inherit_theme(ctx).roles;
+        Color active = active_color_.value_or(roles.primary);
+        Color inactive = inactive_color_.value_or(roles.surface_container_highest);
         Color thumb = thumb_color_;
         if (!enabled_) {
-            active = Color{176, 176, 180, 255};
-            inactive = Color{210, 210, 214, 255};
-            thumb = Color{240, 240, 242, 255};
+            active = roles.outline_variant;
+            inactive = roles.surface_container_high;
+            thumb = roles.surface_container_lowest;
         }
-        Color track = on ? active : inactive;
+        paint_track(p, bounds, on ? active : inactive, on);
+        // 悬停/按下是半透明状态层：叠在轨道之上、滑块之下（源覆盖混合）。
         if (enabled_ && (hovered() || pressed_)) {
-            track = track.shaded(pressed_ ? 0.80F : 0.90F);  // 悬停/按下反馈
+            p.fill_rounded_rect(bounds, bounds.size.height * 0.5F, pressed_ ? roles.pressed : roles.hover);
         }
-        paint_track(p, bounds, track, on);
         paint_thumb(p, bounds, thumb, on);
     }
 
     /// @brief 绘制圆角轨道（关闭态可选描边）。
     /// @param p 绘制器。
     /// @param bounds 轨道区域。
-    /// @param track 轨道填充色（已含悬停/按下压暗）。
+    /// @param track 轨道填充基色（悬停/按下状态层由调用方另行叠加，不在本钩子里处理）。
     /// @param on 开关状态（关闭态才画描边）。
     virtual auto paint_track(Painter &p, const Rect &bounds, Color track, bool on) -> void {
         const float radius = bounds.size.height * 0.5F;
@@ -434,11 +424,10 @@ class Switch : public LeafWidget {
     }
 
     // NOLINTBEGIN(*-non-private-member-variables-in-classes)
-    Binding<bool> binding_;  // 声明须在 value_ 之前（同 checkbox.h 的初始化顺序修复）
-    Reactive<bool> value_;
+    State<bool> value_;  ///< 开关态来源（自有或与调用方共享）
     std::function<void(bool)> on_changed_;
     std::optional<Color> active_color_;  ///< 开启态轨道色；空 = 跟随主题 primary
-    Color inactive_color_ = Color{180, 180, 180, 255};  ///< 关闭态轨道色
+    std::optional<Color> inactive_color_;  ///< 关闭态轨道色；空 = 跟随主题 surface_container_highest
     Color thumb_color_ = colors::AURORA_WHITE;  ///< 滑块（圆形）颜色
     float track_width_ = 44.0F;  ///< 轨道宽 dp
     float track_height_ = 24.0F;  ///< 轨道高 dp

@@ -2,21 +2,30 @@
 /// 目标单元: include/aurora/widget/image_widget.h
 /// 测试说明: 覆盖 ImageView——默认不变量与自描述、无图占位自然尺寸、位图自然尺寸与约束钳制、
 /// Fixed 宽高意图严格等值覆盖（显式盒语义，不受 max 约束钳制）、无图占位描边框/有图栅格化（内存位图，软件 Painter
-/// 像素断言）、 source 序列化往返与非字符串防御、from_file 失败回退占位、
-/// 异步 URL 源三态（占位→加载→成功/失败）与缓存命中、未注入 fetcher 优雅降级
+/// 像素断言）、 source 序列化往返与非字符串宽容读、from_file 失败回退占位、
+/// 异步 URL 源三态（占位→加载→成功/失败）与缓存命中、未注入 fetcher 优雅降级。属性单一声明迁移后
+/// 另覆盖权威表的读消费面：撤表态该键退出序列化、常量档读件在明 / 暗两档与库内解析全同且不存在
+/// 带上下文的第二件、字符串行的宽容反序列化口径与派生键惰性、挂载后写入只标该行声明的脏档
+/// （source 零档、表外位图槽布局档）
 
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
-#include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <utility>
 #include <vector>
 
+#include "aurora/core/diagnostics.h"
+#include "aurora/core/main_queue.h"
+#include "aurora/environment/environment.h"
 #include "aurora/image/image_codec.h"
 #include "aurora/layout/layout_engine.h"
 #include "aurora/state/async.h"
+#include "aurora/theming/theme.h"
+#include "aurora/theming/theme_scope.h"
 #include "aurora/widget/image_widget.h"
 #include "framework/aurora_test.h"
 #include "framework/json_access.h"
@@ -40,35 +49,78 @@ auto make_image(int w, int h) -> Image {
     return img;
 }
 
+/// 造一个注入了指定主题的构建上下文（根级环境，无父指针）。
+/// 返回 holder + ctx：`ctx.env` 指向 holder 内的 Environment，二者须在同作用域内使用。
+auto themed_ctx(const Theme &t) -> std::pair<std::shared_ptr<Environment>, BuildContext> {
+    auto env = std::make_shared<Environment>();
+    env->set_local(t);
+    BuildContext ctx;
+    ctx.env = env.get();
+    return {std::move(env), ctx};
+}
+
+/// 标脏观察器：`Widget::on_dirty` 的 bool 入参把两档合一，这里拆成两枚计数器。
+struct ImageDirty {
+    int paints = 0;  ///< 绘制档落账次数
+    int layouts = 0;  ///< 布局档落账次数
+
+    /// @brief 把观察回调挂到目标控件上（挂上即归零，用例只断增量）。
+    /// @param target 待观察的控件。
+    auto attach_to(ImageView &target) -> void {
+        paints = 0;
+        layouts = 0;
+        target.on_dirty = [this](bool layout) {
+            if (layout) {
+                ++layouts;
+            } else {
+                ++paints;
+            }
+        };
+    }
+};
+
+/// 「带上下文的源路径读件」形态：常量档行不应存在这第二件。
+/// 用概念而非裸 `requires` 式判定：GCC 在非模板上下文把非法简单要求判成硬错误而非 false。
+template <typename W>
+concept ScopedSourceReader = requires(const W &probe, const BuildContext &scope) { probe.source(scope); };
+
+/// 探针：把只在库内消费的读件提到可读位置（`present` 表态位、`resolve` 带上下文解析）。
+/// 两者都不升公共面，故判据只能经派生类点名读取；读到的仍是生产侧同一条函数，不是用例另算一遍。
+class ImageViewProbe final : public ImageView {
+  public:
+    using ImageView::ImageView;
+    using ImageView::present;
+    using ImageView::resolve;
+};
+
 }  // namespace
 
 AURORA_TEST_CASE(default_image_view_invariants) {
-    ImageView iv;
+    ImageViewProbe const iv;
     AURORA_TEST_CHECK_EQ(std::string{iv.type_name()}, "Image");
     AURORA_TEST_CHECK_EQ(iv.bitmap.width, 0);
     AURORA_TEST_CHECK_TRUE(iv.bitmap.pixels.empty());
-    AURORA_TEST_CHECK_FALSE(iv.source.has_value());
+    AURORA_TEST_CHECK_TRUE(iv.source().empty());
+    AURORA_TEST_CHECK_FALSE(iv.present(ImageViewProps::source_row()));
 
+    // `defaults()` 与默认构造同源：源未表态，生效值即该行回落点。
+    const ImageViewProps fresh = ImageView::defaults();
+    AURORA_TEST_CHECK_TRUE(fresh.source().empty());
+
+    // 描述符 = 表行（source）＋两枚派生只读键（image_width / image_height），序不变。
     const auto d = ImageView::describe_static();
     AURORA_TEST_CHECK_EQ(std::string{d.name}, "Image");
     AURORA_TEST_CHECK_EQ(std::string{d.children_policy}, "none");
-    bool has_source = false;
-    bool has_image_width = false;
-    bool has_image_height = false;
-    for (const auto &p : d.properties) {
-        if (p.name == "source") {
-            has_source = true;
-        }
-        if (p.name == "image_width") {
-            has_image_width = true;
-        }
-        if (p.name == "image_height") {
-            has_image_height = true;
-        }
-    }
-    AURORA_TEST_CHECK_TRUE(has_source);
-    AURORA_TEST_CHECK_TRUE(has_image_width);
-    AURORA_TEST_CHECK_TRUE(has_image_height);
+    AURORA_TEST_REQUIRE_EQ(d.properties.size(), 3U);
+    AURORA_TEST_CHECK_EQ(std::string{d.properties[0].name}, "source");
+    AURORA_TEST_CHECK_EQ(std::string{d.properties[0].default_value}, "nullopt");
+    AURORA_TEST_CHECK_FALSE(d.properties[0].required);
+    AURORA_TEST_CHECK_EQ(std::string{d.properties[1].name}, "image_width");
+    AURORA_TEST_CHECK_EQ(std::string{d.properties[1].default_value}, "0");
+    AURORA_TEST_CHECK_EQ(std::string{d.properties[1].json_type}, "integer");
+    AURORA_TEST_CHECK_EQ(std::string{d.properties[1].min_value}, "0");
+    AURORA_TEST_CHECK_EQ(std::string{d.properties[2].name}, "image_height");
+    AURORA_TEST_CHECK_EQ(std::string{d.properties[2].default_value}, "0");
     AURORA_TEST_CHECK_EQ(std::string{iv.describe().name}, "Image");
 }
 
@@ -121,21 +173,14 @@ AURORA_TEST_CASE(paint_empty_bitmap_draws_placeholder_rect) {
     Painter p;
     p.begin(64, 64);
     const Rect vp{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 64.0F, .height = 64.0F}};
-    iv.paint(p, vp, BuildContext{});
+    const BuildContext ctx;
+    iv.paint(p, vp, ctx);
     AURORA_TEST_CHECK_TRUE(iv.paint_bounds() == vp);
-    // 占位为 180 灰 1px 描边框（Painter::draw_rect = 四条 1px fill_rect 边带），非实心填充：
-    // 边框像素为 {180,180,180,255}，框内保持 begin 后的全零底色 {0,0,0,0}。逐通道断言（Color 不可打印）。
-    const Color top = p.get_pixel(32, 0);
-    AURORA_TEST_CHECK_EQ(static_cast<int>(top.r), 180);
-    AURORA_TEST_CHECK_EQ(static_cast<int>(top.g), 180);
-    AURORA_TEST_CHECK_EQ(static_cast<int>(top.b), 180);
-    AURORA_TEST_CHECK_EQ(static_cast<int>(top.a), 255);
-
-    const Color left = p.get_pixel(0, 32);
-    AURORA_TEST_CHECK_EQ(static_cast<int>(left.r), 180);
-    AURORA_TEST_CHECK_EQ(static_cast<int>(left.g), 180);
-    AURORA_TEST_CHECK_EQ(static_cast<int>(left.b), 180);
-    AURORA_TEST_CHECK_EQ(static_cast<int>(left.a), 255);
+    // 占位为 `roles.outline` 的 1px 描边框（Painter::draw_rect = 四条 1px fill_rect 边带），非实心填充：
+    // 边框像素等于兜底主题（无注入作用域即 `Theme::light()`）的描边色，框内保持 begin 后的全零底色。
+    const Color border = inherit_theme(ctx).roles.outline;
+    AURORA_TEST_CHECK_TRUE(p.get_pixel(32, 0) == border);
+    AURORA_TEST_CHECK_TRUE(p.get_pixel(0, 32) == border);
 
     const Color center = p.get_pixel(32, 32);
     AURORA_TEST_CHECK_EQ(static_cast<int>(center.r), 0);
@@ -161,32 +206,29 @@ AURORA_TEST_CASE(paint_decoded_bitmap_rasterizes_pixels) {
 }
 
 AURORA_TEST_CASE(source_serialization_roundtrip) {
-    ImageViewProps props_src{.bitmap = make_image(32, 16), .source = "logo.png"};
-    ImageView src{std::move(props_src)};
+    ImageView src{make_image(32, 16)};
+    src.set_source("logo.png");
     Json props = Json::object();
     src.serialize_props(props);
     AURORA_TEST_CHECK_EQ(require_field<std::string>(props, "source"), "logo.png");
     AURORA_TEST_CHECK_EQ(require_field<int>(props, "image_width"), 32);
     AURORA_TEST_CHECK_EQ(require_field<int>(props, "image_height"), 16);
+    AURORA_TEST_CHECK_FALSE(props.contains("bitmap"));  // 运行期载荷不是属性键
 
-    ImageView dst;
+    ImageViewProbe dst;
     dst.deserialize_props(props);
-    AURORA_TEST_REQUIRE_TRUE(dst.source.has_value());
-    // 前序 AURORA_TEST_REQUIRE 已保证 has_value，tidy 无法穿透断言宏的 CFG，属误报。
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    AURORA_TEST_CHECK_EQ(dst.source.value(), "logo.png");
+    AURORA_TEST_CHECK_TRUE(dst.present(ImageViewProps::source_row()));
+    AURORA_TEST_CHECK_EQ(dst.source(), "logo.png");
+    // 派生只读键不参与重建：位图不回填，两枚尺寸键只是解码结果的现值。
+    AURORA_TEST_CHECK_EQ(dst.bitmap.width, 0);
+    AURORA_TEST_CHECK_EQ(dst.bitmap.height, 0);
 
-    // 未设置 source 时不落盘该键。
+    // 未表态 source 时不落盘该键；派生键照写（它们恒可现算）。
     Json bare = Json::object();
-    ImageView{}.serialize_props(bare);
+    ImageView{make_image(3, 2)}.serialize_props(bare);
     AURORA_TEST_CHECK_FALSE(bare.contains("source"));
-
-    // 非字符串 source 反序列化被忽略（is_string 防御）。
-    Json bad = Json::object();
-    bad.set("source", 42);
-    ImageView guarded;
-    guarded.deserialize_props(bad);
-    AURORA_TEST_CHECK_FALSE(guarded.source.has_value());
+    AURORA_TEST_CHECK_EQ(require_field<int>(bare, "image_width"), 3);
+    AURORA_TEST_CHECK_EQ(require_field<int>(bare, "image_height"), 2);
 }
 
 AURORA_TEST_CASE(from_file_missing_path_falls_back_to_empty) {
@@ -199,39 +241,138 @@ AURORA_TEST_CASE(from_file_missing_path_falls_back_to_empty) {
     AURORA_TEST_CHECK_NEAR(iv.size().height, 100.0F, 1e-4F);
 }
 
-/// @brief 测试基础设施：安装「排队式主线程投递器」，由用例线程手动排水（与
-/// Application::run 的 drain_posted 同构），使控件回填在测试线程确定性执行。
+// ===========================================================================
+// 权威表的读消费面（属性单一声明迁移批）：撤表态 / 两档恒等 / 非法值降级 /
+// 挂载后逐档标脏
+// ===========================================================================
+
+AURORA_TEST_CASE(image_props_clear_unstates_source_and_drops_key) {
+    ImageViewProbe iv{make_image(4, 4)};
+    iv.set_source("logo.png");
+    Json stated = Json::object();
+    iv.serialize_props(stated);
+    AURORA_TEST_CHECK_TRUE(stated.contains("source"));
+    AURORA_TEST_CHECK_FALSE(stated.contains("bitmap"));  // 表外名字（运行期载荷）不是属性键
+
+    iv.clear(ImageViewProps::source_row());
+    AURORA_TEST_CHECK_FALSE(iv.present(ImageViewProps::source_row()));
+    AURORA_TEST_CHECK_TRUE(iv.source().empty());  // 回落基线
+    Json cleared = Json::object();
+    iv.serialize_props(cleared);
+    AURORA_TEST_CHECK_FALSE(cleared.contains("source"));
+    AURORA_TEST_CHECK_EQ(iv.bitmap.width, 4);  // 撤表态不动位图所有权
+    AURORA_TEST_CHECK_EQ(require_field<int>(cleared, "image_width"), 4);  // 派生键照写
+}
+
+AURORA_TEST_CASE(image_props_constant_row_reads_identically_under_light_and_dark) {
+    // 恒等关系的正面取证：本行是常量档，没有 `x(ctx)` 第二件，其无参读件**就是**生效值——
+    // 明 / 暗两档主题下与库内 `resolve(row, ctx)` 取值全同。
+    static_assert(!ScopedSourceReader<ImageView>);
+
+    const auto [env_l, light] = themed_ctx(Theme::light());
+    const auto [env_d, dark] = themed_ctx(Theme::dark());
+    ImageViewProbe iv;
+    AURORA_TEST_CHECK_TRUE(iv.source() == iv.resolve(ImageViewProps::source_row(), light));
+    AURORA_TEST_CHECK_TRUE(iv.source() == iv.resolve(ImageViewProps::source_row(), dark));
+
+    // 控件面同名写件返回控件引用，链式表的是「同一个对象」而非第二份属性。
+    ImageView &chain = iv.set_source("logo.png");
+    AURORA_TEST_CHECK(&chain == static_cast<ImageView *>(&iv));
+    AURORA_TEST_CHECK_EQ(iv.source(), "logo.png");
+    AURORA_TEST_CHECK_TRUE(iv.source() == iv.resolve(ImageViewProps::source_row(), light));
+    AURORA_TEST_CHECK_TRUE(iv.source() == iv.resolve(ImageViewProps::source_row(), dark));
+
+    // 未使用的 holder 显式丢弃，避免 -Wunused 噪声（作用域仍由下面两次解析覆盖）。
+    (void)env_l;
+    (void)env_d;
+}
+
+AURORA_TEST_CASE(image_props_string_row_is_lenient_and_derived_keys_are_inert) {
+    // 字符串行没有登记 `validate`：非字符串按既有宽容口径退空串、仍表态、不产生降级上报
+    // （收紧它属于与本口径无关的行为变更）。派生只读键不进表：给它们喂值既不触达位图，也不产生上报。
+    Diagnostics::take();  // 清掉前序用例残留，本条只看自己产生的降级
+    const std::size_t baseline = Diagnostics::count();
+
+    ImageViewProbe iv;
+    iv.set_source("logo.png");
+    Json not_string = Json::object();
+    not_string.set("source", Json{42});  // 形态不符：喂数
+    iv.deserialize_props(not_string);
+    AURORA_TEST_CHECK_TRUE(iv.present(ImageViewProps::source_row()));
+    AURORA_TEST_CHECK_TRUE(iv.source().empty());
+    AURORA_TEST_CHECK_EQ(Diagnostics::count(), baseline);
+
+    // 派生只读键不进表：给它们喂值既不触达位图，也不产生降级上报。
+    Json derived = Json::object();
+    derived.set("image_width", Json{99});
+    derived.set("image_height", Json{77});
+    iv.deserialize_props(derived);
+    AURORA_TEST_CHECK_EQ(iv.bitmap.width, 0);
+    AURORA_TEST_CHECK_EQ(iv.bitmap.height, 0);
+    AURORA_TEST_CHECK_EQ(Diagnostics::count(), baseline);
+
+    // 反面对照（防空转）：同一路径灌合法值仍照常写入并表态。
+    Json good = Json::object();
+    good.set("source", Json{"ok.png"});
+    iv.deserialize_props(good);
+    AURORA_TEST_CHECK_TRUE(iv.present(ImageViewProps::source_row()));
+    AURORA_TEST_CHECK_EQ(iv.source(), "ok.png");
+    AURORA_TEST_CHECK_EQ(Diagnostics::count(), baseline);  // 全程无降级上报
+
+    Diagnostics::take();
+}
+
+AURORA_TEST_CASE(image_mounted_writers_mark_expected_tiers) {
+    // source 行只服务序列化，不声明任何脏档：挂载后写入零落账。
+    // 位图是表外运行期载荷，控件面写件自己声明布局档（连带 Display List 失效）。
+    ImageView iv;
+    const BuildContext ctx;
+    iv.mount(ctx);
+    ImageDirty dirty;
+    dirty.attach_to(iv);
+
+    iv.set_source("logo.png");
+    AURORA_TEST_CHECK_EQ(dirty.layouts, 0);
+    AURORA_TEST_CHECK_EQ(dirty.paints, 0);
+    iv.set_source("logo.png");  // 同值：判等短路，不落账
+    AURORA_TEST_CHECK_EQ(dirty.layouts, 0);
+
+    iv.set_bitmap(make_image(2, 2));
+    AURORA_TEST_CHECK_EQ(dirty.layouts, 1);
+    AURORA_TEST_CHECK_EQ(dirty.paints, 0);
+}
+
+/// @brief 测试基础设施：领一枚空唤醒的值班租约，回投滞留进程级唯一队列，
+/// 由用例线程手动排水（与 Application::run 的 drain_posted 同构），使控件回填在测试线程确定性执行。
 class PosterGuard {
   public:
-    PosterGuard() {
-        Task<bool>::set_main_poster([this](std::function<void()> fn) -> void {
-            std::scoped_lock lock(mutex_);
-            queue_.push_back(std::move(fn));
-        });
+    PosterGuard() : duty_(MainQueue::on_duty([]() -> void {})) {}
+    ~PosterGuard() {
+        if (duty_.has_value()) {
+            duty_->release();
+        }
     }
-    ~PosterGuard() { Task<bool>::set_main_poster(nullptr); }
     PosterGuard(const PosterGuard &) = delete;
     auto operator=(const PosterGuard &) -> PosterGuard & = delete;
     PosterGuard(PosterGuard &&) = delete;
     auto operator=(PosterGuard &&) -> PosterGuard & = delete;
+    /// @brief 排空全局队列（执行期间新入队的项在后续轮次继续执行，直到队列空）。
     auto drain() -> void {
         for (;;) {
-            std::function<void()> fn;
-            {
-                std::scoped_lock lock(mutex_);
-                if (queue_.empty()) {
-                    return;
-                }
-                fn = std::move(queue_.front());
-                queue_.erase(queue_.begin());
+            auto batch = MainQueue::take_batch();
+            if (batch.empty()) {
+                return;
             }
-            fn();
+            for (std::function<void()> const &fn : batch) {
+                if (fn) {
+                    fn();
+                }
+            }
         }
     }
 
   private:
-    std::mutex mutex_;
-    std::vector<std::function<void()>> queue_;
+    std::optional<MainQueue::Lease> duty_;  ///< 在岗租约（空 wake）：发起过闸、回投入全局队列待排空
 };
 
 /// @brief 排水直至控件进入期望状态（worker 写 result → 投递入队 → 排水执行 存在微秒级窗口，

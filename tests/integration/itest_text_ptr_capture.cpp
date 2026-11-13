@@ -46,7 +46,7 @@ constexpr float AURORA_H = 800.0F;
 auto make_left_aligned_text() -> std::shared_ptr<Text> {
     // CJK-LITERAL: cjk-fixture - Han content keyed into hitbox scan and codepoint-count selection asserts
     return std::make_shared<Text>(
-        TextProps{.content = LocalizedString{"默认14pt文本"}, .text_align = TextAlign::Left, .soft_wrap = true});
+        TextProps().set_content(LocalizedString{"默认14pt文本"}).set_text_align(TextAlign::Left).set_soft_wrap(true));
 }
 
 void layout_root(Widget &root, const float w, const float h) {
@@ -97,7 +97,7 @@ auto release_at(const Sink &s, float x, float y) -> void { s(MouseAction::Releas
 AURORA_TEST_CASE(rtl_drag_select_reaches_leftmost_char) {
     // 1) RTL 拖选最左字：从右端按下向左拖（越过左边界），须包含索引 0（首字'默'）。
     const auto a = make_left_aligned_text();
-    Column col{ColumnProps{.children = {Node{a}}}};
+    Column col{std::vector<Node>{Node{a}}};
     layout_root(col, AURORA_W, AURORA_H);
     paint_root(col, AURORA_W, AURORA_H);
 
@@ -134,8 +134,8 @@ AURORA_TEST_CASE(release_outside_window_retains_selection) {
     // 2) 窗口外释放：拖选时光标移出根/窗口，释放事件仍须送达并按捕获路径结束选择；
     //    释放后的 Move 不得再改变选区（selecting_ 已结束）。
     // CJK-LITERAL: cjk-fixture - Han content asserted via hitbox scan and post-release selection state
-    const auto a = std::make_shared<Text>(TextProps{.content = LocalizedString{"默认14pt文本"}, .soft_wrap = true});
-    Column col{ColumnProps{.children = {Node{a}}}};
+    const auto a = std::make_shared<Text>(TextProps().set_content(LocalizedString{"默认14pt文本"}).set_soft_wrap(true));
+    Column col{std::vector<Node>{Node{a}}};
     layout_root(col, AURORA_W, AURORA_H);
     paint_root(col, AURORA_W, AURORA_H);
 
@@ -173,8 +173,8 @@ AURORA_TEST_CASE(adjacent_soft_wrap_texts_do_not_overlap) {
     const auto a = make_left_aligned_text();
     // CJK-LITERAL: cjk-fixture - second Han text keyed into the non-overlap hitbox assert
     const auto b = std::make_shared<Text>(
-        TextProps{.content = LocalizedString{"Text控件"}, .text_align = TextAlign::Left, .soft_wrap = true});
-    Row row{RowProps{.children = {Node{a}, Node{b}}}};
+        TextProps().set_content(LocalizedString{"Text控件"}).set_text_align(TextAlign::Left).set_soft_wrap(true));
+    Row row{std::vector<Node>{Node{a}, Node{b}}};
     layout_root(row, AURORA_W, AURORA_H);
     paint_root(row, AURORA_W, AURORA_H);
 
@@ -193,7 +193,7 @@ AURORA_TEST_CASE(static_dispatch_path_rtl_drag_reaches_leftmost_char) {
     // 4) 静态 EventDispatcher::dispatch 路径（每个事件委托进程内持久实例 → 保留指针捕获）：
     //    与 run_demo 一致的真实派发路径下，RTL 拖选越过左边界仍延伸到索引 0（含最左'默'）。
     const auto a = make_left_aligned_text();
-    Column col{ColumnProps{.children = {Node{a}}}};
+    Column col{std::vector<Node>{Node{a}}};
     layout_root(col, AURORA_W, AURORA_H);
     paint_root(col, AURORA_W, AURORA_H);
 

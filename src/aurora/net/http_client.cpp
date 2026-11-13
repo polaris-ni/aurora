@@ -1409,10 +1409,10 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
     // 跨全部尝试（含退避等待）的墙登记在这一枚令牌上；每一次尝试各拿一份自己的令牌与 `total` 看门狗，
     // 故 `Timeouts::total` 天然逐尝试重新计时——这正是它与 `RetryPolicy::budget` 分家的落点。
     // 环不开时 `budget` 一并摘掉：一枚「跨全部尝试」的墙在没有第二次尝试时不该变成单段超时。
-    Cancellation sequence;
+    Cancellation const sequence;
     auto wall = std::make_shared<TimeoutState>();
-    StageTimer budget_timer(loop_open ? policy.budget : std::optional<std::chrono::milliseconds>{},
-                            TimeoutStage::Budget, sequence, wall);
+    StageTimer const budget_timer(loop_open ? policy.budget : std::optional<std::chrono::milliseconds>{},
+                                  TimeoutStage::Budget, sequence, wall);
     // 宿主交来的令牌接到本交换的「跨尝试序列」上：取消即掐掉在途那一次（逐尝试的 `token` 由 sequence 转发），
     // 且本环就此不再发起新的尝试。登记时若已取消会立即触发（`Cancellation` 的竞态契约），故起手检查到这里
     // 之间那点空隙不会留下「取消了却没人掐」的窗口。
@@ -1504,7 +1504,7 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
 
         // 三档超时共享一枚触发状态：total 全程登记一次，connect / read_idle 在各自阶段前登记、结束即停表。
         auto tstate = std::make_shared<TimeoutState>();
-        StageTimer total_timer(timeouts.total, TimeoutStage::Total, token, tstate);
+        StageTimer const total_timer(timeouts.total, TimeoutStage::Total, token, tstate);
 
         for (;;) {
             failure_stage.reset();
@@ -1584,7 +1584,7 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
             std::function<detail::CallbackAwaiter<detail::WindowedRead>(std::size_t, std::chrono::milliseconds)>
                 read_within_one;
             auto late = std::make_shared<std::vector<char>>();
-            StageTimer connect_timer(timeouts.connect, TimeoutStage::Connect, token, tstate);
+            StageTimer const connect_timer(timeouts.connect, TimeoutStage::Connect, token, tstate);
             const bool retaining_leftover = pool_active(pool_, pool_options_) && !fetch_leg;
             detail::HttpPoolLease lease;  // 空卫 = 池关着，析构零作为；池开着时析构即恰好归还一次
             bool leased_from_pool = false;
@@ -1919,7 +1919,7 @@ auto Client::send(Request request, Cancellation cancellation) const -> CoroTask<
             // 头与体全部交给传输层（417 一类的直接作答没发体，但请求已按对端意思交完）。
             trace->mark(HttpStage::RequestSent);
             while (!assembler.complete()) {
-                StageTimer read_timer(timeouts.read_idle, TimeoutStage::ReadIdle, token, tstate);
+                StageTimer const read_timer(timeouts.read_idle, TimeoutStage::ReadIdle, token, tstate);
                 auto read = co_await read_one(std::span<char>{chunk});
                 read_timer.stop();  // 本段交付已落地，重置空闲计时：下一轮 read 重新起表
                 if (!read) {
@@ -2241,10 +2241,10 @@ auto Client::open_stream_impl(Request request, DataSink &sink, Cancellation canc
     // 跨全部尝试（含退避等待）的墙登记在这一枚令牌上；每一次尝试各拿一份自己的令牌与 `total` 看门狗，
     // 故 `Timeouts::total` 天然逐尝试重新计时——这正是它与 `RetryPolicy::budget` 分家的落点。
     // 环不开时 `budget` 一并摘掉：一枚「跨全部尝试」的墙在没有第二次尝试时不该变成单段超时。
-    Cancellation sequence;
+    Cancellation const sequence;
     auto wall = std::make_shared<TimeoutState>();
-    StageTimer budget_timer(loop_open ? policy.budget : std::optional<std::chrono::milliseconds>{},
-                            TimeoutStage::Budget, sequence, wall);
+    StageTimer const budget_timer(loop_open ? policy.budget : std::optional<std::chrono::milliseconds>{},
+                                  TimeoutStage::Budget, sequence, wall);
     // 宿主的令牌接到跨尝试序列上，转发与竞态口径同 `send`；已交出去的那一段宿主字节不回滚，
     // 取消管的是「此后不再交付」。
     cancellation.on_cancel([sequence]() mutable { sequence.cancel(); });
@@ -2370,7 +2370,7 @@ auto Client::open_stream_impl(Request request, DataSink &sink, Cancellation canc
         bool upload_settled = false;
 
         auto tstate = std::make_shared<TimeoutState>();
-        StageTimer total_timer(timeouts.total, TimeoutStage::Total, token, tstate);
+        StageTimer const total_timer(timeouts.total, TimeoutStage::Total, token, tstate);
 
         for (;;) {
             failure_stage.reset();
@@ -2437,7 +2437,7 @@ auto Client::open_stream_impl(Request request, DataSink &sink, Cancellation canc
             std::function<detail::CallbackAwaiter<detail::WindowedRead>(std::size_t, std::chrono::milliseconds)>
                 read_within_one;
             auto late = std::make_shared<std::vector<char>>();
-            StageTimer connect_timer(timeouts.connect, TimeoutStage::Connect, token, tstate);
+            StageTimer const connect_timer(timeouts.connect, TimeoutStage::Connect, token, tstate);
             const bool retaining_leftover = pool_active(pool_, pool_options_);
             detail::HttpPoolLease lease;  // 空卫 = 池关着，析构零作为；池开着时析构即恰好归还一次
             bool leased_from_pool = false;
@@ -2742,7 +2742,7 @@ auto Client::open_stream_impl(Request request, DataSink &sink, Cancellation canc
                         break;
                     }
                 } else {
-                    StageTimer read_timer(timeouts.read_idle, TimeoutStage::ReadIdle, token, tstate);
+                    StageTimer const read_timer(timeouts.read_idle, TimeoutStage::ReadIdle, token, tstate);
                     auto read = co_await read_one(std::span<char>{chunk});
                     read_timer.stop();
                     if (!read) {
@@ -2996,7 +2996,7 @@ auto Client::open_stream_impl(Request request, DataSink &sink, Cancellation canc
             }
 
             if (redirect_hop) {
-                Response resp{assembler.head().status, assembler.head().reason, assembler.head().headers, {}};
+                Response const resp{assembler.head().status, assembler.head().reason, assembler.head().headers, {}};
                 // 重定向跳只读了头部、体未读：这条连接上还压着没归属的字节，绝不回池（卫未武装，析构即关）。
                 harvest_set_cookies(cookie_jar_, target, resp.headers(), target.is_secure());
                 auto next = follow(current, resp, hooks.run.touched);
@@ -3015,7 +3015,7 @@ auto Client::open_stream_impl(Request request, DataSink &sink, Cancellation canc
             if (not_modified_hop) {
                 // 合并路径：304 的头部并进表里那条，状态码与体仍取已存那份，再按段交给宿主。条目已被逐出
                 // 就无从合并——那只能交出对端说的那份 304（它按定义没有体），编一份体比交出真相更糟。
-                Response update{assembler.head().status, assembler.head().reason, assembler.head().headers, {}};
+                Response const update{assembler.head().status, assembler.head().reason, assembler.head().headers, {}};
                 std::optional<Response> merged;
                 if (cache_) {
                     merged = cache_->revalidated(origin.method(), opening.key, origin.headers(), update,
@@ -3294,12 +3294,12 @@ auto Client::connect_websocket(Request request, WebSocketSink &sink, WebSocketOp
 
     // 令牌与看门狗只服务握手这一段：结算之后这条连接归会话与句柄，取消不再掐一条宿主正在使用的会话。
     // `read_idle` 在本腿上无事可管——它管的是「一次交换的两段读之间」，而升级后的读环属于会话。
-    Cancellation token;
+    Cancellation const token;
     cancellation.on_cancel([token]() mutable { token.cancel(); });
     auto tstate = std::make_shared<TimeoutState>();
     const Timeouts timeouts = origin.timeouts();
-    StageTimer total_timer(timeouts.total, TimeoutStage::Total, token, tstate);
-    StageTimer connect_timer(timeouts.connect, TimeoutStage::Connect, token, tstate);
+    StageTimer const total_timer(timeouts.total, TimeoutStage::Total, token, tstate);
+    StageTimer const connect_timer(timeouts.connect, TimeoutStage::Connect, token, tstate);
     const StreamOptions stream_options;
     detail::ProxyNegotiation negotiation;  // 只带回 `CONNECT` 的补充事实；本腿不进认证环
     Result<WebSocket> outcome{make_error(ErrorCode::HttpProtocolError, "connect_websocket produced no outcome")};

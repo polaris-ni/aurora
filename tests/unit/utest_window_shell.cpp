@@ -101,7 +101,7 @@ AURORA_TEST_CASE(non_modal_window_keeps_owner_enabled) {
 
 AURORA_TEST_CASE(host_forwards_raise_and_focus_to_surface) {
     const auto oa = make_opts("A");
-    Application app{make_scene("A"), make_window(oa), oa};
+    Application const app{make_scene("A"), make_window(oa), oa};
     WindowHost *const host = app.windows().front();
     HeadlessSurface *const surface = surface_of(host);
     AURORA_TEST_REQUIRE_NOT_NULL(surface);
@@ -117,7 +117,7 @@ AURORA_TEST_CASE(host_forwards_raise_and_focus_to_surface) {
 
 AURORA_TEST_CASE(host_reports_display_id_and_survives_migration_noop) {
     const auto oa = make_opts("A");
-    Application app{make_scene("A"), make_window(oa), oa};
+    Application const app{make_scene("A"), make_window(oa), oa};
     WindowHost *const host = app.windows().front();
     HeadlessSurface *const surface = surface_of(host);
     AURORA_TEST_REQUIRE_NOT_NULL(surface);
@@ -134,7 +134,7 @@ AURORA_TEST_CASE(host_reports_display_id_and_survives_migration_noop) {
 
 AURORA_TEST_CASE(scale_change_marks_window_for_full_redraw) {
     const auto oa = make_opts("A");
-    Application app{make_scene("A"), make_window(oa), oa};
+    Application const app{make_scene("A"), make_window(oa), oa};
     WindowHost *const host = app.windows().front();
     HeadlessSurface *const surface = surface_of(host);
     AURORA_TEST_REQUIRE_NOT_NULL(surface);
@@ -147,7 +147,7 @@ AURORA_TEST_CASE(scale_change_marks_window_for_full_redraw) {
 
 AURORA_TEST_CASE(teardown_unbinds_scale_change_handler) {
     const auto oa = make_opts("A");
-    Application app{make_scene("A"), make_window(oa), oa};
+    Application const app{make_scene("A"), make_window(oa), oa};
     WindowHost *const host = app.windows().front();
     HeadlessSurface *const surface = surface_of(host);
     AURORA_TEST_REQUIRE_NOT_NULL(surface);
@@ -170,7 +170,7 @@ AURORA_TEST_CASE(teardown_unbinds_scale_change_handler) {
 
 AURORA_TEST_CASE(teardown_unbinds_present_request) {
     const auto oa = make_opts("A");
-    Application app{make_scene("A"), make_window(oa), oa};
+    Application const app{make_scene("A"), make_window(oa), oa};
     WindowHost *const host = app.windows().front();
     HeadlessSurface *const surface = surface_of(host);
     AURORA_TEST_REQUIRE_NOT_NULL(surface);
@@ -193,7 +193,7 @@ AURORA_TEST_CASE(teardown_unbinds_present_request) {
 }
 
 AURORA_TEST_CASE(headless_host_shell_calls_are_safe) {
-    Application app{make_scene("headless"), 200, 150};
+    Application const app{make_scene("headless"), 200, 150};
     WindowHost *const host = app.windows().front();
 
     // 无 OS 窗口的宿主：显示器 / 层级操作全部安全 no-op（不得崩溃）。

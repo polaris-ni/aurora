@@ -72,7 +72,6 @@ from lint_db import (  # noqa: E402  (path bootstrap above must run first)
     argv_from_command,
     count_generated_tus,
     default_exclude,
-    is_auto_generated,
     load_db,
     load_tus,
     norm,
@@ -98,59 +97,6 @@ EM_DROP_BARE = {"-Winvalid-pch", "-fpch-instantiate-templates", "-fcolor-diagnos
 # 而是「该 TU 编译不过」——编译不产出带 [check] 的诊断，门禁会静默显示 0 告警。
 # 值为文件的选项（-imacros/-include）可能是相对名，由 clang 在 include 路径里搜，故不校验。
 EM_DIR_OPT_PREFIXES = ("-I", "-isystem", "-iquote", "-idirafter")
-
-
-def argv_from_command(cmd: str) -> list[str]:
-    """把编译库里的 `command` 字符串还原成 argv 列表。
-
-    为什么不用 `shlex.split(posix=True)`：Windows 下 Ninja 写出的 command 走的是
-    `CommandLineToArgvW` 那套转义规则（`\"` 是转义引号，**其余反斜杠一律字面量**），
-    而 posix 模式把所有反斜杠都当转义符吃掉——实测盘符绝对路径被拆成「盘符与目录粘连、
-    分隔符丢失」的废路径，路径全部失效。反斜杠路径失效后 clang-tidy 编译不过，
-    而「编译不过」不产出带 `[check]` 的诊断，于是门禁只看到 0 条告警：覆盖面塌了
-    却报绿。posix=False 又走另一极端（转义引号原样留下，宏值带反斜杠）。故自实现。
-    """
-    toks: list[str] = []
-    cur, i, n = [], 0, len(cmd)
-    in_quote = False
-    has = False  # 是否曾开始构造当前 token（区分「空参数」与「分隔空白」）
-    while i < n:
-        c = cmd[i]
-        if c == "\\":  # 反斜杠只在紧邻引号时才有转义含义
-            j = i
-            while j < n and cmd[j] == "\\":
-                j += 1
-            if j < n and cmd[j] == '"':
-                cur.extend(["\\"] * ((j - i) // 2))
-                if (j - i) % 2:  # 奇数个：最后一个转义引号，字面量并入
-                    cur.append('"')
-                    has = True
-                else:  # 偶数个：引号本身是开/合
-                    in_quote = not in_quote
-                    has = True
-                i = j + 1
-                continue
-            cur.extend(["\\"] * (j - i))
-            has = True
-            i = j
-            continue
-        if c == '"':
-            in_quote = not in_quote
-            has = True
-            i += 1
-            continue
-        if c.isspace() and not in_quote:
-            if has:
-                toks.append("".join(cur))
-                cur, has = [], False
-            i += 1
-            continue
-        cur.append(c)
-        has = True
-        i += 1
-    if has:
-        toks.append("".join(cur))
-    return toks
 
 
 def emscripten_sysroot() -> tuple[str, str]:

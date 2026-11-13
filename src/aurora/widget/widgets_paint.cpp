@@ -16,19 +16,20 @@ auto Text::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> 
     }
     const std::string &s = cached_resolved_text_;
     display_text_ = s;  // 缓存显示文本供命中测试/选区
-    const Font f = effective_font(font, ctx);
-    const render::TextLayoutOpts opts{.letter_spacing = letter_spacing,
-                                      .word_spacing = word_spacing,
-                                      .italic = (font_style == FontStyle::Italic),
+    const Font f = effective_font(current_font(ctx));
+    layout_font_ = f;  // 未经布局也要让命中测试拿到同一份字体（见 layout_font_）
+    const render::TextLayoutOpts opts{.letter_spacing = letter_spacing(),
+                                      .word_spacing = word_spacing(),
+                                      .italic = (font_style() == FontStyle::Italic),
                                       .direction = effective_direction(ctx)};
-    const render::TextAAMode aa = text_aa_mode.has_value() ? *text_aa_mode : render::FontEngine::text_aa_mode();
+    const render::TextAAMode aa = text_aa_mode_.has_value() ? *text_aa_mode_ : render::FontEngine::text_aa_mode();
     paint_scale_ = p.scale();  // 实显宽度校正与绘制同源：命中测试（无 Painter）复用最近一次绘制的像素比
 
     // 若布局阶段未产出行（极端情况），在此兜底计算
     float line_h = line_h_;
     if (lines_.empty() || line_h <= 0.0F) {
-        line_h = render::FontEngine::measure_height(f) * std::max(0.1F, line_height);
-        auto [lines, cp_start] = wrap_lines(s, f, bounds.size.width, soft_wrap, max_lines, overflow, opts);
+        line_h = render::FontEngine::measure_height(f) * std::max(0.1F, line_height());
+        auto [lines, cp_start] = wrap_lines(s, f, bounds.size.width, soft_wrap(), max_lines(), overflow(), opts);
         lines_ = std::move(lines);
         line_cp_start_ = std::move(cp_start);
         // 写回成员：即使未经过 on_layout（如独立文本/测试场景），后续命中测试
@@ -36,7 +37,7 @@ auto Text::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> 
         line_h_ = line_h;
     }
 
-    const bool justify = (text_align == TextAlign::Justify);
+    const bool justify = (text_align() == TextAlign::Justify);
     float y = bounds.origin.y;
     // 文字色：显式优先，否则跟随主题 on_surface（迁移批；ThemeScope 换肤即生效）。
     const Color fg = resolve_text_color(ctx);
@@ -47,7 +48,7 @@ auto Text::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> 
         const std::string &line = lines_[li];
         const float line_w = render::FontEngine::measure_width(line, f, opts);
         float x = bounds.origin.x;
-        switch (text_align) {
+        switch (text_align()) {
             case TextAlign::Right:
                 x = bounds.origin.x + (bounds.size.width - line_w);
                 break;
@@ -67,10 +68,11 @@ auto Text::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> 
         }
 
         // 文本底色
-        if (background_color.a > 0) {
+        const Color bg = background_color();
+        if (bg.a > 0) {
             p.fill_rect(Rect{.origin = Point{.x = bounds.origin.x, .y = y},
                              .size = Size{.width = bounds.size.width, .height = line_h}},
-                        background_color);
+                        bg);
         }
 
         // 本行绘制范围（用于装饰线对齐）；Justify 时整行铺满。
@@ -108,20 +110,21 @@ auto Text::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> 
         }
 
         // 装饰线（上划线 / 下划线 / 删除线）按整行绘制。
-        if (decoration != TextDecoration::None) {
-            const Color dc = decoration_color.value_or(fg);
+        const TextDecoration deco = decoration();
+        if (deco != TextDecoration::None) {
+            const Color dc = decoration_color(ctx);
             const float thick = std::max(1.0F, line_h * 0.06F);
-            if (decoration_has(decoration, TextDecoration::Underline)) {
+            if (decoration_has(deco, TextDecoration::Underline)) {
                 p.fill_rect(Rect{.origin = Point{.x = line_left, .y = y + (line_h * 0.82F)},
                                  .size = Size{.width = line_right - line_left, .height = thick}},
                             dc);
             }
-            if (decoration_has(decoration, TextDecoration::Overline)) {
+            if (decoration_has(deco, TextDecoration::Overline)) {
                 p.fill_rect(Rect{.origin = Point{.x = line_left, .y = y + (line_h * 0.12F)},
                                  .size = Size{.width = line_right - line_left, .height = thick}},
                             dc);
             }
-            if (decoration_has(decoration, TextDecoration::LineThrough)) {
+            if (decoration_has(deco, TextDecoration::LineThrough)) {
                 p.fill_rect(Rect{.origin = Point{.x = line_left, .y = y + (line_h * 0.5F)},
                                  .size = Size{.width = line_right - line_left, .height = thick}},
                             dc);
@@ -167,7 +170,7 @@ auto Text::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> 
             // NOLINTNEXTLINE 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
             const float line_w = render::FontEngine::measure_width(lines_[li], f, opts);
             float line_off = 0.0F;
-            switch (text_align) {
+            switch (text_align()) {
                 case TextAlign::Right:
                     line_off = bounds.size.width - line_w;
                     break;
@@ -195,44 +198,44 @@ auto Text::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> 
             const float yy = bounds.origin.y + (static_cast<float>(li) * line_h);
             p.fill_rect(
                 Rect{.origin = Point{.x = seg_x0, .y = yy}, .size = Size{.width = seg_x1 - seg_x0, .height = line_h}},
-                Color{80, 120, 220, 110});
+                inherit_theme(ctx).roles.primary.with_alpha(110));
         }
         p.pop_clip();
     }
 }
 
-auto Button::paint_background(Painter &p, const Rect &bounds, Color bg) -> void {
-    if (corner_radius > 0.0F) {
-        p.fill_rounded_rect(bounds, corner_radius, bg);
+auto Button::paint_background(Painter &p, const Rect &bounds, Color bg, float radius) -> void {
+    if (radius > 0.0F) {
+        p.fill_rounded_rect(bounds, radius, bg);
     } else {
         p.fill_rect(bounds, bg);
     }
 }
 
-auto Button::baseline_distance(const BuildContext & /*ctx*/) const -> std::optional<float> {
+auto Button::baseline_distance(const BuildContext &ctx) const -> std::optional<float> {
     // 与 paint_label 同源：标签在内容盒内垂直居中（ty = top + (h - th) / 2），
-    // 故基线 = 居中偏移 + 字体 ascent。字号兜底与 th 的口径均取自 paint_label。
-    const float fs = font.size_pt > 0.0F ? font.size_pt : 14.0F;
-    const Font f{.size_pt = fs};
+    // 故基线 = 居中偏移 + 字体 ascent。有效字体（含字阶正文档兜底）与 th 的口径均取自 paint_label。
+    const Font f = effective_font(ctx);
     const float th = render::FontEngine::measure_height(f);
     return ((size().height - th) * 0.5F) + render::FontEngine::measure_ascent(f);
 }
 
-auto Button::paint_border(Painter &p, const Rect &bounds) -> void {
-    if (border_width <= 0.0F || !border_color.has_value()) {
+auto Button::paint_border(Painter &p, const Rect &bounds, float radius) -> void {
+    // 画不画看 border_color 行的表态位：未表态即「无边框」（填充按钮），不是「画一枚透明边框」。
+    if (border_width() <= 0.0F || !present(border_color_row())) {
         return;
     }
-    const Color bc = enabled ? *border_color : border_color->with_alpha(128);  // 禁用态边框半透淡化
-    if (corner_radius > 0.0F) {
-        p.draw_rounded_border(bounds, corner_radius, border_width, bc);
+    const Color stated_border = border_color();
+    const Color bc = enabled() ? stated_border : stated_border.with_alpha(128);  // 禁用态边框半透淡化
+    if (radius > 0.0F) {
+        p.draw_rounded_border(bounds, radius, border_width(), bc);
     } else {
         p.draw_rect(bounds, bc);
     }
 }
 
 auto Button::paint_label(Painter &p, const Rect &bounds, Color text_color, const std::string &display) -> void {
-    const float fs = font.size_pt > 0.0F ? font.size_pt : 14.0F;
-    const Font f{.size_pt = fs};
+    const Font f = layout_font_;  // 与 on_layout 度量同一份字体：本扩展点没有 BuildContext，不得另解一次
     // 缓存失效：显示串变了（或尚未测过）就重测，避免复用另一 locale 下的旧宽。
     if (cached_display_text_ != display || cached_text_width_ <= 0.0F || cached_text_height_ <= 0.0F) {
         cached_display_text_ = display;
@@ -243,15 +246,24 @@ auto Button::paint_label(Painter &p, const Rect &bounds, Color text_color, const
     const float th = cached_text_height_;
     const float tx = bounds.origin.x + ((bounds.size.width - tw) * 0.5F);
     const float ty = bounds.origin.y + ((bounds.size.height - th) * 0.5F);
-    p.draw_text(Rect{.origin = Point{.x = tx, .y = ty}, .size = Size{.width = tw, .height = th}}, display, font,
+    p.draw_text(Rect{.origin = Point{.x = tx, .y = ty}, .size = Size{.width = tw, .height = th}}, display, f,
                 text_color);
 }
 
 auto Button::on_paint(Painter &p, const Rect &bounds, const BuildContext &ctx) -> void {
-    // 绘制分阶段（继承扩展点）：背景 → 边框 → 文字；状态色由 resolve_* 钩子解析
-    // （未显式设色时经 ctx 取主题角色）。
-    paint_background(p, bounds, resolve_background(ctx));
-    paint_border(p, bounds);
+    // 绘制分阶段（继承扩展点）：背景 → 状态层 → 边框 → 文字；状态色由 resolve_* 钩子解析
+    // （未显式设色时经 ctx 取主题角色）。悬停/按下是半透明叠色，画在基色之上而不改基色。
+    // 圆角同理：本帧解算一次（表态值优先，未表态取主题 shapes.small），同一份值同时喂背景与
+    // 边框两阶段，避免同帧换档时两阶段取到不同半径。
+    const float radius = corner_radius(ctx);
+    paint_background(p, bounds, resolve_background(ctx), radius);
+    // 状态层与背景同形：同一份 bounds / radius 再叠一层（源覆盖混合，半透明色生效）。
+    if (const auto overlay = resolve_state_overlay(ctx)) {
+        paint_background(p, bounds, *overlay, radius);
+    }
+    paint_border(p, bounds, radius);
+    // 未经布局也要让文字绘制拿到本轮作用域的生效字体（见 layout_font_）。
+    layout_font_ = effective_font(ctx);
     // 本帧只解析一次：量宽与落笔共用 display 这一份副本。
     paint_label(p, bounds, resolve_text_color(ctx), resolved_label(ctx));
 }

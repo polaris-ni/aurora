@@ -1,0 +1,28 @@
+# Explicitly reviewed list of CTest names that the repository documents as active,
+# one-vote-veto gates. Each name MUST appear in this build's CTest registration set.
+#
+# Why a curated list instead of scanning docs for utest_/itest_/etest_/check_ tokens:
+# a full audit found 21 unregistered names, and 20 of them are naming examples,
+# retired references, planned files in proposals, or regex false positives. Those
+# live in declared_gates_exemptions.txt instead. Only names whose documentation
+# claims "this gate runs today" belong here.
+#
+# Adding a name: only after the corresponding CTest test is really registered.
+# Removing a name: only after the corresponding active declaration is removed
+# from the docs. An empty list is a hard failure, never a clean pass.
+# Generator-dependent gates (check_api_schema_sync / check_gen_api_merge /
+# check_i18n_gen_golden) are deliberately absent: AuroraTests.cmake skips them
+# on Emscripten builds, so declaring them here would turn a green cross build red.
+utest_simd_parity
+registry_integrity
+check_codespec_xref
+check_code_doc_sync
+check_doc_comments
+check_nolint_layout
+check_agents_size
+check_change_proposals
+check_third_party_versions
+check_workflow_yaml
+check_theme_token_registry
+check_no_theme_display_literals
+check_no_theme_color_literals

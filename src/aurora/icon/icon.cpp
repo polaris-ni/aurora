@@ -84,7 +84,11 @@ auto IconRegistry::lookup(std::string_view name) -> Result<IconData> {
     auto &table = registry_table();
     const auto it = table.find(std::string{name});
     if (it != table.end()) {
-        return it->second;
+        // 中转一次再返回：直接 `return it->second` 时 GCC 在 `std::variant` 拷贝的内联链上
+        // 误报 -Wmaybe-uninitialized（指向 `std::string` 的 SSO 联合体，实测 GCC 15/16）；
+        // 具名局部量切断该内联路径，语义不变。
+        const IconData found = it->second;
+        return found;
     }
     return make_error(ErrorCode::IconNameNotRegistered,
                       ErrorParams{{"name", std::string{name}}, {"detail", candidate_detail(name)}});
@@ -105,7 +109,7 @@ auto IconRegistry::clear() -> void { registry_table().clear(); }
 auto paint_icon_data(Painter &p, const Rect &box, const IconData &data, const Color &color, float optical_bias)
     -> void {
     if (const auto *glyph = data.as_glyph()) {
-        Font f{.family = glyph->font_family, .size_pt = box.size.height, .weight = 400};
+        Font const f{.family = glyph->font_family, .size_pt = box.size.height, .weight = 400};
         const std::string text = utf8_encode(static_cast<std::uint32_t>(glyph->codepoint));
         const float h = render::FontEngine::measure_height(f);
         // 字号框垂直居中；跨大跨度再叠光学中心补偿（基线视觉中心偏差）。

@@ -4,7 +4,6 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
-#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -12,6 +11,7 @@
 #include <vector>
 
 #include "aurora/app/perf_overlay.h"
+#include "aurora/core/accessibility.h"
 #include "aurora/core/aurora_assert.h"
 #include "aurora/core/log.h"
 #include "aurora/core/result.h"
@@ -162,6 +162,10 @@ struct WindowOptions {
     RendererPreference renderer = RendererPreference::Auto;  ///< 上屏后端偏好。
 
     /// @brief 窗口可见性策略（默认 `Normal` = 行为不变）。
+    ///
+    /// 本档只是**初值**：它定的是「窗口第一次上屏时怎样」，运行期的显隐走
+    /// `Window::set_visible()` / `Surface::set_visible()`（读回 `is_visible()`），
+    /// 二者是同一份 OS 状态的两侧，不存在「建窗档改不了」的限制。
     WindowVisibility visibility = WindowVisibility::Normal;
 
     /// @brief 窗口角色（多窗口生命周期语义，见 `WindowRole`；默认 `Main` 保证单窗口用法行为不变）。
@@ -530,6 +534,31 @@ class Window {
             surface_->set_fullscreen(on);
         }
     }
+    /// @brief 运行期显隐：让窗口进入 / 退出用户视野（透传 `Surface::set_visible`）。
+    ///
+    /// 与 `minimize()` 的分工见 `Surface::set_visible`：隐藏不留任务栏痕迹。
+    /// `WindowOptions::visibility` 是本开关的**初值**，运行期改它走这里。
+    /// 后端是否接线该机制可先查询：`platform().capabilities().runtime_visibility`。
+    /// @param on true 显示（接线后端不抢焦点）、false 隐藏。
+    auto set_visible(bool on) const -> void {
+        if (surface_) {
+            surface_->set_visible(on);
+        }
+    }
+    /// @brief 当前是否在用户视野内（透传 `Surface::is_visible`；无 Surface 时按可见处理）。
+    /// @return 在屏上为 true。
+    [[nodiscard]] auto is_visible() const -> bool { return !surface_ || surface_->is_visible(); }
+    /// @brief 运行期置顶开关（透传 `Surface::set_always_on_top`）。
+    /// `WindowStyleOptions::always_on_top` 是本开关的**初值**；切换不产生移动、尺寸变化或激活。
+    /// @param on true 置顶、false 取消置顶。
+    auto set_always_on_top(bool on) const -> void {
+        if (surface_) {
+            surface_->set_always_on_top(on);
+        }
+    }
+    /// @brief 当前是否置顶（透传 `Surface::is_always_on_top`；无 Surface 时为 false）。
+    /// @return 置顶为 true。
+    [[nodiscard]] auto is_always_on_top() const -> bool { return surface_ && surface_->is_always_on_top(); }
     /// @brief 控件发起窗口拖拽移动（如自绘标题栏空白区按下）。
     auto begin_window_move() const -> void {
         if (surface_) {
@@ -556,22 +585,66 @@ class Window {
     [[nodiscard]] auto window_mode() const -> WindowMode { return window_mode_; }
     /// @brief 设置当前窗口几何态快照（由 `Application` 在状态变化时调用）。
     /// @param m 新的几何态快照。
+    /// @note 本方法是**快照写入口**（上报链的 sink），不是下发动作入口：应用侧主动设目标档
+    /// 应走 `surface().set_window_mode(m)`（可变引用已在）。若把它「顺手」改成向 Surface
+    /// 转发，会构成「宿主上报 → 写快照 → 下发 → 再上报」回环——上报链的写入点必须与
+    /// 动作入口分开，勿按直觉合并。
     auto set_window_mode(WindowMode m) -> void { window_mode_ = m; }
 
     /// @brief 显式设定本窗根主题（应用换肤/固定主题，最高优先）。
     ///
     /// 未调用时窗口按三级优先链 `os_color_scheme`（由 `Application` 经 `set_os_color_scheme` 推入）
     /// → 明色 解析默认主题；本 setter 一旦设定即覆盖该默认，`prepare_context` 每帧注入之。
+    /// 换档自带两件事，缺一即「逻辑对了、屏幕没变」：① 生效那一帧做一次整子树缓存失效——主题在
+    /// 布局期与 Display List 里都被后代消费，脏标记只向上溯达，后代不失效就停在旧档解算结果；
+    /// ② 整窗标脏（`force_full_redraw`）——换肤改变的是每一像素的配色，增量脏区无从推断。
+    /// （与 `set_locale` 同口径，低频调用时代价可接受。）
     /// @param t 生效主题（其 `scheme` 即最终档）。
-    auto set_theme(Theme t) -> void { theme_ = std::move(t); }
+    auto set_theme(Theme t) -> void {
+        theme_ = std::move(t);
+        theme_pending_ = true;
+        force_full_redraw();
+    }
     /// @brief 当前显式设定的根主题（未设定为空）。
     /// @return 最近一次 `set_theme` 的值；从未显式设定时为 `std::nullopt`。
     [[nodiscard]] auto theme() const -> const std::optional<Theme> & { return theme_; }
+
+    /// @brief 只定**风格轴**，明暗继续跟随 OS（两轴正交模型在应用侧的表达）。
+    ///
+    /// `set_theme` 只能整份覆盖，表达不了「就要 Windows 那套观感，深浅随系统」这种诉求；本 setter
+    /// 只钉风格档，明暗仍走 `set_os_color_scheme` 推入的 OS 档。两者同时给出时 `set_theme` 优先
+    /// （它携带完整的两轴取值，见 `resolved_root_theme()` 的短路）。
+    ///
+    /// 未调用时风格档由 `Theme::default_style()` 探测（每进程读一次，换桌面外壳需重启应用；
+    /// 与明暗轴「运行期跟随 OS」的差异口径见 specification/07-environment-modifier.md §5.2）。
+    /// 与 `set_theme` / `set_locale` 同构：本 setter 只存值，`prepare_context` 于**下一帧**起生效，
+    /// 生效那一帧连带整子树缓存失效 + 整窗标脏（同值重推两者都不做，避免无谓重排重绘）。
+    /// @param s 生效风格档（`Material` 可用来锁回与本窗探测结果无关的基线观感）。
+    auto set_theme_style(ThemeStyle s) -> void {
+        if (style_.has_value() && *style_ == s) {
+            return;  // 同值重推：解算结果不变，不值得清一次子树缓存、更不值得整帧重绘
+        }
+        style_ = s;
+        theme_pending_ = true;
+        force_full_redraw();
+    }
+    /// @brief 当前显式设定的风格档（未设定为空）。
+    /// @return 最近一次 `set_theme_style` 的值；为空表示风格轴交由 `Theme::default_style()` 探测。
+    [[nodiscard]] auto theme_style() const -> const std::optional<ThemeStyle> & { return style_; }
     /// @brief 推入 OS 明暗偏好快照（由 `Application` 在窗口创建、以及收到系统外观变更
     ///        通知——如 Win32 `WM_SETTINGCHANGE`——时调用；`Window` 自身不直读系统以免
     ///        公共头反向依赖平台层）。仅当应用未 `set_theme` 时参与默认主题解析。
+    ///        换档连带整子树缓存失效 + 整窗标脏（与 `set_theme` 同口径），故宿主侧不必再
+    ///        额外 `force_full_redraw`；同档重推（宿主 attach 时常见）两者都不做。
     /// @param s OS 档位（`Unspecified` 表示未表态，按明色回落）。
-    auto set_os_color_scheme(ColorScheme s) -> void { os_scheme_ = s; }
+    auto set_os_color_scheme(ColorScheme s) -> void {
+        if (os_scheme_ == s) {
+            return;  // 同档重推（宿主 attach 时常见）：解算结果不变，不置挂起位、不整帧重绘
+        }
+        os_scheme_ = s;
+        theme_pending_ = true;
+        force_full_redraw();
+    }
 
     /// @brief 显式设定本窗的窗口级 locale（帧级根注入）。
     ///
@@ -655,10 +728,10 @@ class Window {
             applied_inset_.right != inset.right || applied_inset_.bottom != inset.bottom) {
             applied_inset_ = inset;
             // NOLINTNEXTLINE(cppcoreguidelines-pro-type-static-cast-downcast): inset_root_ 构造即 ContentInsetRoot
-            static_cast<detail::ContentInsetRoot &>(inset_root_.widget()).modifier =
-                (inset.left == 0.0F && inset.top == 0.0F && inset.right == 0.0F && inset.bottom == 0.0F)
-                    ? Modifier{}
-                    : Modifier{}.padding(inset);
+            static_cast<detail::ContentInsetRoot &>(inset_root_.widget())
+                .set_modifier((inset.left == 0.0F && inset.top == 0.0F && inset.right == 0.0F && inset.bottom == 0.0F)
+                                  ? Modifier{}
+                                  : Modifier{}.padding(inset));
             force_full_redraw();  // 内缩量变化 ⇒ 子树约束与绘制位置同时变化：整帧重排重绘
         }
         Node &presented = inset_root_;  // 后续帧管线统一以壳为根
@@ -687,6 +760,9 @@ class Window {
         // AURORA_ENABLE_PROFILING 关闭时本行完全消失（零开销）。
         AURORA_PROFILE_FRAME();
         idle_frame_ = false;  // 进入 present_root 即视为非 idle；idle 跳过分支会重新置 true
+        // 无障碍开关换档同步：必须排在脏区计划**之前**——计划一旦判定「无脏无布局变化」就整帧跳过，
+        // 在那之后标脏的换档信号会随本帧一起丢掉，「开关置位 → 生效值变」退化成「等到下次交互」。
+        sync_accessibility_fold();
 
         FramePlan plan;
         if (dirty_tracking_) {
@@ -713,7 +789,7 @@ class Window {
             return bf;
         }
 
-        BuildContext ctx = prepare_context(presented, app_root_changed);
+        BuildContext const ctx = prepare_context(presented, app_root_changed);
         const double layout_ms = run_layout(presented, plan, ctx);
         const double paint_ms = run_paint(p, presented, ctx, plan);
         // 无障碍根注入：布局与绘制都完成后语义树几何才有效，故放在 paint 之后。
@@ -822,12 +898,6 @@ class Window {
         return first_frame_ || layout_dirty_ || !dirty_.is_empty();
     }
 
-    /// @brief 设置本帧末尾的等待请求（由 `Application::run` 每帧经 `compute_wait_timeout`
-    /// 决策后写入；`Window::run` 在 on_frame 之后消费）。语义同 `Surface::wait_events`：
-    /// `<0` 无限等待 / `0` 不等（默认，未设置则保持旧忙轮询行为）/ `>0` 等待毫秒数。
-    /// @param timeout_ms 本帧末尾的等待毫秒数（语义同上，一次性消费）。
-    auto set_next_wait(double timeout_ms) -> void { next_wait_ms_ = timeout_ms; }
-
     /// @brief 绑定本窗口的帧统计实例（多窗口：每窗口独立统计，`FrameStats::instance()`
     /// 在多窗口下会混入其他窗口数据）。
     ///
@@ -873,91 +943,6 @@ class Window {
         };
     }
 
-  public:
-    /// @brief 运行帧循环：pump 事件 → 调 on_frame 回调（渲染根）→ 按需阻塞等待。
-    /// 直到 should_close 或达到 max_frames（<0 表示无限，直到关闭）。on_frame 由 `Application` 注入
-    /// （调用 `present_root`，其内部负责 present），保持 `Window` 与渲染循环解耦；
-    /// `Window::run` 不再额外 present，避免每帧重复提交。
-    ///
-    /// 事件驱动帧循环：on_frame 末尾经 `set_next_wait` 写入本帧
-    /// 等待决策，循环在帧末 `Surface::wait_events` 阻塞到事件/超时，取代忙轮询；
-    /// 等待请求一次性消费（未重新设置则不等），直调 `Window::run` 的低阶调用方
-    /// （测试/自拼帧循环）行为不变。等待时长记入 `FrameStats`（wakeups / sleep ratio）。
-    ///
-    /// @param on_frame 每帧调用的渲染回调（由宿主注入，内部完成 present）；为空对象时该帧跳过渲染。
-    /// @param max_frames 帧数预算：> 0 时跑满该帧数退出，≤ 0（默认 -1）表示不限，直到窗口请求关闭。
-    AURORA_MAIN_THREAD auto run(const std::function<void()> &on_frame, int max_frames = -1) -> void {
-        // 本循环就是这条线程的主线程事件循环：给后台线程（InspectorServer 的 worker）装上回投器，
-        // 使其对 widget 树的读取排在帧与帧之间执行。缺此安装时 `inspector` 的 marshal 会退回
-        // 「在当前线程直读」，与 present/重排并发改树相撞即触发访问违例（0xC0000005）。
-        struct RunQueue {
-            std::mutex mutex;
-            std::vector<std::function<void()>> tasks;
-            bool running = true;
-        };
-        auto queue = std::make_shared<RunQueue>();
-        Surface *const surf = surface_.get();
-        auto drain = [queue]() -> void {
-            std::vector<std::function<void()>> batch;
-            {
-                std::scoped_lock lk(queue->mutex);
-                batch.swap(queue->tasks);
-            }
-            for (auto &task : batch) {
-                if (task) {
-                    task();
-                }
-            }
-        };
-        std::function<void(std::function<void()>)> prev_poster;
-        {
-            std::scoped_lock lk(aurora::detail::main_poster_mutex());
-            prev_poster = aurora::detail::main_poster();
-            aurora::detail::main_poster() = [queue, surf](std::function<void()> fn) -> void {
-                std::function<void()> inline_fn;
-                {
-                    std::scoped_lock lk2(queue->mutex);
-                    if (queue->running) {
-                        queue->tasks.push_back(std::move(fn));
-                    } else {
-                        inline_fn = std::move(fn);  // 循环已退出：无人排水，就地执行（与无回投器时同义）
-                    }
-                }
-                if (inline_fn) {
-                    inline_fn();
-                } else {
-                    surf->request_wake();  // 唤醒睡在 wait_events 的循环，即刻排水
-                }
-            };
-        }
-        int n = 0;
-        while (!should_close()) {
-            drain();
-            pump_events();
-            if (on_frame) {
-                on_frame();
-            }
-            ++n;
-            if (max_frames > 0 && n >= max_frames) {
-                break;
-            }
-            const double wait_ms = next_wait_ms_;
-            next_wait_ms_ = 0.0;  // 一次性消费：未重新设置则不等待（旧行为兜底）
-            if (wait_ms != 0.0 && !should_close()) {
-                const auto t0 = std::chrono::steady_clock::now();
-                surface_->wait_events(wait_ms);
-                const auto t1 = std::chrono::steady_clock::now();
-                FrameStats::instance().record_wait(std::chrono::duration<double, std::milli>(t1 - t0).count());
-            }
-        }
-        {
-            std::scoped_lock lk(aurora::detail::main_poster_mutex());
-            aurora::detail::main_poster() = std::move(prev_poster);  // 交还给外层循环（可能为 nullptr）
-            queue->running = false;
-        }
-    }
-
-  private:
     std::unique_ptr<Surface> surface_;  ///< 组合的后端（不可知）
     std::string title_{"Aurora"};
     /// @brief 本窗口的宿主身份（见 `detail::next_host_id`），每帧随 `prepare_context` 写入
@@ -970,11 +955,42 @@ class Window {
     WindowState window_state_ = WindowState::Visible;  ///< 当前窗口可见性快照（由 Application 设置）。
     WindowMode window_mode_ = WindowMode::Normal;  ///< 当前窗口几何态快照（由 Application 设置）。
     std::optional<Theme> theme_;  ///< 应用显式设定的根主题；空表示交由默认解析链。
+    std::optional<ThemeStyle> style_;  ///< 应用显式设定的风格档；空表示按 `Theme::default_style()` 探测。
     std::optional<Locale> locale_;  ///< 应用显式设定的窗口级 locale；空表示不注入（控件回落缺省档）。
     /// @brief 换档挂起标志：`set_locale` 置位，`prepare_context` 注入该档的那一帧消费并清零
     ///        （消费时顺带做一次整子树缓存失效，见 `Widget::invalidate_subtree_caches`）。
     bool locale_pending_ = false;
     ColorScheme os_scheme_ = ColorScheme::Unspecified;  ///< OS 明暗偏好快照（由 Application 推入）。
+    /// @brief 主题换档挂起标志：`set_theme` / `set_theme_style` / `set_os_color_scheme` 在**解算输入
+    ///        实际变化**时置位，`prepare_context` 注入新档的那一帧消费并清零（同 `locale_pending_` 口径）。
+    ///
+    /// 主题与 locale 同属「后代不自身变脏、却按环境取值」的输入：控件在布局期与 Display List 里
+    /// 消费 `inherit_theme(ctx)`，只靠脏标记不会向下传播，后代即停在旧观感（真机复现：切换风格档后
+    /// 常驻树里的按钮/滑杆仍按旧 primary 绘制）。本标志负责**向下失效**那一半；像素那一半由 setter
+    /// 同批的 `force_full_redraw` 负责（两者缺一：只失效则增量脏区不重绘，只标脏则重排仍读旧缓存）。
+    ///
+    /// 三枚无障碍开关是同一组解算输入（进 `RootThemeCache` 的键），但翻位发生在进程级单例里、
+    /// 本窗没有 setter 可挂标志，因此置位点换成本帧入口的差量比对（见 `sync_accessibility_fold()`），
+    /// 像素与缓存两半的分工不变。
+    bool theme_pending_ = false;
+    /// @brief 根主题解算缓存的键值对：风格档 + 明暗档 + 三枚参与物化的无障碍输入 + 该组合的解算结果。
+    ///
+    /// 键取**解算后的档位**而非 setter 的可选值：`style_` 为空时结果取决于进程级探测档，
+    /// 后者每进程只读一次（见 `Theme::default_style()`），因此键一旦成立即稳定。
+    struct RootThemeCache {
+        ThemeStyle style = ThemeStyle::Material;  ///< 解算用的风格档（探测档已并入）。
+        ColorScheme scheme = ColorScheme::Light;  ///< 解算用的明暗档（`Unspecified` ≡ 明色）。
+        bool high_contrast = false;  ///< 解算用的高对比开关位（无障碍开关进键，见 `resolved_root_theme()`）。
+        float font_scale = 1.0F;  ///< 解算用的字号倍率（取 `resolved_font_scale()` 的归一化值，非裸字段）。
+        bool reduce_motion = false;  ///< 解算用的减动效位（置位时 `MotionScale` 整族取零档）。
+        Theme value;  ///< 该档位组合的解算结果。
+    };
+    mutable std::optional<RootThemeCache> root_theme_cache_;  ///< 见 `resolved_root_theme()` 的缓存注记。
+    /// @brief 上一次本窗物化时读到的无障碍输入快照：换档检测的比较基准，见 `sync_accessibility_fold()`。
+    ///
+    /// 差异判定走 `resolved_font_scale()` 而非裸字段，故宿主反复写入同一非法值（0 / NaN）
+    /// 归一化后恒等于 1.0，不会被误判为换档。
+    AccessibilitySettings last_accessibility_fold_{};
     DirtyRegionTracker dirty_;  ///< 绘制脏追踪器（specification/06-app-platform.md §3.2）。
     bool dirty_tracking_ = true;  ///< 脏追踪开关（默认开启：idle 跳帧 + layout/paint 分离）。
     bool layout_dirty_ = true;  ///< 布局脏：尺寸/结构/约束变化或 mark_needs_layout 触发，下一帧需重排。
@@ -1017,7 +1033,6 @@ class Window {
     bool system_redraw_ = false;  ///< 本次 present_root 由系统重绘请求驱动（WM_PAINT 等）：跳帧时仍须重新上屏。
     bool gpu_fallback_ = false;  ///< GPU 后端首帧失败后的永久软件路径标记（本 Window 生命周期内不再尝试 GPU）。
     bool idle_frame_ = false;  ///< 最近一次 present_root 是否为 idle 跳过（无脏区、未渲染）。
-    double next_wait_ms_ = 0.0;  ///< 本帧末尾的等待请求（一次性消费，0=不等）。
     FrameStats *stats_ = &FrameStats::instance();  ///< 帧统计实例（默认进程级单例；多窗口各窗绑定自己的实例）。
 
     // ---- 分层 HUD 叠加层 ----
@@ -1191,14 +1206,72 @@ class Window {
         return Result<bool>{true};
     }
 
-    /// @brief 解析本窗当前应注入根 BuildContext 的主题（三级优先链）。
-    /// @return 显式 `theme_`（若有，原样，其 `scheme` 即最终档）；否则按 OS 档取 `Theme::dark()` /
-    ///         `Theme::light()`（OS 未表态 `Unspecified` ≡ 明色，与 `token_in`/CSD 桥同口径）。
-    [[nodiscard]] auto resolved_root_theme() const -> Theme {
+    /// @brief 帧入口同步无障碍输入：与本窗上次物化读到的快照比对三枚会改变主题取值的开关位，
+    ///        换档则按「主题换档」的同构口径标脏并挂起向下失效。
+    ///
+    /// 判据为何是差量比对而非挂起标志：这三枚位住在进程级单例（宿主 / OS 桥翻位，
+    /// `set_accessibility_settings`），本窗没有 setter 可挂标志；代价是每帧三次内存读，而漏判的代价
+    /// 是「开关置位不生效」——后者是可达性缺陷，不是观感问题。像素一半由 `force_full_redraw` 负责，
+    /// 缓存一半复用 `theme_pending_`（那三枚位是解算输入，翻位与 `set_theme_style` 换档等价）。
+    ///
+    /// 显式 `set_theme` 时开关不参与物化（那套值是作者写死的，口径见 `resolved_root_theme()` 的返回值
+    /// 说明），翻位因此不构成重绘理由；基准值仍照常跟进，免得撤销显式主题后拿旧快照白判一次换档。
+    /// `screen_reader_active` 不参与比对，与它不入缓存键同口径。
+    auto sync_accessibility_fold() -> void {
+        const AccessibilitySettings fold = current_accessibility_settings();
+        const bool differs = fold.high_contrast != last_accessibility_fold_.high_contrast ||
+                             fold.resolved_font_scale() != last_accessibility_fold_.resolved_font_scale() ||
+                             fold.reduce_motion != last_accessibility_fold_.reduce_motion;
+        last_accessibility_fold_ = fold;
+        if (!differs || theme_.has_value()) {
+            return;
+        }
+        theme_pending_ = true;
+        force_full_redraw();
+    }
+
+    /// @brief 解析本窗当前应注入根 BuildContext 的主题（三级优先链，两轴解算）。
+    /// @return 显式 `theme_`（若有，原样，其 `scheme` 即最终档，风格与明暗一并由它携带；无障碍开关
+    ///         **不折**进用户配色——那套值是应用作者写死的，需要高对比请自行转调
+    ///         `Theme::with_accessibility`）；
+    ///         否则 `Theme::from_style(风格档, 明暗档, 无障碍开关)`——风格轴取 `style_`，未钉时取
+    ///         `Theme::default_style()` 的探测档；明暗轴取 `os_scheme_`，其中 `Unspecified` ≡ 明色
+    ///         （与 CSD 桥、`inherit_theme` 兜底同口径），故注入主题的 `scheme` 恒为 `Light` / `Dark`
+    ///         具体档、不为 `Unspecified`。
+    /// @note 零回归：Material 档下 `from_style(Material, Light)` ≡ `Theme::light()`、
+    ///       `from_style(Material, Dark)` ≡ `Theme::dark()`（除扩展注册表外的九个值面逐字段全等，
+    ///       断言在 `utest_theme_presets`），故「探测不到原生风格」的环境（无头构建、WASM）
+    ///       解算结果与改动前逐值相同。
+    /// @note 解算结果按**输入档位对**缓存，帧路径因此不调 `Theme::from_style`：本函数每帧经
+    ///       `prepare_context` 调用，而 `Theme` 是 936 字节的聚合（含 `TypeScale` 的 15 枚字体族
+    ///       名串），逐帧重建会把堆分配留在稳态帧里。缓存不靠 setter 失效——键就是
+    ///       `(风格档, 明暗档, 三枚会改变快照的无障碍输入)`，任一 setter 换档或宿主翻开关后下一帧
+    ///       自然重建，无遗漏路径可言；显式 `theme_` 走短路分支，不读写该缓存。
+    ///       开关位取自进程级 `current_accessibility_settings()`（纯内存读，不碰注册表 / 配置文件，
+    ///       与动画侧 `reduce_motion` 的现行读法同源），因此「开关置位 → 生效值变」在根主题上成立。
+    ///       `screen_reader_active` **不入键**：读屏在线不改任何主题取值，把它算进键会让每次桥激活
+    ///       都白白重建一份 936 字节快照。
+    [[nodiscard]] auto resolved_root_theme() const -> const Theme & {
         if (theme_.has_value()) {
             return *theme_;
         }
-        return (os_scheme_ == ColorScheme::Dark) ? Theme::dark() : Theme::light();
+        const ThemeStyle style = style_.value_or(Theme::default_style());
+        const ColorScheme scheme = (os_scheme_ == ColorScheme::Dark) ? ColorScheme::Dark : ColorScheme::Light;
+        const AccessibilitySettings accessibility = current_accessibility_settings();
+        if (!root_theme_cache_ || root_theme_cache_->style != style || root_theme_cache_->scheme != scheme ||
+            root_theme_cache_->high_contrast != accessibility.high_contrast ||
+            root_theme_cache_->font_scale != accessibility.resolved_font_scale() ||
+            root_theme_cache_->reduce_motion != accessibility.reduce_motion) {
+            root_theme_cache_ = RootThemeCache{
+                .style = style,
+                .scheme = scheme,
+                .high_contrast = accessibility.high_contrast,
+                .font_scale = accessibility.resolved_font_scale(),
+                .reduce_motion = accessibility.reduce_motion,
+                .value = Theme::from_style(style, scheme, accessibility),
+            };
+        }
+        return root_theme_cache_->value;
     }
 
     /// @brief 构建根 BuildContext 并挂载/安装脏汇聚点（如需要）。
@@ -1224,7 +1297,8 @@ class Window {
         root_env_.set<WindowState>(window_state_);
         root_env_.set<WindowMode>(window_mode_);
         // 注入根主题（默认根注入）：子树无 `ThemeScope` 时经 `inherit_theme(ctx)` 读到此值；
-        // 三级优先链 = 显式 set_theme > set_os_color_scheme 推入的 OS 档 > 明色。子树自建
+        // 三级优先链 = 显式 set_theme > set_os_color_scheme 推入的 OS 档 > 明色，其中风格轴由
+        // set_theme_style / `Theme::default_style()` 定档（两轴解算见 resolved_root_theme）。子树自建
         // `ThemeScope` 仍按「最近祖先优先」覆盖此默认。
         root_env_.set<Theme>(resolved_root_theme());
         // 注入窗口 chrome 服务（与状态快照同源，同一 Surface；此处 surface_ 已解引用必非空）：
@@ -1242,6 +1316,14 @@ class Window {
         // 显式调用（低频），多清一次只等于一次重排，不影响稳态帧。
         if (locale_pending_) {
             locale_pending_ = false;
+            root.widget().invalidate_subtree_caches();
+        }
+        // 主题换档同理：上面 `root_env_.set<Theme>` 已注入新档，但后代的布局 / Display List 缓存
+        // 仍是旧档解算结果——脏标记只向上溯达祖先，后代不主动失效就停在旧观感（常驻树上换肤必现）。
+        // 判据同样取挂起标志而非比对新旧主题：`Theme` 无等价性要求，且本组 setter 由应用显式调用
+        // （低频），多清一次只等于一次重排，不影响稳态帧的缓存收益。
+        if (theme_pending_) {
+            theme_pending_ = false;
             root.widget().invalidate_subtree_caches();
         }
         BuildContext ctx;
@@ -1334,7 +1416,7 @@ class Window {
         const auto t_paint_start = std::chrono::steady_clock::now();
         {
             AURORA_PROFILE_SCOPE("Window::paint");
-            detail::PaintTimer scene_guard{&detail::paint_timing().scene};  // [性能排查] 整段 widget 绘制耗时
+            detail::PaintTimer const scene_guard{&detail::paint_timing().scene};  // [性能排查] 整段 widget 绘制耗时
 #ifdef AURORA_ENABLE_DEBUG
             // 调试帧计数器前移：使本帧 render_into 打的重绘标记与当前帧一致（repaint_highlight 时序）。
             if (debug::any_flag_enabled()) {

@@ -176,7 +176,7 @@ AURORA_TEST_CASE(move_focus_cycles_forward_and_backward_by_tab_index) {
 
 AURORA_TEST_CASE(move_focus_skips_hidden_and_unfocusable_widgets) {
     auto [row, probes] = make_row(3);
-    probes[1]->show.set(false);  // 隐藏控件不参与焦点序
+    probes[1]->set_show(false);  // 隐藏控件不参与焦点序
     probes[2]->set_focusable(false);  // 不可聚焦控件不参与
 
     FocusManager fm;
@@ -324,7 +324,7 @@ AURORA_TEST_CASE(layout_and_display_widgets_are_not_tab_stops_by_default) {
     auto inner = std::make_shared<Row>();
     auto rule = std::make_shared<Divider>();
     auto gapper = std::make_shared<Spacer>();
-    Column col{Node{label}, Node{inner}, Node{rule}, Node{gapper}};
+    Column const col{Node{label}, Node{inner}, Node{rule}, Node{gapper}};
 
     AURORA_TEST_CHECK_FALSE(col.wants_focus());
     AURORA_TEST_CHECK_FALSE(label->wants_focus());
@@ -333,8 +333,8 @@ AURORA_TEST_CASE(layout_and_display_widgets_are_not_tab_stops_by_default) {
     AURORA_TEST_CHECK_FALSE(gapper->wants_focus());
 
     // 基类默认仍是 true：自定义叶控件与交互控件不需任何声明即可 Tab 到。
-    FocusProbe probe;
-    Button btn{"Go"};
+    FocusProbe const probe;
+    Button const btn{"Go"};
     AURORA_TEST_CHECK_TRUE(probe.wants_focus());
     AURORA_TEST_CHECK_TRUE(btn.wants_focus());
 }
@@ -344,7 +344,7 @@ AURORA_TEST_CASE(input_semantics_on_a_container_put_it_back_in_the_order) {
     AURORA_TEST_CHECK_FALSE(col.wants_focus());  // 裸容器不是停点
 
     // 挂上点击即回到焦点序：谓词动态求值，不按类型一刀切。
-    col.modifier.set(Modifier{}.clickable([]() -> void {}));
+    col.set_modifier(Modifier{}.clickable([]() -> void {}));
     AURORA_TEST_CHECK_TRUE(col.wants_focus());
 
     // 宿主否决位一票否决，优先于输入语义。
@@ -370,9 +370,9 @@ AURORA_TEST_CASE(tab_cycle_hits_only_interactive_controls) {
     // 无需宿主逐个 set_focusable(false)（改默认值前该树是 6 个停点）。
     auto a = std::make_shared<Button>("A");
     auto b = std::make_shared<Button>("B");
-    auto inner = std::make_shared<Row>(RowProps{.children = {Node{a}, Node{b}}});
+    auto inner = std::make_shared<Row>(std::vector<Node>{Node{a}, Node{b}});
     auto label = std::make_shared<Text>("label");
-    Column root{ColumnProps{.children = {Node{label}, Node{inner}, Node{Spacer{}}}}};
+    Column root{std::vector<Node>{Node{label}, Node{inner}, Node{Spacer{}}}};
 
     FocusManager fm;
     fm.set_root(&root);

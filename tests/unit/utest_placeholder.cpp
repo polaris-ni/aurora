@@ -119,9 +119,9 @@ AURORA_TEST_CASE(describe_reports_metadata) {
 
     // 无自有信号。
     Placeholder p;
-    std::vector<aurora::SignalViewBase *> out;
+    StateSink out;
     p.collect_signals(out);
-    AURORA_TEST_CHECK_EQ(out.size(), 0U);
+    AURORA_TEST_CHECK_EQ(out.sources().size(), 0U);
 }
 
 // ---- 主题跟随（迁移批）：未显式设色 → 角色回退；显式设色 → 不被主题覆盖 ----
@@ -140,7 +140,7 @@ auto themed_ctx(const Theme &t) -> std::pair<std::shared_ptr<Environment>, Build
 AURORA_TEST_CASE(placeholder_colors_follow_theme_when_unset) {
     // 两态语义：未显式设色时 resolve 取主题角色；主题翻转 ⇒ 解析值翻转（换肤生效）。
     const BuildContext bare;  // 无注入：inherit_theme 回落 light（与 OS 未表态同口径）
-    Placeholder p;
+    Placeholder const p;
     AURORA_TEST_CHECK(p.resolve_background(bare) == Color{0xFF, 0xFF, 0xFF});  // light surface
     AURORA_TEST_CHECK(p.resolve_border(bare) == Color{0xE0, 0x1B, 0x24});  // light error
     AURORA_TEST_CHECK(p.resolve_text(bare) == Color{0x47, 0x47, 0x47});  // light on_surface_variant

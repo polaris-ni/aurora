@@ -9,6 +9,7 @@
 #include "aurora/core/types.h"
 #include "aurora/event/focus.h"
 #include "aurora/render/painter.h"
+#include "aurora/theming/theme_scope.h"  // inherit_theme：浮层投影取主题 shadow
 #include "aurora/widget/descriptor.h"
 #include "aurora/widget/widget.h"
 
@@ -82,7 +83,7 @@ class Popup : public SingleChild {
 
     /// @brief 收集信号视图；Popup 无外露信号。
     /// @param out 信号视图累加表（恒不写入）。
-    auto collect_signals([[maybe_unused]] std::vector<SignalViewBase *> &out) -> void override {}
+    auto collect_signals([[maybe_unused]] StateSink &out) -> void override {}
 
     /// @brief 在指定全局坐标打开弹出层（链式）：压入焦点作用域，Tab 焦点关在本层内。
     /// @param anchor 弹出锚点（全局坐标）。
@@ -216,7 +217,7 @@ class Popup : public SingleChild {
         }
         // 内容绘制在锚点处（全局坐标），叠加轻微投影提升层次感
         const Rect content_box{.origin = anchor_, .size = content_size_};
-        p.draw_shadow(content_box, 0.0F, 2.0F, 8.0F, Color(0, 0, 0, 48));
+        p.draw_shadow(content_box, 0.0F, 2.0F, 8.0F, inherit_theme(ctx).roles.shadow.with_alpha(48));
         child_.widget().paint(p, content_box, ctx);
     }
 
@@ -368,7 +369,7 @@ class OverlayHost : public Container {
 
     /// @brief 收集信号视图；OverlayHost 无外露信号。
     /// @param out 信号视图累加表（恒不写入）。
-    auto collect_signals([[maybe_unused]] std::vector<SignalViewBase *> &out) -> void override {}
+    auto collect_signals([[maybe_unused]] StateSink &out) -> void override {}
 
     /// @brief 追加一个浮层（返回可移除的浮层序号）。
     ///

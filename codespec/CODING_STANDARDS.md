@@ -21,9 +21,9 @@
 
 - **名序一致**：属性 / 参数名序与 React / Flutter 对齐（回调用 `on_xxx` 如 `on_click`，非 `click_handler`；子节点用 `children`；尺寸用 `width` / `height`）。避免自创词序。
 - **默认参数友好**：高频构造提供默认参数 / 便捷工厂（如 `au::colors::AURORA_BLUE`、`dp(16)`），降低记忆负担。
-- **顺序容错**：多参数构造优先用 `XxxProps{...}` 具名聚合（如 `ColumnProps{ .children = ... }`），避免位置参数顺序错误。
+- **顺序容错**：多参数构造优先用具名写法而非位置参数，具体形态按目标类型选——属性对象一律用 `XxxProps().set_x(...)` 链式写件（`*Props` 已无公有字段，指定初始化器编译即红，见 §11.1）；子节点是构造首参的容器写 `Column({ 子项 }, ColumnProps()...)`；指定初始化器只留给 `Theme` / `ChartSeries` 这类纯数据聚合。三者的共同点是「每个实参都带名字」，避免位置参数顺序错误。
 - **强类型几何**：`Length` / `Color` / `Size` / `Point` 为强类型；禁止 `Length(int)` 隐式转换（裸整数编译失败）。已采纳用户字面量 `au::literals`（`100_dp`、`16_ms`、`0xRRGGBB_rgb`），`px(100)` 与 `100_dp` 互补；**禁止头文件全局 `using`**，字面量只在 TU 内按需引入（示例代码用 `using namespace au::literals;`，测试代码按 §3.1 用 using 声明 / 命名空间别名引入，不得用 using-directive）。
-- **所有权清晰**：资源所有权用 `unique_ptr` / `shared_ptr` 明确；跨边界传递用 `std::move`；`Binding<T>` 为非拥有引用（上游生命周期须更长）。
+- **所有权清晰**：资源所有权用 `unique_ptr` / `shared_ptr` 明确；跨边界传递用 `std::move`。状态句柄（`State<T>` / `ReadOnlyState<T>`）按值传递与捕获——复制即共享同一来源，`get()` 返回借用，不得跨写入、来源重绑或最后持有者释放保存。
 - **成员变量命名**：`struct` 成员与类 `public` 成员用**裸名**（无前缀、无后缀，如 `Color::r`、`DragData::mime_type`）；类的 `protected` / `private` 非静态成员统一**尾部下划线**后缀（如 `children_`、`value_`、`on_close_`）；**全仓禁止 `m_` 前缀**。`static` 常量按下一条「常量命名」走 `AURORA_` 前缀 + `UPPER_CASE`（如 `AURORA_NO_SEL`）；`static` 可变成员、`static` `protected`/`private` 成员规则与普通成员一致（尾部下划线）。
 - **常量命名**：命名空间 / 文件级与类内 `static constexpr` 常量统一 `AURORA_` 前缀 + `UPPER_CASE` 全大写下划线（如 `AURORA_DEFAULT_MAX_WIDGET_DEPTH`）；禁止 `k` 前缀 CamelCase。**豁免**：镜像外部标准 API 枚举值的常量按官方名原样保留（`AURORA_` 前缀会破坏与外部文档 / 官方头的逐名对照），前提是收敛在专属命名空间内隔离作用域——现有两例：`colors` 命名空间的色板常量（`core/color.h`）与 `rhi::gl` 命名空间的 GL 枚举镜像（`src/aurora/render/gpu/gl_core.h`，如 `TEXTURE_2D` / `RGBA8`，值逐一取自 GL 官方规范）。`FALSE_` / `TRUE_` 的尾部下划线为规避平台宏碰撞的例外，不作为成员命名惯例。
 - **生命周期回调强类型**：`au::Lifecycle` 的 `on_mount` / `on_unmount`、窗口级 `WindowState` / `WindowMode` 的 `set_on_*` 回调均为具名 `std::function` 强类型（`MountCb = std::function<void(const BuildContext&)>`、`UnmountCb = std::function<void()>`，`WindowStateHandler` / `WindowModeHandler` 同理）；枚举取值穷尽且按「可见性 / 几何态」正交划分（`WindowState` 不并入 `Maximized`），AI 无需猜测「是否还有隐藏状态」。回调均可空（无副作用时不传），且不走异常捕获（与主线程事件回调一致）。
@@ -141,13 +141,17 @@
 | `TEST-R5` | 公共头覆盖 | 每个公共单元头须被某测试显式声明为目标单元，或在该测试中直接 `#include`、其符号在 `tests/` 全树被引用 | 是 |
 | `TEST-R6` | 注册完整性 | `runner --list` 输出的**用例级**集合必须与测试源中注册的用例集合一致；含「`TEST_P` 漏 `INSTANTIATE` → 用例静默不运行」检测 | 是（CTest `registry_integrity`，由 `tools/check/check_test_registry.py` 承担） |
 | `TEST-R7` | 并行安全 | 测试体系禁止新增 `RUN_SERIAL`（CMake 编排与测试源一并扫描）；并行模型为 CTest 进程隔离 + 框架用例边界资源虚拟化，申请串行须登记脚本内 `TEST_R7_WHITELIST` 并注明根因 | 是 |
-| `TEST-R8` | 命名纪律 | 目录定类型 + 前缀强制——`tests/unit/` 一律 `utest_`、`tests/integration/` 一律 `itest_`、`tests/e2e/` 一律 `etest_`；`tests/` 下的子目录须落在已知类型目录（`unit` / `integration` / `e2e`）或设施目录（`framework` / `support` / `fixtures` / `golden`）白名单内，测试 TU 不得游离在外；**Suite 强制等于文件 stem、不可自定义**（`__FILE__` 推导，自定义套件宏禁止） | 是 |
+| `TEST-R8` | 命名纪律 | 目录定类型 + 前缀强制——`tests/unit/` 一律 `utest_`、`tests/integration/` 一律 `itest_`、`tests/e2e/` 一律 `etest_`；`tests/` 下的子目录须落在已知类型目录（`unit` / `integration` / `e2e`）或设施目录（`framework` / `support` / `fixtures` / `golden` / `fuzz`）白名单内，测试 TU 不得游离在外；**Suite 强制等于文件 stem、不可自定义**（`__FILE__` 推导，自定义套件宏禁止） | 是 |
 | `TEST-R9` | 禁止 using-directive | 测试代码禁止 `using namespace`（函数体内亦然）；using 声明 / 命名空间别名须置于使用点之前的作用域内 | 是（脚本） |
 | `TEST-R10` | 禁止 catch-all（跨域） | 单个测试跨 ≥3 个模块域视为 catch-all；因被测主模块自身依赖面广（如测 `Widget` 必带 layout/render/event/navigation）的跨域**不视为违规、不强行拆分**，基线 **20**、只看增量，趋势由守门脚本输出、不在本文档硬编码以免随重构漂移 | 否（趋势指标） |
 
 其中 `TEST-R1` / `TEST-R2` / `TEST-R4` / `TEST-R5` / `TEST-R7` / `TEST-R8` / `TEST-R9` 由 `tools/check/check_code_doc_sync.py` 在 CTest 的 `code_doc_sync` 用例守门（只做确定性判定、存量豁免走白名单、只拦增量）；`TEST-R6` 由 `tools/check/check_test_registry.py` 在 CTest 的 `registry_integrity` 用例守门；`TEST-R3` 靠评审与审计，`TEST-R10` 只作趋势指标，均不纳入守门。
 
+> `tests/fuzz/` 登记为设施目录（第五项）：其中的模糊测试目标不是 CTest 用例，故不受 `TEST-R1` 三行块与类型目录前缀约束；`TEST-R7`（禁 `RUN_SERIAL`）、`TEST-R9`（禁 `using namespace`）、临时文件与字符串字面量门禁仍照常适用。有效性自证目标故意含内存与未定义行为缺陷，只在 Clang 独立构建里编译，不得链进产品库或常规测试 runner。
+
 > 命名消歧：文档交叉引用门禁 `tools/check/check_codespec_xref.py` 另有一套 `R1`–`R5`（链接可达 / 章节号格式 / 反引号路径 / 特性表落点），与本文 `TEST-RN` 无关，勿混用。
+
+> 性能验收另守三条纪律（不新增 `TEST-RN` 编号，由评审与注入变异自证承担）：判据必须有独立基准，并且**真注入一次变异看它转不转红**——判据全绿不是证据；零开销与生命周期类判据只能钉可确定性区分的量（底层钩子注册数、堆分配次数、时钟读取次数、产物字节数），不得用「多读几次」或单独的墙钟中位数差证明修好；时间类读数的回归判定须有同机交错对照、足量重复、噪声预算与并行指标族的多重比较校正，禁止用单次绝对值或本机多次取最小值代替统计判定。
 
 ### 3.3 覆盖率工作流
 
@@ -193,6 +197,7 @@
 - **等的时候谁来泵**用 `tests/framework/net_wait.h`：宿主驱动形态取 `HostDriven` + `pump_once` / `drive_until` / `pump_idle`，引擎驱动形态取 `EngineGuard`（析构把常驻线程、投递接缝与驱动方开关一并交回缺省态，见 §3.1「用例不得依赖进程隔离兜住全局副作用」）。同一枚事件源不得由引擎与宿主同时等待（[`06-app-platform.md`](specification/06-app-platform.md) §8.8.4 的互斥口径）。
 - **三类替身各司其职**：`tests/framework/fake_engine.h` 的 `FakeEngine` 只管**时间**（脚本化到期任务），`tests/framework/scripted_peer.h` 的 `ScriptedPeer` 只管**对端字节**，`net_wait.h` 只管**就绪泵**；`FakeEngineScope` 安装替身时钟时同步将 `run_pending` 挂进泵尾巴，否则 `Engine::post` 的立即任务（名字解析、竞速交错）在脚本化时钟下永不推进，红成「超时」而不是「忘了跑」。
 - **零出站**：网络用例只连回环，未监听的端口经「绑定即关闭」取得，并对端做回环校验；用例必须在无出站网络的 CI 上跑通。
+- **竞态类缺陷不得只钉行为计数**：无锁状态下「恰好恢复一次」「端口仍是旧值」这类行为判据仍可能偶然全绿，绿不是修好的证据。验收须以消毒器落盘报告正文 + 测试退出码的组合为准，并真注入一次变异看它转红；判据形态见 [`specification/08-tooling.md`](specification/08-tooling.md) §8.2「线程消毒定点判据」。
 
 ## 4 元数据与可观测
 
@@ -213,6 +218,8 @@
 | 功能输出 | `AURORA_LOG_RAW(category, ...)` | stdout | 无前缀、不受阈值 / 开关限制、始终输出，且 `fflush` 保证即时送达 |
 
 功能输出通道用于 CLI 的 JSON 结果与 usage 文本、benchmark 表格、LSP / MCP 等基于 stdio 的线协议帧等「程序产品」输出。
+
+基准类工具另有**落盘纪律**：每次运行必须额外写一份带契约版本、运行元数据、读数段与可信度结论的结构化结果文件（契约在 `tools/include/bench_result.h`），原标准输出表格逐项保持不变，既有解析方继续可用。采样不可信、后端不可用或场景跳过时仍须落盘带原因码的结果并判数据缺失，禁止静默不写，也禁止写成看似可用的读数；默认落在 `bench-results/`，由 `AURORA_BENCH_RESULT_DIR` 改向。落盘只产本库结构化数据与 Chrome Trace 兼容时间线，不接外部遥测或网络上报。
 
 遗留 `printf` 风格诊断用 `AURORA_TEST_PRINTF` / `AURORA_TEST_PRINTF_ERR` 桥接宏（先 `snprintf` 入**内存缓冲**再经 `Logger` 输出，非标准输出）。
 
@@ -241,7 +248,7 @@
 
 ### 5.1 特殊成员函数豁免
 
-多态基类定义了虚析构后，原则上应删除（或 `= default` 定义）全部拷贝 / 移动特殊成员函数。仅当现有 API **刻意依赖**隐式拷贝 / 移动时（如 `Reactive<T>` 依赖隐式拷贝赋值支持 `content = "Hi";` 写法、`FormField` 按值持有 `State<T>` 并依赖移动语义），才允许用 `// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)` 抑制，且必须用紧邻注释写明依赖原因。
+多态基类定义了虚析构后，原则上应删除（或 `= default` 定义）全部拷贝 / 移动特殊成员函数。仅当现有 API **刻意依赖**隐式拷贝 / 移动时（如 `State<T>` / `ReadOnlyState<T>` 依赖隐式拷贝共享来源、控件按值持有句柄并依赖移动语义、`Provider<T>` 依赖隐式移动传递注入值），才允许用 `// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)` 抑制，且必须用紧邻注释写明依赖原因。
 
 不得默默无视告警，也不得为消除告警而删除仍被使用的拷贝 / 移动（先全量构建验证再决定）。
 
@@ -262,7 +269,7 @@
 
 **上游词汇绑定型豁免**（`readability-identifier-naming` 唯一该走豁免而非改名的子类）：当标识符名**逐字取自上游 C API**、且该名字本身就是「读到这里就去查上游文档」的检索锚点，改名即切断可追溯性时，才允许豁免。写法为**区间式**（`NOLINTBEGIN(check)` … `NOLINTEND(check)` 成对覆盖整段）。历史实例是 `inspector_server.cpp` 顶部的 Winsock→POSIX 兼容垫片（`INVALID_SOCKET` / `SOCKET_ERROR` / `SD_BOTH` / `WSAStartup` / `WSACleanup` / `WSAGetLastError` / `MAKEWORD` 七个名字与 Windows 腿逐字同名）——该垫片已随统一 socket 层（`aurora::net`，见 []()）删除，**本仓当前零实例**；此规则作为判据保留，供后续真出现词汇绑定场景时套用。三条纪律：① 点名判据是「词汇绑定」而非「是外部符号」——**仅表达本仓命名约定偏离的**（如 libdbus / X11 的简写常量、缺前缀的 `wl_listener` 对象）一律改名到位，不放宽到命名检查的 `CheckOptions`；② 理由整段写在 `NOLINTBEGIN` **之前**（受上面第 1 类折行失效的同一约束）；③ 名单与 `NOLINTEND` 同行闭合（受上面第 3 类约束）。机理与逐条清单见 []()。
 
-以上四类排版由 CTest 门禁 `check_nolint_layout`（`tools/check/check_nolint_layout.py`）常驻把关——脚本内把违规标为 **规则 1**（上方第 1、2 条：指令与代码之间插入任何行）、**规则 2**（⚠️ 段：散文抄令牌）、**规则 3**（上方第 3 条：清单跨行）。它只看注释行的排布与括号是否在本行闭合，补的正是 clang-tidy 看不见的那一段。实测第 1 类在本仓一次成型 **234 处、涉及 98 个文件**，其中 194 处恰好落在真实告警行上，已全部改写为「理由前置 + 指令紧贴代码」（只动注释行，代码行零改动）。第 3 类实测成型 **4 段大区间**（`painter.cpp`、`painter_simd.inl`、`win32_ua.cpp`、`system_tray_win32.cpp`，合计覆盖约 5 000 行），把名单改对后复跑浮出 **795 条从未被报告的告警**：其中 363 条直接改码消除（补括号 130 + 字面量后缀改大写 233，与全仓其余代码同口径），余下才按实测集合收进区间名单。理由注释的位置约束另见 §8.5 末尾与 `BUILD_OPTIONS.md` §4.7。
+以上四类排版由 CTest 门禁 `check_nolint_layout`（`tools/check/check_nolint_layout.py`）常驻把关——脚本内把违规标为 **规则 1**（上方第 1、2 条：指令与代码之间插入任何行）、**规则 2**（⚠️ 段：散文抄令牌）、**规则 3**（上方第 3 条：清单跨行）。它只看注释行的排布与括号是否在本行闭合，补的正是 clang-tidy 看不见的那一段。实测第 1 类在本仓一次成型 **234 处、涉及 98 个文件**，其中 194 处恰好落在真实告警行上，已全部改写为「理由前置 + 指令紧贴代码」（只动注释行，代码行零改动）。第 3 类实测成型 **4 段大区间**（`painter.cpp`、`painter_simd.inl`、`win32_ua.cpp`、`system_tray.cpp`，合计覆盖约 5 000 行），把名单改对后复跑浮出 **795 条从未被报告的告警**：其中 363 条直接改码消除（补括号 130 + 字面量后缀改大写 233，与全仓其余代码同口径），余下才按实测集合收进区间名单。理由注释的位置约束另见 §8.5 末尾与 `BUILD_OPTIONS.md` §4.7。
 
 判因纪律：告警**跨标准库 / 跨目标三元组**出现差异时，先按真实差异处理，不得为凑门禁口径而放宽配置。已实测的四类真实差异——libc++ 的 `basic_string_view(const char *)` 构造非 `noexcept`（静态初始化期即触发 `bugprone-throwing-static-initialization`，框架侧以 `literal_view` 免掉该构造）、wasm32 的 `long` 为 32 位（`long long` → `difference_type` 是真·窄化）、Emscripten libc++ 的 `std::span` 无 `.at()`、`bugprone-dynamic-static-initializers` **只在浏览器口径命中**（该检查的判据是「初始化能否常量完成」，结论随标准库的 `constexpr` 覆盖面而变：`include/` 下同一批函数内 `static` 在 native 遍 0 条、`--emscripten` 遍 16 条。A/B 复验取单一 TU `tests/unit/utest_image_cache.cpp`、同一份 `.clang-tidy`，分别喂 native 与浏览器两份编译库，前者静默、后者报 `render/image_cache.h:27`）。第四条按逐点豁免处置：函数内 `static` 本就靠惰性构造规避跨 TU 初始化顺序，正是该检查担心面的反面。
 
@@ -271,6 +278,17 @@
 ⚠️ 同族另一条口径陷阱：**命中的预处理分支随编译目标而变**，与豁免粒度的关系更隐蔽。`core/platform.h` 的 `macro-to-enum` 即为一例——Windows 命中 `AURORA_ARCH_X64`、Linux 命中 `AURORA_PLATFORM_UNIX` 首支、浏览器命中 `AURORA_ARCH_WASM`，同一段代码三条口径各报各的分支，故「本机 0 条」不代表 CI 0 条。这类豁免一律用**区间式覆盖整段宏定义**而非逐点写，否则逐点名单会随口径漂移成「此处清干净、彼处又冒出来」。
 
 抑制属于显式契约决策，随代码评审、随文档同步。
+
+### 5.3 状态句柄与响应式属性
+
+状态模型（`State<T>` / `ReadOnlyState<T>` / `computed` / `effect`）的日常契约见 [`specification/02-state.md`](specification/02-state.md) §2–§3；编码层遵守以下约定：
+
+- **按值传、按值捕获**：参数与属性类型直接写 `State<T>` / `ReadOnlyState<T>`，复制即共享来源。不要写 `const State<T>&` 充当只读边界（const 只限制重绑，不撤销写权限），也不要保存 `get()` 的引用或 `[&]` 捕获局部句柄跨作用域使用。
+- **值 setter 与来源 setter 分工**：可编辑模型用 `set_value(T)` 写当前格，确需换线时用独立的 `set_value_source(State<T>)`；展示属性用 `set_xxx(ReadOnlyState<T>)` 换源。不要重载 `set_value(State<T>)` 表达两义，也不给展示属性保留隐式写回。
+- **换源必须成对退订 / 订阅**：换源入口先退旧来源、保存新句柄、已挂载时订阅新来源并失效布局/绘制缓存；即使新旧读数相等也必须执行。未挂载只保存来源，挂载时订阅，卸载清空，重挂只订当前来源。
+- **响应式成员统一采集**：每个 `State` / `ReadOnlyState` 成员都在 `collect_signals(StateSink &out)` 中 `out.push(...)` 登记，新增响应式属性不得漏采；临时构造的常量属性由采集结果保活。内部成员不可从外部绕过 getter / setter 赋值。
+- **构造即有效**：来源在构造期就绪；注册、首跑或派生初次求值失败时按已构造成员 RAII 清理，不留下半登记状态（内核侧不变量见 `02-state.md` 附录 A）。
+- **测试判据**：属性换源测试须覆盖「新旧来源初值相等」的情形（只测值变化会漏掉换线）；上游变化测试除像素外，还要用绘制 / 重算计数断言未读取该来源的同级不产生工作。
 
 ---
 
@@ -295,7 +313,7 @@
 
 ### 6.3 元编程边界
 
-模板 / 宏等元编程仅用于「无法用普通函数表达」之处（如 `State` / `Signal` / `Modifier` 的声明式组合）；禁止为「炫技」引入深层模板，避免 AI 难以展开实例化错误。
+模板 / 宏等元编程仅用于「无法用普通函数表达」之处（如 `State` / `ReadOnlyState` / `Modifier` 的声明式组合）；禁止为「炫技」引入深层模板，避免 AI 难以展开实例化错误。
 
 **控件样板减负同样遵循此原则**：基类以**非模板虚函数默认实现**消除重复——`Widget::describe()` 默认返回 `{ .name = type_name() }`、`Container::collect_signals()` 默认遍历 `children_` 收集子节点信号，新增控件只需实现 `type_name()`（+ `describe_static()`）。**禁止为减负引入 CRTP / 模板基类**：那会把实现搬进头文件，破坏声明 / 实现分离，并增大 AI 理解单函数所需加载的上下文。
 
@@ -308,7 +326,7 @@
 ### 6.4 二层属性划分（固有属性 + 正交 Modifier）
 
 - **固有属性层**：描述控件**自身**视觉 / 行为身份（如 `Text::text_align`、`Button::corner_radius`、`Slider::active_color`），以 `XxxProps` 的 snake_case 字段暴露，随控件序列化，是 Inspector / `aurora_api.json` 可枚举的一等属性。
-- **正交修饰层**：跨切面、可叠加、可 `Reactive` 变化的通用装饰，挂在每个 `Widget::modifier`，作用于**任意**控件。
+- **正交修饰层**：跨切面、可叠加、可随状态句柄变化的通用装饰，挂在每个 `Widget::modifier`，作用于**任意**控件。
 - **重叠规则**：优先控件固有属性；`Modifier` 同类项保留用于「给任意控件套一层」的跨切面场景，绘制时 `Modifier` 在外、固有属性在内，可叠加。
 
 **为何保留 `Modifier`（AI 友好）**：装饰能力收敛于**单个 `Modifier` 类型**（约 44 个链式工厂 / 访问器、48 个重载，另有 `Kind` 枚举可枚举），远少于纯包裹控件模型所需的十余个独立 widget 类型（`Padding` / `Container` / `DecoratedBox` / `GestureDetector` / `Align` / `Opacity` / `Transform` / `ClipRRect` / `SizedBox` / `Expanded`…）；扁平 `.modifier` 链比深层 `Container(GestureDetector(Opacity(...)))` 嵌套更不易生成错位；且与现有**扁平** `aurora_api.json` / `diff` / `apply_patch` 序列化模型天然契合。
@@ -319,7 +337,7 @@
 
 - **仅影响外观、不影响几何**的变更（文本选区高亮、颜色 / 主题切换、光标位置、滚动偏移等）**必须**调用 `mark_needs_paint()`（仅置「绘制脏」），让拖选 / 主题切换等帧跳过整树 `layout`。
 - **影响布局几何**的变更（尺寸 / 约束 / 子节点增删、结构性 `Modifier` 如 `rotate` / `scale` 重算包围盒）调用 `mark_needs_layout()`（置「布局脏 + 绘制脏」），下一帧 `layout + paint`。
-- `Widget::on_dirty` 为 `std::function<void(bool)>`（`true` = 含布局脏），经 `Window::wire_dirty` 递归接线整棵树；子控件的 `State` / `Modifier` 变更通过响应式 `Effect` 自动落到上述两个原语，无需手工标脏。
+- `Widget::on_dirty` 为 `std::function<void(bool)>`（`true` = 含布局脏），经 `Window::wire_dirty` 递归接线整棵树；子控件的句柄属性（`State` / `ReadOnlyState`）与 `Modifier` 变更经控件采集的订阅自动落到上述两个原语，无需手工标脏。
 - **反模式**：外观变更误调 `mark_needs_layout()` 会迫使每帧重排，抵消脏追踪的性能收益。
 
 ### 6.6 控件可定制性契约
@@ -346,7 +364,7 @@
 
 - **动机**：① 双实现随时间演化漂移会产生「SIMD 开启 / 关闭给出不同像素」的静默正确性 bug；② parity 测试覆盖不到的边界输入（alpha = 0 / 255、非 8 倍数宽、负坐标、裁剪边界）是漂移高发区。
 - **约束**：SIMD 路径须沿用标量浮点运算序列（同序、`-ffp-contract=off` 禁 FMA），整型截断统一用 `cvtt`（`_mm_cvttps_epi32` / `_mm256_cvttps_epi32`），sRGB 转换沿用同一 LUT；禁止为「提速」引入标量未做的近似或重排。
-- **验收**：每次改动后 `utest_simd_parity` 必须 0 failure（一票否决）；若某函数无法在保持逐位一致前提下向量化，停下来单独提出，不擅自放宽。
+- **验收**：每次改动后 `utest_simd_parity` 必须 0 failure（一票否决）；若某函数无法在保持逐位一致前提下向量化，停下来单独提出，不擅自放宽。实物在 `tests/unit/utest_simd_parity.cpp`，五组三元组逐字节比对且每例以非空缓冲为前提；新写一条「现役门禁」声明时同步 `tools/check/declared_gates.txt`，由 `check_declared_gates` 核对它真的注册在 CTest 里——**声明现役即须真实注册**，示例 / 历史 / 规划名进带理由的豁免表，不进清单。
 - **开关**：`AURORA_ENABLE_SIMD` 默认 ON，OFF 时仅编译标量路径；双实现均属 `aurora::detail` 内部，不计入 `aurora_api.json`。
 
 ### 6.9 错误可机读与局部修复建议
@@ -360,7 +378,7 @@
 ### 6.11 Schema 强制与工具链
 
 - **Schema 强制**：公共 API 的入参 / 出参有 Schema 校验；`gen_api_tools` 输出 `aurora_api.json` 即机器可读 Schema。
-- **代码补全 / LSP**：`aurora_lsp` 消费库 live API（`describe_component` + `known_enums`）对 `au::XxxProps{ .prop = ... }` 等声明式写法做 completion / hover / diagnostics / codeAction。
+- **代码补全 / LSP**：`aurora_lsp` 消费库 live API（`describe_component` + `known_enums`）并经 `tools/include/lsp_live_schema.h` 同源取 `codegen.h` 的链式名单与写件落点，对 `au::XxxProps().set_<key>(...)` 链式声明式写法做 completion / hover / diagnostics / codeAction；花括号属性块按非法形态报一条 error 并给整块改写。
 - **MCP / CLI**：stdio JSON-RPC 2.0 MCP Server（`aurora_mcp`，10 个 tools）+ CLI 工具（`aurora_cli`），消费 `describe()` / `list_all_schemas()` / `validate()` / `render_to_png()` / `to_code()` 等库 API。
 - **序列化 diff**：`to_json` / `from_json` / `diff` / `apply_patch` 提供树级 diff，便于 AI 推断「改了什么」。
 - **示例文档化**：每个 widget 的最小可编译示例随 API 文档发布（`examples/` + [`GUIDELINE.md`](GUIDELINE.md)）。
@@ -549,6 +567,7 @@ BREAKING CHANGE: 自定义 Widget 的 on_paint 实现须改用全局坐标，
 8. **提交前必跑 LINT 且零告警**：**每次提交代码前**必须跑一遍静态检查并确保**零告警**——`cmake --build build --target lint`（配置源为仓库根 `.clang-tidy`，扫描 `compile_commands.json` 中全部非 `third_party` 翻译单元，按 `(file, line, check)` 去重后凡存在 warning 及以上即以退出码 1 失败）。有告警先修；确需抑制时按 §5.2 写明**具体检查名 + 为何不能按建议修复**，不得用裸 `NOLINT` 掩盖。仅做格式化可用 `cmake --build build --target lint-fix` 就地应用 fix-it，但**须人工审阅 diff**，且与逻辑改动分开提交（见 §10.6）。选项、目标与运行器说明见 `BUILD_OPTIONS.md` §4.5。
 9. **提交前必跑排版校验**：排版校验与 lint 是两道独立门禁，`lint` 通过不代表排版合规。提交前必须 `cmake --build build --target format-check`（依据仓库根 `.clang-format` 校验全部非 `third_party` 源文件，任一文件存在差异即以退出码 1 失败）；需要归一整先用 `cmake --build build --target format` 就地重写（同样须人工审阅 diff）。运行器见 `tools/check/run_clang_format.py`。
 10. **仓库内禁止写死本机路径**：任何受版控文件都不得出现本机专属绝对路径——非系统盘盘符路径（`D:/...`；`C:` 为 Windows 系统盘，其 `Program Files` 等系统位不在此列）、用户主目录（`C:/Users/<name>`、`/home/<name>`、`/Users/<name>`）、以及盘符下的本机特征目录段（`.../Development/...`、`.../Projects/...`、`.../msys64/...`）。需要定位外部工具 / 库时一律**由使用者显式传入**：CMake 选项（`-DAURORA_LIBCLANG_DIR=<目录>`、`-DAURORA_LLD_DIR=<目录>`）或环境变量（`LIBCLANG_PATH`）；CMake 内的自动探测只作兜底，且**不得含盘符**——改用 `%ProgramFiles%`、LLVM 安装器写入的注册表键、`/usr/lib/llvm-*` 等相对量。守护：`check_no_hardcoded_paths`（CTest 用例）扫描全部受版控文本文件，命中即红灯；确属必要的例外须在匹配行或其上 2 行内写明 `HARDPATH_EXEMPT: <原因>`。
+11. **工作流折叠标量内禁写 `#` 注释行**：`env:` 下的 `>` / `>-` 折叠标量里，`#` 是**字面内容**而非 YAML 注释，会随 `${{ env.* }}` 展开进 shell，把该行剩余部分连同续行一起注释掉（轻则丢参、重则 `command not found`）。注释一律写在键外。反面不适用：`run: |` 字面块内的 `#` 是传给 bash 的合法 shell 注释，不得一刀切删除。守护：`check_workflow_yaml`（CTest 用例）只针对 `env:` 折叠标量判红，并另做结构自检；改 `.github/workflows/` 须一并跑该门禁。
 
 ### 10.6 禁止事项
 
@@ -568,29 +587,30 @@ BREAKING CHANGE: 自定义 Widget 的 on_paint 实现须改用全局坐标，
 
 **问题背景：** Fluent API 往往产生长链式调用，AI 容易在链中间遗漏括号或参数顺序错误。
 
-**需求陈述：** 同一控件必须提供三种**语义完全等价**的构建形态，AI 可按复杂度选择——① 链式 setter（简短组件）、② `*Props` 具名聚合（嵌套结构，可分块生成）、③ 对已构造对象逐行赋值（复杂组件）。等价性由「控件继承其 Props」保证：`class Xxx : public XxxProps`，`XxxProps` 的字段即控件自身的公有字段，不再用私有 `m_*` 重复声明同一属性。
+**需求陈述：** 同一控件必须提供三种**语义完全等价**的构建形态，AI 可按复杂度选择——① 链式 setter（简短组件）、② 属性对象链式装入 `XxxProps().set_<key>(...)`（嵌套结构，可分块生成）、③ 对已构造对象逐行赋值（复杂组件）。等价性由「控件继承其 Props」保证：`class Xxx : public XxxProps`，属性声明只有 `XxxProps` 这一处，不再用私有 `m_*` 重复声明同一属性；字段本身是私有的，对外只有逐行的读件与 `set_<键>()` 写件（收口口径见 [`specification/04-widget.md`](specification/04-widget.md) §2.5）。
 
 ```cpp
 // 形态一：链式 setter（setter 返回引用）
-auto btn = au::Button(au::ButtonProps{ .label = "OK" });
+auto btn = au::Button(au::ButtonProps().set_label("OK"));
 btn.set_on_click(fn);
 
-// 形态二：*Props 具名聚合
-auto btn2 = au::Button(au::ButtonProps{ .label = "OK" });
-btn2.on_click = fn;
+// 形态二：属性对象链式装入
+auto btn2 = au::Button(au::ButtonProps().set_label("OK"));
+btn2.set_on_click(fn);
 
 // 形态三：对已构造对象逐行赋值
 auto btn3 = au::Button();
-btn3.label = au::LocalizedString{ "OK" };
-btn3.on_click = fn;
+btn3.set_label(au::LocalizedString{ "OK" });
+btn3.set_on_click(fn);
 ```
 
 **关键约束：**
 
-- **控件类不是聚合类型**，不能用 `au::Button{ .label = ... }` 这类指定初始化器构造控件（编译失败）。合法写法只有三种：① `*Props` 聚合；② 初始化列表 `au::Column{ au::Text("A"), au::Text("B") }`（`Column` / `Row` 接受 `std::initializer_list<Node>`）；③ 对已构造对象直接成员赋值。
-- 指定初始化器**仅适用于 `*Props` 聚合结构**与 `Theme` 等纯数据聚合；其中字段顺序无关，遗漏字段回退默认值。
+- **控件类不是聚合类型**，不能用 `au::Button{ .label = ... }` 这类指定初始化器构造控件（编译失败）。合法写法只有三种：① 属性对象——`XxxProps().set_x(...)` 链式装入（库内的 `*Props` 全部收在权威表里，没有可直写的公有字段）；② 初始化列表 `au::Column{ au::Text("A"), au::Text("B") }`（`Column` / `Row` 接受 `std::initializer_list<Node>`），要同时给属性时写 `au::Column({ ... }, au::ColumnProps().set_gap(8.0F))`（子节点是构造首参、不入属性表）；③ 对已构造对象调链式 setter。
+- 指定初始化器**只适用于 `Theme` / `ChartSeries` 这类纯数据聚合**（`*Props` 本体已无此类形态）；其中字段顺序无关，遗漏字段回退默认值。
 - 链式 setter 返回引用；作为子节点放入 `children` 时必须用 `std::move` 包裹（`Widget` 拷贝构造被删除，`Node` 仅移动派生对象）。
-- 嵌套声明推荐 `au::Column(au::ColumnProps{ .children = { ... } })` 的树形结构。
+- 嵌套声明推荐 `au::Column({ 子项... }, au::ColumnProps().set_gap(8.0F))` 的树形结构（子节点是构造首参；属性表内没有 `children` 槽）。
+- **属性面已无两种形态并存**：`BarChart` / `BottomNavBar` / `Button` / `Column` / `Divider` / `Grid` / `ImageView` / `LazyRow` / `LineChart` / `PieChart` / `PullToRefresh` / `Row` / `ScatterChart` / `Scroll` / `Sparkline` / `Text` / `TextInput` / `WebView`（真身 `au::webview::WebView`）共 18 型的 `*Props` 已无公有字段，形态二写作链式装入 `au::Button(au::ButtonProps().set_label("OK"))`、形态三的逐行赋值改走 `set_*()` 写件（`btn.set_label(...)`），直写成员名不再合法；未采用继承式双模的控件（`Checkbox` / `Slider` 一类）仍是私有成员 + setter，与本条无关。
 - 控件可用 `au::` 或 `aurora::` 前缀；推荐 `namespace au = aurora;`。
 
 **验收标准：** 同一界面用三种形态各写一遍，编译产物与运行时行为一致；AI 只需记住「属性名 + `*Props`」即可生成整棵嵌套树，无需记忆顺序位置参数。
@@ -602,8 +622,8 @@ btn3.on_click = fn;
 **需求陈述：**
 
 - **相同语义在所有组件使用完全相同的名称**（`on_click` 在所有可点击控件同名同参），杜绝 `setCaption` / `setValue` / `size().x` 一类同义异名；属性设置器一律为「属性直接赋值」风格。
-- **命名与类型拼写规则**（属性用名词、事件 `on_` 前缀、布尔取 `show` / `enabled` 语义、杜绝缩写、名序与 React / Flutter 对齐、`XxxProps{...}` 具名聚合优先、强类型几何、常量前缀等）以 [`CODING_STANDARDS.md`](CODING_STANDARDS.md) §2 为唯一权威。
-- **扁平命名空间**：所有公共组件、类型、自由函数直接位于 `aurora`，禁止深层嵌套（`aurora::widgets::buttons::MaterialButton` 列为反模式）；变体通过属性区分而非类型区分。对外承诺稳定的**公共子命名空间**为：`colors`（具名颜色常量）、`platform`（平台查询 API）、`debug`（`aurora::debug` 调试门面自由函数，受 §11.2 lint 校验）、`ui`（声明式工厂 `ui::`，用户面构造语法糖）、`storage`（数据存储门面 `aurora::storage`）、`image`（图像编解码）、`imperative`（imperative API）；其余如 `render` / `detail` / `preferences` 等为内部或辅助命名空间，**不属对外承诺稳定的公共 API 表面**。
+- **命名与类型拼写规则**（属性用名词、事件 `on_` 前缀、布尔取 `show` / `enabled` 语义、杜绝缩写、名序与 React / Flutter 对齐、属性对象链式装入 `XxxProps().set_x(...)` 优先、强类型几何、常量前缀等）以 [`CODING_STANDARDS.md`](CODING_STANDARDS.md) §2 为唯一权威。
+- **扁平命名空间**：所有公共组件、类型、自由函数直接位于 `aurora`，禁止深层嵌套（`aurora::widgets::buttons::MaterialButton` 列为反模式）；变体通过属性区分而非类型区分。对外承诺稳定的**公共子命名空间**为：`colors`（具名颜色常量）、`platform`（平台查询 API）、`debug`（`aurora::debug` 调试门面自由函数，受 §11.2 lint 校验）、`ui`（声明式工厂 `ui::`，用户面构造语法糖）、`storage`（数据存储门面 `aurora::storage`）、`image`（图像编解码）、`imperative`（imperative API）、`webview`（原生 Web 嵌入控件 `au::webview::WebView` 与其 `WebViewMode` 等配套类型——它是 76 型里唯一不挂在 `aurora` 直属下的控件，代码生成的产物因此按 `au::webview::…` 发，见 [`specification/08-tooling.md`](specification/08-tooling.md) §2.5.1）；其余如 `render` / `detail` / `preferences` 等为内部或辅助命名空间，**不属对外承诺稳定的公共 API 表面**。
 - 前缀与别名写法见 [`SPECIFICATIONS.md`](SPECIFICATIONS.md) §命名速查。
 
 **验收标准：** AI 在只见过组件名与属性名的情况下，能凭直觉拼出正确 API；`itest_ai_compat` 不出现因「同义异名」导致的生成失败。
@@ -661,7 +681,7 @@ button.alignment(au::Alignment::Cenetr);   // 编译错误：拼写错误立刻�
 **需求陈述：** 只需写「与默认值不同」的部分；默认值须适用于绝大多数场景，避免 AI 每次都要显式指定。
 
 ```cpp
-au::Button(au::ButtonProps{ .label = "OK" });
+au::Button(au::ButtonProps().set_label("OK"));
 // 默认：enabled=true, visible=true,
 //       alignment=Center, font_size=14,
 //       padding={12,6,12,6}, corner_radius=6
@@ -671,7 +691,9 @@ au::Button(au::ButtonProps{ .label = "OK" });
 
 - 默认值文档化在**声明处**：代码中可省略（保持简洁），但 LSP hover 时可见（保持透明），AI 工具无需查阅外部文档。
 - 新增 `XxxProps` 的每个字段必须有合理默认值（规则见 §6.2）。
+- **度量 / 形状 / 配色类默认值以「平台风格解算出的主题令牌」表达，不写字面量**：属性侧用 `std::optional<T>`（空 = 跟随主题），绘制期经 `resolve_xxx(const BuildContext&)` 读 `inherit_theme(ctx)` 的令牌（`shapes.*` / `spacing.*` / `controls.*` / `roles.*` / `conventions.*`），落点清单见 [`specification/04-widget.md`](specification/04-widget.md) §4.1。理由：字面量默认值把「Material 档的取值」误当成「跨风格通用的取值」，同一枚按钮在 KDE 与 macOS 上本该不同的高度和圆角；声明处可见性不受影响——描述符的 `default_value` / `default_expr` 元数据**由该行的回落点派生出发射面**（活令牌档经登记表反查出短名，派生档另可给 `.shows_token<&X::y>()` 由表生成显示串），未显式设置时**不序列化**该键。**串本身不得手抄**：源码里出现 `"theme.` 字面量即为违规，由 `check_no_theme_display_literals` 按裸串 / 转义串 / raw-string 三种拼法各自清点（带定界符的 raw-string 归入 raw-string 档；豁免仅限登记表自身的短名列表、`theme_token_groups()` 的前缀串、就地标了 `THEME-LITERAL:` 的行与名案文件四类）；把串写回源码会让「令牌改名即编译失败」这条防线退化成静默的过期显示串，见 [`specification/07-environment-modifier.md`](specification/07-environment-modifier.md) §5.1。
 - 运行时可查询默认值：各控件提供静态 `defaults()`（如 `au::Button::defaults()` 返回默认 `ButtonProps`）。
+- `defaults()` 是**同名不同主**的两族：`Xxx::defaults()` 出该控件的属性快照，`Theme::defaults()` 出「本机风格档的整套标定主题」（只定风格轴、不定明暗档，见 [`specification/07-environment-modifier.md`](specification/07-environment-modifier.md) §5.1）。生成代码或文档时按主语选，不要把主题实例当属性快照。
 
 **验收标准：** 空构造 + 单一必填属性即可得到可用控件；`defaults()` 与头文件声明的默认值一致。
 
@@ -827,7 +849,8 @@ au::Button(au::ButtonProps{ .label = "OK" });
 - **`#` 开头的字面串必须加反引号或转义**（`docs` 目标执法）：Doxygen 把 `#Word` 读成**显式链接请求**，于是 `#include`、`#ifdef`、色值 `#E01B24` 这类写法报 `explicit link request to 'include' could not be resolved`（色值还会把后面的中文一并吸进链接名）。写 `` `#include` `` 或 `\#include` 即消。
 - **反斜杠字面串要写双份**：散文里出现 `\uXXXX` 会被当命令解析，报 `Found unknown command '\uXXXX'`；要表达 JSON 转义序列本身，写 `\\uXXXX`。
 - **`@file` 只出现在文件级块**：成员 / 函数注释里提一句「见本头的 `@file` 级注释」会被当真命令读取，报 `the name '…' supplied as the argument in the \file statement is not an input file`。指代文件级说明一律改写成文字（「本头顶部的文件级注释」）。
-- **反引号跨度的内容不要以 `.` 开头且紧贴前文**：`` （`.surface()`） ``、`` ：`.background` `` 这类形态会让 Doxygen 的 Markdown 转换产出不成对的 `<tt>`，报 `found </tt> tag without matching <tt>`（实测：去掉跨度起始的点、或让开引号前留一个空格，均可消除）。成员名写作 `Type.field` 或 `field()` 比 `.field` 更明确。
+- **反引号跨度的内容不要以 `.` 开头且紧贴前文**：`` （`.surface()`） ``、`` ：`.background` `` 这类形态会让 Doxygen 的 Markdown 转换产出不成对的 `<tt>`，报 `found </tt> tag without matching <tt>`（实测：去掉跨度起始的点、或让开引号前留一个空格，均可消除）。成员名写作 `Type.field` 或 `field()` 比 `.field` 更明确。同一告警在 `::` 开头且跨度内还含冒号的形态上复现（IPv6 内嵌地址 `::ffff:127.0.0.1`），而只写回环本机地址那一枚 `::1` 不复现——触发点不止「首字符是点」，遇到时按最小 fixture 实测（§13.8）定位，把前导冒号留在跨度外即可消。
+- **内联码里含 `*/` 要改用 `<code>` 标签**（`docs` 目标执法）：`` `bytes */1234` `` 这类跨度里出现注释结束标记时，Doxygen 在扫描阶段就把 `*/` 当作当前 `///` 块所继承的 C 块注释的结尾，报 `Found end of C comment inside a '`' block without matching start of the comment`——且它出现在文档构建按 warning 终止的配置里会直接掐断整轮生成。两种改写经实测取舍：拆成多段跨度（`` `bytes ` `` + `` `1234` ``）渲染成带空格的碎片、丢原文；HTML `<code>bytes */1234</code>` 渲染保留原文（星号的十进制数字实体在 code span 内不解码，文档面会显示成字面实体串，不可用）。故此类一律写 `<code>`。
 - **散文里不得出现裸的命令行令牌**：`@param`、`@brief`、`@note` 这类字面串写进描述正文时，Doxygen 照样把它解析成**真命令**，于是该行之后的内容被归进这条命令的参数，文档结构错位。指代命令一律加反引号（`` `@param` ``）或写中文（「形参说明行」）。
 - **装饰线不要用 `====` / `----` 纯符号行**：Markdown 解析会把它们读成 setext 标题或分隔线，把上一行正文吸进标题层；分节请写 `/// @name 分节名` 或直接用文字。
 - **`@ref` / 链接目标必须可达**：指向头文件、类或函数的显式链接写法要能在文档站内解析，断链即 `docs` 目标红灯（`Referenced ... not existing`）。宁可不写链接、只留仓库相对路径文字，也不要留悬空 `@ref`。
@@ -863,6 +886,7 @@ au::Button(au::ButtonProps{ .label = "OK" });
 
 - **LIT-1（阻断）**：**注释之外不得出现中日韩字符**。`include/` `src/` `examples/` `tests/` `tools/` 内 C++/Python 的字符串字面量、字符字面量与 raw string，以及 `cmake/` 与根 `CMakeLists.txt` 的引号参数 / bracket 参数，一律用英文书写；`//`、`///`、`/* */`、Python/CMake `#`、`#[[ ]]` 与 docstring 属文档散文，保持中文不受此限。判定对象是「会离开源码的东西」——字面量经 `Logger`/`AURORA_LOG_RAW`/`Diagnostics`/`AURORA_CHECK`/Inspector/CLI/LSP/CTest 输出抵达控制台，而控制台代码页不受本库控制：GBK（cp936）等窄代码页下 UTF-8 中文串会呈现为问号与方块，同一份文案在不同代码页上结果不同（本仓整改的直接起因是跑门禁脚本时 `UnicodeEncodeError: 'gbk' codec can't encode character`）。注释不会离开源码，故不受限。
 - **LIT-2（阻断）**：脚本内 `EXEMPT_FILES` 的文件级白名单条目一旦不再命中任何诊断即判红灯。白名单机制常设、列表默认留空，防止清单腐烂。
+- **字体族名照 LIT-1 取 ASCII 原文**：主题标定表里的 `Font::family` 字面量一律写系统字体的英文/拉丁族名（`"Segoe UI Variable Text"`、`"SF Pro Text"`、`"Adwaita Sans"`、`"Noto Sans"`），**不得**为「中文正文该用什么字体」写汉字族名。理由与 LIT-1 同一条链路：族名既进 `FT_Face` 名匹配，也进 `aurora_api.json` 的 `default_expr` 与 LSP hover 文本，代码页一换就匹配不到、读不出来。需要说明「该档在中文环境下的实际观感」时写注释，不写字面量。
 - 规则编号 `LIT-1`/`LIT-2` 与 `tools/check/check_no_cjk_literals.py` 的输出编号一一对应；引用本节写 `§14.x` 或 `LIT-n`，不得写行号（`AGENTS.md` 硬规则 11）。
 
 ### 14.2 例外：功能必需的中文数据
@@ -900,6 +924,8 @@ au::Button(au::ButtonProps{ .label = "OK" });
 | 用 `std::string_view` 或 `"\x03abc"` 形态的字面量承载含 `\0` 的二进制测试输入 | 两条坑叠加：`std::string_view` 从 `const char*` 构造会在首个 `\0` 截断（长度变成 0 而不是预期字节数），而 `\x` 转义**贪婪吞掉后续十六进制数字**（`"\x03abc"` 是一个越界转义，不是「`0x03` 后跟 `abc`」）。二进制输入一律显式带长度（`std::span<const char>(literal, N - 1)` 形态的helper），并把转义与其后的可打印字节用相邻字面量拼接隔开：`"\x03" "abc"` |
 | 在完成回调里写致命断言（`AURORA_TEST_REQUIRE*`） | 回调可能在**析构边界内**派发（如 `~StreamListener` → `close()` → 交付尾批），致命断言抛出的 `CaseAbort` 穿过 `noexcept` 即 `std::terminate`，整条测试进程连带消失、报告里看不见失败原因；回调内只用非致命断言记录失败（[`specification/06-app-platform.md`](specification/06-app-platform.md) §8.8.11） |
 | 在库同步派发的宿主回调（HTTP 交换钩子的两问）里做无界阻塞 I/O，或让钩子持有同一枚 `Client` 自反馈上报 | 回调只许快、不许抛、不许持有发起它的对象（链 → 钩子 → `Client` → 链是引用环）；要在回调里发起交换就换一枚不挂同一组钩子的客户端，把上报挪到回调之外（§4.1 末段与 [`specification/06-app-platform.md`](specification/06-app-platform.md) §8.8.40） |
+| 把 `ConnectivityMonitor::snapshot()` 或订阅回调当作「发不发这次请求」的闸门 | 链路态只是读者可查询的事实与退避提示，**闸一律在 `NetPolicy` 与能力闸两处**。探测口径与真实路径不等价（服务可只在链路本地可达、VPN 路由在探测面外、容器里读不到拓扑），拿它当闸等于把可交付的请求变成库侧自己发起的失败——那类失败对端不留痕、时间线上看不出根因（[`specification/06-app-platform.md`](specification/06-app-platform.md) §8.8.41） |
+| 把一次连接失败（`Dns` / `Unreachable` / `Proxy` 一类）记成链路负证、据此判离线 | 负证只能来自探测腿的合格读数；连接失败只触发一次合并采样并把码写进 `last_failure`，且**永不计负证**。`Dns` 同时覆盖 NXDOMAIN 与解析器故障、`Unreachable` 同时覆盖 ECONNREFUSED 与 ENETUNREACH、`Proxy` 覆盖 407 与配置读不到，任一类当负证都会造出假离线（§8.8.41） |
 | 新增 `std::cout` / `printf` / `puts` | 走 `AURORA_LOG_*`（stderr）/ `AURORA_LOG_RAW`（stdout 产品输出）/ 测试与工具里的 `AURORA_TEST_PRINTF*`（§4.1） |
 | 把 `Authorization` / `Cookie` / 带令牌的查询串原值直接拼进日志、错误 `detail` 或 Inspector JSON | 一律经 `net::present_field` / `net::present_url`：`Secret` 恒折叠且宿主不可放大、`Sensitive` 按 `(导出面 + 键)` 放行、消息体不导出（§4.1、[`specification/06-app-platform.md`](specification/06-app-platform.md) §8.8.38） |
 | 字符串字面量里写中文 | 字面量写英文 + ASCII 标点；确属功能必需中文时就地 `CJK-LITERAL: <类别> - <原因>`（§14） |

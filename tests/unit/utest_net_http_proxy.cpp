@@ -106,7 +106,7 @@ using aurora::test::scripts::reply_after_reading;
 /// @return 代理环境。
 [[nodiscard]] auto environment(std::vector<std::pair<std::string, std::string>> values) -> ProxyEnvironment {
     auto built = ProxyEnvironment::from_environment(reader_of(std::move(values)));
-    AURORA_TEST_REQUIRE_MSG(bool(built), built ? std::string{} : built.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(built), built ? std::string{} : built.error().message);
     return built.value();
 }
 
@@ -218,7 +218,7 @@ using aurora::test::scripts::reply_after_reading;
     }
     const auto begin = at + 5;
     const auto end = lowered.find("\r\n", begin);
-    std::string value{head.substr(begin, end == std::string_view::npos ? std::string_view::npos : end - begin)};
+    std::string const value{head.substr(begin, end == std::string_view::npos ? std::string_view::npos : end - begin)};
     const auto content = value.find_first_not_of(" \t");  // 字段值前的分隔空白不属于值
     return content == std::string::npos ? std::string{} : value.substr(content);
 }
@@ -228,7 +228,7 @@ using aurora::test::scripts::reply_after_reading;
 /// @return `Result<Response>`。
 [[nodiscard]] auto inner(CoroTask<Result<Response>> &task) -> Result<Response> {
     const auto outer = task.result();
-    AURORA_TEST_REQUIRE_MSG(bool(outer), outer ? std::string{} : outer.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(outer), outer ? std::string{} : outer.error().message);
     return outer.value();
 }
 
@@ -237,7 +237,7 @@ using aurora::test::scripts::reply_after_reading;
 /// @return `Result<StreamOutcome>`。
 [[nodiscard]] auto inner(CoroTask<Result<StreamOutcome>> &task) -> Result<StreamOutcome> {
     const auto outer = task.result();
-    AURORA_TEST_REQUIRE_MSG(bool(outer), outer ? std::string{} : outer.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(outer), outer ? std::string{} : outer.error().message);
     return outer.value();
 }
 
@@ -414,7 +414,7 @@ AURORA_TEST_CASE(cleartext_through_an_http_proxy_writes_the_absolute_form) {
     client.proxy(environment({{"HTTP_PROXY", "http://127.0.0.1:" + std::to_string(proxy.port())}}));
 
     const auto response = send_and_drive(client, Request::get("http://api.example.test/v1/items"));
-    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(response), response ? std::string{} : response.error().message);
     AURORA_TEST_CHECK_EQ(response.value().status(), std::uint16_t{200});
 
     const auto head = recorded_text(recorded, guard);
@@ -441,13 +441,14 @@ AURORA_TEST_CASE(the_absolute_form_omits_a_default_port_and_keeps_an_explicit_on
     client.proxy(environment({{"HTTP_PROXY", "http://127.0.0.1:" + std::to_string(proxy.port())}}));
 
     const auto implied = send_and_drive(client, Request::get("http://api.example.test/"));
-    AURORA_TEST_REQUIRE_MSG(bool(implied), implied ? std::string{} : implied.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(implied), implied ? std::string{} : implied.error().message);
     // 默认端口不进文本：请求行与 `Host` 都只写主机名（与直连时同一套省略口径）。
     AURORA_TEST_CHECK_EQ(first_line(recorded_text(recorded, guard)), "GET http://api.example.test/ HTTP/1.1");
     AURORA_TEST_CHECK_EQ(host_field(recorded_text(recorded, guard)), "api.example.test");
 
     const auto explicit_port = send_and_drive(client, Request::get("http://api.example.test:8080/"));
-    AURORA_TEST_REQUIRE_MSG(bool(explicit_port), explicit_port ? std::string{} : explicit_port.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(explicit_port),
+                            explicit_port ? std::string{} : explicit_port.error().message);
     const auto second = recorded_text(recorded, guard);
     AURORA_TEST_CHECK_EQ(first_line(second), "GET http://api.example.test:8080/ HTTP/1.1");
     AURORA_TEST_CHECK_EQ(host_field(second), "api.example.test:8080");
@@ -468,7 +469,7 @@ AURORA_TEST_CASE(a_direct_cleartext_hop_still_writes_the_origin_form) {
     client.policy(permissive_cleartext());
 
     const auto response = send_and_drive(client, Request::get(loopback_url(peer.port(), "/v1/items")));
-    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(response), response ? std::string{} : response.error().message);
     const auto head = recorded_text(recorded, guard);
     AURORA_TEST_CHECK_EQ(first_line(head), "GET /v1/items HTTP/1.1");
     AURORA_TEST_CHECK_EQ(host_field(head), "127.0.0.1:" + std::to_string(peer.port()));
@@ -493,7 +494,7 @@ AURORA_TEST_CASE(a_secure_hop_asks_for_a_tunnel_and_sends_no_request_line) {
 
     const auto response =
         send_and_drive(client, Request::get("https://127.0.0.1:" + std::to_string(origin.port()) + "/"));
-    AURORA_TEST_REQUIRE_FALSE(bool(response));  // 对面没有 TLS 服务：失败是预期结局
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(response));  // 对面没有 TLS 服务：失败是预期结局
 
     const auto head = recorded_text(recorded, guard);
     AURORA_TEST_CHECK_EQ(first_line(head), "CONNECT 127.0.0.1:" + std::to_string(origin.port()) + " HTTP/1.1");
@@ -516,7 +517,7 @@ AURORA_TEST_CASE(an_unreachable_proxy_never_falls_back_to_direct) {
     client.proxy(environment({{"HTTP_PROXY", "http://127.0.0.1:" + std::to_string(dead_port())}}));
 
     const auto response = send_and_drive(client, Request::get(loopback_url(origin.port())));
-    AURORA_TEST_REQUIRE_FALSE(bool(response));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(response));
     // 源站一条都不被连：代理不可达就是失败，库里没有「那就直连试试」这条路。
     AURORA_TEST_CHECK_EQ(origin.accepts(), 0);
 }
@@ -540,7 +541,7 @@ AURORA_TEST_CASE(a_no_proxy_exception_goes_straight_to_the_target) {
         environment({{"HTTP_PROXY", "http://127.0.0.1:" + std::to_string(proxy.port())}, {"NO_PROXY", "127.0.0.1"}}));
 
     const auto response = send_and_drive(client, Request::get(loopback_url(origin.port(), "/v1/items")));
-    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(response), response ? std::string{} : response.error().message);
 
     // 例外命中即直连：请求行回到 origin-form，代理监听口一条都不被连（与没配代理时逐字同形）。
     const auto head = recorded_text(origin_recorded, origin_guard);
@@ -558,7 +559,7 @@ AURORA_TEST_CASE(the_policy_gate_refuses_before_any_connection) {
 
     Client unlisted;  // 缺省策略：明文全拒，且不给回环留隐含例外
     const auto refused = send_and_drive(unlisted, Request::get(loopback_url(peer.port())));
-    AURORA_TEST_REQUIRE_FALSE(bool(refused));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(refused));
     AURORA_TEST_CHECK_EQ(refused.error().code_enum, aurora::ErrorCode::NetPolicyViolated);
     AURORA_TEST_CHECK(names_in(refused.error().message, "allow_cleartext_hosts"));
     // 「一条连接都不发起」的可证形态：对端的 accept 计数恒为 0。
@@ -567,7 +568,7 @@ AURORA_TEST_CASE(the_policy_gate_refuses_before_any_connection) {
     // 流式入口走同一道闸：判据不因为在逐段交付而缺席。
     NullSink host;
     const auto streamed = open_and_drive(unlisted, Request::get(loopback_url(peer.port())), host);
-    AURORA_TEST_REQUIRE_FALSE(bool(streamed));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(streamed));
     AURORA_TEST_CHECK_EQ(streamed.error().code_enum, aurora::ErrorCode::NetPolicyViolated);
     AURORA_TEST_CHECK_EQ(peer.accepts(), 0);
 }
@@ -586,14 +587,14 @@ AURORA_TEST_CASE(the_gate_runs_before_the_cache) {
     const auto url = loopback_url(peer.port());
 
     const auto first = send_and_drive(client, Request::get(url));
-    AURORA_TEST_REQUIRE(bool(first));
+    AURORA_TEST_REQUIRE(static_cast<bool>(first));
     AURORA_TEST_CHECK_FALSE(first.value().from_cache());
     AURORA_TEST_CHECK_EQ(peer.accepts(), 1);
 
     // 表里已有一条新鲜的副本，策略却在这一次改回全拒：闸在先，命中也不交付（少打一次网络不等于少一道闸）。
     client.policy(NetPolicy{});
     const auto gated = send_and_drive(client, Request::get(url));
-    AURORA_TEST_REQUIRE_FALSE(bool(gated));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(gated));
     AURORA_TEST_CHECK_EQ(gated.error().code_enum, aurora::ErrorCode::NetPolicyViolated);
     AURORA_TEST_CHECK_EQ(peer.accepts(), 1);
 }
@@ -616,7 +617,7 @@ AURORA_TEST_CASE(the_gate_is_asked_again_for_every_redirect_hop) {
     client.tls_context(context);
 
     const auto hopped = send_and_drive(client, Request::get(loopback_url(peer.port())));
-    AURORA_TEST_REQUIRE_FALSE(bool(hopped));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(hopped));
     AURORA_TEST_CHECK_EQ(hopped.error().code_enum, aurora::ErrorCode::NetPolicyViolated);
     AURORA_TEST_CHECK(names_in(hopped.error().message, "TLS 1.2"));
     // 掐在第二跳之前：第一跳确实触网，第二跳一条连接都没发起。
@@ -640,14 +641,14 @@ AURORA_TEST_CASE(the_effective_policy_follows_the_documented_order) {
         Client follower;
         AURORA_TEST_CHECK_FALSE(follower.policy().has_value());
         const auto served = send_and_drive(follower, Request::get(url));
-        AURORA_TEST_REQUIRE_MSG(bool(served), served ? std::string{} : served.error().message);
+        AURORA_TEST_REQUIRE_MSG(static_cast<bool>(served), served ? std::string{} : served.error().message);
         AURORA_TEST_CHECK_EQ(peer.accepts(), 1);
 
         // 客户端显式设过的，覆盖进程级默认——覆盖的方向是收紧也照办。
         Client strict;
         strict.policy(NetPolicy{});
         const auto refused = send_and_drive(strict, Request::get(url));
-        AURORA_TEST_REQUIRE_FALSE(bool(refused));
+        AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(refused));
         AURORA_TEST_CHECK_EQ(refused.error().code_enum, aurora::ErrorCode::NetPolicyViolated);
         AURORA_TEST_CHECK_EQ(peer.accepts(), 1);
     }
@@ -655,7 +656,7 @@ AURORA_TEST_CASE(the_effective_policy_follows_the_documented_order) {
     // 进程级回到「未设」后，没设过策略的客户端落回 `NetPolicy{}` 的保守缺省：明文全拒。
     Client after;
     const auto defaulted = send_and_drive(after, Request::get(url));
-    AURORA_TEST_REQUIRE_FALSE(bool(defaulted));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(defaulted));
     AURORA_TEST_CHECK_EQ(defaulted.error().code_enum, aurora::ErrorCode::NetPolicyViolated);
     AURORA_TEST_CHECK_EQ(peer.accepts(), 1);
 }
@@ -679,7 +680,7 @@ AURORA_TEST_CASE(the_effective_policy_is_snapshot_at_the_start_of_the_exchange) 
 
     AURORA_TEST_CHECK(aurora::test::net::drive_until("send done", [&task] { return task.is_done(); }).satisfied);
     const auto response = inner(task);
-    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(response), response ? std::string{} : response.error().message);
     AURORA_TEST_CHECK_EQ(peer.accepts(), 1);
 }
 
@@ -700,7 +701,7 @@ AURORA_TEST_CASE(a_forwarded_407_is_answered_on_proxy_authorization) {
     client.authenticator(std::make_shared<BasicAuthenticator>("lyn", "pw"));
 
     const auto response = send_and_drive(client, Request::get("http://api.example.test/v1/items"));
-    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(response), response ? std::string{} : response.error().message);
     // 代理那一环生在交付之前：宿主拿到的是补了凭据之后的那份 200，而不是先收到 407 再自己处理。
     AURORA_TEST_CHECK_EQ(response.value().status(), std::uint16_t{200});
     AURORA_TEST_CHECK_EQ(body_text(response.value()), "done");
@@ -735,7 +736,7 @@ AURORA_TEST_CASE(a_source_challenge_through_a_proxy_is_answered_on_authorization
     client.authenticator(std::make_shared<BasicAuthenticator>("lyn", "pw"));
 
     const auto response = send_and_drive(client, Request::get("http://api.example.test/v1/items"));
-    AURORA_TEST_REQUIRE_MSG(bool(response), response ? std::string{} : response.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(response), response ? std::string{} : response.error().message);
     AURORA_TEST_CHECK_EQ(response.value().status(), std::uint16_t{200});
     AURORA_TEST_REQUIRE(aurora::test::net::drive_until("both requests filed", [&filed, &guard] {
                             return filed_count(filed, guard) == 2;
@@ -766,7 +767,7 @@ AURORA_TEST_CASE(a_tunnel_refused_with_407_reissues_connect_with_the_credential)
     const auto response =
         send_and_drive(client, Request::get("https://127.0.0.1:" + std::to_string(origin.port()) + "/"));
     // 结局仍是失败：隧道谈成之后没有 TLS 服务可谈。判据不在结局，在「隧道这一腿也被问过、也补过凭据」。
-    AURORA_TEST_REQUIRE_FALSE(bool(response));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(response));
     AURORA_TEST_REQUIRE(aurora::test::net::drive_until("both connects filed", [&filed, &guard] {
                             return filed_count(filed, guard) == 2;
                         }).satisfied);

@@ -25,7 +25,6 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -36,8 +35,6 @@
 #include "aurora/net/cancellation.h"
 #include "aurora/net/detail/lookup.h"
 #include "aurora/net/detail/remote_connect.h"
-#include "aurora/net/engine.h"
-#include "aurora/net/poll.h"
 #include "aurora/net/proxy.h"
 #include "aurora/net/transport.h"
 #include "framework/async_wait.h"

@@ -1,7 +1,7 @@
 #pragma once
 
 /// @brief HTTP 交换钩子：客户端级登记链、只读请求视图、头改写通道与 `send` 上的短路交付。
-/// @file net/http_hook.h
+/// @file http_hook.h
 ///
 /// 本头回答一个问题：**「一次交换起手时，宿主还有没有话要说；应答落定时，它还想不想看」**。钩子是同步的链上
 /// 回调，不是 OkHttp 那种可替换整条链的 `Interceptor`——裁决权留在库内，钩子只拿得到两件事：一枚**只读**的
@@ -46,7 +46,6 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
-#include <utility>
 
 #include "aurora/core/headers.h"
 #include "aurora/core/result.h"

@@ -58,7 +58,7 @@ auto raw(std::vector<std::uint8_t> bytes) -> std::string { return std::string{by
 /// @return 完整解析出的报文副本。
 template <typename T>
 [[nodiscard]] auto completed(const Result<std::optional<T>> &parsed) -> T {
-    AURORA_TEST_REQUIRE_MSG(bool(parsed), parsed ? std::string{} : parsed.error().message);
+    AURORA_TEST_REQUIRE_MSG(static_cast<bool>(parsed), parsed ? std::string{} : parsed.error().message);
     return require_value(parsed.value());
 }
 
@@ -67,7 +67,7 @@ template <typename T>
 /// @return 成功值的副本。
 template <typename T>
 [[nodiscard]] auto unwrapped(const Result<T> &result) -> T {
-    AURORA_TEST_REQUIRE(bool(result));
+    AURORA_TEST_REQUIRE(static_cast<bool>(result));
     return result.value();
 }
 
@@ -105,7 +105,7 @@ AURORA_TEST_CASE(connect_request_uses_authority_form_and_basic_credentials) {
 
 AURORA_TEST_CASE(connect_response_head_is_three_state) {
     const auto pending = wire::parse_connect_response("HTTP/1.1 200 OK\r\nX-Pro: 1\r\n");
-    AURORA_TEST_REQUIRE(bool(pending));
+    AURORA_TEST_REQUIRE(static_cast<bool>(pending));
     AURORA_TEST_CHECK_TRUE(!pending.value().has_value());
 
     const std::string_view complete =
@@ -138,7 +138,7 @@ AURORA_TEST_CASE(connect_response_rejects_non_http_malformed_and_oversized) {
           "HTTP/1.1 200 OK\r\nX A: 1\r\n\r\n", "HTTP/1.1 200 OK\r\n: no-name\r\n\r\n",
           "HTTP/1.1 200 OK\r\nX-A: 1\r\n  folded\r\n\r\n"}) {
         const auto rejected = wire::parse_connect_response(bad);
-        AURORA_TEST_REQUIRE_FALSE(bool(rejected));
+        AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(rejected));
         AURORA_TEST_CHECK_EQ(rejected.error().code_enum, ErrorCode::NetProxyProtocol);
     }
 
@@ -148,13 +148,13 @@ AURORA_TEST_CASE(connect_response_rejects_non_http_malformed_and_oversized) {
         bloated += "X-Padding: a great many bytes of nothing at all\r\n";
     }
     const auto capped = wire::parse_connect_response(bloated, 64);
-    AURORA_TEST_REQUIRE_FALSE(bool(capped));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(capped));
     AURORA_TEST_CHECK_EQ(capped.error().code_enum, ErrorCode::NetProxyProtocol);
     AURORA_TEST_CHECK_TRUE(capped.error().message.find("64") != std::string::npos);
 
     // 未超上限且确实没读到空行 → 仍是「还没读够」，不是错误。
     const auto still_pending = wire::parse_connect_response(bloated.substr(0, 40), 64);
-    AURORA_TEST_REQUIRE(bool(still_pending));
+    AURORA_TEST_REQUIRE(static_cast<bool>(still_pending));
     AURORA_TEST_CHECK_TRUE(!still_pending.value().has_value());
 }
 
@@ -163,11 +163,11 @@ AURORA_TEST_CASE(socks5_greeting_and_subnegotiation_follow_the_rfc) {
     AURORA_TEST_CHECK_EQ(hex(wire::make_socks5_greeting(true)), "05 02 00 02");
 
     const auto pending_method = wire::parse_socks5_method("x");
-    AURORA_TEST_REQUIRE(bool(pending_method));
+    AURORA_TEST_REQUIRE(static_cast<bool>(pending_method));
     AURORA_TEST_CHECK_TRUE(!pending_method.value().has_value());
     AURORA_TEST_CHECK_EQ(completed(wire::parse_socks5_method(raw({0x05, 0x02}))), std::uint8_t{2});
     const auto wrong_version = wire::parse_socks5_method(raw({0x04, 0x00}));
-    AURORA_TEST_REQUIRE_FALSE(bool(wrong_version));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(wrong_version));
     AURORA_TEST_CHECK_EQ(wrong_version.error().code_enum, ErrorCode::NetProxyProtocol);
 
     const ProxyCredentials credentials{.username = "u", .password = "pw"};
@@ -175,14 +175,14 @@ AURORA_TEST_CASE(socks5_greeting_and_subnegotiation_follow_the_rfc) {
     AURORA_TEST_CHECK_EQ(completed(wire::parse_socks5_auth(raw({0x01, 0x00}))), std::uint8_t{0});
     // 子协商回报的版本字段不携带信息，但文法只认 1：放宽会把「对端根本不是 SOCKS5」读成认证失败。
     const auto wrong_auth_version = wire::parse_socks5_auth(raw({0x00, 0x01}));
-    AURORA_TEST_REQUIRE_FALSE(bool(wrong_auth_version));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(wrong_auth_version));
     AURORA_TEST_CHECK_EQ(wrong_auth_version.error().code_enum, ErrorCode::NetProxyProtocol);
 
     for (const ProxyCredentials &bad : {ProxyCredentials{.username = "", .password = "x"},
                                         ProxyCredentials{.username = std::string(256, 'u'), .password = "x"},
                                         ProxyCredentials{.username = "u", .password = std::string(256, 'p')}}) {
         const auto rejected = wire::make_socks5_auth_request(bad);
-        AURORA_TEST_REQUIRE_FALSE(bool(rejected));
+        AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(rejected));
         AURORA_TEST_CHECK_EQ(rejected.error().code_enum, ErrorCode::NetProxyConfigInvalid);
     }
 }
@@ -194,39 +194,39 @@ AURORA_TEST_CASE(socks5_connect_picks_atype_by_resolution_authority) {
     }
     expected_domain.insert(expected_domain.end(), {0x01, 0xBB});
     const auto domain = wire::make_socks5_connect("example.com", 443, true);
-    AURORA_TEST_REQUIRE(bool(domain));
+    AURORA_TEST_REQUIRE(static_cast<bool>(domain));
     AURORA_TEST_CHECK_EQ(hex(domain.value()), hex(expected_domain));
 
     const auto v4 = wire::make_socks5_connect("192.0.2.1", 8080, false);
-    AURORA_TEST_REQUIRE(bool(v4));
+    AURORA_TEST_REQUIRE(static_cast<bool>(v4));
     AURORA_TEST_CHECK_EQ(hex(v4.value()), "05 01 00 01 C0 00 02 01 1F 90");
 
     const auto v6 = wire::make_socks5_connect("2001:db8::1", 80, false);
-    AURORA_TEST_REQUIRE(bool(v6));
+    AURORA_TEST_REQUIRE(static_cast<bool>(v6));
     AURORA_TEST_CHECK_EQ(hex(v6.value()), "05 01 00 04 20 01 0D B8 00 00 00 00 00 00 00 00 00 00 00 01 00 50");
 
     // 未授权代理解析时给名字：本层不做 DNS，也不静默把名字塞进 ATYPE=3——那是行为差异，不是兼容。
     const auto named = wire::make_socks5_connect("example.com", 443, false);
-    AURORA_TEST_REQUIRE_FALSE(bool(named));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(named));
     AURORA_TEST_CHECK_EQ(named.error().code_enum, ErrorCode::NetEndpointInvalid);
     AURORA_TEST_CHECK_TRUE(named.error().message.find("example.com") != std::string::npos);
 
     // 域名形态的长度前缀只有一个字节，256 字节的名字放不下。
-    AURORA_TEST_CHECK_FALSE(bool(wire::make_socks5_connect(std::string(256, 'a'), 443, true)));
+    AURORA_TEST_CHECK_FALSE(static_cast<bool>(wire::make_socks5_connect(std::string(256, 'a'), 443, true)));
 
     // 作用域号在 SOCKS5 地址编码里没有字段可放：宁可报错，也不悄悄丢掉它连到别的链路上去。
     const auto scoped_text = Endpoint::from_ip("fe80::1%2", 443);
-    AURORA_TEST_REQUIRE(bool(scoped_text));
+    AURORA_TEST_REQUIRE(static_cast<bool>(scoped_text));
     AURORA_TEST_CHECK_EQ(scoped_text.value().zone(), "2");
     const auto rejected_scope = wire::make_socks5_connect("fe80::1%2", 443, false);
-    AURORA_TEST_REQUIRE_FALSE(bool(rejected_scope));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(rejected_scope));
     AURORA_TEST_CHECK_EQ(rejected_scope.error().code_enum, ErrorCode::NetEndpointInvalid);
     AURORA_TEST_CHECK_TRUE(rejected_scope.error().message.find("scope id") != std::string::npos);
 }
 
 AURORA_TEST_CASE(socks5_reply_parsing_tracks_variable_address_length) {
     const auto pending = wire::parse_socks5_reply(raw({0x05, 0x00, 0x00, 0x01, 0xCB, 0x00}));
-    AURORA_TEST_REQUIRE(bool(pending));
+    AURORA_TEST_REQUIRE(static_cast<bool>(pending));
     AURORA_TEST_CHECK_TRUE(!pending.value().has_value());
 
     // 应答后面紧跟隧道首字节：解析只吃掉 10 字节，其余留给传输切片。
@@ -248,14 +248,14 @@ AURORA_TEST_CASE(socks5_reply_parsing_tracks_variable_address_length) {
     AURORA_TEST_CHECK_TRUE(!domain.bound.has_value());
     // 长度前缀本身还没读到，仍是「还没读够」。
     const auto short_domain = wire::parse_socks5_reply(raw({0x05, 0x00, 0x00, 0x03}));
-    AURORA_TEST_REQUIRE(bool(short_domain));
+    AURORA_TEST_REQUIRE(static_cast<bool>(short_domain));
     AURORA_TEST_CHECK_TRUE(!short_domain.value().has_value());
 
     const auto unknown_atype = wire::parse_socks5_reply(raw({0x05, 0x00, 0x00, 0x09, 0x01, 0x02}));
-    AURORA_TEST_REQUIRE_FALSE(bool(unknown_atype));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(unknown_atype));
     AURORA_TEST_CHECK_EQ(unknown_atype.error().code_enum, ErrorCode::NetProxyProtocol);
     const auto wrong_version = wire::parse_socks5_reply(raw({0x04, 0x00, 0x00, 0x01, 1, 2, 3, 4, 0, 80}));
-    AURORA_TEST_REQUIRE_FALSE(bool(wrong_version));
+    AURORA_TEST_REQUIRE_FALSE(static_cast<bool>(wrong_version));
     AURORA_TEST_CHECK_EQ(wrong_version.error().code_enum, ErrorCode::NetProxyProtocol);
 
     // 非零 REP 照样解析成功：状态字节到错误码的换算是另一件事（见下面的分岔判据）。

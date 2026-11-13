@@ -50,7 +50,7 @@ auto bounded(float w, float h) -> Constraints {
 
 /// @brief 一棵基础内容树（Column 内一个按钮）。
 /// @return 基础内容节点。
-auto base_content() -> Node { return Node{Button(ButtonProps{.label = "Base"})}; }
+auto base_content() -> Node { return Node{Button(ButtonProps().set_label("Base"))}; }
 
 /// @brief 挂载观测控件：记录挂载 / 卸载次数、挂载时看到的宿主身份与主题主色、布局时读到的主题主色。
 ///
@@ -68,8 +68,8 @@ class MountProbe final : public Widget {
     [[nodiscard]] auto type_name() const -> const char * override { return "MountProbe"; }
     /// @brief 额外登记一个自有信号，使订阅条数 = 自有 1 + `modifier` + `show` = 3（固定值可硬断言）。
     /// @param out 信号视图累加表（本控件追加自身信号）。
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override { out.push_back(&tick_state_); }
-    [[nodiscard]] auto effect_count() const -> std::size_t { return effects_.size(); }
+    auto collect_signals(StateSink &out) -> void override { out.push(tick_state_); }
+    [[nodiscard]] auto effect_count() const -> std::size_t { return signal_subscriptions_.size(); }
 
   protected:
     /// @brief 本控件的布局读环境（记主题主色），故**刻意不可缓存**——否则约束不变时 `on_layout`
@@ -97,7 +97,7 @@ class MountProbe final : public Widget {
     }
 
   private:
-    Reactive<int> tick_state_;
+    State<int> tick_state_;
 };
 
 }  // namespace
@@ -107,7 +107,7 @@ AURORA_TEST_CASE(overlay_index_starts_at_one_and_is_removable) {
     auto host = std::make_shared<OverlayHost>(base_content());
     // 「检查 + 取值」走框架的 `require_value`：宏展开对 clang-tidy 的路径分析不透明，
     // 直接 `*first` 会被误报 unchecked-optional-access。
-    const std::size_t first = require_value(host->add_overlay(Node{Button(ButtonProps{.label = "Overlay"})}));
+    const std::size_t first = require_value(host->add_overlay(Node{Button(ButtonProps().set_label("Overlay"))}));
     AURORA_TEST_CHECK_EQ(first, 1U);
     AURORA_TEST_CHECK_EQ(host->overlay_count(), 1U);
 
@@ -122,7 +122,7 @@ AURORA_TEST_CASE(add_overlay_on_empty_host_is_not_removable) {
     LayoutEngine::layout(*host, bounded(240.0F, 200.0F));
     AURORA_TEST_CHECK_EQ(host->overlay_count(), 0U);
 
-    const std::optional<std::size_t> index = host->add_overlay(Node{Button(ButtonProps{.label = "Orphan"})});
+    const std::optional<std::size_t> index = host->add_overlay(Node{Button(ButtonProps().set_label("Orphan"))});
     AURORA_TEST_CHECK_FALSE(index.has_value());
 
     // 节点已入树（追加本身生效），但不计入浮层、也删不掉——这正是返回值要如实表达的情形。
@@ -141,12 +141,13 @@ AURORA_TEST_CASE(runtime_added_overlay_is_mounted_on_next_layout) {
     // ctx.env 必须非空（真实窗口里指向 `root_env_`）：`Provider::rebuild_env` 在有父环境时走
     // `Environment::with()` 每次重建一份新环境，换肤才生效；`env == nullptr` 的退化路径走
     // `set_local`，其 `map_.emplace` 对已存在的键不覆盖——那是独立于本任务的既有缺陷，不在此顺带修。
-    Environment root_env;
+    Environment const root_env;
     auto host = std::make_shared<OverlayHost>(base_content());
-    Provider<Theme> provider{theme_a, Node{host}};
+    State<Theme> const theme_state{theme_a};
+    Provider<Theme> provider{theme_state, Node{host}};
     BuildContext ctx;
     ctx.env = &root_env;
-    // 先挂载：`Provider` 靠 mount 订阅自己持有的 `value_`，不挂载则 `set_value` 不会标脏、
+    // 先挂载：`Provider` 靠 mount 订阅自己持有的来源，不挂载则来源变化不会标脏、
     // 布局缓存不会失效——那正是「换肤不跟」的另一条独立故障路径，与本次判据无关。
     provider.mount(ctx);
     LayoutEngine::layout(provider, bounded(240.0F, 200.0F), ctx);
@@ -168,7 +169,7 @@ AURORA_TEST_CASE(runtime_added_overlay_is_mounted_on_next_layout) {
     // 换肤后仍读到新值：挂载补齐不是「挂上就冻结」。
     // 第二遍**换一组约束**：`State` 变更只向上失效，缓存命中的祖先会整段跳过子树
     // （既有布局缓存语义，不在本次范围），换约束才能让一次完整布局真的走到 probe。
-    provider.set_value(theme_b);
+    theme_state.set(theme_b);
     LayoutEngine::layout(provider, bounded(260.0F, 220.0F), ctx);
     AURORA_TEST_CHECK_TRUE(probe->primary_at_layout == theme_b.roles.primary);
     AURORA_TEST_CHECK_EQ(probe->mounts, 1);  // 同宿主不重复挂载
@@ -254,7 +255,7 @@ class AnchorBox final : public Widget {
 class DispatchProbe final : public Widget {
   public:
     DispatchProbe(float w, float h) : w_(w), h_(h) {
-        modifier.set(Modifier{}.clickable([]() -> void {}));
+        set_modifier(Modifier{}.clickable([]() -> void {}));
     }
 
     [[nodiscard]] auto type_name() const -> const char * override { return "DispatchProbe"; }
@@ -448,7 +449,7 @@ AURORA_TEST_CASE(popup_content_window_bounds_matches_probe_measured_reachable_bo
     // 形态①：`Popup` 内容控件的窗口盒须与命中链实测可达框相符。
     // 树把 `OverlayHost` 摆在 y = LEAD_IN 的非零位置，故「叠加锚点」与「替换基准」两种读法
     // 在此必然分叉（前者 y 会多出一个 LEAD_IN），判据对修复机制本身敏感。
-    PopupTree f = make_popup_tree(AURORA_ANCHOR);
+    PopupTree const f = make_popup_tree(AURORA_ANCHOR);
     AURORA_TEST_REQUIRE(f.popup->is_open());
     // 缺口前提：`Popup` 在常规流中占零尺寸（否则内容子盒 origin 不会是 {0,0}）。
     AURORA_TEST_CHECK(f.popup->size().width <= 0.0F);
@@ -479,7 +480,7 @@ AURORA_TEST_CASE(popup_content_window_bounds_matches_probe_measured_reachable_bo
 AURORA_TEST_CASE(plain_subtree_window_bounds_matches_probe_measured_reachable_box) {
     // 形态②：未挂 `Popup` 的普通子树，两者同样相符——守住缺省路径零变化。
     // 任何多减 / 少减一份平移（滚动修正、Modifier 内容平移、锚点）都会在这里现形。
-    PlainTree f = make_plain_tree();
+    PlainTree const f = make_plain_tree();
     const Rect wb = require_value(f.target->window_bounds());
     const Rect reachable = require_value(probe_reachable_box(*f.root, f.target.get(), wb));
 
@@ -502,7 +503,7 @@ AURORA_TEST_CASE(popup_paint_and_hit_semantics_unchanged) {
     // `anchor_` 的施加方式不止一种（绘制下传盒 / 命中链 contains 判定），两者都是既有语义，
     // 本次只补事后查询路径，不得改动。
     const Point anchor = AURORA_ANCHOR;
-    PopupTree f = make_popup_tree(anchor);
+    PopupTree const f = make_popup_tree(anchor);
     AURORA_TEST_REQUIRE(f.popup->is_open());
 
     // 绘制路径：内容盒原点仍为 `anchor_`（全局），不含 `OverlayHost` 在树上的位置。
@@ -536,7 +537,7 @@ AURORA_TEST_CASE(dispatch_by_window_bounds_lands_on_popup_content) {
     // 判据④：端到端正面形态——按 `window_bounds()` 的读数取点派发，内容控件须收到事件，
     // 且 `local_position` 等于该点在盒内的偏移。这是缺口原始症状（取点落不到控件 → 字符被基类
     // `Widget::on_text_input` 缺省 `is_handled = true` 静默吞掉）的正面闭合。
-    PopupTree f = make_popup_tree(AURORA_ANCHOR);
+    PopupTree const f = make_popup_tree(AURORA_ANCHOR);
     const Rect wb = require_value(f.target->window_bounds());
     const Point probe_point{.x = wb.origin.x + 60.0F, .y = wb.origin.y + 10.0F};
 
@@ -577,7 +578,7 @@ class InkProbe final : public Widget {
     InkProbe(float w, float h) : w_(w), h_(h) {
         // 必须挂 Clickable：`wants_click()` 缺省只看修饰链，不挂则基类不认它为命中目标、
         // 命中链在自身处判假（本类无子节点）⇒ 盒内探点拿不到非空链。绘制不受此影响。
-        modifier.set(Modifier{}.clickable([]() -> void {}));
+        set_modifier(Modifier{}.clickable([]() -> void {}));
     }
 
     [[nodiscard]] auto type_name() const -> const char * override { return "InkProbe"; }
@@ -702,20 +703,13 @@ AURORA_TEST_CASE(plain_container_gate_still_culls_zero_sized_siblings) {
     const Rect root_box{.origin = Point{.x = 0.0F, .y = 0.0F}, .size = Size{.width = 200.0F, .height = 200.0F}};
 
     // 命中侧：零尺寸兄弟仍被命中闸跳过（cb.contains 闭区间对零尺寸盒恒假 + 两钩子缺省 false）。
-    // 这条与 AURORA_ENABLE_OCCLUSION_CULLING 无关，恒成立——下降闸不依赖遮挡剔除宏。
+    // 这条与遮挡剔除无关，恒成立——下降闸独立于绘制闸。
     AURORA_TEST_CHECK(root->hit_test_chain(Point{.x = 10.0F, .y = 10.0F}, root_box, BuildContext{}).empty());
 
-    // 绘制侧：零尺寸兄弟是否被绘制闸剔除，**取决于 AURORA_ENABLE_OCCLUSION_CULLING**。
-    // 本用例要钉的是「两钩子缺省值恒为 false」（上面已钉），而**实际剔不剔除**由宏决定：
-    // - ON：遮挡剔除闸按 global.intersects(clip) 严格判定，零尺寸盒恒假、且无 paints_outside
-    //   放行 ⇒ 整棵被跳过，不应有墨迹（探点 (10,10) 落在它铺的 60×60 墨迹内）。
-    // - OFF：无剔除闸，子节点无条件绘制，探针照常铺它的 60×60 墨迹 ⇒ 必有墨迹。
-    // 反向不变量（宏关时零尺寸控件不被错误剔除）同样值得守住，故两侧各断言其正确极性。
-#ifdef AURORA_ENABLE_OCCLUSION_CULLING
+    // 绘制侧：零尺寸兄弟被绘制闸剔除。
+    // 本用例要钉的是「两钩子缺省值恒为 false」（上面已钉），绘制闸按 global.intersects(clip) 严格判定：
+    // 零尺寸盒恒假、且无 paints_outside 放行 ⇒ 整棵被跳过，不应有墨迹（探点 (10,10) 落在它铺的 60×60 墨迹内）。
     AURORA_TEST_CHECK(count_ink_pixels(*root, 200, 200) == 0);
-#else
-    AURORA_TEST_CHECK(count_ink_pixels(*root, 200, 200) > 0);
-#endif
 }
 
 AURORA_TEST_CASE(popup_draw_and_hit_gates_agree_in_plain_column) {

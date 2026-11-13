@@ -14,8 +14,10 @@
 #include "aurora/app/clipboard.h"
 #include "aurora/aurora.h"
 #include "framework/aurora_test.h"
+#include "framework/clipboard_memory_backend.h"
 
 namespace aurora::test_cases::itest_text_selection {
+namespace clipboard_memory = aurora::testing::clipboard_memory;
 
 namespace render = aurora::render;
 
@@ -242,7 +244,7 @@ AURORA_TEST_CASE(highlight_does_not_bleed_into_neighbor_row) {
 
     FocusManager fm;
     fm.set_root(&col);
-    Sink dispatch = [&](MouseAction action, float x, float y) -> void {
+    Sink const dispatch = [&](MouseAction action, float x, float y) -> void {
         MouseEvent e;
         e.action = action;
         e.button = MouseButton::Left;
@@ -301,7 +303,7 @@ AURORA_TEST_CASE(neighbor_rows_unselected_and_uncolored_under_cleartype) {
 
     FocusManager fm;
     fm.set_root(&col);
-    Sink dispatch = [&](MouseAction action, float x, float y) -> void {
+    Sink const dispatch = [&](MouseAction action, float x, float y) -> void {
         MouseEvent e;
         e.action = action;
         e.button = MouseButton::Left;
@@ -332,11 +334,11 @@ AURORA_TEST_CASE(endpoint_chars_inclusive_on_drag_select) {
     // 回归：拖选时，按下与松开所在的字符都应计入选区（含头含尾）。
     use_supersample_aa();
     Text txt("Hello World");
-    txt.font_size(24).set_soft_wrap(false).set_align(TextAlign::Left);
+    txt.font_size(24).set_soft_wrap(false).set_text_align(TextAlign::Left);
     BuildContext ctx;
     txt.mount(ctx);
     txt.layout(bounded(1000.0F, 100.0F), ctx);
-    const Font f = txt.font;
+    const Font f{.size_pt = txt.font_size(ctx)};
     const render::TextLayoutOpts o{};
     const std::string s = "Hello World";
     const std::size_t total = s.size();  // 全 ASCII：字节数 == 码点数
@@ -377,10 +379,10 @@ AURORA_TEST_CASE(multi_line_endpoints_inclusive) {
     // 回归：多行（换行）选区中，行尾与行首的端点字符都应计入选区。
     use_supersample_aa();
     Text txt("Hello World");
-    txt.font_size(24).set_soft_wrap(true).set_align(TextAlign::Left);
+    txt.font_size(24).set_soft_wrap(true).set_text_align(TextAlign::Left);
     BuildContext ctx;
     txt.mount(ctx);
-    const Font f = txt.font;
+    const Font f{.size_pt = txt.font_size(ctx)};
     const render::TextLayoutOpts o{};
     const float w_hello = render::FontEngine::measure_width("Hello", f, o);
     txt.layout(bounded(w_hello + 2.0F, 100.0F), ctx);
@@ -409,10 +411,10 @@ AURORA_TEST_CASE(single_line_full_selection_highlights_line_endpoints) {
     use_supersample_aa();
     const std::string s = "Hello World";
     Text txt(s);
-    txt.font_size(24).set_soft_wrap(false).set_align(TextAlign::Left);
+    txt.font_size(24).set_soft_wrap(false).set_text_align(TextAlign::Left);
     BuildContext ctx;
     txt.mount(ctx);
-    const Font f = txt.font;
+    const Font f{.size_pt = txt.font_size(ctx)};
     const render::TextLayoutOpts o{};
     const float full_w = render::FontEngine::measure_width(s, f, o);
     const Size sz = txt.layout(bounded(400.0F, 100.0F), ctx);
@@ -471,10 +473,10 @@ AURORA_TEST_CASE(word_wrap_per_line_endpoint_highlight) {
     use_supersample_aa();
     const std::string s = "Hello World";
     Text txt(s);
-    txt.font_size(24).set_soft_wrap(true).set_align(TextAlign::Left);
+    txt.font_size(24).set_soft_wrap(true).set_text_align(TextAlign::Left);
     BuildContext ctx;
     txt.mount(ctx);
-    const Font f = txt.font;
+    const Font f{.size_pt = txt.font_size(ctx)};
     const render::TextLayoutOpts o{};
     const float w_hello = render::FontEngine::measure_width("Hello", f, o);
     const float w_world = render::FontEngine::measure_width("World", f, o);
@@ -533,10 +535,10 @@ AURORA_TEST_CASE(justify_line_highlight_reaches_right_edge_and_gap_hits_space) {
     // 行右缘；且命中测试与拉伸后的词位一致（词间拉伸间隙归属其空格字符）。
     use_supersample_aa();
     Text txt("aa bb cccccccc");
-    txt.font_size(24).set_soft_wrap(true).set_align(TextAlign::Justify);
+    txt.font_size(24).set_soft_wrap(true).set_text_align(TextAlign::Justify);
     BuildContext ctx;
     txt.mount(ctx);
-    const Font f = txt.font;
+    const Font f{.size_pt = txt.font_size(ctx)};
     const render::TextLayoutOpts o{};
     const float w_aa = render::FontEngine::measure_width("aa", f, o);
     const float w_bb = render::FontEngine::measure_width("bb", f, o);
@@ -613,7 +615,7 @@ AURORA_TEST_CASE(dispatcher_click_focus_enables_ctrl_c_copy) {
 
     FocusManager fm;
     fm.set_root(&col);
-    Sink dispatch = [&](MouseAction action, float x, float y) -> void {
+    Sink const dispatch = [&](MouseAction action, float x, float y) -> void {
         MouseEvent e;
         e.action = action;
         e.button = MouseButton::Left;
@@ -635,13 +637,12 @@ AURORA_TEST_CASE(dispatcher_click_focus_enables_ctrl_c_copy) {
     AURORA_TEST_CHECK_EQ(t->selection().first, std::size_t{0});
     AURORA_TEST_CHECK_EQ(t->selection().second, src.size());
 
-    // Ctrl+C 的「落剪贴板」断言改走库侧**进程内**注入后端（Clipboard::install_test_backend）：
-    // Linux 的系统剪贴板由外部工具（xsel/xclip）实现，其 selection 所有权是**异步**的（xsel
-    // 二次写入依赖既有守护进程交接、xclip 常驻等待读者），内容还受各工具换行约定影响——拿它做
-    // 内容断言既非确定、也不是 aurora 自身的契约（本用例要证明的是「派发链把全文交给了剪贴板
-    // 抽象」，而不是「xsel 工作正常」）。双测试宏未开（Release：AURORA_ENABLE_DEBUG 自动 OFF）时
-    // install 返回 false，此时跳过内容断言；上面的焦点/选区断言与下面的 is_handled 断言仍生效。
-    const bool clipboard_backend_injected = Clipboard::install_test_backend();
+    // Ctrl+C 的「落剪贴板」断言改走测试框架的**进程内** memory 后端
+    // （clipboard_memory::install）：Linux 的系统剪贴板由外部工具（xsel/xclip）实现，其 selection
+    // 所有权是**异步**的（xsel 二次写入依赖既有守护进程交接、xclip 常驻等待读者），内容还受各工具
+    // 换行约定影响——拿它做内容断言既非确定、也不是 aurora 自身的契约（本用例要证明的是「派发链
+    // 把全文交给了剪贴板抽象」，而不是「xsel 工作正常」）。
+    AURORA_TEST_CHECK_TRUE(clipboard_memory::install());
 
     KeyEvent ke;
     ke.action = KeyAction::Down;
@@ -650,16 +651,10 @@ AURORA_TEST_CASE(dispatcher_click_focus_enables_ctrl_c_copy) {
     (void)EventDispatcher::dispatch(col, ke, fm);
     AURORA_TEST_CHECK_MSG(ke.is_handled, "Ctrl+C consumed by focused text");
 
-    if (clipboard_backend_injected) {
-        const auto copied = Clipboard::get_text();
-        AURORA_TEST_REQUIRE_MSG(copied.ok(), "clipboard read through the memory backend succeeds");
-        AURORA_TEST_CHECK_MSG(copied.value() == src, "full drag-selection copied to clipboard");
-        (void)Clipboard::remove_test_backend();
-    } else {
-        AURORA_TEST_TRACE(
-            "clipboard memory backend unavailable (needs AURORA_ENABLE_DEBUG + AURORA_ENABLE_TEST_HOOKS); "
-            "skipped clipboard content assertion — selection content was asserted above");
-    }
+    const auto copied = Clipboard::get_text();
+    AURORA_TEST_REQUIRE_MSG(copied.ok(), "clipboard read through the memory backend succeeds");
+    AURORA_TEST_CHECK_MSG(copied.value() == src, "full drag-selection copied to clipboard");
+    (void)clipboard_memory::remove();
 }
 
 AURORA_TEST_CASE(scaled_display_last_line_tail_fully_highlighted) {
@@ -671,10 +666,10 @@ AURORA_TEST_CASE(scaled_display_last_line_tail_fully_highlighted) {
     const std::string k_para =
         "The pale moon rises above the sleeping town, and the silver light spills gently across the rooftops.";
     Text txt(k_para);
-    txt.font_size(15).set_soft_wrap(true).set_align(TextAlign::Justify);
+    txt.font_size(15).set_soft_wrap(true).set_text_align(TextAlign::Justify);
     BuildContext ctx;
     txt.mount(ctx);
-    const Font f = txt.font;
+    const Font f{.size_pt = txt.font_size(ctx)};
     const render::TextLayoutOpts o{};
     const float full = render::FontEngine::measure_width(k_para, f, o);
     const float line_h = render::FontEngine::measure_height(f);
@@ -744,7 +739,7 @@ AURORA_TEST_CASE(per_char_display_space_hit_round_trip) {
     txt.font_size(15).set_soft_wrap(false);  // 单行，默认左对齐（line_off=0）
     BuildContext ctx;
     txt.mount(ctx);
-    const Font f = txt.font;
+    const Font f{.size_pt = txt.font_size(ctx)};
     const render::TextLayoutOpts o{};
     const float full = render::FontEngine::measure_width(k_line, f, o);
     const Size sz = txt.layout(bounded(full + 20.0F, 100.0F), ctx);

@@ -30,6 +30,7 @@
 #include "aurora/core/platform.h"
 #include "aurora/net/blocking.h"
 #include "aurora/net/detail/async_io.h"
+#include "aurora/net/detail/connectivity_probe.h"
 #include "aurora/net/detail/lookup.h"
 #include "aurora/net/detail/runtime.h"
 #include "aurora/net/poll.h"
@@ -44,9 +45,14 @@
 // 顺序是硬约束而非风格：`mstcpip.h` 里的 `tcp_keepalive` 与 `SIO_KEEPALIVE_VALS` 建在 Winsock 基础类型
 // （`u_long`、`_WSAIOW`、`IOC_IN`）之上，头自身不做包含保护性回补，故必须排在 winsock2.h 之后；
 // clang-format 的 SortIncludes 会把它们按字母序换过来，因此这一段单独关掉格式化。
+// `netioapi.h` 与 `iphlpapi.h` 提供接口表（`GetIfTable2`）与路由表（`GetIpForwardTable2`），
+// 二者建立在 Winsock 基础类型之上，故必须排在 winsock2.h 之后；字母序会把它们换过来，所以
+// 一并留在关掉格式化的这一段里。
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <mstcpip.h>
+#include <netioapi.h>
+#include <iphlpapi.h>
 // clang-format on
 #if defined(AURORA_COMPILER_MSVC) || defined(AURORA_COMPILER_CLANG_CL)
 #pragma comment(lib, "ws2_32.lib")
@@ -690,23 +696,19 @@ auto Listener::bind(const Endpoint &endpoint, int backlog) -> Result<Listener> {
     }
     // NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast)
     Listener listener;
-    listener.handle_ = to_handle(s);
-    listener.port_ = actual_port;
+    listener.handle_.store(to_handle(s));
+    listener.port_.store(actual_port);
     return listener;
 }
 
-Listener::Listener(Listener &&other) noexcept : handle_(other.handle_), port_(other.port_) {
-    other.handle_ = AURORA_INVALID_HANDLE;
-    other.port_ = 0;
-}
+Listener::Listener(Listener &&other) noexcept
+    : handle_(other.handle_.exchange(AURORA_INVALID_HANDLE)), port_(other.port_.exchange(0)) {}
 
 auto Listener::operator=(Listener &&other) noexcept -> Listener & {
     if (this != &other) {
         close();
-        handle_ = other.handle_;
-        port_ = other.port_;
-        other.handle_ = AURORA_INVALID_HANDLE;
-        other.port_ = 0;
+        handle_.store(other.handle_.exchange(AURORA_INVALID_HANDLE));
+        port_.store(other.port_.exchange(0));
     }
     return *this;
 }
@@ -714,7 +716,13 @@ auto Listener::operator=(Listener &&other) noexcept -> Listener & {
 Listener::~Listener() { close(); }
 
 auto Listener::wait_readable(std::chrono::milliseconds timeout) const -> Result<bool> {
-    const NativeSocket s = from_handle(handle_);
+    // 整段等待只用这一次快照：并发 close 换走句柄后不再重读成员，系统调用不会落到半途改变的数值上。
+    // 无效快照直接按失败口径回报：FD_SET 不接受 -1，停机路径上另一线程读到的正是这个值。
+    const std::intptr_t snapshot = handle_.load();
+    if (snapshot == AURORA_INVALID_HANDLE) {
+        return net_error(ErrorCode::NetWaitFailed, "listener closed");
+    }
+    const NativeSocket s = from_handle(snapshot);
     fd_set read_fds;
     FD_ZERO(&read_fds);
     FD_SET(s, &read_fds);
@@ -736,10 +744,15 @@ auto Listener::wait_readable(std::chrono::milliseconds timeout) const -> Result<
 }
 
 auto Listener::accept() const -> Result<StreamSocket> {
+    // 与 wait_readable 同一条快照纪律：停机期间读到无效句柄就按失败口径回报，不把 -1 交给 accept。
+    const std::intptr_t snapshot = handle_.load();
+    if (snapshot == AURORA_INVALID_HANDLE) {
+        return net_error(ErrorCode::NetAcceptFailed, "listener closed");
+    }
     sockaddr_storage peer{};
     AddrLen name_len = sizeof(peer);
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
-    const NativeSocket client = ::accept(from_handle(handle_), reinterpret_cast<sockaddr *>(&peer), &name_len);
+    const NativeSocket client = ::accept(from_handle(snapshot), reinterpret_cast<sockaddr *>(&peer), &name_len);
     if (native_is_invalid(client)) {
         return net_error(ErrorCode::NetAcceptFailed, "accept");
     }
@@ -747,19 +760,20 @@ auto Listener::accept() const -> Result<StreamSocket> {
 }
 
 auto Listener::close() -> void {
-    if (!is_valid()) {
+    // 一次原子交换兼做「判有效」与「发布无效」：并发调用中恰有一个拿到真实句柄去关，其余直接返回。
+    // 先 shutdown 再 close：唤醒另一线程可能阻塞其中的 wait_readable/accept（InspectorServer
+    // 停机协议）。shutdown 与 close 全程只用这次取出的快照，不重读已被发布的成员。
+    const std::intptr_t previous = handle_.exchange(AURORA_INVALID_HANDLE);
+    if (previous == AURORA_INVALID_HANDLE) {
         return;
     }
-    // 先 shutdown 再 close：唤醒另一线程可能阻塞其中的 wait_readable/accept（InspectorServer
-    // 停机协议）。
 #ifdef AURORA_PLATFORM_WINDOWS
-    (void)::shutdown(from_handle(handle_), SD_BOTH);
+    (void)::shutdown(from_handle(previous), SD_BOTH);
 #else
-    (void)::shutdown(from_handle(handle_), SHUT_RDWR);
+    (void)::shutdown(from_handle(previous), SHUT_RDWR);
 #endif
-    native_close(from_handle(handle_));
-    handle_ = AURORA_INVALID_HANDLE;
-    port_ = 0;
+    native_close(from_handle(previous));
+    port_.store(0);
 }
 
 }  // namespace blocking
@@ -1827,5 +1841,97 @@ auto detail::set_broadcast_allowed(std::intptr_t handle, bool enabled) -> Result
     // NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast)
     return Result<void>{};
 }
+
+#ifdef AURORA_PLATFORM_WINDOWS
+namespace {
+
+/// @brief 在接口表里按索引定位一行（找不到即「读不到」，不猜）。
+/// @param table `GetIfTable2` 交出的接口表。
+/// @param index 目标接口索引。
+/// @return 行指针；未命中为空指针。
+[[nodiscard]] auto find_interface_row(const MIB_IF_TABLE2 *table, NET_IFINDEX index) -> const MIB_IF_ROW2 * {
+    if (table == nullptr) {
+        return nullptr;
+    }
+    for (ULONG slot = 0; slot < table->NumEntries; ++slot) {
+        // Win32 接口表以柔性数组收尾，只能按运行时下标访问（无 at() 可用）。
+        if (table->Table[slot].InterfaceIndex == index) {  // NOLINT(*-pro-bounds-constant-array-index)
+            return &table->Table[slot];  // NOLINT(*-pro-bounds-constant-array-index)
+        }
+    }
+    return nullptr;
+}
+
+}  // namespace
+#endif
+
+#ifdef AURORA_PLATFORM_WINDOWS
+namespace detail {
+
+/// @brief 链路态的 Windows 采集腿：问路由表与接口表，只交出一枚无平台类型的读数。
+///
+/// 查询落在**本文件**是刻意的：`<winsock2.h>` 及其所需的 `<netioapi.h>` / `<iphlpapi.h>`
+/// 在仓内只有 `socket.cpp` 一个落点。若把查询写进采集腿，`iphlpapi` 的平台头会在别处
+/// 再开一次口子，那条「平台 socket 头唯一落点」的不变量就为链路态破了例。
+///
+/// 判据（与另两条腿同一句口径）：存在一条**经非回环、operational 接口的缺省路由**。
+/// 目的前缀长必须为零；`Loopback` 行与 `IF_TYPE_SOFTWARE_LOOPBACK` 接口一律不算；
+/// 接口 `OperStatus` 须为 `IfOperStatusUp`。任一 API 失败即回「读不到」。
+///
+/// 不用 `GetNetworkConnectivityHint`：它要求 build 19041+，且本机 MinGW 头没有声明；
+/// 路由 / 接口表自 Vista 起可用，覆盖面更宽。链接面由 CMake 在 Windows 顶层补
+/// `iphlpapi`，不靠 `#pragma comment(lib, ...)`（MinGW 不认，单靠它会漏链）。
+/// @return 有 / 没有 / 读不到（空值）。
+/// @note Thread: 只在引擎线程调用（与采集腿的调用点同）；API 全部同步返回。
+/// @note Side-effects: 读 OS 路由与接口表；不建连接、不发包、不做名字解析。
+auto probe_default_route_win32() -> std::optional<bool> {
+    MIB_IF_TABLE2 *interfaces = nullptr;
+    if (GetIfTable2(&interfaces) != NO_ERROR || interfaces == nullptr) {
+        return std::nullopt;  // 接口表读不到 ⇒ 无从判决
+    }
+    MIB_IPFORWARD_TABLE2 *routes = nullptr;
+    const auto route_status = GetIpForwardTable2(AF_UNSPEC, &routes);
+    if (route_status != NO_ERROR || routes == nullptr) {
+        FreeMibTable(interfaces);
+        return std::nullopt;
+    }
+    bool operational = false;
+    bool unreadable = false;
+    for (ULONG index = 0; index < routes->NumEntries; ++index) {
+        const auto &route = routes->Table[index];  // NOLINT(*-pro-bounds-constant-array-index)
+        if (route.Loopback != FALSE || route.DestinationPrefix.PrefixLength != 0U) {
+            continue;  // 回环 / 非缺省路由
+        }
+        const auto family = route.DestinationPrefix.Prefix.si_family;
+        if (family != AF_INET && family != AF_INET6) {
+            continue;  // 只认 IPv4 / IPv6 两族
+        }
+        const auto *const row = find_interface_row(interfaces, route.InterfaceIndex);
+        if (row == nullptr) {
+            unreadable = true;
+            continue;  // 有路由但接口不在表里 ⇒ 无从判决
+        }
+        if (row->Type == IF_TYPE_SOFTWARE_LOOPBACK) {
+            continue;
+        }
+        if (row->OperStatus == IfOperStatusUp) {
+            operational = true;
+            break;  // 一条可用缺省路由即足以证明「能出去」
+        }
+    }
+    FreeMibTable(routes);
+    FreeMibTable(interfaces);
+    if (operational) {
+        return true;
+    }
+    if (unreadable) {
+        return std::nullopt;  // 有路由而状态读不到 ⇒ 如实回「读不到」
+    }
+    return false;  // 表都可读却一条缺省路由都没有 ⇒ 明确离线
+}
+
+}  // namespace detail
+
+#endif
 
 }  // namespace aurora::net

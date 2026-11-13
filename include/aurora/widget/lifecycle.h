@@ -101,7 +101,7 @@ class Lifecycle : public SingleChild {
 
     /// @brief 信号收集：空操作——Lifecycle 无自有响应式信号，子节点信号在其 mount 时独立收集。
     /// @param out 输出向量（本控件不追加任何信号）。
-    auto collect_signals(std::vector<SignalViewBase *> &out) -> void override {
+    auto collect_signals(StateSink &out) -> void override {
         (void)out;  // Lifecycle 无自有响应式信号；子节点信号在其 mount 时独立收集
     }
 

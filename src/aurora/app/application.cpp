@@ -6,9 +6,11 @@
 #include <utility>
 
 #include "aurora/app/detail/file_picker.h"
+#include "aurora/app/native_menu_bar.h"  // 把应用级命令注册表接到原生菜单栏门面（点击路由出口）
 #include "aurora/app/window_geometry.h"
 #include "aurora/core/log.h"
 #include "aurora/media/audio.h"
+#include "aurora/window/platform.h"  // os_color_scheme()：refresh_os_color_scheme 的显式查询腿
 
 namespace aurora {
 
@@ -88,6 +90,9 @@ auto apply_host_geometry(WindowHost &host, const WindowGeometry &g, const std::s
 // =============================================================================
 
 auto Application::register_host(Scene scene, std::unique_ptr<Window> window, const WindowOptions &opts) -> WindowId {
+    // 把应用级命令注册表接到原生菜单栏门面：菜单项点击经此后按 id 反查命令（原生与自绘路径共用出口）。
+    // 幂等：每登记一个宿主都重设同一指针（commands_ 是全应用唯一真源），开销仅一次赋值。
+    NativeMenuBar::instance().set_command_registry(&commands_);
     const WindowId id = next_id_++;
     // 帧统计归属：登记第二个窗口起，全部宿主切到自有实例（含已登记的），避免多窗数据互相污染；
     // 单窗口用法刻意保留写入全局单例的历史语义（既有 PerfOverlay / bench / 性能集成测试直读之）。
@@ -134,6 +139,10 @@ auto Application::register_host(Scene scene, std::unique_ptr<Window> window, con
             on_window_mode_changed(m);
         }
     });
+    // OS 明暗偏好上报：**逐宿主全装**（与上面两枚只装主窗不同）。OS 档位是进程级事实，
+    // N 扇窗各收一次同值切换应在应用级只算一次通知，去重由 `on_os_color_scheme_changed`
+    // 的先比后设完成；主窗投影的旧口径在此不适用——非主窗收到切换同样要刷新应用级读点。
+    raw->set_os_scheme_sink([this](ColorScheme s) -> void { on_os_color_scheme_changed(s); });
     if (main_host_ == nullptr) {
         main_host_ = raw;  // 首个登记的宿主即主窗口
     }
@@ -192,6 +201,13 @@ auto Application::set_main_window(WindowId id) -> void {
     if (auto *h = window_host(id)) {
         main_host_ = h;  // 未知 id 为 no-op，保持当前主窗口
     }
+}
+
+auto Application::refresh_os_color_scheme() -> void {
+    // 显式 seed：现读一次系统偏好，经与后端上报**同一条**聚合出口写入应用级 State。
+    // 走同一条出口是为了两条口径自动成立——同值不通知（先比后设）与命令式回调同步触发；
+    // 本函数因此幂等，重复调用只在档位真的变了时才发信号。
+    on_os_color_scheme_changed(aurora::os_color_scheme());
 }
 
 // =============================================================================
@@ -411,20 +427,20 @@ auto Application::wait_once(const std::chrono::steady_clock::time_point &frame_s
     if (!opts_.power_saving) {
         return;  // 关闭省电：退回旧忙轮询行为
     }
-    {
-        std::scoped_lock lk(posted_mutex_);
-        if (!posted_.empty()) {
-            return;  // 已有待排水的回投工作：不睡，立即进入下一帧
-        }
+    if (MainQueue::has_pending()) {
+        return;  // 已有待排水的回投工作：不睡，立即进入下一帧
     }
     const double budget_ms = opts_.max_fps > 0 ? 1000.0 / opts_.max_fps : 0.0;
     const double elapsed_ms =
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - frame_start).count();
     // 跨宿主聚合：任一宿主要求「不等待」→ 立即返回；否则取最小正值；全部为「无限」才无限等待。
     // 不能直接对所有返回值取 min：`<0`（无限）在数值上最小却语义最宽松，会被误选。
+    // 解冻重挂与登记动画同等计入：`set_time_scale(0 → >0)` 只留下一位请求，控件自驱的在途标志
+    // 是私有的、全局入口触达不到，就靠这一帧让各控件照常 `tick_gestures` 后自行续跑。
+    const bool anim_active = anim_.has_active() || anim_.take_rearm_request();
     double wait_ms = -1.0;
     for (const auto &h : hosts_) {
-        const double w = h->decide_wait(budget_ms, anim_.has_active(), sched_.next_deadline_ms(), elapsed_ms);
+        const double w = h->decide_wait(budget_ms, anim_active, sched_.next_deadline_ms(), elapsed_ms);
         if (w == 0.0) {
             wait_ms = 0.0;
             break;
@@ -577,29 +593,32 @@ auto Application::run_modal(const std::function<bool()> &done) -> void {
     // Application、TestController 或「无」，置空式收尾会把外层打成半身不遂。
     Scheduler *const prev_sched = Scheduler::current();
     Animator *const prev_anim = Animator::current();
-    std::function<void(std::function<void()>)> prev_poster;
-    {
-        std::scoped_lock lk(detail::main_poster_mutex());
-        prev_poster = detail::main_poster();
-    }
     FocusManager *const prev_focus = current_focus_manager();
     const StrictMode prev_strict = aurora::strict_mode();
     Application *const prev_app = file_dialog::detail::current_application_slot();
+    // 值班复用 vs 自持：模态多在外层 `run()` 在岗时进入（租约已由 loop_begin 持有，直接复用同一
+    // 全局队列，`step_frame` 每帧排水）；仅当无在岗（独立驱动/选择器测试）才为模态期领取一枚自有
+    // 租约，退出按 `loop_end` 同口径收尾。跨线程回投的投递不再各循环自建队列，杜绝抢占歧义。
+    std::optional<MainQueue::Lease> modal_duty;
+    if (!MainQueue::has_on_duty()) {
+        modal_duty = MainQueue::on_duty([this] { request_wake_all(); });
+        if (!modal_duty.has_value()) {
+            // 单主线程下 `has_on_duty` 到 `on_duty` 无竞态，取不到即逻辑不变量被破坏。
+            on_strict_failure("Application::run_modal: main queue duty unexpectedly taken at modal entry");
+        }
+    }
     // RAII 还原：即使 step_frame 抛出（各步均有 fail-open 契约，理论不可达）也归还单例。
     struct SingletonRestore {  // NOLINT(cppcoreguidelines-special-member-functions): 局部 RAII
                                // 还原器，按引用捕获现场、不复制
         Scheduler *sched;
         Animator *anim;
-        std::function<void(std::function<void()>)> poster;
         FocusManager *focus;
         StrictMode strict;
         Application *app;
-        // 抛出面：set_main_poster 体内是 std::function 移动赋值（条件 noexcept）+ 加锁，
-        // 其余四项为平凡指针 / 枚举赋值；模态收尾期无分配需求，实际不可抛
+        // 抛出面：其余四项为平凡指针 / 枚举赋值；模态收尾期无分配需求，实际不可抛
         // （同 ScrollStorage::Scope::~Scope 的处置口径）。
         // NOLINTNEXTLINE(bugprone-exception-escape)
         ~SingletonRestore() {
-            Task<bool>::set_main_poster(std::move(poster));  // 空 poster = 卸载（与 loop_end 同口径）
             Scheduler::set_current(sched);
             Animator::set_current(anim);
             set_current_focus_manager(focus);
@@ -607,22 +626,10 @@ auto Application::run_modal(const std::function<bool()> &done) -> void {
             file_dialog::detail::current_application_slot() = app;
             file_dialog::detail::modal_dispatch_suppressed() = false;
         }
-    } restore{.sched = prev_sched,
-              .anim = prev_anim,
-              .poster = std::move(prev_poster),
-              .focus = prev_focus,
-              .strict = prev_strict,
-              .app = prev_app};
+    } restore{.sched = prev_sched, .anim = prev_anim, .focus = prev_focus, .strict = prev_strict, .app = prev_app};
 
     Scheduler::set_current(&sched_);
     Animator::set_current(&anim_);
-    Task<bool>::set_main_poster([this](std::function<void()> fn) -> void {
-        {
-            std::scoped_lock lk(posted_mutex_);
-            posted_.push_back(std::move(fn));
-        }
-        request_wake_all();
-    });
     file_dialog::detail::current_application_slot() = this;
     file_dialog::detail::modal_dispatch_suppressed() = true;
     ++modal_depth_;
@@ -635,8 +642,15 @@ auto Application::run_modal(const std::function<bool()> &done) -> void {
         wait_once(frame_start);
     }
 
+    // 自持租约（无外层在岗的独立模态）：按 loop_end 同口径收尾——先还（epoch→0）、再打烊窗口内排尽；
+    // 复用作废旧租约则把残留留给外层循环排空（与旧「模态不改投外层」一致）。
+    if (modal_duty.has_value()) {
+        modal_duty->release();
+        const auto closing = MainQueue::closing_scope();
+        drain_posted();
+    }
     --modal_depth_;
-    // 单例还原由 restore 析构完成（模态期安装的四个写口 + 入口快照逐项归还）。
+    // 单例还原由 restore 析构完成（模态期安装的写口 + 入口快照逐项归还）。
 }
 
 }  // namespace aurora

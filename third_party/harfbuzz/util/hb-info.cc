@@ -143,7 +143,7 @@ struct info_t :
     GOptionEntry entries[] =
     {
       {"quiet",		'q', G_OPTION_FLAG_REVERSE, G_OPTION_ARG_NONE,	&this->verbose,	"Generate machine-readable output",	nullptr},
-      {G_OPTION_REMAINING,	0, G_OPTION_FLAG_IN_MAIN,
+      {G_OPTION_REMAINING,	0, G_OPTION_FLAG_IN_MAIN | G_OPTION_FLAG_FILENAME,
 				G_OPTION_ARG_CALLBACK,	(gpointer) &collect_rest,	nullptr,	"[FONT-FILE]"},
       {nullptr}
     };
@@ -860,9 +860,12 @@ retry:
       for (hb_codepoint_t u = HB_SET_VALUE_INVALID;
 	   hb_set_next (unicodes, &u);)
       {
+	/* A Default UVS range may list a codepoint that has no nominal
+	 * mapping, and a Non-Default UVS mapping may point to glyph 0;
+	 * both are collected above but do not resolve to a glyph. */
 	hb_codepoint_t gid = 0;
-	HB_UNUSED bool b = hb_font_get_variation_glyph (font, u, vs, &gid);
-	assert (b);
+	if (!hb_font_get_variation_glyph (font, u, vs, &gid))
+	  continue;
 
 	char glyphname[128];
 	hb_font_glyph_to_string (font, gid,
@@ -1122,6 +1125,14 @@ retry:
 
 	for (unsigned feature_index = 0; feature_index < feature_count; feature_index++)
 	{
+	  hb_tag_t feature_tag = HB_TAG_NONE;
+	  unsigned f_count = 1;
+	  hb_ot_layout_table_get_feature_tags (face, table_tag,
+					       feature_array[feature_index],
+					       &f_count, &feature_tag);
+	  if (!f_count)
+	    continue; /* LangSys references a feature the FeatureList doesn't have. */
+
 	  hb_ot_name_id_t label_id;
 
 	  hb_ot_layout_feature_get_name_ids (face,
@@ -1142,11 +1153,6 @@ retry:
 
 	  printf ("	");
 	  if (verbose) printf ("Feature: ");
-	  hb_tag_t feature_tag;
-	  unsigned f_count = 1;
-	  hb_ot_layout_table_get_feature_tags (face, table_tag,
-					       feature_array[feature_index],
-					       &f_count, &feature_tag);
 	  printf ("%c%c%c%c", HB_UNTAG (feature_tag));
 
 	  if (*name)
@@ -1437,5 +1443,6 @@ retry:
 int
 main (int argc, char **argv)
 {
-  return batch_main<info_t> (argc, argv);
+  argv_t args (argc, argv);
+  return batch_main<info_t> (args.argc, args.argv);
 }

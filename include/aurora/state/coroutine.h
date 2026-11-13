@@ -46,8 +46,9 @@ struct CoroShared<void> {
 /// 协程路径）。
 ///
 /// 与回调式 `au::async().then()` 并存：`co_await au::co_async(fn)` 在后台线程池执行 `fn`，
-/// 续体（coroutine 后续代码）经主线程投递器恢复到主线程（无 poster 时由 worker 直接 resume，
-/// 语义等同回调的直接调用）；`fn` 返回 `T` 或 `Result<T>`，`co_await` 表达式求得 `Result<ValueT>`。
+/// 续体（coroutine 后续代码）经进程级唯一队列恢复到值班主线程（发起需循环在场；落地晚于打烊
+/// = resume 被「打烊取消」，协程随循环终结，绝不就地跨线程恢复）；`fn` 返回 `T` 或 `Result<T>`，
+/// `co_await` 表达式求得 `Result<ValueT>`。
 ///
 /// 典型用法：
 /// @code
@@ -168,7 +169,7 @@ class CoroTask {
     ///
     /// 三条契约（与 `Task<T>::on_cancel` 同构）：只保留最后登记的一枚（传空即撤销登记）；至多触发一次；
     /// **登记时帧已收尾则在当前线程立即触发**，不留「登记即失效」的窗口。观察者跑在帧收尾的那条线程上
-    /// （经主线程投递器恢复的协程即主线程），不得阻塞。
+    /// （经进程级唯一队列恢复的协程即主线程；无挂起点帧在创建表达式内即收尾，则就在创建线程），不得阻塞。
     ///
     /// 本入口存在的理由：`CoroTask` 的 promise 永不首挂也不终挂，帧只能靠 `resume` 前进，结果历来只有
     /// `is_done()` 一条问法——轮询。需要「结束即交付」的适配层（把一次交换交付成 `Task`）因此不必再
@@ -292,13 +293,16 @@ struct CoAwaitable {
     /// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
     [[nodiscard]] auto await_ready() const -> bool { return false; }  // 始终挂起，交线程池执行
 
-    /// @brief awaiter 协议：把 `fn` 投入线程池，完成后经主线程投递器恢复续体。
-    /// @param handle 待恢复的协程句柄；`fn` 落值后由 poster 回主线程（无 poster 时 worker 直接 resume）。
+    /// @brief awaiter 协议：把 `fn` 投入线程池，完成后经进程级唯一队列恢复续体（携带发起世代）。
+    /// @param handle 待恢复的协程句柄；`fn` 落值后按 `await_suspend` 时捕获的值班世代回主线程；
+    ///               若续体晚于打烊落地（世代失配），resume 被「打烊取消」——协程随循环终结，
+    ///               绝不在承接 worker 线程就地 resume（跨线程恢复帧正是要堵的形态）。
     auto await_suspend(std::coroutine_handle<> handle) -> void {
-        // 把 fn 投入线程池；完成后经主线程投递器恢复续体（无 poster 时由 worker 直接 resume）。
-        ThreadPool::default_pool().execute([this, handle]() mutable -> void {
+        // `await_suspend` 跑在发起协程的（主）线程上：此刻捕获在岗世代，供 worker 完成时回投比对。
+        const auto epoch = MainQueue::current_epoch();
+        ThreadPool::default_pool().execute([this, handle, epoch]() mutable -> void {
             value_ = detail::invoke_safe(std::move(f_));
-            detail::post_to_main([handle]() mutable -> void { handle.resume(); });
+            MainQueue::post([handle]() mutable -> void { handle.resume(); }, epoch);
         });
     }
 

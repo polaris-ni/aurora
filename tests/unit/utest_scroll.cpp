@@ -4,30 +4,39 @@
 /// scroll_by 方向与 step 乘子、偏移钳制、程序化 set_offset 的夹取与语义（越窗跳转仍取到正确内容带）、
 /// 无子项退化、初始化列表取首项、step 序列化往返、滚轮余量回传（嵌套滚动协调）、
 /// snap/paging 收位短滑动（含 Center 对齐与半页回弹）、reduce-motion 直落端点、
-/// scroll_to 的即时/动画/夹取语义、offset_signal 随各通道发布、snap 三属性自描述与序列化往返，
+/// scroll_to 的即时/动画/夹取语义、offset_signal 随各通道发布、六行属性表（含 overscan）自描述、
+/// 序列化往返与「未表态不落盘」纪律，
 /// 拖入自动滚边的控件级接线（Over 落点在边缘带内按帧推进 offset、方向跟落点所在带、带外 /
 /// nullopt / 已到边缘即收车、帧钟为假想钟），
 /// 以及 scroll_regression 段（计数类门槛 G-5 至 G-8，阈值取自 tools/check/perf_gates.json，
-/// 仅在 AURORA_ENABLE_PROFILING=ON 时生效，否则注册为 skip）
+/// 仅在 AURORA_ENABLE_PROFILING=ON 时生效，否则注册为 skip）、
+/// 应用内全局时间缩放的 Scroll 消费点（到位帧数按倍率折半且终值不变 / 冻结段零重绘请求且解冻续跑 /
+/// 近边缘自动滚边不受倍率影响的反向项）
 
 #include <chrono>
 #include <fstream>
+#include <functional>
 #include <memory>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
+#include "aurora/animation/animator.h"
 #include "aurora/app/scroll_storage.h"
 #include "aurora/core/accessibility.h"
 #include "aurora/event/dispatcher.h"
 #include "aurora/layout/layout_engine.h"
 #include "aurora/perf/counters.h"
 #include "aurora/perf/scroll_bench.h"
+#include "aurora/theming/theme.h"
 #include "aurora/widget/containers.h"
+#include "aurora/widget/detail/scrollbar.h"
 #include "aurora/widget/scroll.h"
 #include "framework/aurora_test.h"
 #include "framework/json_access.h"
 #include "paths.h"
+#include "support/animation_fixture.h"
 
 namespace aurora::test_cases::utest_scroll {
 using aurora::testing::require_field;
@@ -51,6 +60,32 @@ class FixedBox final : public Widget {
   private:
     float w_;
     float h_;
+};
+
+/// 宽度相关哑控件：自然内容总宽固定，按可用宽度折算换行行数（行高固定）。
+/// 越窄换行越多、内容越高——用于验证经典档「满宽放得下时不凭空出条」（判据二反向项）。
+class WrappingBox final : public Widget {
+  public:
+    WrappingBox(float content_w, float line_h) : content_w_(content_w), line_h_(line_h) {}
+
+    [[nodiscard]] auto type_name() const -> const char * override { return "WrappingBox"; }
+
+  protected:
+    auto on_layout(const Constraints &c, const BuildContext & /*ctx*/) -> Size override {
+        const float w = c.max.width;
+        const float eff = std::max(1.0F, w);
+        int lines = static_cast<int>(content_w_ / eff);
+        if (content_w_ - (static_cast<float>(lines) * eff) > 1e-3F) {
+            ++lines;
+        }
+        const float h = static_cast<float>(lines) * line_h_;
+        return c.constrain(Size{.width = w, .height = h});
+    }
+    auto on_paint(Painter & /*p*/, const Rect & /*bounds*/, const BuildContext & /*ctx*/) -> void override {}
+
+  private:
+    float content_w_;
+    float line_h_;
 };
 
 auto box(float w, float h) -> Node { return Node{std::make_shared<FixedBox>(w, h)}; }
@@ -114,6 +149,80 @@ auto pump(Scroll &s, int frames) -> void {
 /// @brief 等滑动走完：滑满时长 150ms + 余量。
 auto settle(Scroll &s) -> void { pump(s, 16); }
 
+/// @brief 缩放 / 冻结判据的固定帧步长：62500µs = 1/16 秒（二进制精确，跨倍率帧数可整除推导）。
+constexpr auto AURORA_SCALE_FRAME_STEP = std::chrono::microseconds(62500);
+
+/// @brief 按固定帧步长推进一帧（假想帧钟，不读墙钟）——收位滑动的逐帧入口。
+/// @tparam WidgetT 被驱动的控件类型（Scroll / LazyList / GridView / PullToRefresh 同形）
+template <typename WidgetT>
+auto pump_scaled_frame(WidgetT &w) -> void {
+    frame_clock() += AURORA_SCALE_FRAME_STEP;
+    w.tick(frame_clock());
+}
+
+/// @brief 按固定帧步长推进到收位滑动结束（`is_gliding()` 转假），返回真正喂进去的帧数。
+/// @tparam WidgetT 被驱动的控件类型（须有 `tick(time_point)` 与 `is_gliding()`）。
+/// @param w 目标控件。
+/// @param budget 帧预算上限（防呆：正常路径 1–3 帧，超预算即记账失败）。
+/// @return 到位用掉的帧数；超预算时返回 `budget + 1`（并已就地记一次失败）。
+template <typename WidgetT>
+auto pump_until_glide_ends(WidgetT &w, int budget = 32) -> int {
+    for (int n = 1; n <= budget; ++n) {
+        pump_scaled_frame(w);
+        if (!w.is_gliding()) {
+            return n;
+        }
+    }
+    AURORA_TEST_FAIL("snap glide never finished within the frame budget");
+    return budget + 1;
+}
+
+/// @brief 到位帧数的推导模型（倍率只乘**一层**）：`ScrollGlide` 累计满 0.15 秒即刻位，每帧步长 1/16 秒。
+///
+/// 1x / 2x / 4x 依次为 3 / 2 / 1 帧（0.0625、0.125、0.1875 越线）。若消费点与 `scaled_frame_dt`
+/// 两层都乘，倍率会变成平方：2x 档每帧 0.25 秒 ⇒ 只需 1 帧，与下表的 2 帧不符。
+/// @param scale `Animator::set_time_scale` 的倍率（调用方须传正值）。
+/// @return 从滑动起步（elapsed 已归零）到收位所需的固定步长帧数。
+constexpr auto expected_glide_frames(double scale) -> int {
+    constexpr double frame_seconds = 1.0 / 16.0;  // 与 `AURORA_SCALE_FRAME_STEP` 同值的秒数
+    constexpr double duration_seconds = 0.15;  // `ScrollGlide::default_duration_s()`
+    double elapsed = 0.0;
+    for (int n = 1; n <= 64; ++n) {
+        elapsed += frame_seconds * scale;
+        if (elapsed >= duration_seconds) {
+            return n;
+        }
+    }
+    return 0;
+}
+
+/// @brief 重绘请求计数器：作用域内把控件的 `on_dirty` 换成计数回调，出作用域还原原回调。
+///
+/// `Widget::request_frame` 一定会调用挂在控件自身的 `on_dirty`（即便 `layout_parent_` 为空），
+/// 所以它是「本段里请求了多少帧重绘」的直接观测量——判据 11(b) 的「冻结不空转」就落在这个计数上。
+class ScopedDirtyCounter final {
+  public:
+    /// @brief 接上计数回调并保存此前挂在 `on_dirty` 上的回调（通常为空）。
+    /// @param w 观察目标控件（非拥有引用，须比本对象存活更久）。
+    explicit ScopedDirtyCounter(Widget &w) : widget_(w), saved_(std::move(w.on_dirty)) {
+        w.on_dirty = [this](bool /*layout*/) -> void { ++requests_; };
+    }
+    ScopedDirtyCounter(const ScopedDirtyCounter &) = delete;
+    auto operator=(const ScopedDirtyCounter &) -> ScopedDirtyCounter & = delete;
+    ScopedDirtyCounter(ScopedDirtyCounter &&) = delete;
+    auto operator=(ScopedDirtyCounter &&) -> ScopedDirtyCounter & = delete;
+    ~ScopedDirtyCounter() { widget_.on_dirty = std::move(saved_); }
+
+    /// @brief 本作用域内累计的重绘请求数。
+    /// @return `on_dirty` 被调用的次数。
+    [[nodiscard]] auto count() const -> int { return requests_; }
+
+  private:
+    Widget &widget_;
+    std::function<void(bool)> saved_;
+    int requests_ = 0;
+};
+
 /// @brief reduce-motion 守卫：作用域内开启，离开时复原进程级设置（单例，测试须自清）。
 class ReduceMotionGuard final {
   public:
@@ -142,10 +251,8 @@ auto make_regression_tree() -> Node {
     for (int i = 0; i < 40; ++i) {
         rows.emplace_back(box(300.0F, 40.0F));
     }
-    auto col = std::make_shared<Column>(ColumnProps{.children = std::move(rows)});
-    ScrollProps props;
-    props.child = Node{std::move(col)};
-    return Node{std::make_shared<Scroll>(props)};
+    auto col = std::make_shared<Column>(std::move(rows));
+    return Node{std::make_shared<Scroll>(Node{std::move(col)})};
 }
 
 /// @brief 取 `tools/check/perf_gates.json` 中指定 id 的门槛阈值。
@@ -154,7 +261,7 @@ auto make_regression_tree() -> Node {
 /// 否则登记册被删空后断言会静默变成空转。
 auto gate_threshold(const char *id) -> double {
     const std::string path = aurora::testing::paths::under_repo("tools/check/perf_gates.json");
-    std::ifstream in(path, std::ios::binary);
+    std::ifstream const in(path, std::ios::binary);
     AURORA_TEST_REQUIRE_MSG(in.good(), "perf_gates.json must be readable: " + path);
     std::ostringstream ss;
     ss << in.rdbuf();
@@ -230,7 +337,7 @@ AURORA_TEST_CASE(restore_key_restores_offset_on_first_scrollable_layout) {
     // 第一次「会话」：滚动后位置写入注册表。
     {
         Scroll s;
-        s.restore_key = "demo.feed";
+        s.set_restore_key("demo.feed");
         s.add(box(100.0F, 400.0F));
         LayoutEngine::layout(s, bounded(100.0F, 100.0F));
         AURORA_TEST_CHECK_TRUE(s.set_offset(200.0F));
@@ -240,7 +347,7 @@ AURORA_TEST_CASE(restore_key_restores_offset_on_first_scrollable_layout) {
     // 重建同键控件（新实例）：首次可滚动布局即恢复，无需外部介入。
     {
         Scroll s;
-        s.restore_key = "demo.feed";
+        s.set_restore_key("demo.feed");
         s.add(box(100.0F, 400.0F));
         AURORA_TEST_CHECK_NEAR(s.offset_y(), 0.0F, 1e-4F);
         LayoutEngine::layout(s, bounded(100.0F, 100.0F));
@@ -265,7 +372,7 @@ AURORA_TEST_CASE(serialized_offset_round_trips_and_beats_restore_key) {
     storage.write("k", 250.0F);  // 注册表内已有记录
 
     Scroll restored;
-    restored.restore_key = "k";
+    restored.set_restore_key("k");
     restored.add(box(100.0F, 400.0F));
     LayoutEngine::layout(restored, bounded(100.0F, 100.0F));
     AURORA_TEST_CHECK_NEAR(restored.offset_y(), 250.0F, 1e-4F);  // 键恢复
@@ -277,7 +384,7 @@ AURORA_TEST_CASE(serialized_offset_round_trips_and_beats_restore_key) {
 
     // 显式反序列化的 offset 优先于键恢复。
     Scroll explicit_scroll;
-    explicit_scroll.restore_key = "k";
+    explicit_scroll.set_restore_key("k");
     explicit_scroll.add(box(100.0F, 400.0F));
     Json patch = Json::object();
     patch.set("offset", 30.0F);
@@ -288,10 +395,10 @@ AURORA_TEST_CASE(serialized_offset_round_trips_and_beats_restore_key) {
 }
 
 AURORA_TEST_CASE(default_scroll_invariants) {
-    Scroll s;
+    Scroll const s;
     AURORA_TEST_CHECK_EQ(std::string{s.type_name()}, "Scroll");
-    AURORA_TEST_CHECK_NEAR(s.step, 16.0F, 1e-4F);
-    AURORA_TEST_CHECK_NEAR(s.overscan, 1.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(s.step(), 16.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(s.overscan(), 1.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(s.offset_y(), 0.0F, 1e-4F);
     // Scroll 自管离屏内容缓冲，禁用框架 DL 缓存。
     AURORA_TEST_CHECK_FALSE(s.can_cache_display_list());
@@ -303,12 +410,16 @@ AURORA_TEST_CASE(default_scroll_invariants) {
     AURORA_TEST_REQUIRE_NOT_NULL(step);
     AURORA_TEST_CHECK_EQ(std::string{step->type}, "float");
     AURORA_TEST_CHECK_EQ(std::string{step->default_value}, "16.0");
+    const PropDescriptor *overscan = find_prop(d, "overscan");
+    AURORA_TEST_REQUIRE_NOT_NULL(overscan);
+    AURORA_TEST_CHECK_EQ(std::string{overscan->type}, "float");
+    AURORA_TEST_CHECK_EQ(std::string{overscan->default_value}, "1.0");
     AURORA_TEST_CHECK_EQ(std::string{s.describe().name}, "Scroll");
 }
 
 AURORA_TEST_CASE(content_smaller_than_viewport_never_scrolls) {
     // 内容 100 < 视口 200：尺寸取视口，任意方向滚动都停在 0。
-    Scroll s{ScrollProps{.child = box(300.0F, 100.0F)}};
+    Scroll s{box(300.0F, 100.0F)};
     LayoutEngine::layout(s, bounded(300.0F, 200.0F));
     AURORA_TEST_CHECK_NEAR(s.size().width, 300.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(s.size().height, 200.0F, 1e-4F);
@@ -320,7 +431,7 @@ AURORA_TEST_CASE(content_smaller_than_viewport_never_scrolls) {
 
 AURORA_TEST_CASE(overflowing_content_takes_viewport_and_clamps_width) {
     // 内容自然宽 1000 被内容约束（min width = 视口宽）钳到 300，高度 800 不受视口限制。
-    Scroll s{ScrollProps{.child = box(1000.0F, 800.0F)}};
+    Scroll s{box(1000.0F, 800.0F)};
     LayoutEngine::layout(s, bounded(300.0F, 200.0F));
     AURORA_TEST_CHECK_NEAR(s.size().width, 300.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(s.size().height, 200.0F, 1e-4F);
@@ -328,7 +439,7 @@ AURORA_TEST_CASE(overflowing_content_takes_viewport_and_clamps_width) {
 
 AURORA_TEST_CASE(scroll_by_direction_and_step_multiplier) {
     // delta_y 为负（向下滚动）时 offset 增大 |delta|*step；正值（向上滚动）减小。
-    Scroll s{ScrollProps{.child = box(300.0F, 800.0F), .step = 10.0F}};
+    Scroll s{box(300.0F, 800.0F), ScrollProps().set_step(10.0F)};
     LayoutEngine::layout(s, bounded(300.0F, 200.0F));
     s.scroll_by(-30.0F);
     AURORA_TEST_CHECK_NEAR(s.offset_y(), 300.0F, 1e-4F);
@@ -338,7 +449,7 @@ AURORA_TEST_CASE(scroll_by_direction_and_step_multiplier) {
 
 AURORA_TEST_CASE(scroll_offset_clamps_to_content_range) {
     // 可滚范围 = 内容高 800 - 视口高 200 = 600，双向越界均被钳制。
-    Scroll s{ScrollProps{.child = box(300.0F, 800.0F), .step = 1.0F}};
+    Scroll s{box(300.0F, 800.0F), ScrollProps().set_step(1.0F)};
     LayoutEngine::layout(s, bounded(300.0F, 200.0F));
     s.scroll_by(-1000.0F);
     AURORA_TEST_CHECK_NEAR(s.offset_y(), 600.0F, 1e-4F);
@@ -366,19 +477,22 @@ AURORA_TEST_CASE(initializer_list_takes_first_child_only) {
 }
 
 AURORA_TEST_CASE(step_serialization_roundtrip) {
+    // 未表态不落盘：缺省构造的 Scroll 盘上无 step 键，读面取行回落值 16。
     Json props = Json::object();
     Scroll{}.serialize_props(props);
-    AURORA_TEST_CHECK_NEAR(require_field<float>(props, "step"), 16.0F, 1e-4F);
+    AURORA_TEST_CHECK_FALSE(props.contains("step"));
+    Scroll const defaults;
+    AURORA_TEST_CHECK_NEAR(defaults.step(), 16.0F, 1e-4F);
 
     Scroll src;
-    src.step = 24.0F;
+    src.set_step(24.0F);
     src.serialize_props(props);
     AURORA_TEST_CHECK_NEAR(require_field<float>(props, "step"), 24.0F, 1e-4F);
 
     // 反序列化出的 step 参与滚动计算：step=24 时滚一单位位移 24px。
-    Scroll dst{ScrollProps{.child = box(300.0F, 800.0F)}};
+    Scroll dst{box(300.0F, 800.0F)};
     dst.deserialize_props(props);
-    AURORA_TEST_CHECK_NEAR(dst.step, 24.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(dst.step(), 24.0F, 1e-4F);
     LayoutEngine::layout(dst, bounded(300.0F, 200.0F));
     dst.scroll_by(-1.0F);
     AURORA_TEST_CHECK_NEAR(dst.offset_y(), 24.0F, 1e-4F);
@@ -386,7 +500,7 @@ AURORA_TEST_CASE(step_serialization_roundtrip) {
 
 AURORA_TEST_CASE(wheel_margin_bubbles_up_when_clamped_at_edges) {
     // 嵌套滚动协调契约：端点被夹掉的量以 remaining_y 回传（保留符号），由派发器交给更浅层祖先。
-    Scroll s{ScrollProps{.child = box(300.0F, 800.0F), .step = 1.0F}};
+    Scroll s{box(300.0F, 800.0F), ScrollProps().set_step(1.0F)};
     LayoutEngine::layout(s, bounded(300.0F, 200.0F));  // 可滚范围 [0, 600]
 
     ScrollEvent at_top;
@@ -411,7 +525,7 @@ AURORA_TEST_CASE(wheel_margin_bubbles_up_when_clamped_at_edges) {
 
 AURORA_TEST_CASE(snap_extent_glides_to_nearest_boundary_after_wheel) {
     // extent=200 / step=1：滚到 120 后不瞬间跳变，而是 150ms 短滑动收位到 200。
-    Scroll s{ScrollProps{.child = box(300.0F, 800.0F), .step = 1.0F, .snap = ScrollSnap{.extent = 200.0F}}};
+    Scroll s{box(300.0F, 800.0F), ScrollProps().set_step(1.0F).set_snap_extent(200.0F)};
     LayoutEngine::layout(s, bounded(300.0F, 200.0F));
 
     s.scroll_by(-120.0F);
@@ -437,9 +551,8 @@ AURORA_TEST_CASE(snap_extent_glides_to_nearest_boundary_after_wheel) {
 
 AURORA_TEST_CASE(snap_center_alignment_targets_entry_centre) {
     // Center：条目 k 中心贴视口中心 → offset = k·ext + ext/2 − viewport/2 = 120 + 60 − 100 = 80。
-    Scroll s{ScrollProps{.child = box(300.0F, 800.0F),
-                         .step = 1.0F,
-                         .snap = ScrollSnap{.extent = 120.0F, .alignment = ScrollSnapAlignment::Center}}};
+    Scroll s{box(300.0F, 800.0F),
+             ScrollProps().set_step(1.0F).set_snap_extent(120.0F).set_snap_alignment(ScrollSnapAlignment::Center)};
     LayoutEngine::layout(s, bounded(300.0F, 200.0F));
     s.scroll_by(-50.0F);
     settle(s);
@@ -448,7 +561,7 @@ AURORA_TEST_CASE(snap_center_alignment_targets_entry_centre) {
 
 AURORA_TEST_CASE(snap_paging_snaps_back_when_less_than_half_page) {
     // 分页：周期取视口高 300（内容 800 → 可滚 [0, 500]）。
-    Scroll s{ScrollProps{.child = box(300.0F, 800.0F), .step = 1.0F, .snap = ScrollSnap::page()}};
+    Scroll s{box(300.0F, 800.0F), ScrollProps().set_step(1.0F).set_snap_paging(true)};
     LayoutEngine::layout(s, bounded(300.0F, 300.0F));
 
     s.scroll_by(-200.0F);  // 越过半页（150）→ 进下一页
@@ -467,8 +580,8 @@ AURORA_TEST_CASE(snap_paging_snaps_back_when_less_than_half_page) {
 }
 
 AURORA_TEST_CASE(reduce_motion_snaps_directly_without_intermediate_frames) {
-    ReduceMotionGuard guard;
-    Scroll s{ScrollProps{.child = box(300.0F, 800.0F), .step = 1.0F, .snap = ScrollSnap{.extent = 200.0F}}};
+    ReduceMotionGuard const guard;
+    Scroll s{box(300.0F, 800.0F), ScrollProps().set_step(1.0F).set_snap_extent(200.0F)};
     LayoutEngine::layout(s, bounded(300.0F, 200.0F));
 
     s.scroll_by(-120.0F);
@@ -481,7 +594,7 @@ AURORA_TEST_CASE(reduce_motion_snaps_directly_without_intermediate_frames) {
 }
 
 AURORA_TEST_CASE(scroll_to_supports_instant_animated_and_clamped) {
-    Scroll s{ScrollProps{.child = box(300.0F, 800.0F), .step = 1.0F}};
+    Scroll s{box(300.0F, 800.0F), ScrollProps().set_step(1.0F)};
     LayoutEngine::layout(s, bounded(300.0F, 200.0F));  // 可滚 [0, 600]
 
     AURORA_TEST_CHECK_TRUE(s.scroll_to(500.0F, false));  // 即时：无滑动、当场就位
@@ -501,10 +614,10 @@ AURORA_TEST_CASE(scroll_to_supports_instant_animated_and_clamped) {
 }
 
 AURORA_TEST_CASE(offset_signal_publishes_every_scroll_channel) {
-    Scroll s{ScrollProps{.child = box(300.0F, 800.0F), .step = 1.0F}};
+    Scroll s{box(300.0F, 800.0F), ScrollProps().set_step(1.0F)};
     LayoutEngine::layout(s, bounded(300.0F, 200.0F));
 
-    SignalView<float> &offset = s.offset_signal();  // 懒创建：初值取当前偏移
+    const ReadOnlyState<float> offset = s.offset_signal();  // 懒创建：初值取当前偏移
     AURORA_TEST_CHECK_NEAR(offset.get(), 0.0F, 1e-4F);
 
     s.set_offset(80.0F);
@@ -535,21 +648,22 @@ AURORA_TEST_CASE(snap_properties_describe_and_round_trip) {
     AURORA_TEST_CHECK_EQ(align->enum_values.front(), std::string{"Start"});
     AURORA_TEST_CHECK_EQ(align->enum_values.back(), std::string{"End"});
 
-    Scroll src{ScrollProps{.child = box(300.0F, 800.0F),
-                           .step = 1.0F,
-                           .snap = ScrollSnap{.extent = 120.0F, .alignment = ScrollSnapAlignment::Center}}};
+    Scroll const src{box(300.0F, 800.0F), ScrollProps().set_step(1.0F).set_snap_extent(120.0F).set_snap_alignment(
+                                              ScrollSnapAlignment::Center)};
     Json props = Json::object();
     src.serialize_props(props);
     AURORA_TEST_CHECK_NEAR(require_field<float>(props, "snap_extent"), 120.0F, 1e-4F);
-    AURORA_TEST_CHECK_FALSE(require_field<bool>(props, "snap_paging"));
+    // 未表态的行不落盘：缺键读作「跟随该行回落点」，与显式写入 false 不是同一件事。
+    AURORA_TEST_CHECK_FALSE(props.contains("snap_paging"));
+    AURORA_TEST_CHECK_FALSE(src.snap_paging());
     AURORA_TEST_CHECK_EQ(require_field<std::string>(props, "snap_alignment"), std::string{"Center"});
 
     // 反序列化只还原属性、不还原子树：目标实例自带同尺寸内容，才能检验 snap 是否真生效。
-    Scroll dst{ScrollProps{.child = box(300.0F, 800.0F)}};
+    Scroll dst{box(300.0F, 800.0F)};
     dst.deserialize_props(props);
-    AURORA_TEST_CHECK_NEAR(dst.snap.extent, 120.0F, 1e-4F);
-    AURORA_TEST_CHECK_FALSE(dst.snap.paging);
-    AURORA_TEST_CHECK_EQ(static_cast<int>(dst.snap.alignment), static_cast<int>(ScrollSnapAlignment::Center));
+    AURORA_TEST_CHECK_NEAR(dst.snap_extent(), 120.0F, 1e-4F);
+    AURORA_TEST_CHECK_FALSE(dst.snap_paging());
+    AURORA_TEST_CHECK_EQ(static_cast<int>(dst.snap_alignment()), static_cast<int>(ScrollSnapAlignment::Center));
 
     // 往返后的 snap 真实参与收位（Center 目标 80，同 snap_center_alignment 口径）。
     LayoutEngine::layout(dst, bounded(300.0F, 200.0F));
@@ -714,7 +828,7 @@ auto make_local_probe_scrollable(float offset) -> LocalProbeFixture {
         auto r = std::make_shared<LocalProbeRow>(i);
         // 必须挂 Clickable 修饰：`wants_click()` 缺省只看修饰链，不挂则基类不认它为命中目标，
         // `on_pointer_event` 永不触发（探针自身接线错误的经典陷阱，与 make_scrollable 同因）。
-        r->modifier.set(Modifier{}.clickable([]() -> void {}));
+        r->set_modifier(Modifier{}.clickable([]() -> void {}));
         f.rows.push_back(r);
         f.content->add(Node{r});
     }
@@ -746,7 +860,7 @@ auto make_scrollable(float offset) -> ScrollFixture {
         auto row = std::make_shared<HitRow>(i, *f.ledgers.back());
         // 挂 Clickable 修饰：`wants_click()` 默认只看修饰链，缺它则基类不识别点击、
         // activate() 永不触发（探针自身接线错误的经典陷阱）。
-        row->modifier.set(Modifier{}.clickable([]() -> void {}));
+        row->set_modifier(Modifier{}.clickable([]() -> void {}));
         f.rows.push_back(row);
         f.content->add(Node{std::move(row)});
     }
@@ -777,15 +891,33 @@ auto click_at(Widget &root, float x, float y) -> void {
 AURORA_TEST_CASE(content_bounds_written_in_content_coordinates) {
     // 回归点：布局必须把内容盒写入 children_[0]；且是**内容坐标**（原点 0,0、不含滚动偏移）。
     // 吸顶判据（natural_y >= offset_y_）依赖此前提，写成视口坐标会破坏它。
-    ScrollFixture f = make_scrollable(200.0F);
+    ScrollFixture const f = make_scrollable(200.0F);
     const std::vector<Node> &kids = f.scroll->child_nodes();
     AURORA_TEST_REQUIRE(!kids.empty());
     const Rect cb = kids.front().bounds();
-    // 修复前此盒为默认 Rect{}（宽高皆 0）。
-    AURORA_TEST_CHECK_NEAR(cb.size.width, AURORA_VIEW_W, 1e-3F);
+    // 修复前此盒为默认 Rect{}（宽高皆 0）。默认主题为经典档：内容溢出时右侧条带预留
+    // 「粗细 + 两侧内缩」，内容列随之收窄；坐标系与原点仍严格是内容坐标。
+    const float band = Theme::light().controls.scrollbar_thickness + (2.0F * detail::AURORA_SCROLLBAR_INSET);
+    AURORA_TEST_CHECK_NEAR(cb.size.width, AURORA_VIEW_W - band, 1e-3F);
     AURORA_TEST_CHECK_NEAR(cb.size.height, AURORA_CONTENT_H, 1e-3F);
     AURORA_TEST_CHECK_NEAR(cb.origin.x, 0.0F, 1e-3F);
     AURORA_TEST_CHECK_NEAR(cb.origin.y, 0.0F, 1e-3F);
+}
+
+AURORA_TEST_CASE(classic_scroll_no_false_positive_bar_at_full_width) {
+    // 判据二反向项：经典档必须「先满宽测量判溢出、再决定是否收窄内容列」。
+    // 若颠倒为先按「必溢出」收窄再测量，满宽本放得下的内容因换行变多而凭空溢出，
+    // 内容被无谓收窄（内容宽落到 视口宽 - 带宽）且条凭空出现。
+    // WrappingBox 自然宽 600dp、行高 20：视口 300×50 下满宽只换 2 行（高 40 < 50）不溢出；
+    // 误判后窄到 292 则换 3 行（高 60 > 50）溢出。
+    auto scroll = std::make_shared<Scroll>();
+    scroll->add(Node{std::make_shared<WrappingBox>(600.0F, 20.0F)});
+    LayoutEngine::layout(*scroll, bounded(300.0F, 50.0F));
+    const std::vector<Node> &kids = scroll->child_nodes();
+    AURORA_TEST_REQUIRE(!kids.empty());
+    const Rect cb = kids.front().bounds();
+    // 正确实现：满宽测量不溢出 → 不收窄 → 内容宽 == 视口宽 300。
+    AURORA_TEST_CHECK_NEAR(cb.size.width, 300.0F, 1e-3F);
 }
 
 AURORA_TEST_CASE(scrolled_content_still_hits_visual_row) {
@@ -825,7 +957,7 @@ AURORA_TEST_CASE(scrolled_content_still_hits_visual_row) {
 
 AURORA_TEST_CASE(content_outside_viewport_is_not_hittable) {
     // 被 offset 推出可视区的内容不应命中（可视区裁剪）。
-    ScrollFixture f = make_scrollable(400.0F);
+    ScrollFixture const f = make_scrollable(400.0F);
     AURORA_TEST_CHECK_NEAR(f.scroll->offset_y(), 400.0F, 1e-3F);
 
     // 视口顶（y=0.5）对应内容 y=400.5 ⇒ 行号 10；行 9（y=360..400）已在视口之上，不得命中。
@@ -865,7 +997,7 @@ AURORA_TEST_CASE(content_outside_viewport_is_not_hittable) {
 
 AURORA_TEST_CASE(container_stays_on_chain_behind_content) {
     // 容器自身须仍在链上（滚轮/拖拽需要它），但排在内容之后（派发自链尾向链头）。
-    ScrollFixture f = make_scrollable(0.0F);
+    ScrollFixture const f = make_scrollable(0.0F);
     const auto chain = f.scroll->hit_test_chain(Point{.x = 150.0F, .y = 60.0F}, g27_viewport(), BuildContext{});
     AURORA_TEST_REQUIRE(chain.size() >= 2U);
     AURORA_TEST_CHECK_EQ(chain.front().ptr, static_cast<Widget *>(f.scroll.get()));
@@ -880,7 +1012,7 @@ AURORA_TEST_CASE(positive_control_column_root_also_clickable) {
     auto ledger = std::make_unique<HitLedger>();
     auto col = std::make_shared<Column>();
     auto row = std::make_shared<HitRow>(3, *ledger);
-    row->modifier.set(Modifier{}.clickable([]() -> void {}));
+    row->set_modifier(Modifier{}.clickable([]() -> void {}));
     col->add(Node{std::move(row)});
     LayoutEngine::layout(*col, bounded(AURORA_VIEW_W, 400.0F));
 
@@ -897,7 +1029,7 @@ AURORA_TEST_CASE(positive_control_column_root_also_clickable) {
 // ---- VerticalViewSize 数据源（Scroll） ----
 AURORA_TEST_CASE(vertical_view_size_reports_visible_fraction_of_content) {
     // 判据①（数据源）：视口 100 / 内容 400 ⇒ 25%；与 LazyList 同源。
-    Scroll s{ScrollProps{.child = box(300.0F, 400.0F)}};
+    Scroll s{box(300.0F, 400.0F)};
     LayoutEngine::layout(s, bounded(300.0F, 100.0F));
     const auto range = require_value(s.accessibility_scroll());
     AURORA_TEST_CHECK_NEAR(range.viewport, 100.0, 1e-3);
@@ -907,7 +1039,7 @@ AURORA_TEST_CASE(vertical_view_size_reports_visible_fraction_of_content) {
 
 AURORA_TEST_CASE(vertical_view_size_and_scroll_percent_consistent) {
     // 判据③（数据源）：滚到中段时 percent 增大、viewsize 恒定（可见比例不随位置变）。
-    Scroll s{ScrollProps{.child = box(300.0F, 800.0F)}};
+    Scroll s{box(300.0F, 800.0F)};
     LayoutEngine::layout(s, bounded(300.0F, 100.0F));
     const auto top = require_value(s.accessibility_scroll());
     const double top_view = aurora::compute_vertical_view_size(top);
@@ -1002,7 +1134,7 @@ AURORA_TEST_CASE(window_bounds_matches_recomputed_origin_without_scrolling) {
     std::vector<std::shared_ptr<HitRow>> rows;
     for (int i = 0; i < 4; ++i) {
         auto r = std::make_shared<HitRow>(i, *std::make_unique<HitLedger>());
-        r->modifier.set(Modifier{}.clickable([]() -> void {}));
+        r->set_modifier(Modifier{}.clickable([]() -> void {}));
         rows.push_back(r);
         col->add(Node{r});
     }
@@ -1027,9 +1159,9 @@ AURORA_TEST_CASE(window_bounds_accounts_for_modifier_translation) {
     // 同源性回归：中间层Column 带 padding(10) 时，窗口盒须含该内容盒平移，
     // 否则「origin 与绘制仿射同源」这条不变量在事后查询侧就断了（退化成朴素布局原点）。
     auto col = std::make_shared<Column>();
-    col->modifier.set(Modifier{}.padding(10.0F));
+    col->set_modifier(Modifier{}.padding(10.0F));
     auto target = std::make_shared<HitRow>(0, *std::make_unique<HitLedger>());
-    target->modifier.set(Modifier{}.clickable([]() -> void {}));
+    target->set_modifier(Modifier{}.clickable([]() -> void {}));
     col->add(Node{target});
 
     auto root = std::make_shared<Column>();
@@ -1046,12 +1178,12 @@ AURORA_TEST_CASE(window_bounds_is_empty_for_hidden_and_unlaid_out_widget) {
     // 负守卫（口径定死，不得留未定义）：show==false 与从未布局两种情形均返回 nullopt，
     // 而**不是**零盒 —— 零盒无法与「盒恰在窗口原点」区分，会被「非空即采用」的几何判据
     // （如语义树的绘制盒回退）当成有效几何。
-    FixedBox fresh(40.0F, 20.0F);
+    FixedBox const fresh(40.0F, 20.0F);
     AURORA_TEST_CHECK_FALSE(fresh.window_bounds().has_value());
 
     ScrollFixture f = make_scrollable(200.0F);
     AURORA_TEST_REQUIRE(f.rows.size() > 3U);
-    f.rows[3]->show.set(false);
+    f.rows[3]->set_show(false);
     AURORA_TEST_CHECK_FALSE(f.rows[3]->window_bounds().has_value());
     // 同一条树里的兄弟未受影响：判据不得因一个隐藏节点而整树失效。
     AURORA_TEST_CHECK(f.rows[4]->window_bounds().has_value());
@@ -1141,7 +1273,7 @@ AURORA_TEST_CASE(drag_auto_scroll_advances_scroll_on_frame_ticks_and_releases) {
     // （复用既有 offset_y_，不新增滚动实现）；方向跟落点所在带（上带负 / 底带正）；
     // 落点移出带外即就地收车、nullopt（Leave / Drop）即收车、已到可滚边缘亦收车。
     // 帧钟为假想钟（pump 每帧 16ms）；内核首帧 dt 兜底 1/60。
-    ScrollFixture f = make_scrollable(400.0F);
+    ScrollFixture const f = make_scrollable(400.0F);
     Scroll &s = *f.scroll;
     const float max_offset = AURORA_CONTENT_H - AURORA_VIEW_H;  // 800 − 200 = 600
     AURORA_TEST_CHECK_NEAR(s.offset_y(), 400.0F, 1e-4F);
@@ -1180,12 +1312,122 @@ AURORA_TEST_CASE(drag_auto_scroll_advances_scroll_on_frame_ticks_and_releases) {
     AURORA_TEST_CHECK_NEAR(s.offset_y(), frozen, 1e-3F);
 
     // 已到可滚边缘：推进被夹住即收车（单次拖放不会再有反方向意图），不再反复顶墙。
-    ScrollFixture tail = make_scrollable(590.0F);
+    ScrollFixture const tail = make_scrollable(590.0F);
     AURORA_TEST_CHECK_TRUE(tail.scroll->on_system_drag_auto_scroll(Point{.x = 150.0F, .y = 200.0F}));
     pump(*tail.scroll, 1);
     AURORA_TEST_CHECK_NEAR(tail.scroll->offset_y(), max_offset, 1e-3F);  // 夹到末端
     pump(*tail.scroll, 3);
     AURORA_TEST_CHECK_NEAR(tail.scroll->offset_y(), max_offset, 1e-3F);  // 收车后不再推进
+}
+
+// ---- 应用内全局时间缩放：ScrollGlide 的 Scroll 消费点（判据 9 / 10 / 11(b)）----
+
+// @brief 判据 9/10（Scroll 行）：收位滑动的到位帧数按倍率折半、终值逐位不变（倍率只乘一层）。
+AURORA_TEST_CASE(scroll_glide_frame_count_follows_time_scale) {
+    // 推导：帧步长 1/16 秒（二进制精确）、`ScrollGlide` 缺省时长 0.15 秒 ⇒ 单层折算 1x/2x/4x = 3/2/1 帧。
+    // 首帧例外：滑动锚点尚未置位时 `tick_gestures` 兜底取 1/60 秒，长度与后续帧不同会污染取整，
+    // 故每档都先喂一帧把兜底兑现掉，再在途重定向（`scroll_to` 的 `start` 把 elapsed 归零、锚点保留），
+    // 使计数段内每一帧的裸步长恰为 1/16 秒。
+    Animator anim;
+    const testing::ScopedCurrentAnimator current{anim};
+    Scroll s{box(300.0F, 800.0F), ScrollProps().set_step(1.0F)};  // 可滚范围 [0, 600]
+    LayoutEngine::layout(s, bounded(300.0F, 200.0F));
+
+    // 同一棵树、同一目标，只换倍率：复位 → 起滑动 → 兑现兜底帧 → 重定向 → 计数到位帧。
+    auto frames_at = [&s, &anim](double scale) -> int {
+        anim.set_time_scale(scale);
+        s.set_offset(300.0F);  // 复位偏移并作废在途滑动
+        AURORA_TEST_CHECK(s.scroll_to(600.0F));
+        pump_scaled_frame(s);
+        AURORA_TEST_CHECK(s.scroll_to(600.0F));  // 在途重定向：elapsed 归零、锚点已就位
+        return pump_until_glide_ends(s);
+    };
+
+    const int n_1x = frames_at(1.0);
+    const float end_1x = s.offset_y();
+    const int n_2x = frames_at(2.0);
+    const float end_2x = s.offset_y();
+    const int n_4x = frames_at(4.0);
+    const float end_4x = s.offset_y();
+
+    AURORA_TEST_CHECK_EQ(n_1x, expected_glide_frames(1.0));
+    AURORA_TEST_CHECK_EQ(n_2x, expected_glide_frames(2.0));
+    AURORA_TEST_CHECK_EQ(n_4x, expected_glide_frames(4.0));
+    AURORA_TEST_CHECK_EQ(n_1x, 3);
+    // 判据 9：帧数恰为 1x 档的一半。双层缩放（倍率平方）会让 2x 档每帧吃 0.25 秒 ⇒ 一帧到位，
+    // 与这里的 2 帧冲突即转红——2x 档正是抓出「两层都乘」的那一档。
+    AURORA_TEST_CHECK_EQ(n_2x, (n_1x + 1) / 2);
+    AURORA_TEST_CHECK_EQ(n_4x, (n_1x + 3) / 4);  // 四倍速 ⇒ 四分之一
+    AURORA_TEST_CHECK(end_1x == end_2x && end_2x == end_4x);  // 只改步长、不改终值
+    AURORA_TEST_CHECK_FALSE(s.is_gliding());
+
+    anim.set_time_scale(1.0);  // 倍率还原后行为与原先一致（判据 9 的无残留半句）
+    s.set_offset(300.0F);
+    AURORA_TEST_CHECK(s.scroll_to(600.0F));
+    pump_scaled_frame(s);
+    AURORA_TEST_CHECK(s.scroll_to(600.0F));
+    AURORA_TEST_CHECK_EQ(pump_until_glide_ends(s), n_1x);
+}
+
+// @brief 判据 11(b) + 8 的 0.0 档（Scroll 行）：冻结段不推进、零重绘请求，解冻按剩余帧数续跑到同一终值。
+AURORA_TEST_CASE(scroll_glide_freeze_holds_progress_and_emits_no_redraw) {
+    Animator anim;
+    const testing::ScopedCurrentAnimator current{anim};
+    Scroll s{box(300.0F, 800.0F), ScrollProps().set_step(1.0F)};  // 可滚范围 [0, 600]
+    LayoutEngine::layout(s, bounded(300.0F, 200.0F));
+
+    AURORA_TEST_CHECK(s.scroll_to(600.0F));
+    pump_scaled_frame(s);  // 兑现首帧的 1/60 兜底步长
+    AURORA_TEST_CHECK(s.scroll_to(600.0F));  // 在途重定向 ⇒ 其后每帧恰为 1/16 秒
+    pump_scaled_frame(s);  // 推进一帧：elapsed = 1/16 秒
+    AURORA_TEST_REQUIRE_TRUE(s.is_gliding());
+    const float frozen_from = s.offset_y();
+
+    anim.set_time_scale(0.0);
+    AURORA_TEST_CHECK_EQ(anim.time_scale(), 0.0);
+    ScopedDirtyCounter const dirty{s};
+    for (int i = 0; i < 8; ++i) {
+        pump_scaled_frame(s);
+    }
+    AURORA_TEST_CHECK_EQ(s.offset_y(), frozen_from);  // 冻结段一步都不挪
+    AURORA_TEST_CHECK_TRUE(s.is_gliding());  // 在途标志按实现保留（不该被摘除）
+    AURORA_TEST_CHECK_EQ(dirty.count(), 0);  // 判据 11(b)：停着不动也不满帧唤醒
+
+    anim.set_time_scale(1.0);  // 解冻重武装：进度不丢，剩余 2 帧（0.125 → 0.1875 越线）收位
+    AURORA_TEST_CHECK_EQ(pump_until_glide_ends(s), 2);
+    AURORA_TEST_CHECK_GT(dirty.count(), 0);  // 对照：冻结段的 0 不是「回调没接线」
+    AURORA_TEST_CHECK_FALSE(s.is_gliding());
+    AURORA_TEST_CHECK_EQ(s.offset_y(), 600.0F);  // 与不冻结路径的终值逐位一致
+}
+
+// @brief 判据 10 反向项（Scroll 行）：近边缘自动滚边是有意不缩放的例外——同倍率下每帧滚边增量不变。
+AURORA_TEST_CASE(scroll_drag_auto_scroll_delta_ignores_time_scale) {
+    // `DragAutoScroll::advance` 取的是裸墙钟差（不经 `scaled_frame_dt`），故 4x 档增量一字不动。
+    // 顶带满深 ⇒ 速度 -600dp/s：首帧兜底 1/60 秒 ⇒ -10dp，其后每帧 1/16 秒 ⇒ -37.5dp。
+    // 每档都用**全新**的树：滚边内核的 dt 锚点随控件私有，复用上一档的实例会让首帧不再是兜底帧。
+    Animator anim;
+    const testing::ScopedCurrentAnimator current{anim};
+
+    auto deltas_at = [&anim](double scale) -> std::pair<float, float> {
+        anim.set_time_scale(scale);
+        ScrollFixture const f = make_scrollable(400.0F);
+        AURORA_TEST_CHECK_TRUE(f.scroll->on_system_drag_auto_scroll(Point{.x = 150.0F, .y = 0.0F}));
+        const float before = f.scroll->offset_y();
+        pump_scaled_frame(*f.scroll);
+        const float first = f.scroll->offset_y() - before;
+        pump_scaled_frame(*f.scroll);
+        const float second = f.scroll->offset_y() - (before + first);
+        (void)f.scroll->on_system_drag_auto_scroll(std::nullopt);  // 收车，别把状态留给下一档
+        return {first, second};
+    };
+
+    const auto [first_1x, second_1x] = deltas_at(1.0);
+    const auto [first_4x, second_4x] = deltas_at(4.0);
+
+    AURORA_TEST_CHECK_NEAR(first_1x, -10.0F, 1e-3F);  // 兜底帧：-600 × 1/60
+    AURORA_TEST_CHECK_NEAR(second_1x, -37.5F, 1e-3F);  // 固定步长帧：-600 × 1/16
+    AURORA_TEST_CHECK_NEAR(first_4x, first_1x, 0.0F);  // 反向项：真例外，不是漏网
+    AURORA_TEST_CHECK_NEAR(second_4x, second_1x, 0.0F);
 }
 
 }  // namespace aurora::test_cases::utest_scroll

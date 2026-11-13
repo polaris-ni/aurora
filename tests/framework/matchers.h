@@ -22,7 +22,6 @@
 #include <utility>
 
 #include "assertions.h"
-#include "test_types.h"
 #include "value_print.h"
 
 namespace aurora::testing {
