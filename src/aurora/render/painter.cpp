@@ -56,6 +56,45 @@ detail::PaintTiming g_pt;  // 当前帧累加器（aurora::g_pt）
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 detail::PaintTiming g_pt_last;  // 上一完成绘制帧快照
 
+// 覆盖率恒为 1 的行区间整段写入：与 set_pixel 在「无圆角裁剪、coverage == 1」下逐位一致
+// （不透明直写；半透明走与 set_pixel 同一批量混合）。row 指向该行区间首像素。
+auto fill_opaque_span(std::uint8_t *row, int count, Color c) -> void {
+    if (c.a == 255) {
+        for (int i = 0; i < count; ++i) {
+            std::uint8_t *p = row + (static_cast<std::size_t>(i) * 4U);
+            p[0] = c.r;
+            p[1] = c.g;
+            p[2] = c.b;
+            p[3] = 255;
+        }
+        return;
+    }
+    const float a = static_cast<float>(c.a) / 255.0F;
+    blend_srgb_over_region(row, c.r, c.g, c.b, a, a, a, count);
+}
+
+// 覆盖率恒为 1 的横向区间整段写入：frame 为帧缓冲首像素，width 为缓冲宽（像素）。
+auto fill_opaque_row(std::uint8_t *frame, int width, int y, int xa, int xb, Color c) -> void {
+    if (xa >= xb) {
+        return;
+    }
+    fill_opaque_span(
+        frame + (((static_cast<std::size_t>(y) * static_cast<std::size_t>(width)) + static_cast<std::size_t>(xa)) * 4U),
+        xb - xa, c);
+}
+
+// 8 位 alpha → [0,1] 浮点查表：与逐像素 `v / 255.0F` 逐位相同（同一除法的常量折叠），
+// 供 draw_image 缩放路径省掉每像素 4 次除法。
+struct AlphaNormLut {
+    std::array<float, 256> v{};
+    constexpr AlphaNormLut() {
+        for (std::size_t i = 0; i < v.size(); ++i) {
+            v[i] = static_cast<float>(i) / 255.0F;
+        }
+    }
+};
+constexpr AlphaNormLut AURORA_ALPHA_NORM{};
+
 }  // namespace
 
 auto detail::paint_timing() -> detail::PaintTiming & { return g_pt; }
@@ -456,7 +495,13 @@ auto Painter::draw_line(Point a, Point b, float width, Color c) -> void {
     const float dx = bx - ax;
     const float dy = by - ay;
     const float len_sq = (dx * dx) + (dy * dy);
+    // 内部覆写带：dist ≤ 半宽 − 0.5 时 cov 恒为 1，可整段写入。判据留 1% 余量并以平方比较，
+    // 既避免逐像素 sqrt 又不触碰羽化带；圆角裁剪或全局透明度 ≠ 1 时仍逐像素走 set_pixel。
+    const float r_core = hw - 0.5F;
+    const bool batch_ok = !has_rounded_clip_ && global_alpha_ == 1.0 && r_core >= 0.05F;
+    const float r_core_sq = batch_ok ? (r_core * 0.99F) * (r_core * 0.99F) : -1.0F;
     for (int y = y0; y < y1; ++y) {
+        int run_start = -1;
         for (int x = x0; x < x1; ++x) {
             // 点到线段距离（像素中心采样）：投影参数 t 钳到 [0,1] 得圆帽。
             const float px = static_cast<float>(x) + 0.5F - ax;
@@ -464,7 +509,18 @@ auto Painter::draw_line(Point a, Point b, float width, Color c) -> void {
             const float t = len_sq > 0.0F ? aurora::saturate(((px * dx) + (py * dy)) / len_sq) : 0.0F;
             const float ex = px - (t * dx);
             const float ey = py - (t * dy);
-            const float dist = std::sqrt((ex * ex) + (ey * ey));
+            const float dist_sq = (ex * ex) + (ey * ey);
+            if (batch_ok && dist_sq <= r_core_sq) {
+                if (run_start < 0) {
+                    run_start = x;
+                }
+                continue;
+            }
+            if (run_start >= 0) {
+                fill_opaque_row(pixels_.data(), width_, y, run_start, x, c);
+                run_start = -1;
+            }
+            const float dist = std::sqrt(dist_sq);
             const float cov = aurora::saturate(hw + 0.5F - dist);  // 1px 羽化
             if (cov <= 0.0F) {
                 continue;
@@ -472,6 +528,9 @@ auto Painter::draw_line(Point a, Point b, float width, Color c) -> void {
             Color pc = c;
             pc.a = static_cast<std::uint8_t>(std::lround(static_cast<float>(c.a) * cov));
             set_pixel(x, y, pc);  // set_pixel 另行应用裁剪 coverage 与全局透明度
+        }
+        if (run_start >= 0) {
+            fill_opaque_row(pixels_.data(), width_, y, run_start, x1, c);
         }
     }
 }
@@ -541,12 +600,18 @@ auto Painter::stroke_polyline(const std::vector<Point> &pts, float width, Color 
     if (!shrink_to_clips(x0, y0, x1, y1)) {
         return;
     }
+    // 内部覆写带（到折线距离 ≤ 半宽 − 0.5 ⇒ cov 恒为 1）整段写入；距离以平方累计，
+    // 带内像素连 sqrt 都省掉，带外仍按原公式逐像素（含圆角裁剪/全局透明度）。
+    const float r_core = hw - 0.5F;
+    const bool batch_ok = !has_rounded_clip_ && global_alpha_ == 1.0 && r_core >= 0.05F;
+    const float r_core_sq = batch_ok ? (r_core * 0.99F) * (r_core * 0.99F) : -1.0F;
     for (int y = y0; y < y1; ++y) {
         const float py = static_cast<float>(y) + 0.5F;
+        int run_start = -1;
         for (int x = x0; x < x1; ++x) {
             const float px = static_cast<float>(x) + 0.5F;
             // 到折线的最小距离：join / cap 由 min 天然融合为圆角 / 圆帽（半透明下也不会二次合成）。
-            float min_dist = pad;  // 初值即羽化带外边界：更近者才可能产生覆盖
+            float min_dist_sq = pad * pad;  // 初值即羽化带外边界：更近者才可能产生覆盖
             for (const Segment &s : segs) {
                 if ((py < s.min_y - pad) || (py > s.max_y + pad)) {
                     continue;  // 扫描线早退：y 区间外线段不可能贡献覆盖
@@ -556,16 +621,28 @@ auto Painter::stroke_polyline(const std::vector<Point> &pts, float width, Color 
                 const float t = s.len_sq > 0.0F ? aurora::saturate(((wx * s.dx) + (wy * s.dy)) / s.len_sq) : 0.0F;
                 const float ex = wx - (t * s.dx);
                 const float ey = wy - (t * s.dy);
-                const float d = std::sqrt((ex * ex) + (ey * ey));
-                min_dist = std::min(min_dist, d);  // 与手写分支同码（minss），且免掉 InsertBraces 的三行噪声
+                min_dist_sq = std::min(min_dist_sq, (ex * ex) + (ey * ey));  // 与手写分支同码（minss）
             }
-            const float cov = aurora::saturate(hw + 0.5F - min_dist);  // 1px 羽化
+            if (batch_ok && min_dist_sq <= r_core_sq) {
+                if (run_start < 0) {
+                    run_start = x;
+                }
+                continue;
+            }
+            if (run_start >= 0) {
+                fill_opaque_row(pixels_.data(), width_, y, run_start, x, c);
+                run_start = -1;
+            }
+            const float cov = aurora::saturate(hw + 0.5F - std::sqrt(min_dist_sq));  // 1px 羽化
             if (cov <= 0.0F) {
                 continue;
             }
             Color pc = c;
             pc.a = static_cast<std::uint8_t>(std::lround(static_cast<float>(c.a) * cov));
             set_pixel(x, y, pc);  // set_pixel 另行应用裁剪 coverage 与全局透明度
+        }
+        if (run_start >= 0) {
+            fill_opaque_row(pixels_.data(), width_, y, run_start, x1, c);
         }
     }
 }
@@ -607,10 +684,110 @@ auto Painter::fill_sector(Point center, float outer_r, float inner_r, float a0, 
     if (!shrink_to_clips(x0, y0, x1, y1)) {
         return;
     }
+    // 覆盖率恒为 1 的区间整段写入：只在没有圆角裁剪且全局透明度为 1 时成立
+    // （其余情形由 set_pixel 逐像素叠乘裁剪覆盖度与全局透明度）。
+    const bool batch_ok = !has_rounded_clip_ && global_alpha_ == 1.0;
+    // 角向核心判定用两条径向边的单位方向向量：像素中心到边所在直线的垂距即 |u × p|，
+    // 垂距 ≥ 0.5px 时角向覆盖度恒为 1，免掉逐像素 atan2 / fmod。
+    const float e0x = std::cos(a0);
+    const float e0y = std::sin(a0);
+    const float e1x = std::cos(a1);
+    const float e1y = std::sin(a1);
+    // 径向核心的精确判据（与下方逐像素路径同一浮点表达式）：min(radial, angular) ≥ 0.5 时
+    // cov 恰为 1，set_pixel 只做 cov==1 的 source-over。
+    auto radial_core = [&](float px, float py) -> bool {
+        const float r = std::sqrt((px * px) + (py * py));
+        float radial = outer - r;
+        if (inner_px > 0.0F) {
+            radial = std::min(radial, r - inner_px);
+        }
+        return radial >= 0.5F;
+    };
+    auto write_span = [&](int xa, int xb, int y) -> void {
+        if (xa >= xb) {
+            return;
+        }
+        std::uint8_t *row =
+            pixels_.data() +
+            (((static_cast<std::size_t>(y) * static_cast<std::size_t>(width_)) + static_cast<std::size_t>(xa)) * 4U);
+        fill_opaque_span(row, xb - xa, c);
+    };
     for (int y = y0; y < y1; ++y) {
         const float py = static_cast<float>(y) + 0.5F - cy;
+        // 该行「径向核心」的 x 区间（内半径 > 0 时环带被中心挖空，故至多两段）。
+        // 候选区间按几何解析求出并各向外放宽 2px，端点再用精确判据收缩——只会向内剔除，
+        // 不会漏判；r 关于 |px| 单调，段内不会断开。
+        int spans[2][2] = {{0, 0}, {0, 0}};
+        int span_n = 0;
+        if (batch_ok) {
+            const float r_hi = outer - 0.5F;
+            const float r_lo = inner_px > 0.0F ? inner_px + 0.5F : 0.0F;
+            const float py2 = py * py;
+            if (r_hi > 0.0F) {
+                const float hi = std::sqrt(std::max(0.0F, (r_hi * r_hi) - py2)) + 2.0F;
+                int xa = std::max(x0, static_cast<int>(std::ceil(cx - hi - 0.5F)));
+                int xb = std::min(x1, static_cast<int>(std::floor(cx + hi - 0.5F)) + 1);
+                if (r_lo > 0.0F) {
+                    // 环带中心挖空：孔洞取「超集」（解析半宽再放宽 2px），只会少批量、
+                    // 不会把羽化区误当全覆写；孔洞边缘由下方逐像素路径精确计算。
+                    const float hole = std::sqrt(std::max(0.0F, (r_lo * r_lo) - py2)) + 2.0F;
+                    const int ha = static_cast<int>(std::ceil(cx - hole - 0.5F));
+                    const int hb = static_cast<int>(std::floor(cx + hole - 0.5F)) + 1;
+                    if (ha > xa) {
+                        spans[span_n][0] = xa;
+                        spans[span_n][1] = std::min(xb, ha);
+                        if (spans[span_n][1] > spans[span_n][0]) {
+                            ++span_n;
+                        }
+                    }
+                    xa = std::max(xa, hb);
+                }
+                if (xb > xa) {
+                    spans[span_n][0] = xa;
+                    spans[span_n][1] = xb;
+                    ++span_n;
+                }
+                for (int si = 0; si < span_n; ++si) {
+                    int a = spans[si][0];
+                    int b = spans[si][1];
+                    while (a < b && !radial_core(static_cast<float>(a) + 0.5F - cx, py)) {
+                        ++a;
+                    }
+                    while (b > a && !radial_core(static_cast<float>(b - 1) + 0.5F - cx, py)) {
+                        --b;
+                    }
+                    spans[si][0] = a;
+                    spans[si][1] = b;
+                }
+            }
+        }
+        int run_start = -1;
         for (int x = x0; x < x1; ++x) {
             const float px = static_cast<float>(x) + 0.5F - cx;
+            bool core = false;
+            for (int si = 0; si < span_n; ++si) {
+                if (x < spans[si][0]) {
+                    break;  // 两段按 x 递增排列，后续段不会命中
+                }
+                if (x < spans[si][1]) {
+                    core = true;
+                    break;
+                }
+            }
+            if (core && !full) {
+                // 两条径向边的垂距都 ≥ 0.5px ⇒ 角向覆盖度恒为 1（整圆/整环无角向约束）。
+                core = ((e0x * py) - (e0y * px) >= 0.5F) && ((e1y * px) - (e1x * py) >= 0.5F);
+            }
+            if (core) {
+                if (run_start < 0) {
+                    run_start = x;
+                }
+                continue;
+            }
+            if (run_start >= 0) {
+                write_span(run_start, x, y);
+                run_start = -1;
+            }
             const float r = std::sqrt((px * px) + (py * py));
             // 径向带符号距离（正 = 带内）：外弧与内弧取近者。
             float radial = outer - r;
@@ -637,6 +814,9 @@ auto Painter::fill_sector(Point center, float outer_r, float inner_r, float a0, 
             Color pc = c;
             pc.a = static_cast<std::uint8_t>(std::lround(static_cast<float>(c.a) * cov));
             set_pixel(x, y, pc);
+        }
+        if (run_start >= 0) {
+            write_span(run_start, x1, y);
         }
     }
 }
@@ -691,15 +871,39 @@ auto Painter::draw_rounded_border(const Rect &r, float radius, float thickness, 
     const int sx1 = static_cast<int>(std::floor(pr.right() - inset));
     const int sy0 = static_cast<int>(std::ceil(pr.origin.y + inset));
     const int sy1 = static_cast<int>(std::floor(pr.bottom() - inset));
+    // 直边段（SDF 退化为单轴线性）在带状核心内 cov 恒为 1，可按行整段写入；
+    // 圆角象限与羽化边仍逐像素走原公式。
+    const float band_core = (t * 0.5F) - 0.5F;
+    const bool batch_ok = !has_rounded_clip_ && global_alpha_ == 1.0 && band_core >= 0.0F;
     for (int y = y0; y < y1; ++y) {
+        const float qy = std::fabs(static_cast<float>(y) + 0.5F - cy) - (hh - rad);  // 行内不变量
+        int run_start = -1;
         for (int x = x0; x < x1; ++x) {
             if (y >= sy0 && y <= sy1 && x >= sx0 && x <= sx1) {
+                if (run_start >= 0) {
+                    fill_opaque_row(pixels_.data(), width_, y, run_start, x, c);
+                    run_start = -1;
+                }
                 x = sx1;  // 内部安全区：跳到右缘（循环自增后继续扫右侧边框）
                 continue;
             }
             // 圆角矩形 SDF（像素中心采样）。
             const float qx = std::fabs(static_cast<float>(x) + 0.5F - cx) - (hw - rad);
-            const float qy = std::fabs(static_cast<float>(y) + 0.5F - cy) - (hh - rad);
+            const bool straight_edge = qx > 0.0F ? (qy <= 0.0F) : (qy > 0.0F);
+            if (batch_ok && straight_edge) {
+                // 恰一轴为正：SDF = 该轴分量 − rad（无 sqrt），带内覆盖度恒为 1。
+                const float d_lin = (qx > 0.0F ? qx : qy) - rad;
+                if (std::fabs(d_lin + (t * 0.5F)) <= band_core) {
+                    if (run_start < 0) {
+                        run_start = x;
+                    }
+                    continue;
+                }
+            }
+            if (run_start >= 0) {
+                fill_opaque_row(pixels_.data(), width_, y, run_start, x, c);
+                run_start = -1;
+            }
             const float ox = std::max(qx, 0.0F);
             const float oy = std::max(qy, 0.0F);
             const float d = std::sqrt((ox * ox) + (oy * oy)) + std::min(std::max(qx, qy), 0.0F) - rad;
@@ -712,6 +916,9 @@ auto Painter::draw_rounded_border(const Rect &r, float radius, float thickness, 
             Color pc = c;
             pc.a = static_cast<std::uint8_t>(std::lround(static_cast<float>(c.a) * cov));
             set_pixel(x, y, pc);
+        }
+        if (run_start >= 0) {
+            fill_opaque_row(pixels_.data(), width_, y, run_start, x1, c);
         }
     }
 }
@@ -889,7 +1096,7 @@ auto Painter::draw_image(const Image &img, const Rect &dest) -> void {
     // 校验 Image 的核心不变量：pixels 至少覆盖 width*height*4（RGBA8）。
     // 该不变量此前无人强制：Image 的字段是公开可写的，且解码器/用户代码可能构造出
     // 「声明尺寸大于实际缓冲」的图（如解码中途失败仍保留了 width/height），
-    // 此时下方 sample() 只按 width/height 钳制下标，会越界读堆内存并把它画到屏幕上。
+    // 此时下方只按 width/height 钳制源下标，会越界读堆内存并把它画到屏幕上。
     if (static_cast<std::uint64_t>(img.pixels.size()) <
         static_cast<std::uint64_t>(img.width) * static_cast<std::uint64_t>(img.height) * 4U) {
         return;
@@ -908,23 +1115,7 @@ auto Painter::draw_image(const Image &img, const Rect &dest) -> void {
     const float sx = pd.size.width > 0.0F ? img.width / pd.size.width : 1.0F;
     const float sy = pd.size.height > 0.0F ? img.height / pd.size.height : 1.0F;
     const auto img_w = static_cast<std::size_t>(img.width);
-    const auto img_h = static_cast<std::size_t>(img.height);
     const std::size_t row4 = img_w * 4U;
-    // 双线性采样：在 premultiplied-alpha 空间插值，避免半透明边缘出现暗边/光晕；
-    // 同时消除最近邻缩放引入的阶梯锯齿（图标 96px→显示 64px 及设备像素比二次缩放）。
-    auto sample = [&](int ix, int iy) -> const std::uint8_t * {
-        if (ix < 0) {
-            ix = 0;
-        } else if (std::cmp_greater_equal(ix, img_w)) {
-            ix = static_cast<int>(img_w) - 1;
-        }
-        if (iy < 0) {
-            iy = 0;
-        } else if (std::cmp_greater_equal(iy, img_h)) {
-            iy = static_cast<int>(img_h) - 1;
-        }
-        return &img.pixels[(static_cast<std::size_t>(iy) * row4) + (static_cast<std::size_t>(ix) * 4U)];
-    };
     // 1:1 直拷快路径：目标物理尺寸与源尺寸相同、锚点为整数、全局透明度为 1 且无圆角裁剪时，
     // 双线性采样退化为恒等映射（x0 = x − origin、tx = ty = 0）。图标/像素图/离屏层贴回等
     // 最常见形态因此省掉每像素 4 次取样与约 20 次浮点运算。整段覆盖写入要求源全不透明，
@@ -958,42 +1149,68 @@ auto Painter::draw_image(const Image &img, const Rect &dest) -> void {
             return;
         }
     }
+    // 缩放路径：x 方向的「源列下标 + 插值权重」只与列有关，逐列预计算一次供所有行复用，
+    // 省掉每行的 floor/乘法/除法；源行指针按行取一次（原实现每像素做 4 次 y 方向钳制）。
+    const int cols = dx1 - dx0;
+    const int img_w_max = img.width - 1;
+    const int img_h_max = img.height - 1;
+    std::vector<int> col_i0(static_cast<std::size_t>(cols));
+    std::vector<int> col_i1(static_cast<std::size_t>(cols));
+    std::vector<float> col_tx(static_cast<std::size_t>(cols));
+    for (int k = 0; k < cols; ++k) {
+        const float fx = ((static_cast<float>(dx0 + k) + 0.5F - pd.origin.x) * sx) - 0.5F;
+        const int ix = static_cast<int>(std::floor(fx));
+        col_tx[static_cast<std::size_t>(k)] = fx - static_cast<float>(ix);
+        col_i0[static_cast<std::size_t>(k)] = std::clamp(ix, 0, img_w_max);
+        col_i1[static_cast<std::size_t>(k)] = std::clamp(ix + 1, 0, img_w_max);
+    }
+    // 无圆角裁剪时，dx0..dx1 已收缩进矩形裁剪交集，set_pixel 的裁剪判定恒成立。
+    const bool flat_clip = !has_rounded_clip_;
     for (int y = dy0; y < dy1; ++y) {
         const float fy = ((static_cast<float>(y) + 0.5F - pd.origin.y) * sy) - 0.5F;
-        const int y0 = static_cast<int>(std::floor(fy));
-        const float ty = fy - static_cast<float>(y0);
-        for (int x = dx0; x < dx1; ++x) {
-            const float fx = ((static_cast<float>(x) + 0.5F - pd.origin.x) * sx) - 0.5F;
-            const int x0 = static_cast<int>(std::floor(fx));
-            const float tx = fx - static_cast<float>(x0);
-            const std::uint8_t *p00 = sample(x0, y0);
-            const std::uint8_t *p10 = sample(x0 + 1, y0);
-            const std::uint8_t *p01 = sample(x0, y0 + 1);
-            const std::uint8_t *p11 = sample(x0 + 1, y0 + 1);
-            const float a00 = p00[3] / 255.0F;
-            const float a10 = p10[3] / 255.0F;
-            const float a01 = p01[3] / 255.0F;
-            const float a11 = p11[3] / 255.0F;
-            const float w00 = (1.0F - tx) * (1.0F - ty);
-            const float w10 = tx * (1.0F - ty);
-            const float w01 = (1.0F - tx) * ty;
+        const int iy = static_cast<int>(std::floor(fy));
+        const float ty = fy - static_cast<float>(iy);
+        const float ity = 1.0F - ty;
+        const std::uint8_t *row0 = &img.pixels[static_cast<std::size_t>(std::clamp(iy, 0, img_h_max)) * row4];
+        const std::uint8_t *row1 = &img.pixels[static_cast<std::size_t>(std::clamp(iy + 1, 0, img_h_max)) * row4];
+        std::uint8_t *dst_row =
+            pixels_.data() +
+            (((static_cast<std::size_t>(y) * static_cast<std::size_t>(width_)) + static_cast<std::size_t>(dx0)) * 4U);
+        for (int k = 0; k < cols; ++k) {
+            const float tx = col_tx[static_cast<std::size_t>(k)];
+            const float itx = 1.0F - tx;
+            const std::uint8_t *p00 = row0 + (static_cast<std::size_t>(col_i0[static_cast<std::size_t>(k)]) * 4U);
+            const std::uint8_t *p10 = row0 + (static_cast<std::size_t>(col_i1[static_cast<std::size_t>(k)]) * 4U);
+            const std::uint8_t *p01 = row1 + (static_cast<std::size_t>(col_i0[static_cast<std::size_t>(k)]) * 4U);
+            const std::uint8_t *p11 = row1 + (static_cast<std::size_t>(col_i1[static_cast<std::size_t>(k)]) * 4U);
+            const float a00 = AURORA_ALPHA_NORM.v[p00[3]];
+            const float a10 = AURORA_ALPHA_NORM.v[p10[3]];
+            const float a01 = AURORA_ALPHA_NORM.v[p01[3]];
+            const float a11 = AURORA_ALPHA_NORM.v[p11[3]];
+            const float w00 = itx * ity;
+            const float w10 = tx * ity;
+            const float w01 = itx * ty;
             const float w11 = tx * ty;
             const float pa = (a00 * w00) + (a10 * w10) + (a01 * w01) + (a11 * w11);
-            std::uint8_t r = 0;
-            std::uint8_t g = 0;
-            std::uint8_t b = 0;
-            if (pa > 1e-6F) {
-                const auto ch = [&](int c) -> std::uint8_t {
-                    const float v = ((p00[c] * a00) * w00) + ((p10[c] * a10) * w10) + ((p01[c] * a01) * w01) +
-                                    ((p11[c] * a11) * w11);
-                    return static_cast<std::uint8_t>(v / pa);
-                };
-                r = ch(0);
-                g = ch(1);
-                b = ch(2);
+            if (!(pa > 1e-6F)) {
+                // 全透明：set_pixel 对 a==0 只把目标 alpha 抬到 255（RGB 经 gamma 往返恒等）。
+                if (flat_clip) {
+                    dst_row[(static_cast<std::size_t>(k) * 4U) + 3U] = 255;
+                } else {
+                    set_pixel(dx0 + k, y, Color{0, 0, 0, 0});
+                }
+                continue;
             }
+            const auto ch = [&](int c) -> std::uint8_t {
+                const float v =
+                    ((p00[c] * a00) * w00) + ((p10[c] * a10) * w10) + ((p01[c] * a01) * w01) + ((p11[c] * a11) * w11);
+                return static_cast<std::uint8_t>(v / pa);
+            };
+            const std::uint8_t r = ch(0);
+            const std::uint8_t g = ch(1);
+            const std::uint8_t b = ch(2);
             const std::uint8_t a = pa >= 1.0F ? 0xFF : static_cast<std::uint8_t>(pa * 255.0F);
-            set_pixel(x, y, Color{r, g, b, a});
+            set_pixel(dx0 + k, y, Color{r, g, b, a});
         }
     }
 }
@@ -2207,68 +2424,81 @@ auto Painter::blend_region(const Rect &region, BlendMode mode, Color tint, float
     const int tr = tint.r;
     const int tg = tint.g;
     const int tb = tint.b;
+    // 每通道的混合结果只取决于「目标通道值 + 该通道 tint」，故把当前模式折算成三张 256 项
+    // 查表：像素循环里只剩查表与强度 lerp（原实现每像素一次 switch 与最多 6 次整除）。
+    std::array<int, 256> lut_r{};
+    std::array<int, 256> lut_g{};
+    std::array<int, 256> lut_b{};
+    for (int v = 0; v < 256; ++v) {
+        switch (mode) {
+            case BlendMode::Normal:
+                lut_r[v] = tr;
+                lut_g[v] = tg;
+                lut_b[v] = tb;
+                break;
+            case BlendMode::Multiply:
+                lut_r[v] = v * tr / 255;
+                lut_g[v] = v * tg / 255;
+                lut_b[v] = v * tb / 255;
+                break;
+            case BlendMode::Screen:
+                lut_r[v] = 255 - ((255 - v) * (255 - tr) / 255);
+                lut_g[v] = 255 - ((255 - v) * (255 - tg) / 255);
+                lut_b[v] = 255 - ((255 - v) * (255 - tb) / 255);
+                break;
+            case BlendMode::Overlay:
+                lut_r[v] = v < 128 ? 2 * v * tr / 255 : 255 - (2 * (255 - v) * (255 - tr) / 255);
+                lut_g[v] = v < 128 ? 2 * v * tg / 255 : 255 - (2 * (255 - v) * (255 - tg) / 255);
+                lut_b[v] = v < 128 ? 2 * v * tb / 255 : 255 - (2 * (255 - v) * (255 - tb) / 255);
+                break;
+            case BlendMode::Darken:
+                lut_r[v] = std::min(v, tr);
+                lut_g[v] = std::min(v, tg);
+                lut_b[v] = std::min(v, tb);
+                break;
+            case BlendMode::Lighten:
+                lut_r[v] = std::max(v, tr);
+                lut_g[v] = std::max(v, tg);
+                lut_b[v] = std::max(v, tb);
+                break;
+            case BlendMode::Difference:
+                lut_r[v] = std::abs(v - tr);
+                lut_g[v] = std::abs(v - tg);
+                lut_b[v] = std::abs(v - tb);
+                break;
+            case BlendMode::Exclusion:
+                lut_r[v] = v + tr - (2 * v * tr / 255);
+                lut_g[v] = v + tg - (2 * v * tg / 255);
+                lut_b[v] = v + tb - (2 * v * tb / 255);
+                break;
+            default:
+                lut_r[v] = v;
+                lut_g[v] = v;
+                lut_b[v] = v;
+                break;
+        }
+    }
+    const bool full_strength = strength >= 1.0F;
     for (int y = y0; y < y1; ++y) {
+        std::uint8_t *row = pixels_.data() + ((static_cast<std::size_t>(y) * static_cast<std::size_t>(width_)) * 4U) +
+                            (static_cast<std::size_t>(x0) * 4U);
         for (int x = x0; x < x1; ++x) {
-            const std::size_t i = ((static_cast<std::size_t>(y) * width_) + x) * 4;
-            const int sr = pixels_[i];
-            const int sg = pixels_[i + 1];
-            const int sb = pixels_[i + 2];
-            int r = 0;
-            int g = 0;
-            int b = 0;
-            switch (mode) {
-                case BlendMode::Normal:
-                    r = tr;
-                    g = tg;
-                    b = tb;
-                    break;
-                case BlendMode::Multiply:
-                    r = sr * tr / 255;
-                    g = sg * tg / 255;
-                    b = sb * tb / 255;
-                    break;
-                case BlendMode::Screen:
-                    r = 255 - ((255 - sr) * (255 - tr) / 255);
-                    g = 255 - ((255 - sg) * (255 - tg) / 255);
-                    b = 255 - ((255 - sb) * (255 - tb) / 255);
-                    break;
-                case BlendMode::Overlay:
-                    r = sr < 128 ? 2 * sr * tr / 255 : 255 - (2 * (255 - sr) * (255 - tr) / 255);
-                    g = sg < 128 ? 2 * sg * tg / 255 : 255 - (2 * (255 - sg) * (255 - tg) / 255);
-                    b = sb < 128 ? 2 * sb * tb / 255 : 255 - (2 * (255 - sb) * (255 - tb) / 255);
-                    break;
-                case BlendMode::Darken:
-                    r = std::min(sr, tr);
-                    g = std::min(sg, tg);
-                    b = std::min(sb, tb);
-                    break;
-                case BlendMode::Lighten:
-                    r = std::max(sr, tr);
-                    g = std::max(sg, tg);
-                    b = std::max(sb, tb);
-                    break;
-                case BlendMode::Difference:
-                    r = std::abs(sr - tr);
-                    g = std::abs(sg - tg);
-                    b = std::abs(sb - tb);
-                    break;
-                case BlendMode::Exclusion:
-                    r = sr + tr - (2 * sr * tr / 255);
-                    g = sg + tg - (2 * sg * tg / 255);
-                    b = sb + tb - (2 * sb * tb / 255);
-                    break;
-                default:
-                    r = sr;
-                    g = sg;
-                    b = sb;
-                    break;
+            std::uint8_t *p = row + (static_cast<std::size_t>(x - x0) * 4U);
+            const int sr = p[0];
+            const int sg = p[1];
+            const int sb = p[2];
+            const int br = lut_r[static_cast<std::size_t>(sr)];
+            const int bg = lut_g[static_cast<std::size_t>(sg)];
+            const int bb = lut_b[static_cast<std::size_t>(sb)];
+            if (full_strength) {
+                p[0] = aurora::saturate_u8(br);
+                p[1] = aurora::saturate_u8(bg);
+                p[2] = aurora::saturate_u8(bb);
+                continue;
             }
-            const int fr = sr + static_cast<int>(strength * (r - sr));
-            const int fg = sg + static_cast<int>(strength * (g - sg));
-            const int fb = sb + static_cast<int>(strength * (b - sb));
-            pixels_[i] = aurora::saturate_u8(fr);
-            pixels_[i + 1] = aurora::saturate_u8(fg);
-            pixels_[i + 2] = aurora::saturate_u8(fb);
+            p[0] = aurora::saturate_u8(sr + static_cast<int>(strength * (br - sr)));
+            p[1] = aurora::saturate_u8(sg + static_cast<int>(strength * (bg - sg)));
+            p[2] = aurora::saturate_u8(sb + static_cast<int>(strength * (bb - sb)));
         }
     }
 }
@@ -2306,34 +2536,47 @@ auto Painter::mask_region(const Rect &region, ShaderMaskKind kind, float strengt
     const float cx = rw * 0.5F;
     const float cy = rh * 0.5F;
     const float max_r = std::sqrt((cx * cx) + (cy * cy)) + 1e-3F;
-    for (int y = y0; y < y1; ++y) {
-        for (int x = x0; x < x1; ++x) {
-            const float fx = static_cast<float>(x - x0);
+    // 线性类遮罩的因子只随行变化（行内常量）：按行预算 factor，行内只剩乘法，省掉每像素的
+    // switch 与除法。其余类型中只有 RadialFade 逐像素变化；未识别的类型因子恒为 1（不改像素）。
+    if (kind == ShaderMaskKind::LinearFade || kind == ShaderMaskKind::LinearRise) {
+        const bool fade = kind == ShaderMaskKind::LinearFade;
+        for (int y = y0; y < y1; ++y) {
             const float fy = static_cast<float>(y - y0);
-            float base = NAN;
-            switch (kind) {
-                case ShaderMaskKind::LinearFade:
-                    base = 1.0F - (fy / rh);
-                    break;
-                case ShaderMaskKind::LinearRise:
-                    base = fy / rh;
-                    break;
-                case ShaderMaskKind::RadialFade: {
-                    const float dx = fx - cx;
-                    const float dy = fy - cy;
-                    base = 1.0F - (std::sqrt((dx * dx) + (dy * dy)) / max_r);
-                    break;
-                }
-                default:
-                    base = 1.0F;
-                    break;
-            }
+            float base = fade ? 1.0F - (fy / rh) : fy / rh;
             base = aurora::saturate(base);
             const float factor = 1.0F - (strength * (1.0F - base));
-            const std::size_t i = ((static_cast<std::size_t>(y) * width_) + x) * 4;
-            pixels_[i] = aurora::saturate_u8(static_cast<int>(pixels_[i] * factor));
-            pixels_[i + 1] = aurora::saturate_u8(static_cast<int>(pixels_[i + 1] * factor));
-            pixels_[i + 2] = aurora::saturate_u8(static_cast<int>(pixels_[i + 2] * factor));
+            std::uint8_t *row =
+                pixels_.data() +
+                (((static_cast<std::size_t>(y) * static_cast<std::size_t>(width_)) + static_cast<std::size_t>(x0)) *
+                 4U);
+            for (int k = 0; k < rw; ++k) {
+                std::uint8_t *p = row + (static_cast<std::size_t>(k) * 4U);
+                p[0] = aurora::saturate_u8(static_cast<int>(p[0] * factor));
+                p[1] = aurora::saturate_u8(static_cast<int>(p[1] * factor));
+                p[2] = aurora::saturate_u8(static_cast<int>(p[2] * factor));
+            }
+        }
+        return;
+    }
+    if (kind != ShaderMaskKind::RadialFade) {
+        return;
+    }
+    for (int y = y0; y < y1; ++y) {
+        const float fy = static_cast<float>(y - y0);
+        const float dy = fy - cy;
+        const float dy2 = dy * dy;  // 行内不变量
+        std::uint8_t *row =
+            pixels_.data() +
+            (((static_cast<std::size_t>(y) * static_cast<std::size_t>(width_)) + static_cast<std::size_t>(x0)) * 4U);
+        for (int k = 0; k < rw; ++k) {
+            const float dx = static_cast<float>(k) - cx;
+            float base = 1.0F - (std::sqrt((dx * dx) + dy2) / max_r);
+            base = aurora::saturate(base);
+            const float factor = 1.0F - (strength * (1.0F - base));
+            std::uint8_t *p = row + (static_cast<std::size_t>(k) * 4U);
+            p[0] = aurora::saturate_u8(static_cast<int>(p[0] * factor));
+            p[1] = aurora::saturate_u8(static_cast<int>(p[1] * factor));
+            p[2] = aurora::saturate_u8(static_cast<int>(p[2] * factor));
         }
     }
 }
