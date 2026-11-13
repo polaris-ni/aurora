@@ -134,7 +134,8 @@ auto warn(const std::string &label) -> void {
 auto pump_run_loop(int milliseconds) -> void {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(milliseconds);
     while (std::chrono::steady_clock::now() < deadline) {
-        static_cast<void>(CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.1, /*returnAfterCurrentTimer*/ false));
+        static_cast<void>(
+            CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.1, /*returnAfterCurrentTimer*/ static_cast<Boolean>(false)));
     }
 }
 

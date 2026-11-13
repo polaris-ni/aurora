@@ -146,7 +146,7 @@ auto main() -> int {
             NSMenuItem *open_item = [file_menu itemAtIndex:0];
             check(equal_text([open_item title], std::string { "Open\tCtrl+O" }),
                   "shortcut text is appended after a tab");
-            check([[file_menu itemAtIndex:1] isSeparatorItem] != 0, "separator maps to NSMenuItem separator");
+            check([[file_menu itemAtIndex:1] isSeparatorItem] != NO, "separator maps to NSMenuItem separator");
             check([[file_menu itemAtIndex:2] state] == NSControlStateValueOn, "checked state is mapped");
             check([[file_menu itemAtIndex:2] tag] != 0, "checkable item is flagged for in-place toggle");
             check([[file_menu itemAtIndex:3] isEnabled] == NO, "disabled item is greyed out");

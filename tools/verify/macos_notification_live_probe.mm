@@ -88,7 +88,7 @@ auto delivered_item(NSString *identifier) -> NSUserNotification * {
     for (NSUserNotification *item in
          [[NSUserNotificationCenter defaultUserNotificationCenter] deliveredNotifications]) {
         NSString *recorded = [item identifier];  // nullable 属性，isEqualToString: 要求非空实参
-        if ((recorded != nil) && ([identifier isEqualToString:recorded] != 0)) {
+        if ((recorded != nil) && ([identifier isEqualToString:recorded] != NO)) {
             return item;
         }
     }
@@ -103,7 +103,7 @@ auto delivered_count(NSString *identifier) -> std::size_t {
     for (NSUserNotification *item in
          [[NSUserNotificationCenter defaultUserNotificationCenter] deliveredNotifications]) {
         NSString *recorded = [item identifier];  // nullable 属性，isEqualToString: 要求非空实参
-        if ((recorded != nil) && ([identifier isEqualToString:recorded] != 0)) {
+        if ((recorded != nil) && ([identifier isEqualToString:recorded] != NO)) {
             ++count;
         }
     }
@@ -124,7 +124,7 @@ auto cleanup_delivered(NSString *prefix) -> void {
         if (identifier == nil) {
             continue;  // 未标识的条目不属于本探针，无从按前缀 / 占位标识认领
         }
-        if (([identifier hasPrefix:prefix] != 0) || ([identifier isEqualToString:AURORA_DEFAULT_IDENTIFIER] != 0)) {
+        if (([identifier hasPrefix:prefix] != NO) || ([identifier isEqualToString:AURORA_DEFAULT_IDENTIFIER] != NO)) {
             [center removeDeliveredNotification:item];
         }
     }
@@ -230,7 +230,7 @@ auto main() -> int {
         id<NSUserNotificationCenterDelegate> delegate = [center delegate];
         const bool can_activate =
             delegate != nil &&
-            ([delegate respondsToSelector:@selector(userNotificationCenter:didActivateNotification:)] != 0);
+            ([delegate respondsToSelector:@selector(userNotificationCenter:didActivateNotification:)] != NO);
         check(can_activate, "notification delegate is installed");
         if (can_activate && main_item != nil) {
             [delegate userNotificationCenter:center didActivateNotification:delivered_item(main_id)];

@@ -205,9 +205,9 @@ struct MacOSSurface::Impl {
         if (window == nil) {
             return;
         }
-        const bool minimized = [window isMiniaturized] != 0;
+        const bool minimized = [window isMiniaturized] != NO;
         const bool fullscreen = ([window styleMask] & NSWindowStyleMaskFullScreen) != 0;
-        const bool zoomed = !fullscreen && ([window isZoomed] != 0);
+        const bool zoomed = !fullscreen && ([window isZoomed] != NO);
         const WindowMode mode = compute_window_mode(minimized, zoomed, fullscreen);
         if (mode != last_mode) {
             last_mode = mode;
@@ -225,7 +225,7 @@ struct MacOSSurface::Impl {
         if (window == nil) {
             return;
         }
-        const WindowState state = compute_window_state([window isMiniaturized] != 0, active, [window isVisible] != 0);
+        const WindowState state = compute_window_state([window isMiniaturized] != NO, active, [window isVisible] != NO);
         if (state != last_state) {
             last_state = state;
             if (owner != nullptr) {
@@ -413,7 +413,7 @@ struct MacOSSurface::Impl {
             last_mode = WindowMode::Normal;
             // 建窗档即运行期开关的初值：Hidden 档窗口的可见性态播种为 Hidden，
             // 否则第一次真实变化会被「与上次相同」的去重吞掉。
-            last_state = compute_window_state(false, active, [window isVisible] != 0);
+            last_state = compute_window_state(false, active, [window isVisible] != NO);
             // 记录初始明暗档（不上报）：宿主在 WindowHost 构造期自行调用 os_color_scheme()
             // 取快照，这里只建立「之后的变化」的比较基准。
             last_scheme = aurora::detail::macos_os_color_scheme();
@@ -423,7 +423,7 @@ struct MacOSSurface::Impl {
 
     /// @brief 激活本应用（兼容新旧 SDK：`activate` 仅在 macOS 14+ 可用）。
     static auto activate_app() -> void {
-        if ([NSApp respondsToSelector:@selector(activate)] != 0) {
+        if ([NSApp respondsToSelector:@selector(activate)] != NO) {
             [NSApp performSelector:@selector(activate)];
         } else {
 // 旧 SDK 的唯一入口；新版 SDK 上该调用虽弃用但仍在运行时有效。
@@ -690,7 +690,7 @@ auto dispatch_mouse(aurora::MacOSSurface::Impl *impl, NSEvent *event, MouseActio
     const NSPoint p = [self convertPoint:[event locationInWindow] fromView:nil];
     CGFloat dx = [event scrollingDeltaX];
     CGFloat dy = [event scrollingDeltaY];
-    if ([event hasPreciseScrollingDeltas] != 0) {
+    if ([event hasPreciseScrollingDeltas] != NO) {
         // 精确设备（触控板/妙控鼠标）的增量以像素计：折算到与滚轮同量级的「行」。
         // 与 GLFW 的 Cocoa 后端同系数（0.1），使同一台机器上两个后端的滚动手感一致。
         dx *= 0.1;
@@ -776,8 +776,8 @@ auto dispatch_mouse(aurora::MacOSSurface::Impl *impl, NSEvent *event, MouseActio
     if (impl == nullptr) {
         return;
     }
-    NSString *text = ([string isKindOfClass:[NSAttributedString class]] != 0) ? [(NSAttributedString *)string string]
-                                                                              : (NSString *)string;
+    NSString *text = ([string isKindOfClass:[NSAttributedString class]] != NO) ? [(NSAttributedString *)string string]
+                                                                               : (NSString *)string;
     const std::string utf8 = aurora::ns_to_utf8(text);
     if (utf8.empty()) {
         return;
@@ -805,8 +805,8 @@ auto dispatch_mouse(aurora::MacOSSurface::Impl *impl, NSEvent *event, MouseActio
     if (impl == nullptr) {
         return;
     }
-    NSString *text = ([string isKindOfClass:[NSAttributedString class]] != 0) ? [(NSAttributedString *)string string]
-                                                                              : (NSString *)string;
+    NSString *text = ([string isKindOfClass:[NSAttributedString class]] != NO) ? [(NSAttributedString *)string string]
+                                                                               : (NSString *)string;
     const std::u16string u16 = aurora::ns_to_utf16(text);
     if (u16.empty()) {
         impl->marked = false;
@@ -1352,7 +1352,7 @@ auto MacOSSurface::minimize() -> void {
     if (!impl_ || impl_->window == nil) {
         return;
     }
-    if ([impl_->window isMiniaturized] == 0) {
+    if ([impl_->window isMiniaturized] == NO) {
         [impl_->window miniaturize:nil];
     }
 }
@@ -1386,8 +1386,8 @@ auto MacOSSurface::set_window_mode(WindowMode m) -> void {
     }
     NSWindow *window = impl_->window;
     const bool fullscreen = ([window styleMask] & NSWindowStyleMaskFullScreen) != 0;
-    const bool minimized = [window isMiniaturized] != 0;
-    const bool zoomed = !fullscreen && ([window isZoomed] != 0);
+    const bool minimized = [window isMiniaturized] != NO;
+    const bool zoomed = !fullscreen && ([window isZoomed] != NO);
 
     switch (m) {
         case WindowMode::FullScreen:
@@ -1459,13 +1459,13 @@ auto MacOSSurface::set_accessibility_root(Widget *root) -> void {
 auto MacOSSurface::raise() -> void {
     // 已隐藏的窗口不因提层而出现（`Surface::raise` 契约）：`orderFront:` 会把 `orderOut:`
     // 之后的窗口重新排回屏上，等于绕过运行期显隐开关。
-    if (impl_ != nullptr && impl_->window != nil && [impl_->window isVisible] != 0) {
+    if (impl_ != nullptr && impl_->window != nil && [impl_->window isVisible] != NO) {
         [impl_->window orderFront:nil];
     }
 }
 
 auto MacOSSurface::focus_window() -> void {
-    if (!impl_ || impl_->window == nil || [impl_->window isVisible] == 0) {
+    if (!impl_ || impl_->window == nil || [impl_->window isVisible] == NO) {
         return;  // 同 `raise`：已隐藏的窗口不因聚焦而出现
     }
     Impl::activate_app();
@@ -1481,7 +1481,7 @@ auto MacOSSurface::set_visible(bool on) -> void {
     }
     // 幂等：先读原生实值，同值不再发 AppKit 调用——重复 `orderOut:` / `orderFrontRegardless`
     // 各带一次排序与重绘，而语义上没有任何东西要变。
-    if (([impl_->window isVisible] != 0) == on) {
+    if (([impl_->window isVisible] != NO) == on) {
         return;
     }
     if (on) {
@@ -1495,7 +1495,7 @@ auto MacOSSurface::set_visible(bool on) -> void {
 }
 
 auto MacOSSurface::is_visible() const -> bool {
-    return impl_ != nullptr && impl_->window != nil && [impl_->window isVisible] != 0;
+    return impl_ != nullptr && impl_->window != nil && [impl_->window isVisible] != NO;
 }
 
 auto MacOSSurface::set_always_on_top(bool on) -> void {

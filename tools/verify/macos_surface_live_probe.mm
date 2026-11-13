@@ -261,7 +261,7 @@ auto main() -> int {
               aurora_verify::format_handle(surface.native_handle()));
         auto *window = (__bridge NSWindow *)surface.native_handle();
         check(window != nil, "native_handle bridges to NSWindow");
-        check([window isVisible] != 0, "window is visible after creation");
+        check([window isVisible] != NO, "window is visible after creation");
         check(nearly(surface.size().width, 360.0F) && nearly(surface.size().height, 240.0F), "initial logical size",
               fmt_size(surface.size()));
 
@@ -477,7 +477,7 @@ auto main() -> int {
 
         surface.set_visible(false);
         check(!surface.is_visible(), "set_visible(false) readback");
-        check([window isVisible] == 0, "set_visible(false) reaches NSWindow.isVisible");
+        check([window isVisible] == NO, "set_visible(false) reaches NSWindow.isVisible");
         check(observed == aurora::WindowState::Hidden, "hidden window reports WindowState::Hidden",
               aurora_verify::format_int(static_cast<long long>(observed)));
         check(NSEqualRects([window frame], frame_before) != NO && nearly(surface.position().x, pos_before.x) &&
@@ -496,10 +496,10 @@ auto main() -> int {
 
         surface.set_visible(true);
         check(surface.is_visible(), "set_visible(true) readback");
-        check([window isVisible] != 0, "set_visible(true) reaches NSWindow.isVisible");
+        check([window isVisible] != NO, "set_visible(true) reaches NSWindow.isVisible");
         check(observed != aurora::WindowState::Hidden, "shown window leaves WindowState::Hidden",
               aurora_verify::format_int(static_cast<long long>(observed)));
-        check([window isKeyWindow] == 0, "show does not steal keyboard focus");
+        check([window isKeyWindow] == NO, "show does not steal keyboard focus");
         check(NSEqualRects([window frame], frame_before) != NO, "show keeps frame");
         surface.set_visible(true);  // 幂等
         check(surface.is_visible(), "set_visible(true) idempotent");
@@ -519,7 +519,7 @@ auto main() -> int {
             aurora::Surface &bl = bl_win->surface();
             auto *bl_window = (__bridge NSWindow *)bl.native_handle();
             check(bl_window != nil, "borderless window bridges to NSWindow");
-            check([bl_window isResizable] != 0, "borderless keeps the native resize capability");
+            check([bl_window isResizable] != NO, "borderless keeps the native resize capability");
             const NSRect bl_frame = [bl_window frame];
             const NSRect bl_content = [bl_window contentRectForFrameRect:bl_frame];
             check(nearly(static_cast<float>(bl_content.size.width), static_cast<float>(bl_frame.size.width)) &&
@@ -530,7 +530,7 @@ auto main() -> int {
                                      std::pair<NSWindowButton, const char *>{NSWindowMiniaturizeButton, "miniaturize"},
                                      std::pair<NSWindowButton, const char *>{NSWindowZoomButton, "zoom"}}) {
                 NSButton *button = [bl_window standardWindowButton:slot.first];
-                check(button == nil || [button isHidden] != 0,
+                check(button == nil || [button isHidden] != NO,
                       std::string{"borderless hides the "} + slot.second + " button");
             }
 
@@ -556,7 +556,7 @@ auto main() -> int {
             if (bl_fixed.ok()) {
                 auto fixed_win = std::move(bl_fixed.value());
                 auto *fixed_window = (__bridge NSWindow *)fixed_win->surface().native_handle();
-                check(fixed_window != nil && [fixed_window isResizable] == 0,
+                check(fixed_window != nil && [fixed_window isResizable] == NO,
                       "borderless with resizable=false stays non-resizable");
             }
         }
@@ -572,7 +572,7 @@ auto main() -> int {
             auto *fl_window = (__bridge NSWindow *)fl_win->surface().native_handle();
             check(fl_window != nil, "frameless window bridges to NSWindow");
             // 契约口径：`Frameless` = 完全无装饰、无缩放边框，故不得因本提案放宽。
-            check([fl_window isResizable] == 0, "frameless keeps no resize capability");
+            check([fl_window isResizable] == NO, "frameless keeps no resize capability");
             const NSSize before = [fl_window frame].size;
             post_corner_drag(fl_window, 12, 8.0);
             const NSSize after = [fl_window frame].size;

@@ -83,22 +83,22 @@ namespace {
     if (type == nil) {
         return std::nullopt;
     }
-    if ([type isEqualToString:NSPasteboardTypeString] != 0) {
+    if ([type isEqualToString:NSPasteboardTypeString] != NO) {
         return std::string{AURORA_MIME_TEXT_PLAIN};
     }
-    if ([type isEqualToString:NSPasteboardTypePNG] != 0) {
+    if ([type isEqualToString:NSPasteboardTypePNG] != NO) {
         return std::string{AURORA_MIME_IMAGE_PNG};
     }
-    if ([type isEqualToString:NSPasteboardTypeHTML] != 0) {
+    if ([type isEqualToString:NSPasteboardTypeHTML] != NO) {
         return std::string{AURORA_MIME_TEXT_HTML};
     }
     // 文件清单在 pasteboard 上的三种历史形态统一折算为 uri-list（本库消费方只认这一档）。
-    if (([type isEqualToString:@"text/uri-list"] != 0) || ([type isEqualToString:NSPasteboardTypeFileURL] != 0) ||
-        ([type isEqualToString:@"NSFilenamesPboardType"] != 0)) {
+    if (([type isEqualToString:@"text/uri-list"] != NO) || ([type isEqualToString:NSPasteboardTypeFileURL] != NO) ||
+        ([type isEqualToString:@"NSFilenamesPboardType"] != NO)) {
         return std::string{AURORA_MIME_URI_LIST};
     }
     // 自定义 MIME 以字面量作 type：含 "/" 的非 UTI 串按 MIME 交回（UTI 不含斜杠）。
-    if ([type containsString:@"/"] != 0) {
+    if ([type containsString:@"/"] != NO) {
         return to_utf8(type);
     }
     return std::nullopt;
@@ -172,7 +172,7 @@ auto discard_offer() -> void {
     state->offer = aurora::ClipboardOffer{};
     ++state->generation;  // 后续迟到回调一律丢弃
     // 所有权已易主：如实通知应用。AppKit 不保证回调线程，统一折回主线程（框架的回调契约）。
-    if ([NSThread isMainThread] != 0) {
+    if ([NSThread isMainThread] != NO) {
         aurora::clipboard::detail::fire_ownership_lost();
     } else {
         dispatch_async(dispatch_get_main_queue(), ^{

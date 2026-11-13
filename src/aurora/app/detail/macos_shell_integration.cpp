@@ -100,7 +100,7 @@ constexpr double AURORA_POINTS_PER_MM = 72.0 / 25.4;
     NSBundle *bundle = [NSBundle mainBundle];
     NSString *path = [bundle bundlePath];
     NSString *identifier = [bundle bundleIdentifier];
-    if (path == nil || identifier == nil || ([path hasSuffix:@".app"] == 0)) {
+    if (path == nil || identifier == nil || ([path hasSuffix:@".app"] == NO)) {
         return std::nullopt;
     }
     return to_utf8(identifier);
@@ -350,7 +350,7 @@ auto backend_run_at_login_set(bool enabled, const AppIdentity &identity) -> Resu
         NSError *error = nil;
         SMAppService *service = [SMAppService mainAppService];
         const BOOL ok = enabled ? [service registerAndReturnError:&error] : [service unregisterAndReturnError:&error];
-        if (ok == 0) {
+        if (ok == NO) {
             const std::string detail = error_detail(error);
             return make_error(ErrorCode::RunAtLoginFailed, "run-at-login: the login item service rejected the request" +
                                                                (detail.empty() ? std::string() : ": " + detail));
@@ -463,7 +463,7 @@ class MacPrintSession final : public desktop_shell::PrintSessionBackend {
             [operation setShowsProgressPanel:NO];
             const BOOL ok = [operation runOperation];
             [view release];
-            if (ok == 0) {
+            if (ok == NO) {
                 return make_error(ErrorCode::PrintSessionFailed, "print: the print operation failed");
             }
         }
@@ -497,7 +497,7 @@ class MacPrintSession final : public desktop_shell::PrintSessionBackend {
         PrintTarget target;
         target.name = to_utf8(name);
         target.id = target.name;
-        target.is_default = default_name != nil && ([name isEqualToString:default_name] != 0);
+        target.is_default = default_name != nil && ([name isEqualToString:default_name] != NO);
         targets.push_back(std::move(target));
     }
     return targets;

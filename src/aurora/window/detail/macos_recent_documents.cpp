@@ -58,7 +58,7 @@ auto is_listed(NSDocumentController *controller, NSURL *url) -> bool {
     // 声明式初始化，故此处恒报「未初始化」——它是语言形态差异，不是漏初始化。
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     for (NSURL *listed in [controller recentDocumentURLs]) {
-        if ([[listed URLByResolvingSymlinksInPath] isEqual:wanted] != 0) {
+        if ([[listed URLByResolvingSymlinksInPath] isEqual:wanted] != NO) {
             return true;
         }
     }

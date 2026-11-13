@@ -92,7 +92,7 @@ auto delivered_item(NSString *identifier) -> NSUserNotification * {
     for (NSUserNotification *item in
          [[NSUserNotificationCenter defaultUserNotificationCenter] deliveredNotifications]) {
         NSString *recorded = [item identifier];  // nullable 属性，isEqualToString: 要求非空实参
-        if ((recorded != nil) && ([identifier isEqualToString:recorded] != 0)) {
+        if ((recorded != nil) && ([identifier isEqualToString:recorded] != NO)) {
             return item;
         }
     }
@@ -132,7 +132,7 @@ auto write_icon_file(NSString *path) -> bool {
         return false;
     }
     NSData *png = [rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
-    return png != nil && ([png writeToFile:path atomically:YES] != 0);
+    return png != nil && ([png writeToFile:path atomically:YES] != NO);
 }
 
 /// @brief 合成一次状态按钮点击（直接向 target 派发 action）。
@@ -155,7 +155,7 @@ auto menu_item_with_title(NSMenu *menu, NSString *title) -> NSMenuItem * {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     for (NSMenuItem *item in menu.itemArray) {
         NSString *label = [item title];  // nullable 属性，isEqualToString: 要求非空实参
-        if ((label != nil) && ([title isEqualToString:label] != 0)) {
+        if ((label != nil) && ([title isEqualToString:label] != NO)) {
             return item;
         }
     }
@@ -200,7 +200,7 @@ auto main() -> int {
             NSStatusItem *item = (bridge != nullptr) ? (__bridge NSStatusItem *)bridge->native_status_item() : nil;
             check(item != nil, "status item pointer is non-nil");
             check(item != nil && item.button != nil, "status item exposes a button");
-            check(bridge != nullptr && bridge->visible() && (item.visible != 0), "status item starts visible");
+            check(bridge != nullptr && bridge->visible() && (item.visible != NO), "status item starts visible");
 
             check(bridge != nullptr && bridge->tooltip() == "Aurora tray probe", "initial tooltip comes from the title",
                   bridge != nullptr ? bridge->tooltip() : std::string{});
@@ -222,10 +222,10 @@ auto main() -> int {
                   "empty path falls back to the application icon", app_icon ? "app icon available" : "no app icon");
 
             tray.hide();
-            check(bridge != nullptr && !bridge->visible() && (item == nil || (item.visible == 0)),
+            check(bridge != nullptr && !bridge->visible() && (item == nil || (item.visible == NO)),
                   "hide() hides the status item");
             tray.show();
-            check(bridge != nullptr && bridge->visible() && (item == nil || (item.visible != 0)),
+            check(bridge != nullptr && bridge->visible() && (item == nil || (item.visible != NO)),
                   "show() reveals it again");
 
             // ---- 无菜单时的点击激活 ----
@@ -256,19 +256,19 @@ auto main() -> int {
             check(bridge != nullptr && bridge->menu_item_count() == 5, "menu item count includes nested entries",
                   bridge != nullptr ? aurora_verify::format_uint(bridge->menu_item_count()) : std::string{});
             check(menu != nil && menu.numberOfItems == 4, "top-level item count matches");
-            check(menu != nil && (menu.autoenablesItems == 0), "auto-enabling is off (declarative enabled wins)");
+            check(menu != nil && (menu.autoenablesItems == NO), "auto-enabling is off (declarative enabled wins)");
 
             NSMenuItem *alpha_item = (menu != nil) ? menu_item_with_title(menu, @"Alpha") : nil;
             NSMenuItem *disabled_item = (menu != nil) ? menu_item_with_title(menu, @"Disabled") : nil;
             NSMenuItem *more_item = (menu != nil) ? menu_item_with_title(menu, @"More") : nil;
             check(alpha_item != nil && alpha_item.state == NSControlStateValueOn,
                   "checkable + checked maps to NSControlStateValueOn");
-            check(disabled_item != nil && (disabled_item.enabled == 0), "enabled=false maps to a disabled item");
-            check(menu != nil && menu.numberOfItems == 4 && ([[menu itemAtIndex:2] isSeparatorItem] != 0),
+            check(disabled_item != nil && (disabled_item.enabled == NO), "enabled=false maps to a disabled item");
+            check(menu != nil && menu.numberOfItems == 4 && ([[menu itemAtIndex:2] isSeparatorItem] != NO),
                   "separator maps to a separator item");
             check(more_item != nil && more_item.submenu != nil && more_item.submenu.numberOfItems == 1,
                   "nested children map to a submenu");
-            check(more_item != nil && more_item.submenu != nil && (more_item.submenu.autoenablesItems == 0),
+            check(more_item != nil && more_item.submenu != nil && (more_item.submenu.autoenablesItems == NO),
                   "submenu auto-enabling is off");
 
             // ---- 叶子项点击路由（合成 performAction）----

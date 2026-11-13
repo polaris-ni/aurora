@@ -65,7 +65,7 @@ auto ns_string(const std::string &text) -> NSString * { return [NSString stringW
     (void)center;
     NSString *tag = nil;
     id recorded = notification.userInfo[AURORA_NOTIFICATION_TAG_KEY];
-    if ([recorded isKindOfClass:[NSString class]] != 0) {
+    if ([recorded isKindOfClass:[NSString class]] != NO) {
         tag = static_cast<NSString *>(recorded);
     }
     // 非本后端投递的通知（没有 userInfo 标签）退回 identifier；两者皆空时回传空串。
@@ -98,7 +98,7 @@ auto is_delivered(NSUserNotificationCenter *center, NSString *identifier) -> boo
         // `NSUserNotification::identifier` 是 nullable 属性，`isEqualToString:` 要求非空实参：
         // 先取进局部并判掉 nil，未标识的项本就匹配不上任何标识。
         NSString *recorded = [existing identifier];
-        if ((recorded != nil) && ([identifier isEqualToString:recorded] != 0)) {
+        if ((recorded != nil) && ([identifier isEqualToString:recorded] != NO)) {
             return true;
         }
     }
