@@ -62,7 +62,7 @@ import subprocess
 import sys
 import time
 from collections import Counter, defaultdict
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # 编译库读取 / argv 还原 / 取依赖的底层件与 `select_lint_tus.py` 共用同一份实现：
 # 两处若各写一套，选集判定的「受影响 TU」与缓存指纹覆盖的 TU 会分叉，而分叉的症状是
@@ -567,14 +567,22 @@ def main() -> int:
 
     # 打印**本轮总覆盖面**（含缓存复放）而不只是真跑的条数：读日志的人要判断的是
     # 「这一遍到底覆盖了几个 TU」，写 `0` 会被读成「这一遍没跑」。
-    print(f"[lint] clang-tidy over {len(tus)} translation units "
-          f"({len(to_run)} analysed, {len(cached_out)} replayed), {jobs} parallel{mode}{shard_desc}")
+    # 进度行按「每完成一个 TU 一行」输出：文件、已处理、未处理、耗时。CI 上 lint 动辄几十分钟，
+    # 只打里程碑时日志长时间一片空白，超时被取消更是什么都看不到，判不清卡在哪个 TU。
+    # 分母固定是本片总覆盖面（含缓存复放），否则「已处理 + 未处理」会随缓存命中数漂移。
+    total_tus = len(tus)
+    print(f"[lint] clang-tidy over {total_tus} translation units "
+          f"({len(to_run)} analysed, {len(cached_out)} replayed), {jobs} parallel{mode}{shard_desc}",
+          flush=True)
+    print(f"[lint] progress: {len(cached_out)}/{total_tus} processed, "
+          f"{len(to_run)} pending (one line per completed TU below)", flush=True)
 
     findings: dict[tuple[str, str, str], str] = {}
     # 每条告警的**首发 TU**：头文件告警会在每个包含它的 TU 里重复上报，去重后只剩一条，
     # 于是「谁把它拉进分析的」这个判因必需的信息就丢了——`clang-analyzer` 一类只有沿某条
-    # 具体调用路径才会命中的检查尤其如此（复现只能从某个 TU 起手）。ex.map 按输入顺序产出，
-    # 而输入是 sorted() 的 TU 清单，故「首发」= 报出它的最小路径 TU，跨轮次确定可比。
+    # 具体调用路径才会命中的检查尤其如此（复现只能从某个 TU 起手）。并发按真实完成顺序收结果，
+    # 但解析一律按 sorted() 的 TU 清单走，与完成顺序无关，故「首发」= 报出它的最小路径 TU，
+    # 跨轮次确定可比。
     found_by: dict[tuple[str, str, str], str] = {}
     by_area: Counter[str] = Counter()
     timeouts: list[str] = []
@@ -588,13 +596,23 @@ def main() -> int:
         # C TU 的 `-std=c++20` 语言分流：见 write_c_tu_config。
         c_config = write_c_tu_config(a.config, a.build_dir)
     if to_run:
+        processed = len(cached_out)
         with ThreadPoolExecutor(max_workers=jobs) as ex:
             jobs_args = [(t, a.checks, a.build_dir, a.fix,
                           c_config if (c_config and t.endswith(".c")) else a.config) for t in to_run]
-            for i, (tu, out, _dt) in enumerate(ex.map(run_one, jobs_args), 1):
+            # as_completed 而非 ex.map：后者按提交顺序逐个 yield，只要队首那个 TU 慢（或卡住），
+            # 后面早已跑完的一批就一直不打印，进度看着像整个作业挂死。按真实完成顺序收，
+            # 才能一直看到「刚跑完的是谁、还剩几个」，也才能从日志里定位拖慢整片的那个 TU。
+            futures = [ex.submit(run_one, args) for args in jobs_args]
+            for fut in as_completed(futures):
+                tu, out, dt = fut.result()
                 outputs[tu] = out
-                if i % 25 == 0 or i == len(to_run):
-                    print(f"  ... {i}/{len(to_run)}  ({time.time() - t0:.0f}s)", flush=True)
+                processed += 1
+                print(f"[lint] {processed}/{total_tus} processed, {total_tus - processed} pending | "
+                      f"{dt:.1f}s | {tu}", flush=True)
+    else:
+        print(f"[lint] {total_tus}/{total_tus} processed, 0 pending "
+              f"(every TU replayed from cache; no analysis this run)", flush=True)
     # 解析一律按 sorted 的 TU 清单顺序进行：缓存复放与真跑的产物在此合流，故去重后记下的
     # 「首发 TU」与全量跑法同一口径（`found_by` 的跨轮次可比性依赖这一点）。
     for tu in tus:

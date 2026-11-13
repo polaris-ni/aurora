@@ -476,7 +476,7 @@ cmake -S . -B build -DAURORA_LLD_DIR="<LLVM 安装根>/bin"                     
 | 配置来源 | 仓库根 `.clang-tidy`（`Checks` / `CheckOptions` / `HeaderFilterRegex`） |
 | 扫描范围 | `compile_commands.json` 中全部**非 `third_party/`** 翻译单元，另有具名排除（见下「排除名单」） |
 | 去重 | 按 `(file, line, check)` 去重——头文件诊断会在每个包含它的 TU 中重复上报，原始条数不可直接用作门禁计数 |
-| 结构化清单 | `lint` / `lint-fix` 始终把完整清单写到该构建目录的 `lint-findings.json`（`shard` / `tu_count` / `tu_total` / `unique_findings` / `broken_tus` / `by_check` / `by_file` / `findings`）：门禁 stdout 只印 top-N 文件表，尾数不在其中，判因与存量清点必须以这份 JSON 为准。`findings` 每条为 `[文件, 行, check, severity, 消息, 首发 TU]`——头文件告警按 `(file, line, check)` 去重后只剩一条，「谁把它拉进分析的」这个判因起点靠第 6 位留下（`clang-analyzer` 一类只在某条具体调用路径上才命中的检查尤其需要）；`ex.map` 按 sorted 清单顺序产出，故「首发」跨轮次确定可比 |
+| 结构化清单 | `lint` / `lint-fix` 始终把完整清单写到该构建目录的 `lint-findings.json`（`shard` / `tu_count` / `tu_total` / `unique_findings` / `broken_tus` / `by_check` / `by_file` / `findings`）：门禁 stdout 只印 top-N 文件表，尾数不在其中，判因与存量清点必须以这份 JSON 为准。`findings` 每条为 `[文件, 行, check, severity, 消息, 首发 TU]`——头文件告警按 `(file, line, check)` 去重后只剩一条，「谁把它拉进分析的」这个判因起点靠第 6 位留下（`clang-analyzer` 一类只在某条具体调用路径上才命中的检查尤其需要）；解析按 sorted 清单顺序走、与并发完成顺序无关，故「首发」跨轮次确定可比 |
 | 分片 | `AURORA_LINT_SHARD=<i>/<n>`（默认空 = 一遍跑全量）：把已排序的 TU 清单切成 n 份、本目录只跑第 i 份，供 CI 矩阵并跑多个作业。只改排布、不减覆盖面，也**不改判据**（任一片红即整门红）。详见下「墙钟与分片」 |
 | 依赖 | `clang-tidy`（PATH）+ python（PATH）+ `CMAKE_EXPORT_COMPILE_COMMANDS`（未开启时本模块自动打开） |
 | 生成物先决 | 聚合目标 `lint-prereq` 收全部「lint 直读源文件所依赖的构建期产物」：`wayland-gen`（存在时）+ 全部构建期词表生成目标（`cmake/AuroraI18n.cmake` 经全局属性 `AURORA_I18N_LINT_PREREQ_TARGETS` 登记，demos 关闭时该段清单为空）。`lint` / `lint-fix` 在 configure 期依赖它，不经编译链的 lint 腿（CI 增量作业直接调 `run_clang_tidy.py`）显式 `cmake --build <dir> --target lint-prereq` |
@@ -490,15 +490,17 @@ cmake --build build --target lint        # 全量 lint，有告警则失败；�
 cmake --build build --target lint-fix    # 就地应用 fix-it，随后必须人工审阅 diff
 python tools/check/run_clang_tidy.py --build-dir build --json-out findings.json  # 结构化清单
 python tools/check/run_clang_tidy.py --build-dir build --include 'src/'          # 只 lint 库代码
-python tools/check/run_clang_tidy.py --build-dir build --shard 0/4 --print-tus   # 看第 0 片跑哪些 TU（不跑 tidy）
-cmake -S . -B build-shard0 -DAURORA_LINT_SHARD=0/4 ...                           # 本目录的 lint 目标只跑第 0 片
+python tools/check/run_clang_tidy.py --build-dir build --shard 0/6 --print-tus   # 看第 0 片跑哪些 TU（不跑 tidy）
+cmake -S . -B build-shard0 -DAURORA_LINT_SHARD=0/6 ...                           # 本目录的 lint 目标只跑第 0 片
 python tools/check/select_lint_tus.py --build-dir build --git-diff HEAD~1        # 按改动挑 TU（见下节）
 python tools/check/run_clang_tidy.py --build-dir build --tu-list build/lint-selection/tus_0.txt \
        --deps build/lint-selection/deps.json --cache-dir .tidy-cache              # 只跑挑出来的那批 + 结果缓存
 ```
 
-**墙钟与分片（`--shard=i/n`）**：门禁的墙钟 = TU 数 × 单 TU 分析成本 ÷ 并行度，而 CI runner 只有 4 vCPU，并行度已经开满核数——native 一遍约 500+ TU 实测 `elapsed 5172s`（86 分钟，run 35844126045 的 86.9 分钟连 DEBUG=ON 那遍都没跑到），多道 pass 串在一个作业里就是数小时量级。剩下的唯一变量是**把 TU 摊到多个作业**：`-DAURORA_LINT_SHARD=i/n` 让本目录的 `lint` 目标只跑第 i 片，主遍因此按 shard(4) = 4 个作业并跑，每片 ~140 TU ≈ 25 分钟，而**主遍总核时分毫未变**。三份编译库不再是三份全量：主遍只留把 DEBUG / SIMD / TEST_HOOKS 全钉 ON 的那一份，另两份极性由 `lint-polarity` 按宏 token 定向选集补扫（见下「反极性覆盖」），native 全量分片作业由 12 个降到 4 个，另加三个辅助定向单 job（8p 两遍 + 8w 一遍）。
-三点约束：① 切分只在 `load_tus()` 的 `sorted()` 结果上做 `tus[i::n]`，清单顺序唯一确定「谁归哪片」，同一份编译库重复取片稳定，且相邻同目录（往往同样重）的 TU 被摊到不同片上；② 分片**不减覆盖面也不改判据**——任一片红即整门红，缺片等于缺覆盖面，故格式非法 / 索引越界在 configure 期 `FATAL_ERROR`，片内选中 0 个 TU 在 runner 期以退出码 2 拒跑，两层都不许「跑到了但没活儿」被读成「跑过且干净」；③ 每片 JSON 自带 `shard` 与 `tu_total`（切分前的全量条数）自述「本片是全量的哪一份」，`--print-tus` 则只打印本片清单便退出，用来离线核验互斥性与并集完整性（本机实测：504 TU → 4 片各 126，两两不相交、并集恰等于全量）。
+**墙钟与分片（`--shard=i/n`）**：门禁的墙钟 = TU 数 × 单 TU 分析成本 ÷ 并行度，而 CI runner 只有 4 vCPU，并行度已经开满核数——native 一遍约 500+ TU 实测 `elapsed 5172s`（86 分钟，run 35844126045 的 86.9 分钟连 DEBUG=ON 那遍都没跑到），多道 pass 串在一个作业里就是数小时量级。剩下的唯一变量是**把 TU 摊到多个作业**：`-DAURORA_LINT_SHARD=i/n` 让本目录的 `lint` 目标只跑第 i 片，主遍因此按 shard(6) = 6 个作业并跑，每片约 83 TU ≈ 15 分钟（按 4 片时代实测折算），而**主遍总核时分毫未变**。三份编译库不再是三份全量：主遍只留把 DEBUG / SIMD / TEST_HOOKS 全钉 ON 的那一份，另两份极性由 `lint-polarity` 按宏 token 定向选集补扫（见下「反极性覆盖」），native 全量分片作业由 12 个降到 6 个，另加三个辅助定向单 job（8p 两遍 + 8w 一遍）。
+三点约束：① 切分只在 `load_tus()` 的 `sorted()` 结果上做 `tus[i::n]`，清单顺序唯一确定「谁归哪片」，同一份编译库重复取片稳定，且相邻同目录（往往同样重）的 TU 被摊到不同片上；② 分片**不减覆盖面也不改判据**——任一片红即整门红，缺片等于缺覆盖面，故格式非法 / 索引越界在 configure 期 `FATAL_ERROR`，片内选中 0 个 TU 在 runner 期以退出码 2 拒跑，两层都不许「跑到了但没活儿」被读成「跑过且干净」；③ 每片 JSON 自带 `shard` 与 `tu_total`（切分前的全量条数）自述「本片是全量的哪一份」，`--print-tus` 则只打印本片清单便退出，用来离线核验互斥性与并集完整性（本机实测：Windows LLVM 编译库 817 TU → 6 片分别 137 / 136×5，两两不相交、并集恰等于全量）。
+
+**进度可观测**：runner 启动时先印本片覆盖面分解（总数 / 待分析 / 缓存复放），此后每完成一个 TU 印一行 `[lint] <已处理>/<总数> processed, <未处理> pending | <耗时>s | <文件>`，按真实完成顺序输出，故能从日志直接看出还剩几个、哪个 TU 拖慢了整片。分母含缓存复放的 TU，否则「已处理 + 未处理」会随命中数漂移。`lint` / `lint-fix` 目标用 `USES_TERMINAL` 把命令放进 Ninja 的 console pool、Python 另加 `-u`，绕开「自定义命令 stdout 缓冲到结束才吐」——lint 动辄几十分钟，作业一旦被超时取消，缓冲里的进度会整段丢失，日志只剩一行目标描述；现在即使被取消也能看到停在哪个 TU。
 
 **按改动选集（`tools/check/select_lint_tus.py`）**：分片解决的是「一遍太慢」， 选集解决的是「这一遍里的大多数 TU 与本次改动无关」。输入一份改动清单（`--changed <文件>` 或直接 `--git-diff <ref>`），输出 `selection.json` / `deps.json` / `tus_<i>.txt`，再交给 runner 的 `--tu-list` 消费。判据不变（仍是 0 finding 才过），变的只是「这一轮把判据施加在哪些 TU 上」—— 可行性来自一条事实：clang-tidy 的诊断只可能来自 TU 自身与它读到的头文件，没被挑中的 TU 本轮 不可能因本次改动而产生新告警。
 
@@ -510,7 +512,7 @@ python tools/check/run_clang_tidy.py --build-dir build --tu-list build/lint-sele
 
 **结果缓存（`--cache-dir` + `--deps`）**：指纹 = clang-tidy 版本 + 编译器版本 + `.clang-tidy` 内容 + 该 TU 的编译 argv + TU 自身内容 + 依赖逐文件内容；命中即**复放上一次的原始输出**，不是 「记为通过」。两条硬边界：① 编译失败 / 超时的 TU **绝不入缓存**——这类 TU 一条 `[check]` 诊断 都不产出，把这种「0 告警」写进缓存等于把一次偶发塌方固化成永久绿灯；② `--deps` 里没有的 TU 不缓存，否则指纹退化成「只看自身内容」，改了它包含的头却命中旧结果，那是本缓存唯一能造出的 假绿。本机实测：10 个 demo TU 冷跑 92 秒 → 热跑 0.38 秒，两轮 `findings` 逐条相等。
 
-**CI 的全量 / 增量分界**：lint 全量矩阵（主遍 `lint` 4 片 + `lint-polarity` 2 job + `lint-wasm` 1 job + `lint-windows` / `lint-macos` 各 1 job，共 9 个作业）只在 **PR、master(+main) 推送、每周定时（周一 03:17 UTC）与手动触发** 四类事件下跑；**功能分支推送不触发全量矩阵**，改用作业 8i `lint-incremental` 单 job 增量覆盖——单 job 内顺序跑 native(DEBUG OFF/ON) 与 wasm 三套编译库上「本次改动**本身即 TU**」的那批（`--changed-only`，**不展开 include 闭包**），把分支 push 的 lint 开销从 9 个 job 压到 1 个；闭包级覆盖只属于全量口径（master 推送与面向 master 的 PR），故「改一个公共头」这类分支推送在增量口径下即空闲（留 `idle` 记录），由 PR / master 的全量遍兜底。`lint-incremental` 与全量矩阵走同一套 `run_clang_tidy.py`，有告警即非零退出，零漏红；子集为空（而非全集）时写一份 `idle: true` 的 JSON 留痕——「没活儿」与「跑过且干净」在日志里长得一模一样，故空片必须留痕。取不到基线（浅克隆、首推 / 强推）时回落「相对 origin/master 的净改动」仍为有界子集，**绝不退化成空集**。全量出口由 PR / master 与每周定时兜底。分支推送若已被 open PR 收编（同一 sha），`gate` 查重作业会把 8i 与全部重作业一并跳过——该轮覆盖由 PR 腿的 9-job 全量矩阵承担，不构成覆盖面缺口；没有 PR 的分支推送照旧跑 8i。
+**CI 的全量 / 增量分界**：lint 全量矩阵（主遍 `lint` 6 片 + `lint-polarity` 2 job + `lint-wasm` 1 job + `lint-windows` / `lint-macos` 各 1 job，共 11 个作业）只在 **PR、master(+main) 推送、每周定时（周一 03:17 UTC）与手动触发** 四类事件下跑；**功能分支推送不触发全量矩阵**，改用作业 8i `lint-incremental` 单 job 增量覆盖——单 job 内顺序跑 native(DEBUG OFF/ON) 与 wasm 三套编译库上「本次改动**本身即 TU**」的那批（`--changed-only`，**不展开 include 闭包**），把分支 push 的 lint 开销从 11 个 job 压到 1 个；闭包级覆盖只属于全量口径（master 推送与面向 master 的 PR），故「改一个公共头」这类分支推送在增量口径下即空闲（留 `idle` 记录），由 PR / master 的全量遍兜底。`lint-incremental` 与全量矩阵走同一套 `run_clang_tidy.py`，有告警即非零退出，零漏红；子集为空（而非全集）时写一份 `idle: true` 的 JSON 留痕——「没活儿」与「跑过且干净」在日志里长得一模一样，故空片必须留痕。取不到基线（浅克隆、首推 / 强推）时回落「相对 origin/master 的净改动」仍为有界子集，**绝不退化成空集**。全量出口由 PR / master 与每周定时兜底。分支推送若已被 open PR 收编（同一 sha），`gate` 查重作业会把 8i 与全部重作业一并跳过——该轮覆盖由 PR 腿的 11-job 全量矩阵承担，不构成覆盖面缺口；没有 PR 的分支推送照旧跑 8i。
 
 **排除名单（脚本的 `DEFAULT_EXCLUDE`）**：`third_party/` 与两份具名排除——① `tests/support/fake_gl.h`（GL 驱动桩：56 条告警里 48 条 `readability-named-parameter`、5 条指针算术。桩不读参数、签名须逐字对齐 `GLFn` 函数表，「按本仓规范改名」即失真）；② **构建目录里的生成物** `GENERATED_EXCLUDE`（`(^|/)[^/]*-gen/`，典型是 `wayland-scanner` 在 configure 期编出的 `<build>/wayland-gen/*-protocol.c`）：这些 `.c` 属于生成物、不受本仓风格约束，且缺生成头会让整片 TU 编译失败（`broken_tus`）。⚠️ 刻意**不**用裸 `gen/`：源码树里 `tools/gen/` 是本仓 API / 错误码生成器的正式目录，全局匹配会把第一方代码静默踢出覆盖面；构建目录专属的 `<build>/gen/` 由 `default_exclude(build_dir)` 在锚定到本轮构建目录之后再补上。逐文件 / 逐形态点名而非目录通配：新增排除必须显式登记，杜绝整目录被静默放行。判据是「哪种手段留下的盲点小」，不是「看着像不像三方代码」——整文件排除会让该文件此后的手写代码一并脱离检查，故仅当告警类别没有更窄的豁免手段时才用它。反例已量过：`src/aurora/render/gpu/gl_core.h`（49 条）与 `src/aurora/window/detail/atspi_protocol.h`（74 条）曾进同一候选名单，但它们的告警几乎全是 `readability-identifier-naming`，而该检查有**按类别**的 `*IgnoredRegexp`（clang-tidy 22 实测：与 `EnumConstantCase` 同配时，命中正则的枚举常量不再上报，未命中的照常上报），所以这两份留在覆盖面内、由命名豁免处置。两种取舍都能复证：把 `HeaderFilterRegex` 换成分隔符无关的配置、只跑包含这三份头的 TU，桩一条也不上报（被排除），另两份分别报回 74 / 49 条（在覆盖面内）。
 
@@ -532,7 +534,7 @@ python tools/check/run_clang_tidy.py --build-dir build --tu-list build/lint-sele
 python tools/check/run_clang_tidy.py --build-dir build-wasm --emscripten   # 浏览器 TU + #ifdef AURORA_BACKEND_WASM 分支
 ```
 
-两条口径各自的把关面：native 遍覆盖 host 后端与 `#else` 分支，wasm 遍覆盖 `AURORA_PLATFORM_*` 的另一侧（POSIX 派发分支、Web Audio 后端、`wasm_*` 探针）与 libc++ 差异面。CI 两条口径都跑，且各自是一道独立的必过位：`lint` 主遍（8）把 DEBUG / SIMD / TEST_HOOKS 全钉 ON 并全量分 4 片，`lint-polarity`（8p）与 `lint-wasm`（8w）分别按宏 token 定向补扫极性差集与浏览器专属 TU；8w 仍跑 `--emscripten` 口径；二者互不替代——任一绿灯都不构成另一条通过的证据。浏览器口径原本挂在 `wasm` 作业的末步，拆出：单遍实测 69.7 分钟，占该作业 79.4 分钟的 88%，整条 workflow 的墙钟被一个静态检查步骤卡住；拆成 8w 的分片矩阵后 `wasm` 作业回到 ~10 分钟（configure + 构建 + ctest），两条 lint 门禁并行同量级。
+两条口径各自的把关面：native 遍覆盖 host 后端与 `#else` 分支，wasm 遍覆盖 `AURORA_PLATFORM_*` 的另一侧（POSIX 派发分支、Web Audio 后端、`wasm_*` 探针）与 libc++ 差异面。CI 两条口径都跑，且各自是一道独立的必过位：`lint` 主遍（8）把 DEBUG / SIMD / TEST_HOOKS 全钉 ON 并全量分 6 片，`lint-polarity`（8p）与 `lint-wasm`（8w）分别按宏 token 定向补扫极性差集与浏览器专属 TU；8w 仍跑 `--emscripten` 口径；二者互不替代——任一绿灯都不构成另一条通过的证据。浏览器口径原本挂在 `wasm` 作业的末步，拆出：单遍实测 69.7 分钟，占该作业 79.4 分钟的 88%，整条 workflow 的墙钟被一个静态检查步骤卡住；拆成 8w 的分片矩阵后 `wasm` 作业回到 ~10 分钟（configure + 构建 + ctest），两条 lint 门禁并行同量级。
 
 **反极性覆盖（`lint-polarity` 辅助遍）**：`AURORA_ENABLE_SIMD` 与 `AURORA_ENABLE_TEST_HOOKS` 默认 ON，主遍把它们与 `AURORA_ENABLE_DEBUG` 一起全钉 ON，其 `#ifdef` 收口的 OFF 分支不参与主遍分析。辅助遍按 `debug-off` / `simd-testhooks-off` 两份编译库把极性反过来，但**只扫宏 token 命中的那批 TU**（`git grep -lE` 生成清单，再经 `select_lint_tus.py --changed-only` 保留本身是 TU 的文件，与平台子作业同构），各 1 个单 job、不分片。token 选集可能漏掉「宏经公共头间接生效」的 TU，故每周定时事件下辅助遍改跑 `lint` 全量目标兜底，`timeout-minutes` 因此留到 120。定向补扫的核时远低于旧「三份编译库各自全量 × 4 片」的 12 个 native 作业。
 
@@ -548,7 +550,7 @@ python tools/check/run_clang_tidy.py --build-dir build-wasm --emscripten   # 浏
 
 **`HeaderFilterRegex` 的路径分隔符缺口**：现值为 `(include[/\\]aurora|src[/\\]aurora|[/\\]tests[/\\]|[/\\]tools[/\\]|[/\\]examples[/\\])`，**分隔符无关**。缺口本身：旧值只认正斜杠，而编译库里的头文件路径常是「正斜杠根 + 反斜杠段」的混合形态，某一段的分隔符与正则不符，该段之后的头文件告警就被过滤掉。实测后果（扩面前）：同一份 `tests/framework` 下的头文件，收口前 native 遍报 0 条、wasm 遍报十余条（两条口径拼出的路径形态不同，穿过过滤的能力也就不同），因此**本机 native 门禁的有效覆盖面主要是主文件诊断**——本机那句「两口径 0 findings」证明的面比字面窄。缺口在 Linux runner 上不存在（路径全正斜杠）：CI 首跑因此放出 native 422 条 / wasm 470 条，与本机 0 并不矛盾，是同一份代码在两张覆盖面下的两个数。扩面的一次性代价本机也量过：**417 条 / 64 文件**（多为同一头文件被多个 TU 重复上报），其中 `readability-identifier-naming` 163 条（global constant 76、enum constant 47）、`readability-named-parameter` 50 条。这批存量已按下面的处置阶梯逐项清到 0（改名 / `CheckOptions` 按类别豁免 / 带理由的逐点与区间式 `NOLINT`），两条口径复验各自 **0 findings**，本机与 CI 自此量的是同一张覆盖面。
 
-**CI 语义：lint 家族均为必过门禁**。全量事件下 = 主遍 `lint` 4 片 + `lint-polarity` 2 个定向 job + `lint-wasm` 1 个定向 job + `lint-windows` / `lint-macos` 各 1 个平台子作业；**整门绿 = 9 个作业全绿**，任一片 `unique_findings` 非 0（或有 TU 编译失败）即让该片红、进而让整门红。各片 `lint-findings.json` 以 `tidy-findings-main-shard{0..3}` / `tidy-findings-{debug-off,simd-testhooks-off,wasm}` / `tidy-findings-{windows,macos}` 逐片落盘——**「不报」与「跑到了」是两件事**，判因与回归定位都要看清单，而分片后清单是互补的：读单片只是全量的 1/n，聚合时按 `shard` / `tu_total` 核对片数齐没齐。为什么曾经 report-only：该门禁自引入起从未绿过——先红在装不上 clang-tidy-22（apt 404），修好后红在上述分隔符缺口兑现的存量；一个永远红的必过位不等于门禁，只是把红灯常态化、让每个 PR 背一个与自身无关的失败。收回条件（各份清单的 `unique_findings` 均为 0）已于本轮达成，随即扩面 + 转必过。**日后在此转红按同一阶梯清理，不得再次回退 report-only。** 存量按覆盖面代价从小到大处置：① `.clang-tidy` 的 `CheckOptions`（命名类占大头，`*IgnoredRegexp` 按类别精确豁免，不牺牲文件其余检查）；② 逐点 `NOLINT` + 原因（受 §4.5「NOLINT 纪律」与 `check_nolint_layout` 约束）；③ 整文件排除（永久盲点，只给桩/替身这类本就不受本仓风格约束的文件）。
+**CI 语义：lint 家族均为必过门禁**。全量事件下 = 主遍 `lint` 6 片 + `lint-polarity` 2 个定向 job + `lint-wasm` 1 个定向 job + `lint-windows` / `lint-macos` 各 1 个平台子作业；**整门绿 = 11 个作业全绿**，任一片 `unique_findings` 非 0（或有 TU 编译失败）即让该片红、进而让整门红。各片 `lint-findings.json` 以 `tidy-findings-main-shard{0..5}` / `tidy-findings-{debug-off,simd-testhooks-off,wasm}` / `tidy-findings-{windows,macos}` 逐片落盘——**「不报」与「跑到了」是两件事**，判因与回归定位都要看清单，而分片后清单是互补的：读单片只是全量的 1/n，聚合时按 `shard` / `tu_total` 核对片数齐没齐。为什么曾经 report-only：该门禁自引入起从未绿过——先红在装不上 clang-tidy-22（apt 404），修好后红在上述分隔符缺口兑现的存量；一个永远红的必过位不等于门禁，只是把红灯常态化、让每个 PR 背一个与自身无关的失败。收回条件（各份清单的 `unique_findings` 均为 0）已于本轮达成，随即扩面 + 转必过。**日后在此转红按同一阶梯清理，不得再次回退 report-only。** 存量按覆盖面代价从小到大处置：① `.clang-tidy` 的 `CheckOptions`（命名类占大头，`*IgnoredRegexp` 按类别精确豁免，不牺牲文件其余检查）；② 逐点 `NOLINT` + 原因（受 §4.5「NOLINT 纪律」与 `check_nolint_layout` 约束）；③ 整文件排除（永久盲点，只给桩/替身这类本就不受本仓风格约束的文件）。
 
 ### 4.6 `AURORA_ENABLE_IMAGE_*`（图像编解码能力）
 
@@ -992,7 +994,7 @@ aurora_setup_consumer_target(my_app)      # 可选再追加若干 PRIVATE includ
 -D AURORA_UNITY_BUILD=ON|OFF             # Unity/jumbo 构建（默认 OFF；全量构建加速、单文件迭代变慢，见 §4.8）
 -D AURORA_UNITY_BATCH_SIZE=<N>           # unity 批次大小（默认 16；仅 AURORA_UNITY_BUILD=ON 时生效）
 -D AURORA_ENABLE_CLANG_TIDY=ON|OFF       # lint / lint-fix 目标（默认 ON）
--D AURORA_LINT_SHARD=0/4                 # TU 分片（默认空 = 全量一遍；CI 矩阵用，见 §4.5）
+-D AURORA_LINT_SHARD=0/6                 # TU 分片（默认空 = 全量一遍；CI 矩阵用，见 §4.5）
 
 # 静态检查
 cmake --build build --target lint        # 全量 lint（非 third_party，去重后计数）

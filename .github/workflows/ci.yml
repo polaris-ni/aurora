@@ -53,13 +53,13 @@
 #                    覆盖该宏的 `-pthread` 链接标志与 ThreadPool 行为分支。
 #  7. install     — cmake --install + 工作流内联最小消费端端到端验证
 #                    （find_package(Aurora) + 静态链接 + feature 宏导出一致性）。
-#  8. lint        — clang-tidy **主遍**：一份编译数据库、4 个 TU 分片作业，去重后 0 finding 才通过。
+#  8. lint        — clang-tidy **主遍**：一份编译数据库、6 个 TU 分片作业，去重后 0 finding 才通过。
 #                    口径是「开尽可能多的宏、扫尽可能多的代码」：DEBUG=ON、SIMD / TEST_HOOKS 显式 ON、
 #                    顶层 env 的 LINT_CAPABILITY_FLAGS 全量（除 Windows/macOS 特有宏外的全部后端与
 #                    能力开关，含 WebView 控件），并追加 OpenSSL provider 使两枚 TLS 引擎 TU 同时入面。
 #                    依赖 AuroraLint.cmake 的 `lint` 目标与 AURORA_LINT_SHARD 分片开关。
-#                    为什么主遍仍摊 4 片：runner 只有 4 vCPU，单遍 500+ TU 实测 86 分钟，分片只改
-#                    排布、不减主遍覆盖面，墙钟降到 ~25 分钟。
+#                    为什么主遍仍摊 6 片：runner 只有 4 vCPU，单遍 500+ TU 实测 86 分钟，分片只改
+#                    排布、不减主遍覆盖面；6 片把每片 TU 数再压三分之一，墙钟按片数近线性下降。
 #  8p. lint-polarity — **辅助极性遍**（2 个单 job）：分别按 DEBUG=OFF 与 SIMD/TEST_HOOKS=OFF
 #                    配置编译库，只扫「这些宏开关能改变代码形态」的 TU——按宏 token 用 git grep
 #                    定向选集，再经 select_lint_tus.py --changed-only 保留本身是 TU 的文件，与
@@ -71,8 +71,8 @@
 #                    只补 native 编译库里根本不存在的那批 TU。
 #                    ⚠️ 辅助遍的覆盖率口径与旧「三份编译库各自全量」不同：token 选集可能漏掉
 #                    「宏经公共头间接生效」的 TU，故 **8p / 8w 在每周定时事件下改跑全量**（与
-#                    8win 的每周全量同款兜底），把系统性漏选补回来。判据是「7 个作业全绿」：
-#                    主遍 4 片 + 8p 两遍 + 8w 一遍，任一红即整门红。
+#                    8win 的每周全量同款兜底），把系统性漏选补回来。判据是「9 个作业全绿」：
+#                    主遍 6 片 + 8p 两遍 + 8w 一遍，任一红即整门红。
 #                    ⚠️ 主遍口径是 **native**：Windows / macOS 特有宏下的代码各由 8win / 8mac
 #                    子作业定向补齐（只扫平台相关 TU）。
 #                    全量 / 增量分流：主遍与辅助遍只在 PR、master(+main) 推送、每周定时与手动
@@ -1255,15 +1255,17 @@ jobs:
   # TEST_HOOKS 全部显式 ON，另在 Configure 步骤追加 OpenSSL provider。旧形态是「三份编译库
   # （DEBUG OFF / ON / SIMD+TEST_HOOKS OFF）各自全量 × 4 分片 = 12 个作业」，其中两份把与主遍
   # 重合的 498 TU 又各扫了一遍；现在极性差集交给 8p 的两个定向单 job（只扫宏 token 命中的
-  # TU），主遍仍全量但只有一份，全量矩阵由 16 个作业降到 7 个。
+  # TU），主遍仍全量但只有一份，全量矩阵由 16 个作业降到 9 个（主遍 6 片 + 8p / 8w 共 3 个）。
   # 为什么主遍仍摊成矩阵：runner 只有 4 vCPU —— 单遍实测 498 TU / 5172s = 86 分钟，单 job
-  # 串跑必超时；分片把 TU 摊到 4 个作业，每片约 125 TU ≈ 22 分钟，整门墙钟 86 → ~25 分钟。
+  # 串跑必超时；分片把 TU 摊到 6 个作业，每片约 83 TU（按 4 片实测折算约 15 分钟），
+  # 整门墙钟随片数近线性下降。片数由 4 提到 6 是为了给偶发变慢的 runner 多留余量：
+  # 曾出现两片各跑满 40 分 17 秒、命中作业级超时被取消（并非代码失败）。
   # ⚠️ 主遍分片只改排布、不减主遍覆盖面（该跑的 TU 一个不少）；总覆盖面 = 主遍全量 +
   #    8p / 8w 的极性差集 + 8win / 8mac 的平台差集，另由每周定时全量兜底 token 选集的漏选。
-  # ⚠️ 判据是「主遍 4 片 + 辅助 3 个作业全绿」：任一片红即整门红；`fail-fast: false` 让其余片
+  # ⚠️ 判据是「主遍 6 片 + 辅助 3 个作业全绿」：任一片红即整门红；`fail-fast: false` 让其余片
   #    继续跑完，好让一次 push 就看到整张告警面。缺片（作业被跳过或没配出来）等于缺覆盖面，
   #    故每片的 lint-findings.json 自带 `shard` / `tu_total` 字段供聚合核对。
-  # 改片数须同时动两处：下面的 `shard: [0, 1, 2, 3]` 与 `total: [4]`（矩阵表达式取不到某维度
+  # 改片数须同时动两处：下面的 `shard: [0, 1, 2, 3, 4, 5]` 与 `total: [6]`（矩阵表达式取不到某维度
   # 的取值列表，job name 里又用不了 `env`，只能把总数单列成一个取值维度当引用点）。
   # 两处不一致的后果不对称，都响：列表比 total 长 → 越界片在 configure 期 FATAL_ERROR；
   # 列表比 total 短 → 那几片**没人跑**，门禁只剩部分覆盖面。后者只能靠本注释与每片 JSON 里的
@@ -1272,19 +1274,22 @@ jobs:
   lint:
     name: clang-tidy (main, shard ${{ matrix.shard }}/${{ matrix.total }})
     runs-on: ubuntu-26.04
-    # 240 → 40：每片 ~140 TU ≈ 24 分钟 tidy，加 apt 安装 / configure / lint-prereq ≈ 4 分钟；40 分钟是
-    # 一倍半余量。余量必须留：本轮 TU 编译失败即整片红，慢起来没有上限。
+    # 240 → 60：6 片后每片约 83 TU（按 4 片实测折算 ≈ 15 分钟 tidy），加 apt 安装 / configure /
+    # lint-prereq ≈ 4 分钟；60 分钟留足余量。余量必须留：本轮 TU 编译失败即整片红，慢起来
+    # 没有上限——曾有两片各跑满 40 分 17 秒被 40 分钟上限取消，故片数与上限一并放宽。
+    # 每完成一个 TU 的进度（文件 / 已处理 / 未处理 / 耗时）由 run_clang_tidy.py 实时输出，
+    # lint 目标另用 USES_TERMINAL 绕开 Ninja 的 stdout 缓冲，超时也能从日志定位卡在哪个 TU。
     # 主遍只跑 PR / master(+main) / 每周定时 / 手动触发；分支推送改由下方 lint-incremental
     # 单 job 增量覆盖（见作业 8i）。
     needs: gate
     if: ${{ !cancelled() && needs.gate.outputs.dup != 'true' && (github.event_name != 'push' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main') }}
-    timeout-minutes: 40
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3]
+        shard: [0, 1, 2, 3, 4, 5]
         # 单值维度：只为给 `--shard=i/n` 的 n 一个 yaml 内的引用点（见上方注释）。
-        total: [4]
+        total: [6]
     steps:
       - uses: actions/checkout@v7
       - name: Install clang-tidy-22 + desktop backend dev dependencies
@@ -1418,7 +1423,7 @@ jobs:
           fi
           list="build-lint/lint-selection/tus_${{ matrix.shard }}.txt"
           if [ ! -s "$list" ]; then
-            # 空片只在增量模式下合法（子集不够摊满 4 片，脚本已按 --min-tu-per-shard 少分片）。
+            # 空片只在增量模式下合法（子集不够摊满 6 片，脚本已按 --min-tu-per-shard 少分片）。
             # 必须留痕：「没活儿」与「跑过且干净」在日志里长得一模一样。
             printf '{"idle":true,"mode":"incremental","shard":[%s,%s],"tu_count":0,"tu_total":0,"unique_findings":0,"broken_tus":[],"by_check":[],"by_file":[],"findings":[]}\n' \
               "${{ matrix.shard }}" "${{ matrix.total }}" > build-lint/lint-findings.json

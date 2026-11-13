@@ -1,7 +1,7 @@
 # ---------------------------------------------------------------------------
 # Aurora CodeQL (advanced setup)
 #
-# Deliberately separate from ci.yml. ci.yml owns the 9-job lint gate matrix and
+# Deliberately separate from ci.yml. ci.yml owns the 11-job lint gate matrix and
 # its fixed exits; adding a job there would change that matrix and need a
 # change proposal. Advanced setup is required because default setup cannot
 # exclude paths: every open alert in this repository comes from vendored

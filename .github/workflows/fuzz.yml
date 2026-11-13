@@ -16,7 +16,7 @@ permissions:
   contents: read
 
 # This workflow is deliberately separate from ci.yml. ci.yml owns the full
-# 9-job lint gate matrix and its four fixed exits (push / PR / weekly / manual);
+# 11-job lint gate matrix and its four fixed exits (push / PR / weekly / manual);
 # adding a job there would change that matrix and need a change proposal.
 # The fuzz targets are EXCLUDE_FROM_ALL, need a Clang-only runtime and a
 # dedicated build directory, and are not registered as CTest cases.
