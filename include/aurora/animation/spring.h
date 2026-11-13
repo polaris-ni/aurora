@@ -42,21 +42,46 @@ struct SpringDescription {
 class SpringSimulation {
   public:
     /// @brief 以弹簧参数、起止位置与初速度构造。
+    ///
+    /// 闭合解的系数只由构造参数决定，故在此一次求值：`value()` 每帧被调用多次
+    /// （位置 + 数值微分的两次取样），逐次重算 sqrt / 除法是纯重复劳动。
+    /// 常数按原表达式原次序求值，结果与逐次重算逐位一致。
     /// @param spring 弹簧物理描述（刚度/阻尼/质量）。
     /// @param start 起始位置（与目标值同单位域）。
     /// @param end 收敛目标位置。
     /// @param velocity 初速度（单位/秒，默认 0）。
     SpringSimulation(const SpringDescription &spring, double start, double end, double velocity = 0.0)
-        : spring_(spring), start_(start), end_(end), velocity_(velocity) {}
+        : end_(end), offset_(start - end), w0_(spring.natural_frequency()), zeta_(spring.damping_ratio()) {
+        if (std::abs(zeta_ - 1.0) < 1e-6) {
+            // 临界阻尼：y(t) = (A + B·t)·e^(-w0·t)
+            regime_ = Regime::Critical;
+            amp_a_ = offset_;
+            amp_b_ = velocity + (w0_ * offset_);
+        } else if (zeta_ < 1.0) {
+            // 欠阻尼：y(t) = e^(-ζw0 t)·(A·cos(ωd t) + B·sin(ωd t))
+            regime_ = Regime::Under;
+            wd_ = w0_ * std::sqrt(1.0 - (zeta_ * zeta_));
+            amp_a_ = offset_;
+            amp_b_ = (velocity + (zeta_ * w0_ * offset_)) / wd_;
+        } else {
+            // 过阻尼：y(t) = A·e^(r1 t) + B·e^(r2 t)
+            regime_ = Regime::Over;
+            const double s = w0_ * std::sqrt((zeta_ * zeta_) - 1.0);
+            r1_ = (-zeta_ * w0_) + s;
+            r2_ = (-zeta_ * w0_) - s;
+            amp_a_ = (velocity - (r2_ * offset_)) / (r1_ - r2_);
+            amp_b_ = offset_ - amp_a_;
+        }
+    }
 
     /// @brief 时刻 t（秒）的位置。
     /// @param t 时刻（秒）。
     /// @return 闭合解位置（欠/临界/过阻尼统一覆盖，可能短暂越过 end）。
     [[nodiscard]] auto value(double t) const -> double {
-        const double y0 = start_ - end_;
-        const double w0 = spring_.natural_frequency();
-        const double zeta = spring_.damping_ratio();
-        return end_ + displacement(y0, velocity_, w0, zeta, t);
+        if (t <= 0.0) {
+            return end_ + offset_;
+        }
+        return end_ + displacement(t);
     }
 
     /// @brief 时刻 t（秒）的速度（数值微分，供 settled 判定）。
@@ -80,37 +105,32 @@ class SpringSimulation {
     [[nodiscard]] auto target() const -> double { return end_; }
 
   private:
-    /// @brief 相对目标的位移 y(t)，y(0)=y0, y'(0)=v0。
-    static auto displacement(double y0, double v0, double w0, double zeta, double t) -> double {
-        if (t <= 0.0) {
-            return y0;
+    /// @brief 阻尼形态：构造时按 ζ 定档，逐帧只按档位分派（不重复求判据）。
+    enum class Regime : std::uint8_t { Critical, Under, Over };
+
+    /// @brief 相对目标的位移 y(t)，y(0)=y0, y'(0)=v0（系数已在构造时缓存）。
+    [[nodiscard]] auto displacement(double t) const -> double {
+        switch (regime_) {
+            case Regime::Critical:
+                return (amp_a_ + (amp_b_ * t)) * std::exp(-w0_ * t);
+            case Regime::Under:
+                return std::exp(-zeta_ * w0_ * t) * ((amp_a_ * std::cos(wd_ * t)) + (amp_b_ * std::sin(wd_ * t)));
+            case Regime::Over:
+                return (amp_a_ * std::exp(r1_ * t)) + (amp_b_ * std::exp(r2_ * t));
         }
-        if (std::abs(zeta - 1.0) < 1e-6) {
-            // 临界阻尼：y(t) = (A + B·t)·e^(-w0·t)
-            const double a = y0;
-            const double b = v0 + (w0 * y0);
-            return (a + (b * t)) * std::exp(-w0 * t);
-        }
-        if (zeta < 1.0) {
-            // 欠阻尼：y(t) = e^(-ζw0 t)·(A·cos(ωd t) + B·sin(ωd t))
-            const double wd = w0 * std::sqrt(1.0 - (zeta * zeta));
-            const double a = y0;
-            const double b = (v0 + (zeta * w0 * y0)) / wd;
-            return std::exp(-zeta * w0 * t) * ((a * std::cos(wd * t)) + (b * std::sin(wd * t)));
-        }
-        // 过阻尼：y(t) = A·e^(r1 t) + B·e^(r2 t)
-        const double s = w0 * std::sqrt((zeta * zeta) - 1.0);
-        const double r1 = (-zeta * w0) + s;
-        const double r2 = (-zeta * w0) - s;
-        const double a = (v0 - (r2 * y0)) / (r1 - r2);
-        const double b = y0 - a;
-        return (a * std::exp(r1 * t)) + (b * std::exp(r2 * t));
+        return offset_;
     }
 
-    SpringDescription spring_;
-    double start_ = 0.0;
-    double end_ = 0.0;
-    double velocity_ = 0.0;
+    double end_ = 0.0;  ///< 收敛目标位置
+    double offset_ = 0.0;  ///< 起点相对目标的位移（= start - end，构造时缓存）
+    double w0_ = 0.0;  ///< 无阻尼固有角频率 ω0
+    double zeta_ = 0.0;  ///< 阻尼比 ζ
+    double wd_ = 0.0;  ///< 欠阻尼振荡角频率（仅欠阻尼档使用）
+    double r1_ = 0.0;  ///< 过阻尼实根之一（仅过阻尼档使用）
+    double r2_ = 0.0;  ///< 过阻尼实根之二（仅过阻尼档使用）
+    double amp_a_ = 0.0;  ///< 位移解系数 A
+    double amp_b_ = 0.0;  ///< 位移解系数 B
+    Regime regime_ = Regime::Critical;  ///< 构造时定档的阻尼形态
 };
 
 /// @brief 弹簧到状态的即插封装：把「每帧 `value(t)` 写 State + `is_settled` 定格停帧」收成一处

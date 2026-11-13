@@ -873,16 +873,15 @@ auto Widget::hit_test_chain(const Point &local, const Rect &bounds, const BuildC
                 break;
             }
         }
-        std::vector<HitNode> result;
-        result.reserve(descendants.size() + 1);
+        // 原地前插而非新建 result 再整链拷贝：命中链每层都会经过本函数，旧写法在
+        // 深度 k 的链上产生 k 次 vector 分配 + O(k²) 元素拷贝（每次鼠标移动都走一遍）。
         if (!self_in_chain) {
             // 记入链的 origin 必须是**内容盒**原点（self_box.origin），与绘制同源：
             // 派发器按 `global - it.origin` 本地化坐标，用布局盒原点会让 `local_position`
             // 少减沿途累计的 `tf.translation`（Dropdown 按 local.y 反算选项序号即错位一档）。
-            result.emplace_back(this, weak_from_this(), self_box.origin);
+            descendants.insert(descendants.begin(), HitNode(this, weak_from_this(), self_box.origin));
         }
-        result.insert(result.end(), descendants.begin(), descendants.end());
-        return result;
+        return descendants;
     }
     return descendants;
 }

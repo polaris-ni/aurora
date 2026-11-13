@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cstdint>
-#include <list>
 #include <unordered_map>
 #include <vector>
 
@@ -42,18 +41,30 @@ class GlyphAtlas {
     /// @brief 插入并标记最近使用；超出容量时淘汰最久未用条目。
     /// @param key 字形缓存键（同 `find`）。
     /// @param entry 待缓存的字形光栅化条目（按值传入，由图集接管所有权）。
-    auto insert(std::uint64_t key, Entry entry) -> void;
+    /// @return 条目在本图集内的常驻指针（未命中插入后无需再次 `find` 即可直接使用）。
+    auto insert(std::uint64_t key, Entry entry) -> const Entry *;
 
     /// @brief 清空全部缓存。
     auto clear() -> void;
 
   private:
-    auto touch(std::uint64_t key) const -> void;
+    /// @brief 缓存记录：条目本体 + 最近使用序号。
+    ///
+    /// 命中只回写序号（一次哈希内的标量写），不再做链表 erase/push_front；
+    /// 超容量时按序号扫描淘汰最久未用者，保证与逐次 LRU 提升完全相同的淘汰顺序。
+    struct Record {
+        Entry entry;  ///< 字形条目本体
+        std::uint64_t last_used = 0;  ///< 最近使用序号（越大越新）
+    };
 
-    std::unordered_map<std::uint64_t, Entry> map_;
-    mutable std::list<std::uint64_t> lru_;
-    /// @brief key → lru_ 迭代器映射，用于 O(1) LRU 更新。
-    mutable std::unordered_map<std::uint64_t, std::list<std::uint64_t>::iterator> lru_map_;
+    /// @brief 淘汰当前最久未用的一条（仅在插入后超出容量时调用）。
+    auto evict_oldest() -> void;
+
+    std::unordered_map<std::uint64_t, Record> map_;
+    std::uint64_t use_clock_ = 0;  ///< 单调递增的使用序号计数器
+    /// @brief 最近一次命中/插入的条目指针缓存：未命中→插入→再查找的常见序列免二次哈希。
+    Record *last_hit_ = nullptr;
+    std::uint64_t last_hit_key_ = 0;
 };
 
 }  // namespace aurora::render

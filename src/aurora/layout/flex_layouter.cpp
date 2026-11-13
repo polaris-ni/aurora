@@ -12,7 +12,9 @@ namespace {
 struct FlexLayoutContext {
     Flex config;
     Constraints parent;
-    std::vector<FlexItem> items;
+    // 子项表只读借用调用方的 vector（生命周期覆盖整个 layout 调用），不再整体拷贝一份。
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members) 只读借用，调用期内存活
+    const std::vector<FlexItem> &items;
     bool horizontal = false;
     bool reverse = false;
     int main_axis;

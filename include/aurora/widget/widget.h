@@ -1689,9 +1689,19 @@ class Widget : public std::enable_shared_from_this<Widget>, public detail::Props
     auto mark_needs_layout_impl([[maybe_unused]] bool propagated) -> void {
         needs_layout_ = true;
         layout_cache_valid_ = false;
-        if ((layout_parent_ != nullptr) && !is_relayout_boundary()) {
-            layout_parent_->mark_needs_layout_impl(true);
+        // 沿布局父链**一次**上溯：祖先逐个置位（遇重排边界即止）。旧写法是逐层递归，
+        // 每层回程再各自 `request_frame` 走到根 —— 深度 d 的树上单次标脏即 O(d²) 次
+        // 虚调用与脏回调；动画/状态每帧多次标脏时是主要胶水开销。
+        for (Widget *p = (is_relayout_boundary() ? nullptr : layout_parent_); p != nullptr;
+             p = (p->is_relayout_boundary() ? nullptr : p->layout_parent_)) {
+            p->needs_layout_ = true;
+            p->layout_cache_valid_ = false;
+#ifdef AURORA_ENABLE_DEBUG
+            debug::detail::record_dirty(debug::DirtyKind::Layout, p->type_name(), debug::current_debug_frame(), true);
+#endif
         }
+        // 缓存失效与发帧请求各只需一次：两者本就沿父链自本控件走到根（见各自实现），
+        // 逐层重复调用是同一批祖先上的幂等重扫。
         invalidate_display_list_up();
         request_frame(true);
 #ifdef AURORA_ENABLE_DEBUG

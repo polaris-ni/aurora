@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <concepts>
+#include <cstddef>
 #include <cstdint>
 #include <deque>
 #include <functional>
@@ -9,7 +10,7 @@
 #include <optional>
 #include <stdexcept>
 #include <type_traits>
-#include <unordered_set>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -242,6 +243,14 @@ class Engine {
     /// @param job 执行远端存储变更的闭包。
     auto submit_job(std::function<void()> job) -> void;
 
+    /// @brief 入口外直达执行：调用方已确认 `!in_entry()` 时省掉闭包/队列的一次构造。
+    ///
+    /// 执行纪律与 `submit_job` 的入口外分支完全一致（深度包裹 + 排空后续轮），
+    /// 交付回调内的写入仍排队到后续轮而非重入。若实际已处于入口内（不预期），
+    /// 退化为入队，语义不变。
+    /// @param job 执行体（入口外同步调用一次）。
+    auto run_direct(const std::function<void()> &job) -> void;
+
     /// @brief 值已提交：版本自增并向可达终端交付一个稳定轮次。
     /// @param src 已提交的来源。
     auto write_committed(SourceNode &src) -> void;
@@ -252,6 +261,10 @@ class Engine {
 
   private:
     /// @brief 一次待执行写入：闭包与其因果链（由触发它的终端贡献）。
+    ///
+    /// 因果链按值拷贝：排队写入只在「回调内再写」时才发生（少数路径），而交付阶段每个
+    /// 终端都会压栈/出栈一次；把链做成共享结点会把一次分摊零成本的操作换成每终端一次
+    /// 堆分配，得不偿失。
     struct Job {
         std::function<void()> fn;  ///< 写入闭包
         std::vector<std::uint64_t> chain;  ///< 执行前生效的因果链
@@ -259,7 +272,11 @@ class Engine {
 
     Engine() = default;
     /// @brief 从提交来源出发标脏可达节点并收集终端。
-    auto mark(SourceNode &src) -> void;
+    ///
+    /// @param src 提交的来源。
+    /// @param epoch 本轮纪元戳；同一轮内重复访问的节点靠「戳 == 本轮」去重，
+    ///        取代了原先每轮清空并逐边插入的两个哈希集。
+    auto mark(SourceNode &src, std::uint32_t epoch) -> void;
     /// @brief 按登记顺序交付本轮终端。
     auto deliver() -> void;
     /// @brief 在给定因果链下执行一个写入闭包。
@@ -271,8 +288,12 @@ class Engine {
     std::deque<Job> jobs_;
     std::vector<std::shared_ptr<RunRecord>> pending_;
     std::vector<std::uint64_t> active_chain_;
-    std::unordered_set<std::uint64_t> seen_sources_;
-    std::unordered_set<std::uint64_t> seen_observers_;
+    /// @brief 来源去重戳（下标 = 节点身份）；值 == 本轮纪元即已访问。
+    std::vector<std::uint32_t> seen_source_epoch_;
+    /// @brief 观察者去重戳（下标 = 登记序号）；值 == 本轮纪元即已访问。
+    std::vector<std::uint32_t> seen_observer_epoch_;
+    /// @brief 当前轮纪元（自 1 起；回绕时整体清零）。
+    std::uint32_t epoch_ = 0;
     std::uint32_t depth_ = 0;
 };
 
@@ -308,14 +329,26 @@ class Source final : public SourceOf<T> {
     /// @brief 提交新值：等价时不替换、不通知；否则排队写入并通知。
     /// @param next 候选值。
     auto assign(T next) -> void {
-        auto self = std::static_pointer_cast<Source>(this->shared_from_this());
-        Engine::instance().submit_job([self, next = std::move(next)]() mutable {
-            if (self->eq_ && self->eq_(next, self->value_)) {
-                return;
-            }
-            self->value_ = std::move(next);
-            Engine::instance().write_committed(*self);
-        });
+        Engine &engine = Engine::instance();
+        if (engine.in_entry()) {
+            // 回调内写入：值可能被后续轮覆盖，等价判定必须留到执行时，故排入队列。
+            auto self = std::static_pointer_cast<Source>(this->shared_from_this());
+            engine.submit_job([self, next = std::move(next)]() mutable {
+                if (self->eq_ && self->eq_(next, self->value_)) {
+                    return;
+                }
+                self->value_ = std::move(next);
+                Engine::instance().write_committed(*self);
+            });
+            return;
+        }
+        // 入口外（交互回调、动画帧的常见路径）：省掉捕获 shared_ptr 与值的闭包
+        // （超出 SBO 时的一次堆分配）与共享引用计数往返，判定后可原地替换再提交。
+        if (eq_ && eq_(next, value_)) {
+            return;
+        }
+        value_ = std::move(next);
+        engine.run_direct([this]() -> void { Engine::instance().write_committed(*this); });
     }
 
     /// @brief 原地修改载荷后强制发布一次，不经过等价比较。
@@ -394,6 +427,11 @@ class RunRecord final : public Observer, public DepsCollector, public std::enabl
     std::function<void()> fn_;
     std::vector<Dep> deps_;
     std::vector<Dep> next_;
+    /// @brief 本轮读集合的来源 → `next_` 下标，供求值期 O(1) 去重。
+    std::unordered_map<const SourceNode *, std::size_t> next_index_;
+    /// @brief 替换依赖时的排序缓冲（按稳定身份归并两侧），复用容量以免逐次分配。
+    std::vector<SourceNode *> sorted_deps_;
+    std::vector<SourceNode *> sorted_next_;
     bool pending_ = false;
     bool cancelled_ = false;
     bool running_ = false;
