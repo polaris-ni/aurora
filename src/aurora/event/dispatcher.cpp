@@ -21,9 +21,11 @@ auto EventDispatcher::dispatch(Widget &root, MouseEvent &e, FocusManager *fm) ->
 
 namespace {
 // 沿命中链自最深（链尾）向根（链头）派发；全局坐标换算为各控件本地坐标。
-auto deliver_chain(std::vector<HitNode> &chain, MouseEvent &e) -> void {
+// 只读命中链（仅写 e.local_position），故取 const 引用：调用方可直接复用捕获表中的链，
+// 无需为每个 Move 事件整条深拷贝。
+auto deliver_chain(const std::vector<HitNode> &chain, MouseEvent &e) -> void {
     const Point global = e.position;
-    for (auto &it : std::views::reverse(chain)) {
+    for (const auto &it : std::views::reverse(chain)) {
         // 控件可能已被虚拟列表回收（命中链持有生命周期守卫）：失效则安全跳过。
         // keepalive 必须活到 on_pointer_event 返回之后：用户 on_click 回调可能重建
         // 页面并丢掉该控件的最后一个强引用，而返回后控件还要写自己的 pressed_ 等成员。
@@ -223,11 +225,15 @@ auto EventDispatcher::dispatch_mouse(Widget &root, MouseEvent &e, FocusManager *
     // 使光标移出根/窗口外、或落入重叠兄弟控件时仍连续派发给按下时的目标。
     const auto cit = pointer_capture_.find(key);
     if (cit != pointer_capture_.end()) {
-        std::vector<HitNode> chain = cit->second;  // 复制：Release 会擦除原链
         if (e.action == MouseAction::Release) {
+            // Release 会解除捕获：先把链移出（不拷贝），再擦除表项，最后以引用派发。
+            std::vector<HitNode> chain = std::move(cit->second);
             pointer_capture_.erase(cit);
+            deliver_chain(chain, e);
+        } else {
+            // Move：捕获链原样复用，省掉每个移动事件的整链深拷贝（含 weak_ptr 守卫）。
+            deliver_chain(cit->second, e);
         }
-        deliver_chain(chain, e);
         set_current_focus_manager(prev);
         return true;
     }

@@ -277,6 +277,39 @@ AURORA_TEST_CASE(draw_image_scales_to_destination) {
     AURORA_TEST_CHECK_EQ(p.get_pixel(3, 3), Color::red());
 }
 
+AURORA_TEST_CASE(draw_image_one_to_one_blits_exactly) {
+    // 1:1 且整数锚点时走整行直拷快路径：每个像素与源逐字节一致（不经采样/混合改写）。
+    Image img;
+    img.width = 2;
+    img.height = 2;
+    img.pixels = {255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 0, 255};
+
+    Painter p;
+    p.begin(4, 4);
+    p.draw_image(img, rect_at(1.0F, 1.0F, 2.0F, 2.0F));
+    AURORA_TEST_CHECK_EQ(p.get_pixel(1, 1), Color(255, 0, 0));
+    AURORA_TEST_CHECK_EQ(p.get_pixel(2, 1), Color(0, 255, 0));
+    AURORA_TEST_CHECK_EQ(p.get_pixel(1, 2), Color(0, 0, 255));
+    AURORA_TEST_CHECK_EQ(p.get_pixel(2, 2), Color(255, 255, 0));
+    AURORA_TEST_CHECK_EQ(p.get_pixel(0, 0).a, 0);  // 目标矩形外不受影响
+}
+
+AURORA_TEST_CASE(draw_image_one_to_one_translucent_blends) {
+    // 半透明 1:1 贴图不得走直拷（否则透明通道被硬写成不透明）：须与底色混合。
+    Image img;
+    img.width = 1;
+    img.height = 1;
+    img.pixels = {255, 0, 0, 128};
+
+    Painter p;
+    p.begin(1, 1);
+    p.fill_rect(rect_at(0.0F, 0.0F, 1.0F, 1.0F), Color(0, 0, 255));
+    p.draw_image(img, rect_at(0.0F, 0.0F, 1.0F, 1.0F));
+    const Color c = p.get_pixel(0, 0);
+    AURORA_TEST_CHECK_GT(static_cast<int>(c.r), 0);
+    AURORA_TEST_CHECK_GT(static_cast<int>(c.b), 0);
+}
+
 AURORA_TEST_CASE(linear_gradient_interpolates_along_axis) {
     Painter p;
     p.begin(8, 1);

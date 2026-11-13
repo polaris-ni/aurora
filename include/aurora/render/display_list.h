@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "aurora/core/color.h"
@@ -167,6 +168,21 @@ class DisplayList {
             (void)img.content_hash();
         }
         image_pool_.push_back(img);
+        return static_cast<int>(image_pool_.size()) - 1;
+    }
+
+    /// @brief 图像入池（移动版）：接管调用方的像素缓冲，避免整图再拷贝一次。
+    ///
+    /// 与 `const Image &` 版语义相同（预热内容摘要 + 追加池尾并返回下标），差别仅在
+    /// 池内元素由移动构造而来。离屏合成（`Painter::composite` 录制态）等「图像是本
+    /// 次调用临时产物、调用后不再使用」的场合应改走本重载，省掉一份整帧缓冲拷贝。
+    /// @param img 待入池的图像（调用后其像素缓冲被移走，内容未定义，仅可析构或重新赋值）。
+    /// @return 该图像在 image_pool_ 中的下标。
+    auto add_image(Image &&img) -> int {
+        if (img.stream_key == 0) {
+            (void)img.content_hash();
+        }
+        image_pool_.push_back(std::move(img));
         return static_cast<int>(image_pool_.size()) - 1;
     }
 

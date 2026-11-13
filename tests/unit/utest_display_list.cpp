@@ -4,6 +4,7 @@
 /// clear 全池复位，以及 replay 到 Painter 的像素等价性与空列表回放的无副作用
 
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "aurora/core/color.h"
@@ -38,6 +39,30 @@ AURORA_TEST_CASE(pools_assign_independent_increasing_indices) {
     AURORA_TEST_CHECK_EQ(list.add_font(Font{}), 0);
     AURORA_TEST_CHECK_EQ(list.add_image(Image{}), 0);
     AURORA_TEST_CHECK_EQ(list.add_matrix(Matrix2D{}), 0);
+}
+
+AURORA_TEST_CASE(add_image_move_preserves_pixels) {
+    // 移动版入池：像素缓冲被接管而非再拷贝一份，回放结果与原图一致。
+    Image img;
+    img.width = 2;
+    img.height = 1;
+    img.pixels = {10, 20, 30, 255, 40, 50, 60, 255};
+
+    DisplayList list;
+    const int idx = list.add_image(std::move(img));
+    AURORA_TEST_CHECK_EQ(idx, 0);
+
+    DrawCmd cmd;
+    cmd.kind = CmdKind::DrawImage;
+    cmd.bounds = rect_at(0.0F, 0.0F, 2.0F, 1.0F);
+    cmd.image_idx = idx;
+    list.push_cmd(cmd);
+
+    Painter painter;
+    painter.begin(2, 1);
+    list.replay(painter);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(painter.get_pixel(0, 0).r), 10);
+    AURORA_TEST_CHECK_EQ(static_cast<int>(painter.get_pixel(1, 0).b), 60);
 }
 
 AURORA_TEST_CASE(push_cmd_tracks_count_and_breaks_emptiness) {

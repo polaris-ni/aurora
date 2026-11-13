@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <map>
 #include <string_view>
 #include <tuple>
 
@@ -177,7 +178,10 @@ auto reg_error(const char *name, ErrorCode code, std::string msg) -> void {
 
 }  // namespace
 
-auto register_core_widgets() -> void {
+namespace {
+
+/// @brief 实际填充注册表；只经 `register_core_widgets` 的首次调用执行一次。
+auto register_core_widgets_impl() -> void {
     // ---- 默认构造 + 属性反序列化（绝大多数库控件）----
     reg_default<Text>("Text");
     // TextInput 的标量属性（占位符、字号、配色、`value` 等）全部可 JSON 往返；焦点、选区、
@@ -298,6 +302,19 @@ auto register_core_widgets() -> void {
               "(register a factory for the concrete type, e.g. ThemeProvider)");
 }
 
+}  // namespace
+
+auto register_core_widgets() -> void {
+    // 各公开入口（from_json / describe / search / list）都先调本函数；每次重放近百个工厂会重复
+    // 构造 std::function 与被捕获的构造参数。注册表没有清空入口，首建后的重复注册只是同名覆盖
+    // 同实现，故用函数内静态哨兵只走一次；魔法静态保证首个调用线程完成注册后才放行其它线程。
+    static const bool REGISTERED = []() -> bool {
+        register_core_widgets_impl();
+        return true;
+    }();
+    (void)REGISTERED;
+}
+
 namespace {
 
 /// @brief `from_json` 的递归实现，带深度上限。
@@ -318,7 +335,9 @@ auto from_json_impl(const Json &j, std::size_t depth) -> Result<std::shared_ptr<
     }
     const auto type = t->as_or<std::string>("");
     const Json *pp = j.at("props");
-    const Json props = pp != nullptr ? *pp : Json::object();
+    // 属性只读地转交工厂，按引用取用即可；缺失时共享进程级空对象，避免每节点深拷贝一份 props。
+    static const Json EMPTY_PROPS = Json::object();
+    const Json &props = pp != nullptr ? *pp : EMPTY_PROPS;
 
     auto wres = WidgetRegistry::instance().make(type, props);
     if (!wres) {
@@ -479,6 +498,14 @@ auto is_container_type(const std::string &t) -> bool {
 /// **原生 JSON 值**（修复回填与 prompt 投影的可信源）；描述符里 C++ 风格的显示串（`auto` /
 /// `theme.primary` / `{8,8,8,8}`…）只在无原生值可依时以 `default_expr` 落盘。
 auto component_schema(const std::string &name) -> Json {
+    // 已注册类型的 schema 只由类型名决定（工厂表在核心注册完成后固定），而 search/list 会按类型
+    // 反复取同一份；缓存后按值返回拷贝，调用方拿到的仍是独立对象，与逐次重建的输出一致。
+    // 未注册类型不入缓存：其 schema 构建代价低，也避免任意调用名把缓存撑大。
+    // NOLINTNEXTLINE(bugprone-dynamic-static-initializers) 单线程 UI 路径；函数内静态初始化顺序无关
+    static std::map<std::string, Json> cache;
+    if (const auto it = cache.find(name); it != cache.end()) {
+        return it->second;
+    }
     Json w = Json::object();
     w.set("type", name);
     // 稀疏布尔：恒 false 与恒同值的键不再逐控件输出（读取侧 as_or 默认 false 语义不变）。
@@ -575,6 +602,9 @@ auto component_schema(const std::string &name) -> Json {
         payload.set("channel", desc.payload_channel);
         w.set("payload", std::move(payload));
     }
+    if (registered) {
+        cache.emplace(name, w);
+    }
     return w;
 }
 
@@ -599,18 +629,40 @@ auto describe_component(const std::string &name) -> Json {
     return serialization::component_schema(name);
 }
 
+namespace {
+
+/// @brief 单字节小写化（与 `<cctype>` 的 `std::tolower` 同口径，先转 `unsigned char` 防负数下标）。
+auto lower_byte(char c) -> char { return static_cast<char>(std::tolower(static_cast<unsigned char>(c))); }
+
+/// @brief 大小写不敏感的子串判断，等价于「两头各转小写后 `find`」，但只为每对字符做一次转换，
+/// 不为每个候选类型名分配临时串。
+auto contains_ci(std::string_view haystack, std::string_view needle) -> bool {
+    if (needle.empty()) {
+        return true;
+    }
+    if (needle.size() > haystack.size()) {
+        return false;
+    }
+    const std::size_t last = haystack.size() - needle.size();
+    for (std::size_t i = 0; i <= last; ++i) {
+        std::size_t j = 0;
+        while (j < needle.size() && lower_byte(haystack[i + j]) == lower_byte(needle[j])) {
+            ++j;
+        }
+        if (j == needle.size()) {
+            return true;
+        }
+    }
+    return false;
+}
+
+}  // namespace
+
 auto search_components(const std::string &query) -> std::vector<Json> {
     serialization::register_core_widgets();
-    auto lower = [](std::string s) -> std::string {
-        for (char &c : s) {
-            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-        }
-        return s;
-    };
-    const std::string needle = lower(query);
     std::vector<Json> out;
     for (const std::string &t : serialization::WidgetRegistry::instance().list_types()) {
-        if (lower(t).find(needle) != std::string::npos) {
+        if (contains_ci(t, query)) {
             out.push_back(serialization::component_schema(t));
         }
     }

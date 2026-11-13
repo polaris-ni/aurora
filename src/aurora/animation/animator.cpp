@@ -128,7 +128,10 @@ auto Animator::tick(double dt_seconds) const -> void {
         }
     }
     for (const Binding &b : on_tick_) {
-        if (b.fn) {
+        // bind() 建立的绑定自带归属控制器，其闭包体就是「控制器本帧脏则写回」：控制器未脏时
+        // 直接跳过，省掉一次 std::function 间接调用。裸回调（owner 为空）的契约是每帧都执行、
+        // 不接收脏位，故照旧调用；带步长的回调自行推进时间轴，同样不受脏位约束。
+        if (b.fn && (b.owner == nullptr || b.owner->dirty())) {
             b.fn();
         }
         if (b.dt_fn) {

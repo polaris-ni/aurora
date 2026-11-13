@@ -717,6 +717,8 @@ au::Column{}
 
 `DisplayList`（`render/display_list.h`）是**绘制指令的唯一来源**：`Painter` 在录制态把每条上屏原语追加为一条 `DrawCmd`——几何 / 颜色 / 标量内联，文本字符串 / 渐变色标 / 字体 / 图像 / 变换矩阵等**变长数据入池**、命令只持下标（避免每条命令内嵌大对象）。命中缓存时父级整树一次 `replay` 即可压平重放。
 
+**图像入池有两个重载**：`add_image(const Image &)` 拷贝入池；`add_image(Image &&)` 接管调用方的像素缓冲。后者供「图像是本次调用的临时产物」的场合使用——录制态的 `Painter::composite(const Painter &)` 即经 `to_image()` 产出临时快照后按移动入池，省掉整帧缓冲的第二次拷贝。
+
 **回放目标抽象**：`replay` 的目标是 `rhi::RhiBackend`，而非具体的 `Painter`。
 
 ```cpp

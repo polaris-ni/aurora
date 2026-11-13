@@ -81,14 +81,16 @@ auto RunRecord::on_invalidate() -> void { pending_ = true; }
 
 auto RunRecord::add(SourceNode &src, std::uint64_t version) -> void {
     // 同一来源在一轮回调内重复读取只保留一条边：版本取最近一次读取，
-    // 使「本轮是否真的变化」的判定与最后读数一致。
-    for (auto &dep : next_) {
-        if (dep.node.get() == &src) {
-            dep.seen = version;
-            return;
-        }
+    // 使「本轮是否真的变化」的判定与最后读数一致。宽扇入回调的读集合靠哈希索引定位，
+    // 求值期不再逐条线性查重。
+    if (const auto found = next_index_.find(&src); found != next_index_.end()) {
+        next_[found->second].seen = version;
+        return;
     }
+    // 先落边再落索引：索引只允许指向已存在的元素，反向顺序在分配失败时会留下越界下标。
+    const auto index = next_.size();
     next_.push_back(Dep{.node = src.shared_from_this(), .seen = version});
+    next_index_.emplace(&src, index);
 }
 
 auto RunRecord::as_terminal() -> std::shared_ptr<RunRecord> { return shared_from_this(); }
@@ -106,24 +108,43 @@ auto RunRecord::cancel() noexcept -> void {
     }
     deps_.clear();
     next_.clear();
+    next_index_.clear();
 }
 
 auto RunRecord::replace_deps() -> void {
-    const auto contains = [](const std::vector<Dep> &list, const SourceNode *node) -> bool {
-        return std::any_of(list.begin(), list.end(), [node](const Dep &dep) -> bool { return dep.node.get() == node; });
-    };
-    for (const auto &old : deps_) {
-        if (!contains(next_, old.node.get())) {
-            old.node->remove_observer(*this);
-        }
+    // 两侧各自已去重，故「旧有新无」「新有旧无」可按稳定节点身份排序后线性归并求出，
+    // 免去双向嵌套线性查找。排序只改遍历次序：每个来源至多一次 add/remove，
+    // 观察者表内的相对顺序不变；`deps_` 本身仍按读取序保存（不改对外依赖顺序）。
+    sorted_deps_.clear();
+    sorted_deps_.reserve(deps_.size());
+    for (const auto &dep : deps_) {
+        sorted_deps_.push_back(dep.node.get());
     }
-    for (const auto &fresh : next_) {
-        if (!contains(deps_, fresh.node.get())) {
-            fresh.node->add_observer(*this);
+    sorted_next_.clear();
+    sorted_next_.reserve(next_.size());
+    for (const auto &dep : next_) {
+        sorted_next_.push_back(dep.node.get());
+    }
+    const auto by_id = [](const SourceNode *left, const SourceNode *right) -> bool { return left->id() < right->id(); };
+    std::sort(sorted_deps_.begin(), sorted_deps_.end(), by_id);
+    std::sort(sorted_next_.begin(), sorted_next_.end(), by_id);
+    auto old_it = sorted_deps_.begin();
+    auto new_it = sorted_next_.begin();
+    while (old_it != sorted_deps_.end() || new_it != sorted_next_.end()) {
+        if (new_it == sorted_next_.end() || (old_it != sorted_deps_.end() && (*old_it)->id() < (*new_it)->id())) {
+            (*old_it)->remove_observer(*this);
+            ++old_it;
+        } else if (old_it == sorted_deps_.end() || (*new_it)->id() < (*old_it)->id()) {
+            (*new_it)->add_observer(*this);
+            ++new_it;
+        } else {
+            ++old_it;
+            ++new_it;
         }
     }
     deps_ = std::move(next_);
     next_.clear();
+    next_index_.clear();
 }
 
 auto RunRecord::execute() -> void {
@@ -132,6 +153,7 @@ auto RunRecord::execute() -> void {
     }
     running_ = true;
     next_.clear();
+    next_index_.clear();
     CollectorScope const scope(*this);
     try {
         if (fn_) {
@@ -189,6 +211,15 @@ auto Engine::submit_job(std::function<void()> job) -> void {
         jobs_.push_back({.fn = std::move(job), .chain = active_chain_});
         return;
     }
+    run_direct(job);
+}
+
+auto Engine::run_direct(const std::function<void()> &job) -> void {
+    if (depth_ > 0) {
+        // 不预期（入口外才走直达）：退化回排队，语义与 submit_job 完全一致。
+        jobs_.push_back({.fn = job, .chain = active_chain_});
+        return;
+    }
     ++depth_;
     try {
         run_job(job, {});
@@ -222,23 +253,38 @@ auto Engine::run_job(const std::function<void()> &fn, std::vector<std::uint64_t>
 auto Engine::write_committed(SourceNode &src) -> void {
     src.bump();
     pending_.clear();
-    seen_sources_.clear();
-    seen_observers_.clear();
-    mark(src);
+    // 纪元戳代替两个哈希集：每次提交不再逐边 insert/clear（后者会为每个元素分配与回收
+    // 结点），只需一次自增；回绕时清零全部戳位以保证不误判。
+    if (++epoch_ == 0) {
+        std::fill(seen_source_epoch_.begin(), seen_source_epoch_.end(), 0);
+        std::fill(seen_observer_epoch_.begin(), seen_observer_epoch_.end(), 0);
+        epoch_ = 1;
+    }
+    mark(src, epoch_);
     deliver();
 }
 
-auto Engine::mark(SourceNode &src) -> void {
-    if (!seen_sources_.insert(src.id()).second) {
+auto Engine::mark(SourceNode &src, std::uint32_t epoch) -> void {
+    const auto sid = static_cast<std::size_t>(src.id());
+    if (seen_source_epoch_.size() <= sid) {
+        seen_source_epoch_.resize(sid + 1, 0);
+    }
+    if (seen_source_epoch_[sid] == epoch) {
         return;
     }
+    seen_source_epoch_[sid] = epoch;
     for (Observer *observer : src.observers()) {
-        if (!seen_observers_.insert(observer->seq()).second) {
+        const auto oid = static_cast<std::size_t>(observer->seq());
+        if (seen_observer_epoch_.size() <= oid) {
+            seen_observer_epoch_.resize(oid + 1, 0);
+        }
+        if (seen_observer_epoch_[oid] == epoch) {
             continue;
         }
+        seen_observer_epoch_[oid] = epoch;
         observer->on_invalidate();
         if (auto *downstream = observer->as_source(); downstream != nullptr) {
-            mark(*downstream);
+            mark(*downstream, epoch);
         } else if (auto record = observer->as_terminal(); record != nullptr) {
             pending_.push_back(std::move(record));
         }

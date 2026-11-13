@@ -203,6 +203,9 @@ auto Painter::begin(int width, int height) -> void {
     // push_clip_rounded 双压泄漏造成整窗白屏），不得跨帧扩散。
     clip_stack_.clear();
     has_rounded_clip_ = false;
+    // gamma 表在帧起点统一就绪：逐像素原语（set_pixel / blend_subpixel）不再各自
+    // 查 ready 标志，省掉每像素一次 acquire 语义的原子读 + 分支。
+    init_gamma_tables();
 }
 
 auto Painter::width() const -> int { return width_; }
@@ -291,30 +294,26 @@ auto Painter::fill_rect_fast_path(int &x0, int &y0, int &x1, int &y1, Color c) -
                         first, row_bytes);
         }
     } else {
-        // 半透明：内联 source-over（与 set_pixel 同一浮点公式，位级一致），
+        // 半透明：走 SIMD 批量混合（与 set_pixel 的 a<255 分支同一浮点公式，位级一致），
         // 省去逐像素的越界/裁剪/全局透明度开销。
         // 注意：必须乘以全局透明度 global_alpha_（转场淡入淡出依赖），
         // 与 set_pixel 的 c.a *= global_alpha_ 语义一致。
         const float a = (static_cast<float>(c.a) * static_cast<float>(global_alpha_)) / 255.0F;
         const float inv = 1.0F - a;
+        const int count = x1 - x0;
         for (int y = y0; y < y1; ++y) {
             std::uint8_t *row =
                 pixels_.data() +
                 (((static_cast<std::size_t>(y) * static_cast<std::size_t>(width_)) + static_cast<std::size_t>(x0)) *
                  4U);
-            for (int x = 0; x < x1 - x0; ++x) {
-                std::uint8_t *px = row + (static_cast<std::size_t>(x) * 4U);
-                px[0] = static_cast<std::uint8_t>((px[0] * inv) + (c.r * a));
-                px[1] = static_cast<std::uint8_t>((px[1] * inv) + (c.g * a));
-                px[2] = static_cast<std::uint8_t>((px[2] * inv) + (c.b * a));
-                px[3] = 255;
-            }
+            blend_linear_region(row, c.r, c.g, c.b, a, inv, count);
         }
     }
     return true;
 }
 
 auto Painter::fill_rect_slow_path(int x0, int y0, int x1, int y1, Color c) -> void {
+    init_gamma_tables();
     // 慢路径：圆角裁剪（SDF 覆盖度）/ 全局透明度 <1 时逐像素处理；
     // 迭代范围仍收缩进裁剪交集（裁剪外像素 coverage 恒为 0，扫到也是白扫）。
     // 行级优化：每行计算圆角全覆写 x 范围（rounded_full_x_range），范围内直接
@@ -338,12 +337,28 @@ auto Painter::fill_rect_slow_path(int x0, int y0, int x1, int y1, Color c) -> vo
         const ClipRegion *cr;
         float threshold;
     };
-    std::vector<RoundedInfo> rounded_clips;
+    // 常规裁剪栈（≤8 层圆角）完全走栈上定长缓冲，省掉每次填充的一次 new/delete；
+    // 仅在异常深的裁剪栈下才回落 vector，行为与原来一致。
+    constexpr int rounded_stack_cap = 8;
+    std::array<RoundedInfo, static_cast<std::size_t>(rounded_stack_cap)> rounded_buf{};
+    std::vector<RoundedInfo> rounded_heap;
+    int rounded_n = 0;
     for (const ClipRegion &cr : clip_stack_) {
         if (cr.rounded && cr.radius > 0.0F) {
-            rounded_clips.push_back({.cr = &cr, .threshold = cr.anti_alias ? -0.5F : 0.0F});
+            const RoundedInfo info{.cr = &cr, .threshold = cr.anti_alias ? -0.5F : 0.0F};
+            if (rounded_n < rounded_stack_cap) {
+                rounded_buf[static_cast<std::size_t>(rounded_n)] = info;
+            } else {
+                if (rounded_heap.empty()) {
+                    rounded_heap.assign(rounded_buf.begin(), rounded_buf.end());
+                }
+                rounded_heap.push_back(info);
+            }
+            ++rounded_n;
         }
     }
+    const RoundedInfo *rounded_infos = rounded_heap.empty() ? rounded_buf.data() : rounded_heap.data();
+    const int rounded_count = rounded_heap.empty() ? rounded_n : static_cast<int>(rounded_heap.size());
     // 慢路径逐像素 source-over 仍须乘以全局透明度 global_alpha_（与 set_pixel 一致），
     // 否则 set_alpha(<1) 淡入淡出对矩形填充无效（转场/全局淡变）。
     const float fa = (static_cast<float>(c.a) * static_cast<float>(global_alpha_)) / 255.0F;
@@ -352,7 +367,8 @@ auto Painter::fill_rect_slow_path(int x0, int y0, int x1, int y1, Color c) -> vo
         // 全覆写 x 范围 = 所有圆角裁剪各行全覆写范围的交集
         int safe_x0 = x0;
         int safe_x1 = x1;
-        for (const auto &ri : rounded_clips) {
+        for (int ci = 0; ci < rounded_count; ++ci) {
+            const RoundedInfo &ri = rounded_infos[ci];
             const auto [fx0, fx1] = rounded_full_x_range(*ri.cr, y, ri.threshold);
             safe_x0 = std::max(safe_x0, fx0);
             safe_x1 = std::min(safe_x1, fx1);
@@ -416,6 +432,7 @@ auto Painter::draw_line(Point a, Point b, float width, Color c) -> void {
     if (width <= 0.0F || c.a == 0) {
         return;
     }
+    init_gamma_tables();
     AURORA_PROFILE_COUNT(draw_calls, 1);
     detail::PaintTimer guard{&g_pt.line};
     // 逻辑 dp → 物理像素；半宽 + 1px 羽化带决定包围盒。
@@ -483,6 +500,7 @@ auto Painter::stroke_polyline(const std::vector<Point> &pts, float width, Color 
     if (pts.size() < 2 || width <= 0.0F || c.a == 0) {
         return;
     }
+    init_gamma_tables();
     AURORA_PROFILE_COUNT(draw_calls, 1);
     detail::PaintTimer guard{&g_pt.line};
     // 逻辑 dp → 物理像素；半宽 + 1px 羽化带决定包围盒（与 draw_line 同口径）。
@@ -574,6 +592,7 @@ auto Painter::fill_sector(Point center, float outer_r, float inner_r, float a0, 
     if (inner >= outer_r) {
         return;
     }
+    init_gamma_tables();
     AURORA_PROFILE_COUNT(draw_calls, 1);
     detail::PaintTimer guard{&g_pt.fill};
     const float cx = center.x * scale_;
@@ -644,6 +663,7 @@ auto Painter::draw_rounded_border(const Rect &r, float radius, float thickness, 
     if (thickness <= 0.0F || c.a == 0 || r.size.width <= 0.0F || r.size.height <= 0.0F) {
         return;
     }
+    init_gamma_tables();
     AURORA_PROFILE_COUNT(draw_calls, 1);
     detail::PaintTimer guard{&g_pt.border};
     // 圆角矩形 SDF 带状覆盖度：外缘 d=0、内缘 d=-t（向内描边），两侧各 0.5px 羽化。
@@ -862,6 +882,7 @@ auto Painter::draw_image(const Image &img, const Rect &dest) -> void {
         return;
     }
     detail::PaintTimer guard{&g_pt.image};
+    init_gamma_tables();
     if (img.pixels.empty() || img.width <= 0 || img.height <= 0) {
         return;
     }
@@ -904,6 +925,39 @@ auto Painter::draw_image(const Image &img, const Rect &dest) -> void {
         }
         return &img.pixels[(static_cast<std::size_t>(iy) * row4) + (static_cast<std::size_t>(ix) * 4U)];
     };
+    // 1:1 直拷快路径：目标物理尺寸与源尺寸相同、锚点为整数、全局透明度为 1 且无圆角裁剪时，
+    // 双线性采样退化为恒等映射（x0 = x − origin、tx = ty = 0）。图标/像素图/离屏层贴回等
+    // 最常见形态因此省掉每像素 4 次取样与约 20 次浮点运算。整段覆盖写入要求源全不透明，
+    // 故先校验一遍 alpha 再逐行 memcpy；半透明图回落下方通用路径（多出的一遍扫描远小于
+    // 双线性逐像素的代价）。
+    if (sx == 1.0F && sy == 1.0F && pd.origin.x == std::floor(pd.origin.x) && pd.origin.y == std::floor(pd.origin.y) &&
+        global_alpha_ == 1.0F && !has_rounded_clip_) {
+        const int src_x0 = dx0 - static_cast<int>(pd.origin.x);
+        const int src_y0 = dy0 - static_cast<int>(pd.origin.y);
+        const auto copy_w = static_cast<std::size_t>(dx1 - dx0);
+        bool all_opaque = true;
+        for (int y = dy0; y < dy1 && all_opaque; ++y) {
+            const std::uint8_t *src_row = &img.pixels[(static_cast<std::size_t>(src_y0 + (y - dy0)) * row4) +
+                                                      (static_cast<std::size_t>(src_x0) * 4U)];
+            for (std::size_t i = 0; i < copy_w; ++i) {
+                if (src_row[(i * 4U) + 3U] != 0xFFU) {
+                    all_opaque = false;
+                    break;
+                }
+            }
+        }
+        if (all_opaque) {
+            for (int y = dy0; y < dy1; ++y) {
+                const std::uint8_t *src_row = &img.pixels[(static_cast<std::size_t>(src_y0 + (y - dy0)) * row4) +
+                                                          (static_cast<std::size_t>(src_x0) * 4U)];
+                std::uint8_t *dst_row = &pixels_[((static_cast<std::size_t>(y) * static_cast<std::size_t>(width_)) +
+                                                  static_cast<std::size_t>(dx0)) *
+                                                 4U];
+                std::memcpy(dst_row, src_row, copy_w * 4U);
+            }
+            return;
+        }
+    }
     for (int y = dy0; y < dy1; ++y) {
         const float fy = ((static_cast<float>(y) + 0.5F - pd.origin.y) * sy) - 0.5F;
         const int y0 = static_cast<int>(std::floor(fy));
@@ -1121,7 +1175,6 @@ auto Painter::get_pixel(int x, int y) const -> Color {
 }
 
 auto Painter::set_pixel(int x, int y, Color c) -> void {
-    init_gamma_tables();
     if (x < 0 || y < 0 || x >= width_ || y >= height_) {
         return;
     }
@@ -1188,7 +1241,6 @@ auto Painter::set_pixel(int x, int y, Color c) -> void {
 }
 
 auto Painter::blend_subpixel(int x, int y, Color c, std::uint8_t cr, std::uint8_t cg, std::uint8_t cb) -> void {
-    init_gamma_tables();
     if (x < 0 || y < 0 || x >= width_ || y >= height_) {
         return;
     }
@@ -1232,20 +1284,23 @@ auto Painter::blend_subpixel_span(int x0, int y, Color c, const std::uint8_t *sr
     if (n <= 0) {
         return;
     }
-    if (is_recording() || has_rounded_clip_) {
-        // 录制态 / 圆角 SDF 裁剪：逐像素回退（语义不同，不能批量）
+    init_gamma_tables();  // 整段入口一次（逐像素回退亦复用同一份表）
+    const auto blend_pixel_at = [&](int x) {
+        const int k = x - x0;
         if (lcd) {
-            for (int x = 0; x < n; ++x) {
-                blend_subpixel(x0 + x, y, c, src[(x * 3) + 0], src[(x * 3) + 1], src[(x * 3) + 2]);
-            }
+            blend_subpixel(x, y, c, src[(k * 3) + 0], src[(k * 3) + 1], src[(k * 3) + 2]);
         } else {
-            for (int x = 0; x < n; ++x) {
-                blend_subpixel(x0 + x, y, c, src[x], src[x], src[x]);
-            }
+            blend_subpixel(x, y, c, src[k], src[k], src[k]);
+        }
+    };
+    // 逐像素回退：录制态语义不同不能批量；圆角裁剪下若源 alpha 归一因子不为 1，
+    // 批量公式（global_alpha_ × src_alpha）与 blend_subpixel（只乘 global_alpha_）不等价。
+    if (is_recording() || (has_rounded_clip_ && src_alpha != 1.0F)) {
+        for (int x = 0; x < n; ++x) {
+            blend_pixel_at(x0 + x);
         }
         return;
     }
-    init_gamma_tables();
     if (y < 0 || y >= height_) {
         return;
     }
@@ -1280,24 +1335,71 @@ auto Painter::blend_subpixel_span(int x0, int y, Color c, const std::uint8_t *sr
                              g_gamma_tables.srgb_to_linear[c.b]};
     const float cov = static_cast<float>(global_alpha_) * src_alpha;
     const std::size_t row_base = static_cast<std::size_t>(y) * static_cast<std::size_t>(width_);
-    for (int x = x_lo; x <= x_hi; ++x) {
-        const int k = x - x0;
-        const std::uint8_t cr = lcd ? src[(k * 3) + 0] : src[k];
-        const std::uint8_t cg = lcd ? src[(k * 3) + 1] : src[k];
-        const std::uint8_t cb = lcd ? src[(k * 3) + 2] : src[k];
-        const float fr = (cr / 255.0F) * cov;
-        const float fg = (cg / 255.0F) * cov;
-        const float fb = (cb / 255.0F) * cov;
-        if (fr <= 0.0F && fg <= 0.0F && fb <= 0.0F) {
-            continue;  // 零覆盖像素跳过（等同原 blend_subpixel 的 continue）
+    // 行内区间批量混合：coverage 恒为 1 时与逐像素 blend_subpixel 逐位一致
+    // （同一 gamma-correct source-over 公式，A 通道同样写 255）。
+    // skip_zero 仅用于纯矩形裁剪路径，保持其原有的「零覆盖不写」行为。
+    const auto blend_range = [&](int lo, int hi, bool skip_zero) {
+        for (int x = lo; x <= hi; ++x) {
+            const int k = x - x0;
+            const std::uint8_t cr = lcd ? src[(k * 3) + 0] : src[k];
+            const std::uint8_t cg = lcd ? src[(k * 3) + 1] : src[k];
+            const std::uint8_t cb = lcd ? src[(k * 3) + 2] : src[k];
+            const float fr = (cr / 255.0F) * cov;
+            const float fg = (cg / 255.0F) * cov;
+            const float fb = (cb / 255.0F) * cov;
+            if (skip_zero && fr <= 0.0F && fg <= 0.0F && fb <= 0.0F) {
+                continue;  // 零覆盖像素跳过（等同原 blend_subpixel 的 continue）
+            }
+            const std::size_t i = (row_base + static_cast<std::size_t>(x)) * 4U;
+            std::uint8_t *p = &pixels_[i];
+            // gamma-correct source-over（逐位等价于 blend_srgb_over），已验证与旧实现位级一致。
+            p[0] = linear_to_srgb((sr_lin[0] * fr) + (g_gamma_tables.srgb_to_linear[p[0]] * (1.0F - fr)));
+            p[1] = linear_to_srgb((sr_lin[1] * fg) + (g_gamma_tables.srgb_to_linear[p[1]] * (1.0F - fg)));
+            p[2] = linear_to_srgb((sr_lin[2] * fb) + (g_gamma_tables.srgb_to_linear[p[2]] * (1.0F - fb)));
+            p[3] = 255;
         }
-        const std::size_t i = (row_base + static_cast<std::size_t>(x)) * 4U;
-        std::uint8_t *p = &pixels_[i];
-        // gamma-correct source-over（逐位等价于 blend_srgb_over），已验证与旧实现位级一致。
-        p[0] = linear_to_srgb((sr_lin[0] * fr) + (g_gamma_tables.srgb_to_linear[p[0]] * (1.0F - fr)));
-        p[1] = linear_to_srgb((sr_lin[1] * fg) + (g_gamma_tables.srgb_to_linear[p[1]] * (1.0F - fg)));
-        p[2] = linear_to_srgb((sr_lin[2] * fb) + (g_gamma_tables.srgb_to_linear[p[2]] * (1.0F - fb)));
-        p[3] = 255;
+    };
+    if (!has_rounded_clip_) {
+        blend_range(x_lo, x_hi, true);
+        return;
+    }
+    // 圆角裁剪：逐行求 coverage 恒为 1 的列区间（多个圆角裁剪取交集），区间内走同一批量混合，
+    // 只有圆弧过渡列继续逐像素 SDF 回退。端点再用与逐像素回退完全相同的 coverage() 复核，
+    // 确保区间内每个裁剪的覆盖度恰为 1，批量结果与逐像素结果逐位一致。
+    int safe_lo = x_lo;
+    int safe_hi = x_hi;
+    for (const ClipRegion &cr2 : clip_stack_) {
+        if (cr2.rounded && cr2.radius > 0.0F) {
+            const auto [fx0, fx1] = rounded_full_x_range(cr2, y, cr2.anti_alias ? -0.5F : 0.0F);
+            safe_lo = std::max(safe_lo, fx0);
+            safe_hi = std::min(safe_hi, fx1 - 1);
+        }
+    }
+    const auto covers_fully = [&](int x) {
+        float v = 1.0F;
+        for (const ClipRegion &cr2 : clip_stack_) {
+            v *= cr2.coverage(static_cast<float>(x), static_cast<float>(y));
+        }
+        return v == 1.0F;
+    };
+    while (safe_lo <= safe_hi && !covers_fully(safe_lo)) {
+        ++safe_lo;
+    }
+    while (safe_lo <= safe_hi && !covers_fully(safe_hi)) {
+        --safe_hi;
+    }
+    if (safe_lo <= safe_hi) {
+        blend_range(safe_lo, safe_hi, false);
+        for (int x = x_lo; x < safe_lo; ++x) {
+            blend_pixel_at(x);
+        }
+        for (int x = safe_hi + 1; x <= x_hi; ++x) {
+            blend_pixel_at(x);
+        }
+        return;
+    }
+    for (int x = x_lo; x <= x_hi; ++x) {
+        blend_pixel_at(x);
     }
 }
 
@@ -1352,6 +1454,7 @@ auto Painter::composite(const Painter &src, const Matrix2D &matrix) -> void {
         cmd.kind = CmdKind::Composite;
         cmd.matrix_idx = recording_stack_.back()->add_matrix(matrix);
         cmd.composite_scale = src.scale_;
+        // to_image() 是本次调用的临时产物：走移动版入池，省掉整帧缓冲的第二份拷贝。
         cmd.image_idx = recording_stack_.back()->add_image(src.to_image());
         recording_stack_.back()->push_cmd(cmd);
         return;
@@ -1397,6 +1500,7 @@ auto Painter::to_image() const -> Image {
 
 auto Painter::composite_pixels(const std::uint8_t *spix, int sw, int sh, float sscale, const Matrix2D &matrix) -> void {
     detail::PaintTimer guard{&g_pt.composite};
+    init_gamma_tables();
     const float lw = static_cast<float>(sw) / sscale;
     const float lh = static_cast<float>(sh) / sscale;
 
@@ -1446,7 +1550,6 @@ auto Painter::composite_pixels(const std::uint8_t *spix, int sw, int sh, float s
     // 二者 set_pixel 另有语义，保守回退慢路径。
     if (matrix.m11 == 1.0F && matrix.m12 == 0.0F && matrix.m21 == 0.0F && matrix.m22 == 1.0F && sscale == scale_ &&
         !has_rounded_clip_ && global_alpha_ == 1.0) {
-        init_gamma_tables();  // set_pixel 每次调用前置；快路径直接混合，须自行确保 LUT 就绪
         // 单线程 UI 每帧复用，避免逐帧分配（表长 = 目标遍历宽/高，量级为视口尺寸）。
         thread_local std::vector<int> sx_map;
         thread_local std::vector<int> sy_map;
@@ -1572,6 +1675,7 @@ auto Painter::draw_linear_gradient(const Rect &area, Point start, Point end, con
         return;
     }
     detail::PaintTimer guard{&g_pt.gradient};
+    init_gamma_tables();
     if (colors.empty() || stops.empty()) {
         return;
     }
@@ -1629,10 +1733,40 @@ auto Painter::draw_linear_gradient(const Rect &area, Point start, Point end, con
         const ClipRegion *cr;
         float threshold;
     };
-    std::vector<GradRoundedInfo> rounded_clips;
+    // 常规裁剪栈（≤8 层圆角）走栈上定长缓冲，省掉每次渐变的一次 new/delete；
+    // 仅在异常深的裁剪栈下才回落 vector。
+    constexpr int grad_rounded_stack_cap = 8;
+    std::array<GradRoundedInfo, static_cast<std::size_t>(grad_rounded_stack_cap)> grad_rounded_buf{};
+    std::vector<GradRoundedInfo> grad_rounded_heap;
+    int grad_rounded_n = 0;
     for (const ClipRegion &cr : clip_stack_) {
         if (cr.rounded && cr.radius > 0.0F) {
-            rounded_clips.push_back({.cr = &cr, .threshold = cr.anti_alias ? -0.5F : 0.0F});
+            const GradRoundedInfo info{.cr = &cr, .threshold = cr.anti_alias ? -0.5F : 0.0F};
+            if (grad_rounded_n < grad_rounded_stack_cap) {
+                grad_rounded_buf[static_cast<std::size_t>(grad_rounded_n)] = info;
+            } else {
+                if (grad_rounded_heap.empty()) {
+                    grad_rounded_heap.assign(grad_rounded_buf.begin(), grad_rounded_buf.end());
+                }
+                grad_rounded_heap.push_back(info);
+            }
+            ++grad_rounded_n;
+        }
+    }
+    const GradRoundedInfo *grad_rounded_infos =
+        grad_rounded_heap.empty() ? grad_rounded_buf.data() : grad_rounded_heap.data();
+    const int grad_rounded_count =
+        grad_rounded_heap.empty() ? grad_rounded_n : static_cast<int>(grad_rounded_heap.size());
+    // 多色标：stops 覆盖 [0,1] 且非降序时，t 在行内单调，当前色标区间可随 x 单向推进，
+    // 免去逐像素 sample_gradient 的区间线性搜索；其余形态保持原逐像素采样。
+    const std::size_t n_seg = std::min(colors.size(), stops.size());
+    bool segmented = colors.size() == stops.size() && n_seg >= 2 && stops.front() <= 0.0F && stops.back() >= 1.0F;
+    if (segmented) {
+        for (std::size_t si = 1; si < n_seg; ++si) {
+            if (stops[si] < stops[si - 1]) {
+                segmented = false;
+                break;
+            }
         }
     }
     const auto ga = static_cast<float>(global_alpha_);  // 与 set_pixel 一致的全局透明度
@@ -1643,7 +1777,8 @@ auto Painter::draw_linear_gradient(const Rect &area, Point start, Point end, con
         // 本行全覆写 x 区间 = 所有圆角裁剪各行全覆写范围的交集（无圆角裁剪时即 [x0,x1)）。
         int safe_x0 = x0;
         int safe_x1 = x1;
-        for (const auto &ri : rounded_clips) {
+        for (int ci = 0; ci < grad_rounded_count; ++ci) {
+            const GradRoundedInfo &ri = grad_rounded_infos[ci];
             const auto [fx0, fx1] = rounded_full_x_range(*ri.cr, y, ri.threshold);
             safe_x0 = std::max(safe_x0, fx0);
             safe_x1 = std::min(safe_x1, fx1);
@@ -1661,23 +1796,100 @@ auto Painter::draw_linear_gradient(const Rect &area, Point start, Point end, con
         if (safe_x0 < safe_x1) {
             float t = (((static_cast<float>(safe_x0) - sx) * dx) + ((static_cast<float>(y) - sy) * dy)) * inv_len_sq;
             const float t_step = dx * inv_len_sq;  // 沿 +x 每像素 t 增量（t 沿 x 线性）
-            for (int x = safe_x0; x < safe_x1; ++x) {
-                t = std::max(0.0F, std::min(1.0F, t));
-                const Color c = sample_gradient(colors, stops, t);
-                t += t_step;
-                std::uint8_t *p = row + (static_cast<std::size_t>(x - x0) * 4U);
-                // 与 set_pixel 一致：先按全局透明度折算 alpha，再判不透明快路径 / gamma 混合。
-                const int ca = static_cast<int>(std::lround(static_cast<double>(c.a) * ga));
+            // 恒等色整段批量写入：alpha 判定与下方逐像素分支逐字一致。
+            const auto fill_constant = [&](int xa, int xb, const Color &col) {
+                if (xb <= xa) {
+                    return;
+                }
+                const int ca = static_cast<int>(std::lround(static_cast<double>(col.a) * ga));
                 const int ca_c = ca > 255 ? 255 : ca;
+                const int cnt = xb - xa;
+                std::uint8_t *p = row + (static_cast<std::size_t>(xa - x0) * 4U);
                 if (ca_c >= 255) {
-                    p[0] = c.r;
-                    p[1] = c.g;
-                    p[2] = c.b;
-                    p[3] = 255;
-                } else if (ca_c <= 0) {
-                } else {
+                    for (int k = 0; k < cnt; ++k) {
+                        std::uint8_t *px = p + (static_cast<std::size_t>(k) * 4U);
+                        px[0] = col.r;
+                        px[1] = col.g;
+                        px[2] = col.b;
+                        px[3] = 255;
+                    }
+                } else if (ca_c > 0) {
                     const float a = static_cast<float>(ca_c) / 255.0F;
-                    blend_srgb_over_region(p, c.r, c.g, c.b, a, a, a, 1);
+                    blend_srgb_over_region(p, col.r, col.g, col.b, a, a, a, cnt);
+                }
+            };
+            if (!segmented) {
+                for (int x = safe_x0; x < safe_x1; ++x) {
+                    t = std::max(0.0F, std::min(1.0F, t));
+                    const Color c = sample_gradient(colors, stops, t);
+                    t += t_step;
+                    std::uint8_t *p = row + (static_cast<std::size_t>(x - x0) * 4U);
+                    // 与 set_pixel 一致：先按全局透明度折算 alpha，再判不透明快路径 / gamma 混合。
+                    const int ca = static_cast<int>(std::lround(static_cast<double>(c.a) * ga));
+                    const int ca_c = ca > 255 ? 255 : ca;
+                    if (ca_c >= 255) {
+                        p[0] = c.r;
+                        p[1] = c.g;
+                        p[2] = c.b;
+                        p[3] = 255;
+                    } else if (ca_c <= 0) {
+                    } else {
+                        const float a = static_cast<float>(ca_c) / 255.0F;
+                        blend_srgb_over_region(p, c.r, c.g, c.b, a, a, a, 1);
+                    }
+                }
+            } else {
+                // t 单调：色标区间随 x 单向推进；落在 t 钳位平台（0 或 1）的尾部是常数色，整段批量。
+                std::size_t seg = (t_step >= 0.0F) ? 0U : (n_seg - 2U);
+                int x = safe_x0;
+                while (x < safe_x1) {
+                    t = std::max(0.0F, std::min(1.0F, t));
+                    Color c;
+                    bool saturated = false;
+                    if (t <= 0.0F) {
+                        c = colors.front();
+                        saturated = (t_step <= 0.0F);
+                    } else if (t >= 1.0F) {
+                        c = colors.back();
+                        saturated = (t_step >= 0.0F);
+                    } else {
+                        if (t_step >= 0.0F) {
+                            while (seg + 2U < n_seg && t > stops[seg + 1U]) {
+                                ++seg;
+                            }
+                        } else {
+                            while (seg > 0U && t <= stops[seg]) {
+                                --seg;
+                            }
+                        }
+                        const float range = stops[seg + 1U] - stops[seg];
+                        const float frac = (range > 0.0F) ? (t - stops[seg]) / range : 0.0F;
+                        const Color &ca = colors[seg];
+                        const Color &cb = colors[seg + 1U];
+                        c = Color{
+                            static_cast<std::uint8_t>(ca.r + ((cb.r - ca.r) * frac)),
+                            static_cast<std::uint8_t>(ca.g + ((cb.g - ca.g) * frac)),
+                            static_cast<std::uint8_t>(ca.b + ((cb.b - ca.b) * frac)),
+                            static_cast<std::uint8_t>(ca.a + ((cb.a - ca.a) * frac)),
+                        };
+                    }
+                    if (saturated) {
+                        fill_constant(x, safe_x1, c);
+                        break;
+                    }
+                    std::uint8_t *p = row + (static_cast<std::size_t>(x - x0) * 4U);
+                    const int ca_c = std::min(255, static_cast<int>(std::lround(static_cast<double>(c.a) * ga)));
+                    if (ca_c >= 255) {
+                        p[0] = c.r;
+                        p[1] = c.g;
+                        p[2] = c.b;
+                        p[3] = 255;
+                    } else if (ca_c > 0) {
+                        const float a = static_cast<float>(ca_c) / 255.0F;
+                        blend_srgb_over_region(p, c.r, c.g, c.b, a, a, a, 1);
+                    }
+                    t += t_step;
+                    ++x;
                 }
             }
         }
@@ -1704,6 +1916,7 @@ auto Painter::draw_radial_gradient(const Rect &area, Point center, float radius,
         return;
     }
     detail::PaintTimer guard{&g_pt.gradient};
+    init_gamma_tables();
     if (colors.empty() || stops.empty() || radius <= 0.0F) {
         return;
     }
@@ -1748,12 +1961,30 @@ auto Painter::draw_radial_gradient(const Rect &area, Point center, float radius,
         const ClipRegion *cr;
         float threshold;
     };
-    std::vector<GradRoundedInfo> rounded_clips;
+    // 常规裁剪栈（≤8 层圆角）走栈上定长缓冲，省掉每次渐变的一次 new/delete；
+    // 仅在异常深的裁剪栈下才回落 vector。
+    constexpr int radial_rounded_stack_cap = 8;
+    std::array<GradRoundedInfo, static_cast<std::size_t>(radial_rounded_stack_cap)> grad_rounded_buf{};
+    std::vector<GradRoundedInfo> grad_rounded_heap;
+    int grad_rounded_n = 0;
     for (const ClipRegion &cr : clip_stack_) {
         if (cr.rounded && cr.radius > 0.0F) {
-            rounded_clips.push_back({.cr = &cr, .threshold = cr.anti_alias ? -0.5F : 0.0F});
+            const GradRoundedInfo info{.cr = &cr, .threshold = cr.anti_alias ? -0.5F : 0.0F};
+            if (grad_rounded_n < radial_rounded_stack_cap) {
+                grad_rounded_buf[static_cast<std::size_t>(grad_rounded_n)] = info;
+            } else {
+                if (grad_rounded_heap.empty()) {
+                    grad_rounded_heap.assign(grad_rounded_buf.begin(), grad_rounded_buf.end());
+                }
+                grad_rounded_heap.push_back(info);
+            }
+            ++grad_rounded_n;
         }
     }
+    const GradRoundedInfo *grad_rounded_infos =
+        grad_rounded_heap.empty() ? grad_rounded_buf.data() : grad_rounded_heap.data();
+    const int grad_rounded_count =
+        grad_rounded_heap.empty() ? grad_rounded_n : static_cast<int>(grad_rounded_heap.size());
     const auto ga = static_cast<float>(global_alpha_);  // 与 set_pixel 一致的全局透明度
     for (int y = y0; y < y1; ++y) {
         std::uint8_t *row =
@@ -1761,7 +1992,8 @@ auto Painter::draw_radial_gradient(const Rect &area, Point center, float radius,
             (((static_cast<std::size_t>(y) * static_cast<std::size_t>(width_)) + static_cast<std::size_t>(x0)) * 4U);
         int safe_x0 = x0;
         int safe_x1 = x1;
-        for (const auto &ri : rounded_clips) {
+        for (int ci = 0; ci < grad_rounded_count; ++ci) {
+            const GradRoundedInfo &ri = grad_rounded_infos[ci];
             const auto [fx0, fx1] = rounded_full_x_range(*ri.cr, y, ri.threshold);
             safe_x0 = std::max(safe_x0, fx0);
             safe_x1 = std::min(safe_x1, fx1);
@@ -1847,6 +2079,7 @@ auto Painter::draw_shadow(const Rect &shape, float offset_x, float offset_y, flo
     if (!shrink_to_clips(x0, y0, x1, y1)) {
         return;  // 裁剪外纯白扫（blend_pixel 经 set_pixel 恒丢弃）
     }
+    init_gamma_tables();
     AURORA_PROFILE_COUNT(draw_calls, 1);
 
     // 阴影矩形（物理像素）
