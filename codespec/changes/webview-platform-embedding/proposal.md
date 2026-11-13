@@ -4,7 +4,7 @@
 |:---|:---|
 | 变更编号 | CHG-017 |
 | 提出日期 | 2026-10-14 |
-| 当前状态 | 实施中 |
+| 当前状态 | 已归档 |
 | 关联需求 | SPEC.PLATFORM.ZERO-IFDEF.001 |
 | 影响面 | 新增公共模块 `webview/`（命名空间 `aurora::webview`；公共头 `web_view.h`、`native_view_host.h`（二者均位于 `include/aurora/webview/`）+ `src/aurora/webview/` 下五个实现源文件）；新增公共控件 `WebView`（第 74 个 widget，`aurora_api.json` 与 `tools/check/umbrella_manifest.txt` 同步收录）；新增 `Surface` 之外的第二条平台扩展点 `NativeViewHost`（宿主侧原生子视图书架：每帧几何同步 + Linux 侧 fd 并入事件等待）；新增线程局部宿主访问口（形态仿 `current_focus_manager()`）；新增 `AURORA_ENABLE_WEBVIEW` 组编译开关（默认 OFF，`FeatureFlags` 运行时查询同步收口）；`codespec/errors.toml` 新增 `webview-*` 错误组；`validate_ui` 增一类组合诊断；`codespec/manual-test/` 新增探针配套条目。不改 `Painter` / `Surface` / 布局 / 事件既有语义 |
 
@@ -166,3 +166,12 @@ DevTools 协议接入、cookie 与站点存储管理、下载管理、自定义 
 - `codespec/errors.toml`（新增 `webview-*` 错误组）
 - `codespec/ERROR_CATALOG.md`（生成物：`webview-*` 错误码，随 `gen_error_codes` 刷新）
 - `codespec/changes/webview-platform-embedding/proposal.md` 自身状态随批次流转（已提议 → 实施中 → 已归档）
+
+## 实施记录与偏离（落码期回写）
+
+1. **落码完成，回写落点已核。** 模块落 `include/aurora/webview/`（`web_view.h`、`native_view_host.h`）与 `src/aurora/webview/` 五源（`web_view.cpp`、`native_view_host.cpp`、`engine_null.cpp`、`engine_webview2.cpp`、`engine_webkitgtk.cpp`）；控件为 `au::webview::WebView`（76 型中唯一不挂 `aurora` 直属命名空间者）；三枚开关 `AURORA_ENABLE_WEBVIEW` / `_WEBVIEW2` / `_WEBKITGTK` 默认 OFF，归入 `AURORA_ENABLE_*` 能力组与 `FeatureFlags` 镜像；`webview-*` 错误组经 `errors.toml` 进 `ERROR_CATALOG.md`。回写落点逐项核实：`ARCHITECTURE.md` 模块映射、`BUILD_OPTIONS.md` 能力开关组、`04-widget.md` 控件行、`06-app-platform.md` §12.1 原生子视图扩展点、`03-layout-render.md` 快照口径、`manual-test/11-widget.md` 探针配套条目、`errors.toml` + `ERROR_CATALOG.md` 均在位。
+2. **测试与门禁。** `tests/unit/utest_web_view.cpp` 与 `tests/unit/utest_native_view_host.cpp` 覆盖 §验收判据 1–2 的 props 往返、四种降级路径、dp→物理矩形换算与几何去重；快照模式的 golden 比对落 `utest_offscreen`；`check_api_schema_sync` / `check_api_budget` / `check_umbrella_header` / `check_arch_module_map` / `check_core_layer_boundary` / `check_naming_conventions` / `check_platform_macros` 与 `lint` / `format-check` 全绿；`AURORA_ENABLE_WEBVIEW_WEBVIEW2` 已纳入 lint 扩面矩阵；宏关闭时全仓构建通过、既有用例零回归。
+3. **有意边界一：macOS 无引擎实现。** `WebViewEngine::WkWebView` 只有枚举位与注册表入口，既无对应构建宏，也无 `engine_wkwebview.cpp` 与工厂；macOS 上 `probe()` 落 `Disabled`、两模式全 false、`create_view()` 返回空，控件走占位矩形。这与 §6「本次只预留枚举位与注册表入口，不落实现」一致，是**申报过的边界而非遗漏**；补实现须另立提案并配真机探针。
+4. **有意边界二：Wayland 两模式均不可用。** Wayland 无法把另一客户端的 surface 作为定位子 surface，收养机制不成立，`probe()` 归因 `UnsupportedPlatform` 并同时关闭快照模式（快照未在 Wayland 实证，不预先声称）。
+5. **未取证项如实登记。** 真机探针 `aurora_verify_webview_webview2` 与 `aurora_verify_webview_webkitgtk` 均为 `EXCLUDE_FROM_ALL`、不进 CTest；WebKitGTK 一枚归 Linux 真机手验，尚未执行，故「X11 环境下加载内联 HTML → 标题回报 → 消息往返 → 几何随动」这组判据在 Linux 侧仍属待外部验证。验收判据 4 的两处变异自证属落码期过程证据，未以单独脚本常驻。
+6. **首版不做项保持不变。** §9 列的 DevTools、cookie / 站点存储、下载、自定义 scheme、权限 / 打印、多实例 profile、页面内音视频，以及四条已知限制（Scroll 内 tearing、Web 之上无法叠加 Painter 绘制、Aurora↔Web 焦点贯通不承诺、语义树不穿透）均未在本批改变。

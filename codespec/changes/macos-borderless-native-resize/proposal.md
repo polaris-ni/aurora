@@ -4,7 +4,7 @@
 |:---|:---|
 | 变更编号 | CHG-062 |
 | 提出日期 | 2026-11-02 |
-| 当前状态 | 实施中 |
+| 当前状态 | 已归档 |
 | 关联需求 | SPEC.PLATFORM.CONSISTENT-BEHAVIOR.001 |
 | 影响面 | `src/aurora/window/detail/macos_decoration.h`（新增：档位 → 装饰布尔的纯映射真源）、`tests/unit/utest_macos_decoration.cpp`（新增：映射表驱动单测，非 Apple runner 亦跑）、`src/aurora/window/macos_surface.cpp`（建窗期只保留「布尔 → 掩码 / 属性」的逐字映射 + 标准窗钮显隐）、`include/aurora/window/macos_surface.h`（类注释的装饰口径）、`tools/verify/macos_surface_live_probe.mm`（新增掩码能力与真拖拽段）；`codespec/specification/07-environment-modifier.md` §4.1 映射表、`codespec/manual-test/10-window.md` 一条新用例、CHANGELOG.md。**不改公共类型与函数签名**：`DecorationPolicy` / `WindowResizeEdge` 枚举项与值序、`Surface` 虚函数集、错误码均不动，且本提案不新增 `MacOSSurface::begin_window_resize` 覆写 |
 

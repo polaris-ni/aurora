@@ -4,7 +4,7 @@
 |:---|:---|
 | 变更编号 | CHG-061 |
 | 提出日期 | 2026-10-31 |
-| 当前状态 | 实施中 |
+| 当前状态 | 已归档 |
 | 关联需求 | 无 |
 | 影响面 | `src/aurora/window/macos_surface.cpp`（`capture_window` 实现：内容视图缓存位图 → PNG）、`include/aurora/window/macos_surface.h`（覆写声明与注释）、`include/aurora/window/surface.h`（基类注释的后端清单补 macOS）、`tests/unit/utest_macos_surface.cpp`（成员指针类型钉住）、`tools/verify/macos_surface_live_probe.mm`（真机探针补截图段）、`codespec/` 两处回写 |
 

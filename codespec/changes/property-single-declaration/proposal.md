@@ -439,3 +439,19 @@
 > - **Breaking**：属性的主题默认值不再以手写显示串存在于源码。`PropDescriptor::default_value` 里形如 `theme.*` 的字面量（含裸串 / 转义串 / raw-string 三种拼法）整体退役，`default_expr` 由权威表行的回落点与新增的 `theme_tokens` 对照表生成；aurora_api.json 顶层新增两枚非条目块 `accessor_rules` 与 `theme_tokens`，`ColorScheme` 补入 enums，`ThemeProvider` 条目补主题载荷。控件层硬编码色字面量（基线约 158 处）与 `Color::shaded(0.92F)` / `shaded(0.80F)` 交互态魔数改为读 `roles.hover` / `roles.pressed`。
 > - **Added**：`Theme` 的度量令牌组共四枚——`ShapeScale`（圆角档）/ `SpacingScale`（间距档）/ `ControlMetrics`（控件基准度量档）三枚随主线风格批落地，本批补 `MotionScale`（动效时长档），并给四组各加「成员指针 → 短名」编译期对照表（短名 `theme.<Theme 字段名>.<档名>`）；控件默认值不再硬编码在字段声明处，改为属性行上的回落点，其表示在描述符与 schema 中可求值（活令牌档出 `default_expr`，常量档出格式化值）。include/aurora/core/color.h 新增 constexpr `relative_luminance` 与 `contrast_ratio`（原只存在于单元测试的测试局部实现），配一枚新的对比度门禁覆盖库自带明暗两列的全部前景配对；OS 无障碍开关（高对比、字号缩放、减动效）折进主题快照的物化点，字号缩放改经 `TypeScale` 解析并带动间距 / 圆角档，src/aurora/widget/text.cpp 的末端 `size_pt *=` 随之退役。
 > - **Migration**：① 全库 codemod 规则 `XxxProps{ .a = x, .b = y }` → `XxxProps().set_a(x).set_b(y)`（顺序无关，漏写者回退默认）；② `obj.<attr> = v` → `obj.set_<attr>(v)`；③ 读取属性的既有直引用法 → **同名的一件读件**：**回落点跟随主题或由他行派生的属性**，公共读件只有 `x(ctx)` 一件，故所有取值点（绘制 / 布局 / 命中测试 / 事件回调 / 单测 / `defaults()` 比对）一律带上 `BuildContext`——没有「无参同名读件」这条退路，取值点一时拿不到 ctx 就是把上下文传进去，而不是改取一个不会随换肤的值；**回落点为常量的属性一律用 `x()`**——它们没有 `x(ctx)` 这个名字，写出来就是编译错，而不是另一种取法；原按「`has_<attr>()` + `resolve_<attr>(ctx)`」口径写的代码改为直接 `x(ctx)`，需要让属性重新跟随主题或退回默认时改调 `clear(<属性>_row())`（无逐属性 `reset_<attr>()`）；需要「用户是否表过态」的判据改走 Inspector 属性面板或序列化输出（该位不再是公共方法）；④ 覆盖 `collect_signals` 的自定义控件保留 override，函数体改为一行 `collect_prop_sources(out)`；⑤ 自研控件若曾把 `*Props` 字段当公有成员在类内直写，须改为经写件/读件访问（这正是本条要拦的静默失效面）。
+
+## 收口状态
+
+原「未落的整段替换清单」四项逐项核对，三项已随后续批落地：
+
+1. **LSP 指定初始化器补全面** —— 已落。`tools/include/lsp_features.h` 的属性补全与 hover 已按链式形态发射（`set_<key>()` 写件、行名可跳转），并带出「该控件不接受指定初始化器」的诊断，旧聚合补全面退役。
+2. **`manual-test/11|13|22` 三篇重写** —— 已落。三篇现有用例数分别为 17 / 12 / 12 条，覆盖运行时换肤、部分覆写、三档无障碍开关、覆盖面序列化往返、Inspector 与 MCP 读写等判据面。
+3. **schema 的 `consumed` 位** —— 已落。`aurora_api.json` 的 `theme_tokens` 逐组带 `consumed` 与 `consumed_rule`，未消费组与规格登记表的一致由 `check_no_theme_color_literals` 的 C1 腿判等集守护。
+
+仍未落的一件与两处挂账，性质均为「代码 / 判据未完成」而非「外部证据待取」：
+
+4. **「76 型 × 3 风格」全量产物编译矩阵** —— 未落。仓库内没有对应脚本或 CI 作业；`itest_to_code` 覆盖的是单型产物，不构成全量矩阵。补法是以 `to_code` 遍历全部在册类型 × 三档风格，逐 TU 编译并断言通过，可作为独立小批落地。
+5. **八处 `font_size` 常量基线未随批迁移**（第二十四批自身登记）：`button.h` / `text_input.h` 两枚表行 provider 各回 14.0F，`chip.h` / `radio_spin.h` 两枚、`tab_bar.h`、`dropdown.h` 回 13.0F，`segmented_control.h` 回 14.0F。迁移会动像素与 golden，故挂账随观感批次处理。
+6. **未测项其九（OS 无障碍开关推送）** 仍未接线。
+
+因此本提案状态保持「实施中」：与代码侧已闭合、仅余平台运行读数待取的提案相比，本件存在明确的代码侧未完成项，不满足归档判据。

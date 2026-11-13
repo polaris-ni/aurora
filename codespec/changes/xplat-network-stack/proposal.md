@@ -4,7 +4,7 @@
 |:---|:---|
 | 变更编号 | CHG-018 |
 | 提出日期 | 2026-10-12 |
-| 当前状态 | 实施中 |
+| 当前状态 | 已归档 |
 | 关联需求 | SPEC.FEAT.NET.ENGINE-PLUGGABILITY.001 |
 | 影响面 | 破坏性重做公共模块 `net/`（CHG-006 的同步 `StreamSocket` / `Listener` 面退位，见变更内容第 4 条）；新增异步传输引擎、DNS（含双栈与竞速）、代理族、本地 IPC、TLS、HTTP/1.1、SSE、WebSocket 公共 API，及 `Url` / `Headers` / `Framer` 三个共用基础件（前两者落 `core/`）；`Application` 事件循环新增网络完成事件通道与**全平台事件源注册口**（X11/Wayland 现有 DBus fd 通道收编为其消费者，Win32 / macOS / GLFW 等待集同步改造）；`state/` 新增 `Resource` 三态绑定类型；`tests/framework` 新增条件等待辅助与内置 `FakeEngine`；Inspector 路由由 `if` 链改注册表并新增 `network` 端点（配套 MCP 工具）；响应解压复用既有 wuffs gzip/zlib（无新增第三方依赖）；codespec/errors.toml 扩 `net-*` / `http-*` / `ws-*` 码组；codespec/BUILD_OPTIONS.md 新增「实现引擎」宏与 `AURORA_NET_TLS_PROVIDER` 缓存变量（**公共 API 面不加宏**）；codespec/CODING_STANDARDS.md §4.1 补凭据脱敏硬规则；InspectorServer 与 tools/servers/inspector_client.h 迁移为新传输层消费者；codespec/SPECIFICATIONS.md §5 登记 9 条 `SPEC.*.NET.*` 需求 |
 
@@ -809,3 +809,15 @@ HTTP 语义件的**认证切片**已落地（§16 第 34 项）：新增公共�
 - `codespec/specification/01-core.md`（`Url` 与大小写不敏感 `Headers` 两个新基础件的契约与归属）
 - `codespec/GUIDELINE.md`（新增「网络请求 → 三态渲染」最小可编译配方）
 - `codespec/changes/xplat-network-stack/proposal.md` 自身状态随批次流转（已提议 → 实施中 → 已归档）
+
+## 归档记录
+
+**代码侧判据已闭合，回写落点已核。** §16 对账表 48 项全部为「已落地」（其中第 3、4 项按裁决不做，第 21、37 项为待外部验证），代码侧缺口为 0；单测与集成用例落 `tests/unit/utest_net_*.cpp`、`tests/integration/itest_net_*.cpp`、`tests/unit/utest_state_resource.cpp`；规格契约落 `06-app-platform.md` §8.8.36–§8.8.41 六节；`manual-test/23-net.md` 的 TC-NET-001/002/005/006/008/009 在册；`CHANGELOG.md` 的 Breaking 与 Migration 已覆盖 `Session` / `StreamSocket` / `Listener` 的退位与迁移路径；`check_codespec_xref` / `check_code_doc_sync` / `check_change_proposals` / `check_manual_test_format` 绿。
+
+**尚未取得的外部运行证据（如实登记，不声称通过）。** 下列三项属 CI、真机与 Emscripten+Node 侧证据，不是代码缺口：
+
+1. TLS 1.2 在握手内即拒收的版本关联（以 `openssl s_server -tls1_2` 作对端，断言错误码落 `net-tls-version` 而非等到密钥交换），需在 Windows Schannel、WSL OpenSSL、WSL mbedTLS 三处各跑一次。
+2. macOS 侧：`tls-providers` 矩阵两枚 SecureTransport 作业的运行读数、系统代理读取腿读数、`TC-NET-009` 的 `--expect auto` / `online` / `offline` 三步（`source=dynamic_store`）、以及 macOS 与 GLFW 宿主上 `set_host_driven(true)` 的 `sources()` / `dispatch()` 回归。
+3. wasm 侧：`wasm_fetch_live_probe` 经 Node 驱动的状态码 / 响应头 / 体摘要比对，以及 WASM 预设下 `WebSocket` 能力位为假、连接报 `net-platform-unavailable` 的负向断言。
+
+上述读数取得前，相应判据一律按「待外部验证」读，不以「代码存在」代替运行证据；取得后按原口径补登记，不重开本提案。
