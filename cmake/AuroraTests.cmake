@@ -320,6 +320,29 @@ if (AURORA_BUILD_TESTS)
     # 复制一份最小客户端只会测到副本，测不到那个「超时选项按平台不同形」的回归位。
     # src/ 让**零平台依赖**的内部折算单元（如 window/detail/ime_composition.h）可被无头单测
     # 直接断言——平台专属实现仍在后端宏门控内，测试包含不到也不会引 <windows.h>。
+    # 属性面「全量类型 × 三种生成风格」编译矩阵：.inc 由 gen_codegen_matrix 按 aurora_api.json 发射，
+    # 被 tests/integration/itest_codegen_matrix.cpp 直接 include——于是「产物可编译」由编译器判定，
+    # 而不是字符串比对。产物当前编不过的类型登记在 tools/gen/codegen_matrix_exemptions.txt，
+    # 生成器把它们写进独立的豁免表，测试断言其显式在册（不允许静默跳过）。
+    # 类型清单与 check_api_schema_sync 同源（都读 aurora_api.json），故新增控件自动进矩阵。
+    set(AURORA_CODEGEN_MATRIX_DIR "${CMAKE_BINARY_DIR}/generated")
+    set(AURORA_CODEGEN_MATRIX_INC "${AURORA_CODEGEN_MATRIX_DIR}/codegen_matrix.inc")
+    if (TARGET gen_codegen_matrix)
+        add_custom_command(
+                OUTPUT "${AURORA_CODEGEN_MATRIX_INC}"
+                COMMAND ${CMAKE_COMMAND} -E make_directory "${AURORA_CODEGEN_MATRIX_DIR}"
+                COMMAND gen_codegen_matrix
+                        "${AURORA_SOURCE_DIR}/aurora_api.json"
+                        --out "${AURORA_CODEGEN_MATRIX_DIR}"
+                        --exempt "${AURORA_SOURCE_DIR}/tools/gen/codegen_matrix_exemptions.txt"
+                DEPENDS gen_codegen_matrix
+                        "${AURORA_SOURCE_DIR}/aurora_api.json"
+                        "${AURORA_SOURCE_DIR}/tools/gen/codegen_matrix_exemptions.txt"
+                COMMENT "Generating the codegen compile matrix (registered widget types x 3 generation styles)"
+                VERBATIM)
+        add_custom_target(codegen_matrix_inc DEPENDS "${AURORA_CODEGEN_MATRIX_INC}")
+    endif ()
+
     function(_aurora_configure_runner tgt)
         aurora_setup_consumer_target(${tgt}
                 "${CMAKE_CURRENT_SOURCE_DIR}/tests"
@@ -329,7 +352,8 @@ if (AURORA_BUILD_TESTS)
                 "${AURORA_SOURCE_DIR}/tools/servers"
                 "${AURORA_SOURCE_DIR}/src"
                 "${CMAKE_CURRENT_SOURCE_DIR}/tests"
-                "${CMAKE_CURRENT_SOURCE_DIR}/tests/support")
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/support"
+                "${AURORA_CODEGEN_MATRIX_DIR}")
         # 库侧差异，聚合后收敛到 runner 一处：
         #   shcore — dpi_awareness 用例（GetDpiForWindow 等）高 DPI 回归；inspector — 检视 server pimpl 实现；
         #   -ffp-contract=off — 标量黄金参考禁 FMA 收缩（目标级应用：仅禁收缩，语义安全）。
@@ -526,6 +550,11 @@ if (AURORA_BUILD_TESTS)
     # ---- 框架自检：验证注册 / 断言 / 异常隔离 / 退出码协议 ----
     # 使用内建 synthetic 用例，不消费注册表，故不干扰 registry_integrity；分片时跑 0 号分片。
     list(GET _runner_targets 0 _first_runner)
+    if (TARGET codegen_matrix_inc)
+        foreach (_tgt ${_runner_targets})
+            add_dependencies(${_tgt} codegen_matrix_inc)
+        endforeach ()
+    endif ()
     add_test(NAME framework_selftest COMMAND ${_first_runner} --selftest)
 
     # 完整性守护（TEST-R6，用例级）：runner --list 与测试源中的用例宏逐用例比对，

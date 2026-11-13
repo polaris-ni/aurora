@@ -200,6 +200,12 @@ aurora_add_tool(gen_api_tools tools/gen/gen_api.cpp)
 # 消灭的形态，故本目标自身不得含任何颜色数学。运行：cmake --build build --target gen_contrast_tools
 aurora_add_tool(gen_contrast_tools tools/gen/gen_contrast.cpp)
 
+# 工具：属性面「全量类型 × 三种生成风格」矩阵的生成器。产物是 codegen_matrix.inc——每格一个函数，
+# 由 tests/integration/itest_codegen_matrix.cpp 直接 include 后随测试一起编译，故「产物可编译」
+# 交给编译器判定，不比字符串。类型清单取 aurora_api.json（与 check_api_schema_sync 同源）。
+# 运行：cmake --build build --target gen_codegen_matrix
+aurora_add_tool(gen_codegen_matrix tools/gen/gen_codegen_matrix.cpp)
+
 # 可复现生成：运行 gen_api_tools 直接写 aurora_api.json（跨平台，无需 shell 重定向）。
 # gen_api_tools 全量重写时保留既有 error_codes/debug 段（见 gen_api.cpp）；
 # 随后 gen_debug_api 以 codespec/debug_api.toml 为准重并 debug 段——单跑本目标即得完整文件，

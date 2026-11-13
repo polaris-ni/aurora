@@ -201,6 +201,10 @@ enum class CodeStyle : std::uint8_t { Fluent, StepByStep, DesignatedInit };   //
 
 **产物可编译性的验证口径**：`tests/integration/itest_to_code.cpp`（30 例）锁形态，其中「DesignatedInit 与 Fluent 逐字节相同」「子节点槽守卫产物仍可编译」两例钉住本节上面的别名裁决与分支 4，「带子命名空间的类型落在自己的子命名空间里」一例钉住 `cpp_namespace` 的三处拼名。另有全量「类型 × 3 风格」产物逐条 `g++ -fsyntax-only` 体检与真实 UI 树 fixture（`tests/fixtures/ai_compat/`）锁可编译性 —— **该矩阵的名单与读数取自属性面批量迁移之前（73 型 × 3 风格：fluent 65/73、di 65/73、step 65/73，缺的 8 项恰是 `is_unconstructible` 名单；fixture 11 棵树 × 3 风格产物 33/33 全通过），本批未重跑**，schema 现为 76 型，故三个数字都是过期读数，只作方法留档；迁移后 `di` 档与 `fluent` 档由同一条发射路径产出，逐字节相同属构造上的事实（由 `itest_to_code` 的样本断言背书），不是重跑矩阵的实测。矩阵须按**每类型一座独立 TU**编译：把全部产物拼进单座大 TU（省时但）会被 GCC 的级联报错污染——一处失败即波及后续命名空间，实测把 65/73 误报成 50/73、18/73，归属不可信。
 
+**该体检已常驻化**：`tools/gen/gen_codegen_matrix.cpp` 按 `aurora_api.json` 的在册类型生成矩阵，`tests/integration/itest_codegen_matrix.cpp` 整份 include 后随 runner 编译，于是「产物可编译」由编译器判定、不再依赖一次性手工体检。当前读数：76 型中 **67 型 × 3 风格 = 201 格全编译**（fluent 67/67、di 67/67、step 67/67），其余 **9 型**登记在 `tools/gen/codegen_matrix_exemptions.txt`：6 个模板 / 别名型（`Provider` / `Repeater` / `ReorderableList` 与三个 `*Provider`）、2 个仅位置构造型（`Hero` / `Dismissible`），以及 `WebView`——它可构造但禁复制与移动，`Node` 的按值构造不成立，属**待修的产物形态缺口**而非设计边界。清单是实测基线：新增控件自动进矩阵，某型修好后须手工删除对应条目，否则不会自动纳管。
+
+与本段旧体检的口径差异如实登记：本矩阵把全部可编译格**拼进单座 TU**，而非每型一座独立 TU。旧口径的级联污染风险由豁免清单前置吸收（已知不可编译的型根本不进编译面）；若将来新增某型失败，clang 的报错仍逐条归到 `codegen_matrix.inc` 的行号，必要时以 `--dump <Type>` 单独核对三种产物。GCC 腿若出现归属混乱，按同一分工处置。
+
 ```cpp
 std::string code = au::serialization::to_code(json, au::serialization::CodeStyle::Fluent);
 ```
