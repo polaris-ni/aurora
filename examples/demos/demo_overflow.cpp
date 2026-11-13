@@ -25,6 +25,24 @@ auto main() -> int {
         return col;
     };
 
+    // 辅助：Scroll 专用载体——上下两块异色内容，使滚轮位移与两端夹取可肉眼判定
+    auto make_scroll_box = []() -> au::Node {
+        auto top = std::make_shared<au::Text>();
+        top->set_content(au::LocalizedString{std::string{"top half"}});
+        top->set_modifier(au::Modifier{}.size(150.0F, 60.0F).background(au::Color{220, 50, 50, 255}));
+        auto bottom = std::make_shared<au::Text>();
+        bottom->set_content(au::LocalizedString{std::string{"bottom half"}});
+        bottom->set_modifier(au::Modifier{}.size(150.0F, 60.0F).background(au::Color{50, 90, 220, 255}));
+
+        au::Column col{std::vector<au::Node>{au::Node{top}, au::Node{bottom}}};
+        col.set_modifier(au::Modifier{}
+                             .size(150.0F, 60.0F)
+                             .background(au::Color{50, 180, 80, 255})
+                             .border(1.0F, pal::AURORA_BORDER));
+        col.overflow_strategy(au::OverflowStrategy::Scroll);
+        return col;
+    };
+
     au::Node root = au::Column{
         GradientTitle{"OverflowStrategy"},
         gap(12),
@@ -51,9 +69,9 @@ auto main() -> int {
         gap(12),
 
         Card{
-            au::Text{au::LocalizedString{"Scroll: overflow scrollable (reserved, currently same as Hidden)"}},
+            au::Text{au::LocalizedString{"Scroll: wheel scrolls content, clamped at both ends"}},
             gap(8),
-            make_overflow_box(au::OverflowStrategy::Scroll, "Scroll: scrollable (placeholder)"),
+            make_scroll_box(),
         },
     };
 

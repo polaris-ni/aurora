@@ -276,10 +276,10 @@ drain_posted → pump_all_once → on_frame_ → poll_close_requests → tick_al
 | 后端 | `set_window_mode` 实现 | 真机状态 |
 |:---|:---|:---|
 | Wayland | `xdg_toplevel` 的 set/unset_maximized 与 set/unset_fullscreen 按目标态组合（`Normal` 只拆当前已挂的态）；实现内立即 `notify_window_mode`，稍后到达的 configure 以相同值幂等收敛（本地态仍由 configure 单独驱动） | 真实现 |
-| X11 | EWHM `_NET_WM_STATE` **ADD / REMOVE 目标态** ClientMessage——CSD 三钮原 `_NET_WM_STATE_TOGGLE` 切换语义已一并重构为按本地 mode 快照算目标态；`Minimized` 走 `XIconifyWindow`；属性通告到达后经既有路径更新并上报。注意这是**宿主方法**：`minimize` / `toggle_maximize` / `set_fullscreen` 三枚公共切换槽无覆写（落基类 no-op），公共切换腿另立缺口（机制在 ≠ 接线，见 §5 能力位口径） | 真实现（`set_window_mode` 槽） |
+| X11 | EWMH `_NET_WM_STATE` **ADD / REMOVE 目标态** ClientMessage——CSD 三钮原 `_NET_WM_STATE_TOGGLE` 切换语义已一并重构为按本地 mode 快照算目标态；`Minimized` 走 `XIconifyWindow`；属性通告到达后经既有路径更新并上报。三枚公共切换槽均已覆写：`minimize` 转发 `set_window_mode(Minimized)`、`toggle_maximize` 按本地 mode 快照算目标态、`set_fullscreen` 转发同源（能力位口径见 §5） | 真实现 |
 | Win32 | `SC_RESTORE` / `SC_MAXIMIZE` / `SC_MINIMIZE` 经窗口过程（与用户走系统菜单同路径），`WM_SIZE` 回来定档上报。注意这是**宿主方法**：公共槽由 `Win32Surface` 覆写转发（`minimize` → `SC_MINIMIZE`；`toggle_maximize` 以 OS 实值 `IsZoomed` 判档；`set_window_mode` 原样转发；`set_fullscreen` 转发 `Win32Host::set_fullscreen` 做 borderless 全屏——monitor 枚举 + 还原几何 + `WM_SIZE` 定档上报） | 真实现 |
 | D3D11 | 同一 `Win32Host` 宿主，`D3D11Surface` 四枚公共槽内联转发与 `Win32Surface` 逐字同口径（此前落基类 no-op，已补） | 真实现 |
-| GLFW | `glfwRestoreWindow` / `glfwMaximizeWindow` / `glfwIconifyWindow`，回调回来定档上报。注意这是**宿主方法**：`minimize` / `toggle_maximize` / `set_fullscreen` 三枚公共切换槽无覆写（落基类 no-op），公共切换腿另立缺口 | 真实现（`set_window_mode` 槽） |
+| GLFW | `glfwRestoreWindow` / `glfwMaximizeWindow` / `glfwIconifyWindow`，回调回来定档上报。三枚公共切换槽均已覆写：`minimize` 转发 `glfwIconifyWindow`、`toggle_maximize` 按 `Impl::maximized` 走 `glfwMaximizeWindow` / `glfwRestoreWindow`（请求语义 + 回调定档）、`set_fullscreen` 走 borderless 铺满所在显示器（存/还原几何与装饰态、不改视频模式） | 真实现 |
 | Headless | 记录目标态 + `notify_window_mode` 同步上报：无 OS 语义、零副作用、可断言（无头几何恢复用例的观测面） | 真实现（测试 seam） |
 | macOS | `toggleFullScreen:` / `miniaturize:` / `deminiaturize:` / `zoom:` 按目标态组合（先读 `styleMask` 全屏位、`isMiniaturized`、`isZoomed` 再补差额）；立即按目标档 `notify_window_mode`，AppKit 的异步过渡完成后由窗口委托按真实态校正 | 真实现 |
 
@@ -295,9 +295,7 @@ drain_posted → pump_all_once → on_frame_ → poll_close_requests → tick_al
 **已知缺口（均不在本批，不得暗示已修）**：
 
 - Wayland 的 `set_position` 在协议层不可设（见上条「Linux 几何 setter 现状」）——Wayland 上位置恢复仍是 no-op；尺寸恢复是**提议**语义（合成器可拒绝），真机读数须区分「提议已送达」与「确实按目标尺寸落地」；
-- Win32 / D3D11 的 `FullScreen` 已由 `Win32Host::set_fullscreen` 真实现（borderless 全屏：monitor 枚举 + 还原几何 + `WM_SIZE` 定档上报，退出还原到进入前几何）；GLFW 的 `FullScreen` 仍无实现（monitor 切换通道未建），调用时落基类 no-op；
 - `WgpuX11Surface` / `WgpuWin32Surface` 两个同源面**不转发任何几何原语**（`minimize` / `toggle_maximize` / `set_fullscreen` 历来不转发，此前同批补转发的还有 `WgpuWaylandSurface` 与 `D3D11Surface`——D3D11 已补四槽转发，见上表）——统一既有缺口，不在本批；
-- `X11` / `GLFW` 的三枚公共切换槽（`minimize` / `toggle_maximize` / `set_fullscreen`）无 `Surface` 覆写（落基类 no-op）：两家 `set_window_mode` 槽已真实现、CSD 钮走内部目标态路径，但应用自绘标题栏的公共切换腿未接；能力位按「公共入口是否全部接通」口径如实为 false（§5），待公共切换腿补齐后再翻位；
 - 应用级 `window_mode()` State 只聚合主窗（`register_host` 的 mode sink 仅在宿主即主窗时转发）：既有口径、非本批引入，仅在 §6.2 补记，行为不改。
 
 **统一帧循环**（`Application::run`，不再委托 `Window::run`）：
@@ -508,12 +506,12 @@ au::App().window(win ? std::move(win.value()) : nullptr)
 
 `runtime_visibility` 与 `runtime_always_on_top` 表「OS 提供运行期窗口显隐 / 置顶机制，且本库已把 §3.6 的四枚开关接到该机制」。当前 `Win32`、`D3D11` 与 `MacOS` 为 true：Win32 / D3D11 共用同一宿主（`ShowWindow(SW_SHOWNA / SW_HIDE)` 与 `SetWindowPos(HWND_TOPMOST / HWND_NOTOPMOST)`，故同翻；wgpu 是渲染偏好而非独立 `SurfaceKind`，不另列）；macOS 落 `orderFrontRegardless` / `orderOut:` 与 `setLevel:(NSFloatingWindowLevel / NSNormalWindowLevel)`。其余恒 false 且各有一句实情：`X11` 的 `XMapWindow` / `XUnmapWindow` 与 `Glfw` 的 `glfwShowWindow` / `glfwHideWindow` **机制在但本库未落桥**，`Wayland` 既没有「隐藏顶层窗口」也没有「置顶」的核心协议（只有 minimize），`Headless` 是记录值 seam 而非 OS 机制——**未接线的方向不预先声称**。缺位时 `set_visible` / `set_always_on_top` 是**可观测的 no-op**（`is_visible()` 恒为基类默认 true、`is_always_on_top()` 恒为 false），应用据此先查询再降级，而不是「按了热键窗口没反应还以为是热键坏了」。逐 `SurfaceKind` 期望表由 `utest_window_runtime_control` 锚定（「未接线先翻位」的变异对应用例转红）。
 
-`runtime_window_mode` 与 `runtime_fullscreen` 表「程序化窗控公共入口是否全部接通」——答的是**公共入口**（`Surface` 覆写），不是「OS 有没有这个机制」：`X11` 的 `_NET_WM_STATE_MAXIMIZED_*` / `_NET_WM_STATE_FULLSCREEN` 机制在；`runtime_window_mode` 因 `minimize` / `toggle_maximize` 两枚公共切换腿此前在 X11 / Glfw 未覆写曾如实 false，现已补齐覆写、与 `set_window_mode` 一并接通，翻为 true（与 Win32 / D3D11 / Wayland / MacOS 同列）；`runtime_fullscreen` 则因 `set_fullscreen` 覆写 + `set_window_mode(FullScreen)` 已在 X11（发 `_NET_WM_STATE_FULLSCREEN` 原子、WM 接管几何还原）/ Glfw（borderless 铺满所在显示器、存/还原几何与装饰态、不改视频模式）落地，翻为 true。逐位矩阵：
+`runtime_window_mode` 与 `runtime_fullscreen` 表「程序化窗控公共入口是否全部接通」——答的是**公共入口**（`Surface` 覆写），不是「OS 有没有这个机制」：`X11` 的 `_NET_WM_STATE_MAXIMIZED_*` / `_NET_WM_STATE_FULLSCREEN` 机制在；`runtime_window_mode` 因 `minimize` / `toggle_maximize` 两枚公共切换槽此前在 X11 / Glfw 未覆写曾如实 false，现已补齐覆写、与 `set_window_mode` 一并接通，翻为 true（与 Win32 / D3D11 / Wayland / MacOS 同列）；`runtime_fullscreen` 则因 `set_fullscreen` 覆写 + `set_window_mode(FullScreen)` 已在 X11（发 `_NET_WM_STATE_FULLSCREEN` 原子、WM 接管几何还原）/ Glfw（borderless 铺满所在显示器、存/还原几何与装饰态、不改视频模式）落地，翻为 true。逐位矩阵：
 
 | `SurfaceKind` | `runtime_window_mode`（`minimize` / `toggle_maximize` / `set_window_mode`） | `runtime_fullscreen`（`set_fullscreen` / 直设 `FullScreen`） |
 |:---|:---|:---|
 | `Win32` / `D3D11` | true（同一 `Win32Host` 的 `SC_*` 目标态 + `WM_SIZE` 回报定档） | true（borderless 全屏：monitor 枚举 + 还原几何 + `WM_SIZE` 定档上报，由 `Win32Host::set_fullscreen` 统一处理） |
-| `X11` / `Glfw` | true（X11 的 `minimize` 转发 `set_window_mode(Minimized)` 经 `XIconifyWindow` 收走窗口、`toggle_maximize` 按 `Impl::mode` 快照走 EWMH `_NET_WM_STATE_MAXIMIZED_*` 原子、与 CSD 钮同源；Glfw 的 `minimize` 转发 `glfwIconifyWindow`、`toggle_maximize` 按 `Impl::maximized` 走 `glfwMaximizeWindow` / `glfwRestoreWindow` 请求语义、回调定档上报；三枚公共切换腿全部接通） | true（X11 经 `set_window_mode(FullScreen)` 发 `_NET_WM_STATE_FULLSCREEN` 原子、WM 接管几何还原，`set_fullscreen` 覆写转发同源；Glfw 经 borderless 铺满所在显示器，存/还原几何 + 装饰态，不改视频模式） |
+| `X11` / `Glfw` | true（X11 的 `minimize` 转发 `set_window_mode(Minimized)` 经 `XIconifyWindow` 收走窗口、`toggle_maximize` 按 `Impl::mode` 快照走 EWMH `_NET_WM_STATE_MAXIMIZED_*` 原子、与 CSD 钮同源；Glfw 的 `minimize` 转发 `glfwIconifyWindow`、`toggle_maximize` 按 `Impl::maximized` 走 `glfwMaximizeWindow` / `glfwRestoreWindow` 请求语义、回调定档上报；三枚公共切换槽全部接通） | true（X11 经 `set_window_mode(FullScreen)` 发 `_NET_WM_STATE_FULLSCREEN` 原子、WM 接管几何还原，`set_fullscreen` 覆写转发同源；Glfw 经 borderless 铺满所在显示器，存/还原几何 + 装饰态，不改视频模式） |
 | `Wayland` / `MacOS` | true（两家四槽原已齐全） | true（同左） |
 | `Wasm` / `Headless` | false（Headless 的 `set_window_mode` 是测试 seam，不代表 OS 能力） | false（同左） |
 

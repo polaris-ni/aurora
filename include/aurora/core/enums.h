@@ -138,7 +138,7 @@ enum class OverflowStrategy : std::uint8_t {
     Visible,  ///< 子内容溢出可见（默认）
     Hidden,  ///< 溢出部分隐藏（裁剪）
     Clip,  ///< 同 Hidden，但保留 hit-test（裁剪视觉但事件穿透溢出区域）
-    Scroll,  ///< 溢出部分可滚动（预留，当前等同 Hidden）
+    Scroll,  ///< 溢出部分可滚动（容器按 `scroll_content_height()` 夹取偏移并平移内容；内容不高出时无位移）
 };
 
 /// @brief 图片缩放拟合（参考 Flutter BoxFit）。

@@ -78,15 +78,16 @@ struct PlatformCapabilities {
     /// `Wayland` 走 xdg_toplevel 的 set_minimized/set_maximized，`MacOS` 走 AppKit
     /// `miniaturize:` / `zoom:`；`X11` 的 minimize 经 `XIconifyWindow`、toggle_maximize 经
     /// `_NET_WM_STATE_MAXIMIZED_*` 目标态请求（与 CSD 钮同源），`Glfw` 经 `glfwIconifyWindow` /
-    /// `glfwMaximizeWindow`（回调回来定档上报）——六家桌面后端三腿皆齐，故全 true；`Wasm` 无窗口概念、
-    /// `Headless` 的 `set_window_mode` 是测试 seam（不代表 OS 能力），恒 false。
+    /// `glfwMaximizeWindow`（回调回来定档上报）——六家桌面后端的三枚公共切换槽皆已覆写，故全
+    /// true；`Wasm` 无窗口概念、`Headless` 的 `set_window_mode` 是测试 seam（不代表 OS 能力），恒 false。
     bool runtime_window_mode = false;
     /// @brief 全屏切换（`set_fullscreen()` 与 `set_window_mode(FullScreen)`）已接到 OS。
     ///
     /// 口径同 `runtime_window_mode`：`Win32` / `D3D11`（同一 `Win32Host` 的 borderless 全屏：
-    /// monitor 枚举 + 还原几何 + `WM_SIZE` 定档上报）/ `Wayland` / `MacOS` 四家已齐故为 true；
-    /// `X11` 虽有 `_NET_WM_STATE_FULLSCREEN` 但公共切换腿未接线，`Glfw` 无 monitor 通道——
-    /// 二者如实 false，应用先查询再决定画不画全屏钮。
+    /// monitor 枚举 + 还原几何 + `WM_SIZE` 定档上报）/ `Wayland` / `MacOS` 四家既有通道；
+    /// `X11` 经 `_NET_WM_STATE_FULLSCREEN` 原子（WM 接管几何还原）、`Glfw` 经 borderless 铺满
+    /// 所在显示器（存/还原几何与装饰态、不改视频模式）——六家桌面后端全为 true；`Wasm` /
+    /// `Headless` 非 OS 能力恒 false，应用先查询再决定画不画全屏钮。
     bool runtime_fullscreen = false;
     /// @brief 存在 OS 打印会话机制，且本库已接线 `PrintSession`（Windows GDI 打印会话 / macOS AppKit
     /// 打印操作）。Linux 恒 false：本库不引入 libcups（第三方形态全是 vendored 源码，系统动态库是
