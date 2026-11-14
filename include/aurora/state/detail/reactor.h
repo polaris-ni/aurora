@@ -11,6 +11,7 @@
 #include <stdexcept>
 #include <type_traits>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -429,9 +430,8 @@ class RunRecord final : public Observer, public DepsCollector, public std::enabl
     std::vector<Dep> next_;
     /// @brief 本轮读集合的来源 → `next_` 下标，供求值期 O(1) 去重。
     std::unordered_map<const SourceNode *, std::size_t> next_index_;
-    /// @brief 替换依赖时的排序缓冲（按稳定身份归并两侧），复用容量以免逐次分配。
-    std::vector<SourceNode *> sorted_deps_;
-    std::vector<SourceNode *> sorted_next_;
+    /// @brief 上一轮依赖来源的身份索引，供替换依赖时判「本轮读集合是否仍含旧来源」。
+    std::unordered_set<const SourceNode *> prev_index_;
     bool pending_ = false;
     bool cancelled_ = false;
     bool running_ = false;

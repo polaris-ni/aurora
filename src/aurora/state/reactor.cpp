@@ -112,39 +112,30 @@ auto RunRecord::cancel() noexcept -> void {
 }
 
 auto RunRecord::replace_deps() -> void {
-    // 两侧各自已去重，故「旧有新无」「新有旧无」可按稳定节点身份排序后线性归并求出，
-    // 免去双向嵌套线性查找。排序只改遍历次序：每个来源至多一次 add/remove，
-    // 观察者表内的相对顺序不变；`deps_` 本身仍按读取序保存（不改对外依赖顺序）。
-    sorted_deps_.clear();
-    sorted_deps_.reserve(deps_.size());
+    // 两侧各自已去重：「旧有新无」摘观察者、「新有旧无」挂观察者，各做一次身份查表即可，
+    // 免去双向嵌套线性查找。索引只用于存在性判定、从不遍历，故与分配地址无关；
+    // 不用「排序后归并」——指针序本身随分配地址变化，排序只会在与结果无关的地方引入不确定性
+    // （clang-tidy 的指针排序检查即针对此）。`deps_` 仍按读取序保存，对外依赖顺序不变。
+    prev_index_.clear();
+    prev_index_.reserve(deps_.size());
     for (const auto &dep : deps_) {
-        sorted_deps_.push_back(dep.node.get());
+        prev_index_.insert(dep.node.get());
     }
-    sorted_next_.clear();
-    sorted_next_.reserve(next_.size());
+    for (const auto &dep : deps_) {
+        if (!next_index_.contains(dep.node.get())) {
+            dep.node->remove_observer(*this);
+        }
+    }
     for (const auto &dep : next_) {
-        sorted_next_.push_back(dep.node.get());
-    }
-    const auto by_id = [](const SourceNode *left, const SourceNode *right) -> bool { return left->id() < right->id(); };
-    std::sort(sorted_deps_.begin(), sorted_deps_.end(), by_id);
-    std::sort(sorted_next_.begin(), sorted_next_.end(), by_id);
-    auto old_it = sorted_deps_.begin();
-    auto new_it = sorted_next_.begin();
-    while (old_it != sorted_deps_.end() || new_it != sorted_next_.end()) {
-        if (new_it == sorted_next_.end() || (old_it != sorted_deps_.end() && (*old_it)->id() < (*new_it)->id())) {
-            (*old_it)->remove_observer(*this);
-            ++old_it;
-        } else if (old_it == sorted_deps_.end() || (*new_it)->id() < (*old_it)->id()) {
-            (*new_it)->add_observer(*this);
-            ++new_it;
-        } else {
-            ++old_it;
-            ++new_it;
+        if (!prev_index_.contains(dep.node.get())) {
+            dep.node->add_observer(*this);
         }
     }
     deps_ = std::move(next_);
     next_.clear();
     next_index_.clear();
+    // 索引只服务本轮判定：留着会让键集持有已摘除来源的地址，下一轮虽先清空也无谓。
+    prev_index_.clear();
 }
 
 auto RunRecord::execute() -> void {
