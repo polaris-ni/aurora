@@ -590,7 +590,11 @@ au::Column{}
 > `pending_cursor_shape`，enter 前不下发（`set_cursor` 返回即生效，无须调用方重试），enter 与
 > `wl_output.scale` 变化时**强制重提交**（主题按 `24 × scale` 设备像素重载）。主题查找链为
 > `cursor_rfc_name(shape)` → `default` → `left_ptr`，全落空才 WARN 一次并留在合成器默认光标。
-> 动画光标（如 `wait`）取 `images[0]` 首帧，客户端不驱动帧序列。`wp_cursor_shape_manager_v1`
+> 动画光标（如 `wait`，`image_count > 1`）由客户端按 `wl_cursor_image::delay` 逐帧重提交——帧序
+> 推进抽在零平台依赖的 `detail::FrameClock`（`utest_frame_clock` 无头全证：按帧延迟环形推进、
+> 停摆追帧单轮上限 64 帧、0 延迟钳 1ms），挂在帧循环上（`poll_platform_events` 每帧驱动、
+> `wait_events` 按最近截止收敛超时）；形状 / 缩放变化或指针 re-enter 时回第 0 帧重放整段动画。
+> `wp_cursor_shape_manager_v1`
 > （新协议，免主题）实测本机 WSLg Weston 未发布该全局，故不走该路。观测面 `cursor_state()`
 > 返回本次提交的「主题命中名 / 位图尺寸 / 热点 / buffer 身份 / 提交次数」，用于真机探针判定。
 >

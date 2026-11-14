@@ -15,6 +15,7 @@
 #include <xkbcommon/xkbcommon.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <functional>
@@ -33,6 +34,7 @@
 #include "aurora/window/detail/csd_decoration.h"
 #include "aurora/window/detail/csd_geometry.h"
 #include "aurora/window/detail/csd_shadow_compose.h"
+#include "aurora/window/detail/frame_clock.h"
 #include "aurora/window/detail/ime_composition.h"
 #include "aurora/window/detail/key_repeat.h"
 #include "aurora/window/detail/title_bar_painter.h"
@@ -239,7 +241,10 @@ struct WaylandSurface::Impl {
     int cursor_hotspot_x = 0;  ///< 热点（表面逻辑坐标）。
     int cursor_hotspot_y = 0;
     std::uint64_t cursor_buffer_id = 0;  ///< 提交的 wl_buffer 身份（指针值；主题持有，勿销毁）。
-    int cursor_image_count = 0;  ///< 动画帧数（>1 = 动画光标，本端只取首帧）。
+    int cursor_image_count = 0;  ///< 动画帧数（>1 = 动画光标，本端逐帧重提交）。
+    /// @brief 动画光标的帧时钟（时序策略见 detail/frame_clock.h）：延迟表随形状/主题更新，
+    /// 帧循环 pump_cursor_animation 每帧 advance_due、wait_events 按最近截止收敛超时。
+    detail::FrameClock cursor_anim;
     int cursor_commits = 0;  ///< cursor 表面 commit 次数（观测面：证明「确有提交」且同形状幂等）。
     bool cursor_theme_warned = false;  ///< 主题/名字彻底缺失只 WARN 一次（不在悬停热路径刷屏）。
 #if defined(AURORA_HAVE_WL_TEXT_INPUT) && AURORA_HAVE_WL_TEXT_INPUT
@@ -360,6 +365,13 @@ struct WaylandSurface::Impl {
     /// @param force 忽略「同形状同缩放」去重（`wl_pointer.enter` 后必须走这条：合成器已回到默认光标）。
     /// @return 是否已提交（false = 资源/serial 未就绪，或主题彻底缺名字）。
     auto apply_cursor(bool force = false) -> bool;
+    /// @brief 提交动画光标的指定帧（attach 主题自有 buffer + commit + set_cursor + 诊断面更新）。
+    /// @param cur 已解析的主题光标（非空、image_count > 0）。
+    /// @param frame 帧序号（< image_count）。
+    /// @return 提交成功为 true；buffer / 表面创建失败为 false。
+    auto submit_cursor_frame(wl_cursor *cur, int frame, const char *fallback_name) -> bool;
+    /// @brief 按帧 delay 驱动动画光标的逐帧重提交（帧循环每帧调用；见 pump_key_repeats 同款挂点）。
+    auto pump_cursor_animation() -> void;
 
     auto ensure_slot(Slot &s, int w, int h) const -> bool;
     auto pick_slot(int w, int h) -> Slot *;
@@ -1264,8 +1276,8 @@ auto WaylandSurface::Impl::apply_cursor(bool force) -> bool {
         }
         cur = wl_cursor_theme_get_cursor(cursor_theme, fb);  // 主题缺该形状：回退箭头语义
     }
-    // images 是 C ABI 的 wl_cursor_image **：image_count 已验 > 0，取首帧静态图是本端固定约定
-    // （动画光标的逐帧重提交留待后续）。裸指针下标按 C 结构体布局就地豁免。
+    // images 是 C ABI 的 wl_cursor_image **：image_count 已验 > 0。动画光标（wait/watch 等，
+    // image_count > 1）由 pump_cursor_animation 按 images[i].delay 逐帧重提交。
     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
     if (cur == nullptr || cur->image_count == 0U || cur->images[0] == nullptr) {
         if (!cursor_theme_warned) {
@@ -1275,9 +1287,34 @@ auto WaylandSurface::Impl::apply_cursor(bool force) -> bool {
         }
         return false;
     }
-    // 同上：wl_cursor_image ** 取首帧（约定见上方豁免理由）。
+    // 形状 / 缩放变化或显式 force（enter 后合成器回默认光标）时回第 0 帧重放整段动画；
+    // 同形状的幂等重提交（缩放没变、只被 enter 重复触发）不重置播放位置。帧延迟表随
+    // 主题 / 形状更新（帧数变了也重载，避免拿旧表驱动新光标）。
+    const int frame_count = static_cast<int>(cur->image_count);
+    const bool shape_or_scale_changed =
+        force || cursor_applied_shape != pending_cursor_shape || cursor_applied_scale != scale;
+    if (shape_or_scale_changed || cursor_anim.frames() != frame_count || !cursor_anim.running()) {
+        std::vector<std::uint32_t> delays(static_cast<std::size_t>(frame_count));
+        // NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+        for (int i = 0; i < frame_count; ++i) {
+            delays[static_cast<std::size_t>(i)] = cur->images[static_cast<std::size_t>(i)]->delay;
+        }
+        // NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+        cursor_anim.load(delays);
+        cursor_anim.start(std::chrono::steady_clock::now());
+    }
+    if (!submit_cursor_frame(cur, cursor_anim.frame(), want)) {
+        return false;
+    }
+    if (frame_count <= 1) {
+        cursor_anim.stop();  // 静态光标：不驱动换帧
+    }
+    return true;
+}
+
+auto WaylandSurface::Impl::submit_cursor_frame(wl_cursor *cur, int frame, const char *fallback_name) -> bool {
     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
-    wl_cursor_image *img = cur->images[0];  // 动画光标（wait/watch）取首帧静态图，本端不做逐帧重提交
+    wl_cursor_image *img = cur->images[static_cast<std::size_t>(frame)];  // 主题自有位图，本端不二次上传
     wl_buffer *buf = wl_cursor_image_get_buffer(img);
     if (buf == nullptr) {
         return false;
@@ -1315,7 +1352,7 @@ auto WaylandSurface::Impl::apply_cursor(bool force) -> bool {
     cursor_applied = true;
     cursor_applied_shape = pending_cursor_shape;
     cursor_applied_scale = scale;
-    cursor_resolved_name = (cur->name != nullptr) ? cur->name : want;
+    cursor_resolved_name = (cur->name != nullptr) ? cur->name : fallback_name;
     cursor_image_w = w;
     cursor_image_h = h;
     cursor_buffer_scale = bscale;
@@ -1328,6 +1365,24 @@ auto WaylandSurface::Impl::apply_cursor(bool force) -> bool {
     cursor_image_count = static_cast<int>(cur->image_count);
     ++cursor_commits;
     return true;
+}
+
+auto WaylandSurface::Impl::pump_cursor_animation() -> void {
+    if (!cursor_anim.running() || cursor_theme == nullptr || pointer == nullptr || pointer_enter_serial == 0U ||
+        cursor_surface == nullptr) {
+        return;
+    }
+    // 按最近成功解析的名字现取主题光标：主题重载（scale 变）后名字仍然有效，不需要缓存指针。
+    wl_cursor *cur = wl_cursor_theme_get_cursor(cursor_theme, cursor_resolved_name.c_str());
+    if (cur == nullptr || cur->image_count <= 1U) {
+        cursor_anim.stop();  // 名字失效或主题被换成静态光标：停止驱动，等下一次 apply
+        return;
+    }
+    const int next = cursor_anim.advance_due(std::chrono::steady_clock::now());
+    if (next < 0) {
+        return;  // 未到期
+    }
+    (void)submit_cursor_frame(cur, next, cursor_resolved_name.c_str());
 }
 
 #if defined(AURORA_HAVE_WL_TEXT_INPUT) && AURORA_HAVE_WL_TEXT_INPUT
@@ -2283,6 +2338,8 @@ auto WaylandSurface::poll_platform_events() -> void {
     }
     // 自动重复的合成点：每帧必经（wgpu 宿主原样转发本方法），掉帧后由状态机按上限补条。
     d.pump_key_repeats();
+    // 动画光标的换帧点：同款挂点（wait / watch 等多帧光标按帧 delay 逐帧重提交）。
+    d.pump_cursor_animation();
     // 刷新「当前发起窗口」槽：拖出由控件在事件派发期内发起（`Widget::begin_system_drag`），
     // 而事件派发只发生在**本窗口**的事件泵内，故此刻登记即唯一正确的发起桥（多窗口场景）。
     if (d.drag != nullptr) {
@@ -2345,6 +2402,10 @@ auto WaylandSurface::wait_events(double timeout_ms) -> void {
     // 长按出字变成一秒一蹦。到期后回到帧循环，由 pump_key_repeats 合成。
     double wait = capped;
     if (const auto ms = d.kb_repeat.ms_until_due(std::chrono::steady_clock::now()); ms.has_value()) {
+        wait = std::min(wait, std::max(0.0, *ms));
+    }
+    // 动画光标同理：下一帧 delay 到点即醒，由 pump_cursor_animation 换帧重提交。
+    if (const auto ms = d.cursor_anim.ms_until_due(std::chrono::steady_clock::now()); ms.has_value()) {
         wait = std::min(wait, std::max(0.0, *ms));
     }
     std::vector<pollfd> fds;
