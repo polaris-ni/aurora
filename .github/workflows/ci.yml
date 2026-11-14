@@ -41,7 +41,12 @@
 #                    而这场覆盖没有别的作业补得上。开关串集中在该动作的注释里，改一处即全流水线同步。
 #                    4t 的 tsan 定点作业是唯一例外：只跑四个纯网络竞态用例，实证基线就在
 #                    不含该前缀的配置下取得，装配它会扩大插桩面与第三方噪声，削弱判据信噪比。
-#   4. asan        — AURORA_ENABLE_ASAN=ON（AddressSanitizer + UBSan）跑全量 ctest。
+#   4. asan        — AURORA_ENABLE_ASAN=ON（AddressSanitizer + UBSan）跑全量 ctest（纯 Headless 面）。
+#   4g. asan-graphics — AURORA_ENABLE_ASAN=ON 且编入 X11+GLFW 两个真实后端，xvfb 下**只跑 E2E**：
+#                    把平台 TU（X11Surface 建窗/上屏/输入回投、GlfwSurface 的 GLX 上下文）第一次
+#                    送进插桩面。与 4 分工：4 兜内核/网络/Inspector/TLS 的全量用例，本作业兜真实
+#                    图形栈；全量用例在 -O0 插桩下已近超时，故两者分作业、不叠在一处。
+#                    触发口径同 4t：只在 PR 与 master(+main) 推送跑。
 #  4t. tsan        — 全局编译标志注入 -fsanitize=thread，只跑四个网络用例的竞态定点红线
 #                    （判定看 TSan 落盘报告 + ctest 退出码）。只在 PR 与 master(+main)
 #                    推送跑，普通分支 push / 每周定时 / 手动触发都不跑——全量插桩冷构建
@@ -969,10 +974,80 @@ jobs:
 
       - name: Test (under virtual X display)
         # -LE e2e：本作业是纯 Headless 默认后端面（X11/GLFW 默认 OFF），E2E 无真实后端可跑、
-        # 全部 skipped by policy，排除以省 ctest 时间；且真实图形栈与 ASan 的交互未评估，
-        # 归后续增量（口径见 08-tooling §8.2「CI 作业口径」）。内核自测 utest_e2e_harness
-        # 只用 HeadlessSurface，随全量用例照常执行。
+        # 全部 skipped by policy，排除以省 ctest 时间；真实图形栈×ASan 由下方 3g 作业单独承担。
+        # 内核自测 utest_e2e_harness 只用 HeadlessSurface，随全量用例照常执行。
         run: xvfb-run -a ctest --test-dir build --output-on-failure -C Release -LE e2e -j "$(nproc)"
+
+  # ---------------------------------------------------------------------------
+  # 3g. AddressSanitizer × 真实图形栈（X11 + GLFW，xvfb 虚拟显示）
+  # ---------------------------------------------------------------------------
+  # 与 3. asan 的分工：那一条是纯 Headless 面——X11 / GLFW 默认 OFF，平台 TU 根本不参与
+  # 编译，因而从未被插桩；内核、网络、Inspector、TLS 由它兜住。本作业把两个真实后端编进来
+  # 且**只跑 E2E**（`-L e2e`），于是 X11Surface 的建窗 / 上屏 / 输入回投、GlfwSurface 的 GLX
+  # 上下文与缓冲交换第一次进入 AddressSanitizer + UBSan 的插桩面。
+  # 为什么分成两个作业而不是一个跑两遍：Headless 面全量用例在 -O0 插桩下已接近作业超时，
+  # 再把真实后端与 E2E 叠进去会同时拖垮两者；分开后失败归因也清楚（`-LE e2e` 红 = 内核，
+  # 本作业红 = 真实图形栈）。
+  # e2e 期望集写 `x11,glfw`：与 backends(linux-x11-wayland-glfw) 同镜像、同依赖组合，那一条
+  # 实测全绿；ASan 不改变 GL/X 栈的可用性，期望集只裁决「后端能不能起来」，故照抄。
+  # ASAN_OPTIONS=detect_leaks=0 只在本作业：GLX / llvmpipe 与 Xlib 客户端库未被插桩，它们
+  # 退出期的分配不属于本库责任，开着只会是噪声红；本库自身的越界 / 悬垂 / UBSan 照常生效，
+  # 泄漏检测仍由 3. asan（Headless 全量）承担。
+  asan-graphics:
+    name: asan (ubuntu-gcc, x11+glfw)
+    runs-on: ubuntu-26.04
+    timeout-minutes: 180
+    needs: gate
+    # 与 4t 同口径：只在 PR 与 master(+main) 推送跑。全量插桩冷构建（-O0，无 PCH）比常规作业
+    # 贵一个量级，不该每次普通分支推送都付一遍；而合入前的 PR 与主线推送都必须过这一关。
+    if: ${{ !cancelled() && needs.gate.outputs.dup != 'true' && (github.event_name == 'pull_request' || (github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'))) }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # 与 3. asan 同因：aurora_find_clang_format 需要能读懂本仓 .clang-format 的版本。
+      - name: Setup clang-format (repo-parseable)
+        uses: ./.github/actions/setup-clang-format
+
+      # ASan 强制关 PCH（AuroraInstrumentation.cmake 里 set(CMAKE_DISABLE_PRECOMPILE_HEADERS ON)），
+      # 命令行无 PCH 依赖，ccache 可全量缓存。
+      - name: Setup ccache
+        uses: hendrikmuhs/ccache-action@v1.2.24
+        with:
+          key: asan-graphics-ubuntu-gcc
+
+      # 依赖与 backends(linux-x11-wayland-glfw) 同集，另补 libgl1-mesa-dri：xvfb 下 GLFW 要靠
+      # mesa（llvmpipe）提供 GLX 3.3 兼容上下文，只装 libgl1-mesa-dev 头文件是不够的。
+      - name: Install desktop backend dev dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y libx11-dev libxfixes-dev libxrandr-dev libxinerama-dev \
+            libxcursor-dev libxi-dev libxext-dev libgl1-mesa-dev libgl1-mesa-dri \
+            xvfb xclip xsel gsettings-desktop-schemas
+
+      - name: Configure
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
+          -DCMAKE_BUILD_TYPE=Release
+          -DAURORA_ENABLE_ASAN=ON
+          -DAURORA_BACKEND_X11=ON -DAURORA_BACKEND_GLFW=ON -DAURORA_ENABLE_GLFW_GPU_GL=ON
+          -DAURORA_ENABLE_DEBUG=ON
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: ccache stats
+        run: ccache --show-stats --verbose || ccache --show-stats
+
+      - name: Test E2E (under virtual X display)
+        env:
+          # 期望集 = 本作业编进来的两个真实后端：集内不可用判失败（不是跳过），
+          # 免得「xvfb 没起来 / 镜像换掉了」伪装成永久绿灯。
+          AURORA_E2E_EXPECT: x11,glfw
+          # 只关泄漏检测：GLX/llvmpipe 与 Xlib 未被插桩，其退出期分配不是本库的问题。
+          ASAN_OPTIONS: detect_leaks=0
+        run: xvfb-run -a ctest --test-dir build --output-on-failure -C Release -L e2e -j "$(nproc)"
+
 
   # ---------------------------------------------------------------------------
   # 4t. ThreadSanitizer 定点竞态红线（网络并发四例）
