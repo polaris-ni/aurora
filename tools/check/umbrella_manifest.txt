@@ -252,6 +252,7 @@ aurora/widget/title_bar.h
 aurora/widget/toast.h
 aurora/widget/toolbar.h
 aurora/widget/widget.h
+aurora/widget/window_resize_grip.h
 aurora/window/cursor_map.h
 aurora/window/frame_pacing.h
 aurora/window/platform.h

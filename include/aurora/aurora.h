@@ -260,6 +260,7 @@
 #include "aurora/widget/toast.h"
 #include "aurora/widget/toolbar.h"
 #include "aurora/widget/widget.h"
+#include "aurora/widget/window_resize_grip.h"
 #include "aurora/window/cursor_map.h"
 #include "aurora/window/frame_pacing.h"
 #include "aurora/window/platform.h"
