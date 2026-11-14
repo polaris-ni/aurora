@@ -182,8 +182,9 @@ enum class CodeStyle : std::uint8_t { Fluent, StepByStep, DesignatedInit };   //
 
 写不出合法 C++ 的属性/子节点**一律省略并在 stderr 告警**（`AURORA_LOG_WARN("codegen", …)`），既不产出编译不过的语句，也不静默丢语义：
 
-- **类型没有通用构造入口**（`is_bespoke_ctor`，21 项）：位置参数构造（`Badge(count, child)`、`Drawer(content, panel, side, width)`、`Splitter`、`TabBar`、`PageView`、`Show`、`Timer`、`VideoPlayer`…）、类模板需实参（`Provider`/`Repeater`/`ReorderableList` 及其三个 `*Provider` 别名）、不在 `aurora` 命名空间下（`BreakpointBuilder`）、或子项本就惰性构建（`LazyRow`，`children_policy = "virtual"`）。对它们只生成空构造，**告警丢弃子节点**——硬编位置参数实参等于臆造 API。
-- **连空构造都不存在**（`is_unconstructible`，8 项：`BreakpointBuilder`/`Hero`/`LocaleProvider`/`MediaQueryProvider`/`Provider`/`ReorderableList`/`Repeater`/`ThemeProvider`）：产物按真实类型名发射 `au::T{}` 并告警点名「须手工补构造实参」，不改写成别的控件（替换比报错更难发现）。
+- **类型没有通用构造入口**（`is_bespoke_ctor`，21 项）：位置参数构造（`Badge(count, child)`、`Drawer(content, panel, side, width)`、`Splitter`、`TabBar`、`PageView`、`Show`、`Timer`、`VideoPlayer`…）、类模板需实参（`Provider`/`Repeater`/`ReorderableList` 及其三个 `*Provider` 别名）、子树由运行时构建闭包产出（`BreakpointBuilder`）、或子项本就惰性构建（`LazyRow`，`children_policy = "virtual"`）。对它们只生成空构造，**告警丢弃子节点**——硬编位置参数实参等于臆造 API。
+- **连空构造都不存在**（`is_unconstructible`，8 项：`Dismissible`/`Hero`/`LocaleProvider`/`MediaQueryProvider`/`Provider`/`ReorderableList`/`Repeater`/`ThemeProvider`）：产物按真实类型名发射 `au::T{}` 并告警点名「须手工补构造实参」，不改写成别的控件（替换比报错更难发现）。名单曾登记 `BreakpointBuilder` 并把成因写成「不在 `aurora` 命名空间下」——该理由与源码不符（它在 `aurora` 内且有 `= default` 构造），矩阵实测 `au::BreakpointBuilder{}` 可编译，故已移出；同一轮补入 `Dismissible`（只有 `Dismissible(Node child, …)` 位置构造，无默认形态，此前漏登记故不告警）。
+- **只可 `shared_ptr` 持有**（`shared_ptr_owned`，1 项：`WebView`）：拷贝与移动均 `= delete`，`Node` 的按值构造（内部 `std::make_shared<T>(std::forward<W>(w))` 要求可移动）编译不过。表达式风格发射 `au::Node{std::make_shared<au::webview::WebView>(au::webview::WebViewProps()…)}`，分步风格声明 `auto __wN = std::make_shared<…>()`、写件走 `->`、交给父节点时拷贝指针副本而非 `std::move`。这与库内既有的使用形态一致（`utest_web_view` / `utest_offscreen` 一律 `std::make_shared<webview::WebView>`）。
 - **字段为 protected 且未登记 setter** 的类型（`Slider`/`Checkbox`/`Chip`/`Popup`…）：StepByStep 省略该属性并告警。全量类型体检（73 类型 × 550 条默认属性，**属性面批量迁移前的读数，本批未重跑**）中，StepByStep 发射 342 条、告警省略 208 条；把 208 条补齐需要逐类型登记真实 setter，属可选增强，不影响产物可编译性。
 - **取值形态无法还原**（如枚举属性给了数字、或命中 `Image`/`FlexWeight`/`Flex`/`Json` 这 4 类无专用分支的形态）：告警省略，不再静默。
 
@@ -191,17 +192,18 @@ enum class CodeStyle : std::uint8_t { Fluent, StepByStep, DesignatedInit };   //
 
 | 分支 | 判据 | 发射形态 | 落点 |
 |:---|:---|:---|---:|
+| 0 | 只可 `shared_ptr` 持有（`shared_ptr_owned`） | `au::Node{std::make_shared<au::T>(au::TProps().set_x(…))}` | 1 型 |
 | 1 | 不在链式写件名单内（`!props_chain_writers`，即无聚合的 58 型） | `au::T{}` / `au::T{ 子项 }` | 58 型 |
-| 2 | 有链式写件、本节点无子节点 | `au::T(au::TProps().set_x(…))` | 13 型 |
+| 2 | 有链式写件、本节点无子节点 | `au::T(au::TProps().set_x(…))` | 12 型 |
 | 3 | 子节点是构造首参的容器（`kids_first_ctor`：`Column`/`Row`/`Grid`） | `au::T({ 子项 }, au::TProps().set_x(…))`，无属性时免 `Props` 形参 | 3 型 |
 | 3b | 子节点是构造首参的单子容器（`single_child_first_ctor`：`Scroll`/`PullToRefresh`） | `au::T(子节点, au::TProps().set_x(…))`，无属性时 `au::T(子节点)` | 2 型 |
 | 4 | 有子节点却两者皆非 | 告警丢弃子节点，只发 `au::T(au::TProps()…)` | 0 型 |
 
 本表曾有第六条「免 `Props` 包裹的多子扁平容器」（判据 `is_flat_container`，名单 `Column`/`Row`/`Stack`/`Grid`/`Scroll`/`Card`）与第七条「`*Props` 里仍带 `.children` 成员的聚合容器」兜底发射 `.children = { 子项 }`。两档现都已删除：前者的六型里四型改走 3/3b、`Stack` 走 1、`Card` 在库里根本没有这个类型；后者的产物在字段私有化之后编译红。分支 4 因此是**给「新增容器却忘了登记构造槽」预留的守卫**，不是当前任何一种控件的形态。
 
-**产物可编译性的验证口径**：`tests/integration/itest_to_code.cpp`（30 例）锁形态，其中「DesignatedInit 与 Fluent 逐字节相同」「子节点槽守卫产物仍可编译」两例钉住本节上面的别名裁决与分支 4，「带子命名空间的类型落在自己的子命名空间里」一例钉住 `cpp_namespace` 的三处拼名。另有全量「类型 × 3 风格」产物逐条 `g++ -fsyntax-only` 体检与真实 UI 树 fixture（`tests/fixtures/ai_compat/`）锁可编译性 —— **该矩阵的名单与读数取自属性面批量迁移之前（73 型 × 3 风格：fluent 65/73、di 65/73、step 65/73，缺的 8 项恰是 `is_unconstructible` 名单；fixture 11 棵树 × 3 风格产物 33/33 全通过），本批未重跑**，schema 现为 76 型，故三个数字都是过期读数，只作方法留档；迁移后 `di` 档与 `fluent` 档由同一条发射路径产出，逐字节相同属构造上的事实（由 `itest_to_code` 的样本断言背书），不是重跑矩阵的实测。矩阵须按**每类型一座独立 TU**编译：把全部产物拼进单座大 TU（省时但）会被 GCC 的级联报错污染——一处失败即波及后续命名空间，实测把 65/73 误报成 50/73、18/73，归属不可信。
+**产物可编译性的验证口径**：`tests/integration/itest_to_code.cpp`（31 例）锁形态，其中「DesignatedInit 与 Fluent 逐字节相同」「子节点槽守卫产物仍可编译」两例钉住本节上面的别名裁决与分支 4，「带子命名空间的类型落在自己的子命名空间里」「禁复制与移动的类型经 `make_shared` 落进 `Node`」两例钉住 `cpp_namespace` 的三处拼名与分支 0（含作为子节点时的指针副本交出，并断言产物里不出现 `std::move`）。另有全量「类型 × 3 风格」产物逐条 `g++ -fsyntax-only` 体检与真实 UI 树 fixture（`tests/fixtures/ai_compat/`）锁可编译性 —— **该矩阵的名单与读数取自属性面批量迁移之前（73 型 × 3 风格：fluent 65/73、di 65/73、step 65/73，缺的 8 项恰是 `is_unconstructible` 名单；fixture 11 棵树 × 3 风格产物 33/33 全通过），本批未重跑**，schema 现为 76 型，故三个数字都是过期读数，只作方法留档；迁移后 `di` 档与 `fluent` 档由同一条发射路径产出，逐字节相同属构造上的事实（由 `itest_to_code` 的样本断言背书），不是重跑矩阵的实测。矩阵须按**每类型一座独立 TU**编译：把全部产物拼进单座大 TU（省时但）会被 GCC 的级联报错污染——一处失败即波及后续命名空间，实测把 65/73 误报成 50/73、18/73，归属不可信。
 
-**该体检已常驻化**：`tools/gen/gen_codegen_matrix.cpp` 按 `aurora_api.json` 的在册类型生成矩阵，`tests/integration/itest_codegen_matrix.cpp` 整份 include 后随 runner 编译，于是「产物可编译」由编译器判定、不再依赖一次性手工体检。当前读数：76 型中 **67 型 × 3 风格 = 201 格全编译**（fluent 67/67、di 67/67、step 67/67），其余 **9 型**登记在 `tools/gen/codegen_matrix_exemptions.txt`：6 个模板 / 别名型（`Provider` / `Repeater` / `ReorderableList` 与三个 `*Provider`）、2 个仅位置构造型（`Hero` / `Dismissible`），以及 `WebView`——它可构造但禁复制与移动，`Node` 的按值构造不成立，属**待修的产物形态缺口**而非设计边界。清单是实测基线：新增控件自动进矩阵，某型修好后须手工删除对应条目，否则不会自动纳管。
+**该体检已常驻化**：`tools/gen/gen_codegen_matrix.cpp` 按 `aurora_api.json` 的在册类型生成矩阵，`tests/integration/itest_codegen_matrix.cpp` 整份 include 后随 runner 编译，于是「产物可编译」由编译器判定、不再依赖一次性手工体检。当前读数：76 型中 **68 型 × 3 风格 = 204 格全编译**（fluent 68/68、di 68/68、step 68/68），其余 **8 型**登记在 `tools/gen/codegen_matrix_exemptions.txt`：6 个模板 / 别名型（`Provider` / `Repeater` / `ReorderableList` 与三个 `*Provider`）与 2 个仅位置构造型（`Hero` / `Dismissible`），两类都是设计边界而非缺陷。`WebView` 曾以「可构造但禁复制与移动」列在豁免清单里，`shared_ptr_owned` 发射分支落地后已可编译并从清单移除——那次是矩阵当场抓到的真实产物缺口，不是设计边界。清单是实测基线：新增控件自动进矩阵，某型修好后须手工删除对应条目，否则不会自动纳管。清单自身受一条一致性判据守护——每条豁免都必须落在 codegen 的告警面（`is_unconstructible` ∪ `is_bespoke_ctor`）内，否则说明出现了「codegen 以为能发、实际编不过」的产物缺口，必须在发射侧修掉而不是登记成设计边界；`WebView` 的 `shared_ptr_owned` 分支正是被这条判据逼出来的。
 
 与本段旧体检的口径差异如实登记：本矩阵把全部可编译格**拼进单座 TU**，而非每型一座独立 TU。旧口径的级联污染风险由豁免清单前置吸收（已知不可编译的型根本不进编译面）；若将来新增某型失败，clang 的报错仍逐条归到 `codegen_matrix.inc` 的行号，必要时以 `--dump <Type>` 单独核对三种产物。GCC 腿若出现归属混乱，按同一分工处置。
 

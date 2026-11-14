@@ -36,4 +36,21 @@ AURORA_TEST_CASE(codegen_matrix_exemptions_are_explicit) {
     }
 }
 
+AURORA_TEST_CASE(codegen_matrix_exemptions_stay_within_the_warned_set) {
+    // 豁免 = 「产物编不过」，而 codegen 自己的告警面 = `is_unconstructible` ∪ `is_bespoke_ctor`。
+    // 两者不等即说明存在一条「codegen 以为能发、实际编不过」的产物缺口——那必须修在发射侧，
+    // 不能静静留在豁免清单里充作设计边界（`WebView` 的 `shared_ptr_owned` 分支就是这条判据
+    // 抓出来的；反向的名单漂移——`BreakpointBuilder` 实测可编译、`Dismissible` 漏登记——同样
+    // 表现为本判据红）。
+    for (const auto &entry : k_codegen_matrix_exempt) {
+        const std::string_view type{entry.type};
+        const bool warned =
+            au::serialization::detail::is_unconstructible(type) || au::serialization::detail::is_bespoke_ctor(type);
+        AURORA_TEST_CHECK_MSG(warned,
+                              "an exempt type must be one codegen already refuses to emit generically; "
+                              "a type codegen believes constructible but that does not compile is a "
+                              "product gap to fix in the emitter, not a baseline exemption");
+    }
+}
+
 }  // namespace aurora::test_cases::itest_codegen_matrix

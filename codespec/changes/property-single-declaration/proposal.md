@@ -448,7 +448,7 @@
 2. **`manual-test/11|13|22` 三篇重写** —— 已落。三篇现有用例数分别为 17 / 12 / 12 条，覆盖运行时换肤、部分覆写、三档无障碍开关、覆盖面序列化往返、Inspector 与 MCP 读写等判据面。
 3. **schema 的 `consumed` 位** —— 已落。`aurora_api.json` 的 `theme_tokens` 逐组带 `consumed` 与 `consumed_rule`，未消费组与规格登记表的一致由 `check_no_theme_color_literals` 的 C1 腿判等集守护。
 
-4. **「76 型 × 3 风格」全量产物编译矩阵** —— 已落。`tools/gen/gen_codegen_matrix.cpp` 按 `aurora_api.json` 的在册类型生成矩阵，`tests/integration/itest_codegen_matrix.cpp` 整份 include 后随 runner 编译，故「产物可编译」由编译器判定；当前 67 型 × 3 风格 = **201 格全部编译**，其余 9 型登记在 `tools/gen/codegen_matrix_exemptions.txt`（6 个模板 / 别名型、2 个仅位置构造型，以及 `WebView`——后者可构造但禁复制与移动，属待修的产物形态缺口）。
+4. **「76 型 × 3 风格」全量产物编译矩阵** —— 已落。`tools/gen/gen_codegen_matrix.cpp` 按 `aurora_api.json` 的在册类型生成矩阵，`tests/integration/itest_codegen_matrix.cpp` 整份 include 后随 runner 编译，故「产物可编译」由编译器判定；当前 68 型 × 3 风格 = **204 格全部编译**，其余 8 型登记在 `tools/gen/codegen_matrix_exemptions.txt`（6 个模板 / 别名型、2 个仅位置构造型），两类均为设计边界。矩阵当场抓到的三处产物面漂移已全部收口：`WebView` 的「禁复制与移动」由 `shared_ptr_owned` 发射分支解决（`au::Node{std::make_shared<…>(…)}`，分步风格改 `->` 写件并拷贝指针交出），`is_unconstructible` 名单补入 `Dismissible`、移出实测可编译的 `BreakpointBuilder`。
 
 仍余两处挂账，性质均为「代码 / 判据未完成」而非「外部证据待取」：
 

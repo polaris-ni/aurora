@@ -158,8 +158,9 @@ AURORA_TEST_CASE(codegen_namespaced_type_lands_in_its_own_subnamespace) {
     const au::Json node =
         make_node("WebView", testing::json_obj({{"url", "https://example.com"}, {"mode", "Snapshot"}}));
     const std::string fluent = to_code(node, CodeStyle::Fluent);
-    AURORA_TEST_CHECK_MSG(fluent.find("au::webview::WebView(au::webview::WebViewProps()") != std::string::npos,
-                          "codegen: the ctor and its Props aggregate both carry the webview:: segment");
+    AURORA_TEST_CHECK_MSG(
+        fluent.find("std::make_shared<au::webview::WebView>(au::webview::WebViewProps()") != std::string::npos,
+        "codegen: the ctor and its Props aggregate both carry the webview:: segment");
     AURORA_TEST_CHECK_MSG(fluent.find(".set_mode(au::webview::WebViewMode::Snapshot)") != std::string::npos,
                           "codegen: the enum row lands in webview::WebViewMode, not a bare WebViewMode");
     AURORA_TEST_CHECK_MSG(fluent.find("au::WebView") == std::string::npos,
@@ -167,10 +168,37 @@ AURORA_TEST_CASE(codegen_namespaced_type_lands_in_its_own_subnamespace) {
 
     const std::string step =
         to_code(make_node("WebView", testing::json_obj({{"mode", "snapshot"}})), CodeStyle::StepByStep);
-    AURORA_TEST_CHECK_MSG(step.find("auto __w0 = au::webview::WebView{};") != std::string::npos,
+    AURORA_TEST_CHECK_MSG(step.find("auto __w0 = std::make_shared<au::webview::WebView>();") != std::string::npos,
                           "codegen: StepByStep declares the namespaced type qualified");
-    AURORA_TEST_CHECK_MSG(step.find("__w0.set_mode(au::webview::WebViewMode::Snapshot);") != std::string::npos,
+    AURORA_TEST_CHECK_MSG(step.find("__w0->set_mode(au::webview::WebViewMode::Snapshot);") != std::string::npos,
                           "codegen: StepByStep writes the mode row through set_mode (case-normalised)");
+}
+
+AURORA_TEST_CASE(codegen_shared_ptr_owned_type_reaches_node_through_make_shared) {
+    // `WebView` 的拷贝与移动都是 delete（widget 经 shared_ptr 持有），`Node` 的按值构造因而编不过。
+    // 产物必须显式交出堆对象：`au::Node{std::make_shared<…>(…)}`。判据钉「表达式是 Node 而非裸控件」，
+    // 因为裸控件正是矩阵此前抓到的那条编译红。
+    const au::Json node = make_node("WebView", testing::json_obj({{"url", "https://example.com"}}));
+    const std::string fluent = to_code(node, CodeStyle::Fluent);
+    AURORA_TEST_CHECK_MSG(fluent.starts_with("au::Node{std::make_shared<au::webview::WebView>("),
+                          "codegen: the WebView product is a Node holding a shared_ptr, not a bare widget");
+    AURORA_TEST_CHECK_MSG(fluent.ends_with(")}"), "codegen: the Node wrapper is closed after the ctor call");
+
+    // 作为子节点时同样成立：父容器首参是 `std::vector<Node>`，`au::Node{…}` 直接可收。
+    const au::Json tree =
+        make_node("Column", testing::json_obj({{"gap", 8.0F}}), testing::json_arr({node, make_button("OK")}));
+    const std::string tree_fluent = to_code(tree, CodeStyle::Fluent);
+    AURORA_TEST_CHECK_MSG(tree_fluent.find("au::Node{std::make_shared<au::webview::WebView>(") != std::string::npos,
+                          "codegen: a shared_ptr-owned child is handed over as au::Node{...}");
+
+    // 分步风格：子件交给父节点时拷贝指针副本（连移动都是 delete），且父节点声明在子件之后。
+    const std::string tree_step = to_code(tree, CodeStyle::StepByStep);
+    AURORA_TEST_CHECK_MSG(tree_step.find("auto __w1 = std::make_shared<au::webview::WebView>();") != std::string::npos,
+                          "codegen: StepByStep declares the shared_ptr-owned child as a heap object");
+    AURORA_TEST_CHECK_MSG(tree_step.find("au::Node{__w1}") != std::string::npos,
+                          "codegen: StepByStep passes the owned child by copying the pointer, not by move");
+    AURORA_TEST_CHECK_MSG(tree_step.find("std::move(__w1)") == std::string::npos,
+                          "codegen: no std::move reaches a type whose move constructor is deleted");
 }
 
 AURORA_TEST_CASE(codegen_child_slot_guard_keeps_output_compilable) {

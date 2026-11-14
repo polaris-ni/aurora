@@ -8,14 +8,15 @@
 # because an exempted type simply never reaches the compiler). Treat it like
 # tools/check/declared_gates_exemptions.txt: shrinking is progress, growing needs a reason.
 #
-# Three kinds live here as of 2026-11-14:
+# Two kinds live here as of 2026-11-14:
 #   - template / alias types whose construction needs template arguments written out (6),
-#   - positional-only constructors with no default form (2),
-#   - WebView, which is constructible but deletes copy and move, so it cannot reach Node by value (1).
+#   - positional-only constructors with no default form (2).
 #
-# The first two kinds are already reported on stderr by codegen's own note_construction() path; the
-# third is a product-shape gap that the matrix found and that still needs a fix (see the trailing
-# comment on that line).
+# Both kinds are already reported on stderr by codegen's own note_construction() path. WebView used to
+# be a third kind ("constructible but copy and move are deleted, so Node cannot take it by value");
+# codegen now emits au::Node{std::make_shared<...>(...)} for such types, so it compiles and left this
+# list. Dismissible entered it the same round: the matrix measured that au::Dismissible{} has no
+# default form, while is_unconstructible() had been missing it (so no warning was raised).
 
 ThemeProvider | Provider<Theme> alias: construction needs the template argument spelled out
 LocaleProvider | Provider<Locale> alias: construction needs the template argument spelled out
@@ -25,4 +26,3 @@ ReorderableList | class template without a default template argument
 Repeater | class template without a default template argument
 Hero | positional-only constructor, no default form (au::Hero{} does not compile)
 Dismissible | positional-only constructor, no default form (au::Dismissible{} does not compile)
-WebView | constructible but copy and move are deleted, so Node cannot take it by value; needs an au::Node{std::make_shared<...>} emission branch -- NOT YET FIXED

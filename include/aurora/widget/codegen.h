@@ -111,11 +111,13 @@ struct PropTarget {
 ///
 /// 这些类型按位置参数构造（`Badge(count, child)`、`Drawer(content, panel, side, width)`、
 /// `Splitter(orientation, …)`；`Stack` 的 `alignment` 同样只能进构造形参），或本身是类模板
-/// （`Provider<T>`/`Repeater<T>`/`ReorderableList<T>`——`au::Provider{}` 推不出模板实参），
-/// `BreakpointBuilder` 甚至不在 `aurora` 命名空间下；`LazyRow` 是虚拟化列表（`children_policy = "virtual"`），
-/// 子项按需由 `item_builder` 生成、`LazyRowProps` 里没有 `children` 成员。**没有通用构造入口**，故对它们只生成空构造并
-/// **告警丢弃子节点**——硬编一个位置参数实参等于臆造 API。名单逐项由「73 类型 × 3 风格」产物编译
-/// 体检暴露（`error: no matching function for call to`），非凭空猜测；能力口径见
+/// （`Provider<T>`/`Repeater<T>`/`ReorderableList<T>`——`au::Provider{}` 推不出模板实参）；
+/// `BreakpointBuilder` 的子树由运行时构建闭包产出、没有子节点形参；`LazyRow` 是虚拟化列表
+/// （`children_policy = "virtual"`），子项按需由 `item_builder` 生成、`LazyRowProps` 里没有
+/// `children` 成员。**没有通用构造入口**，故对它们只生成空构造并
+/// **告警丢弃子节点**——硬编一个位置参数实参等于臆造 API。名单逐项由产物编译体检暴露
+/// （`error: no matching function for call to`），自 2026-11 起由常驻矩阵
+/// `tests/integration/itest_codegen_matrix.cpp` 持续复核，非凭空猜测；能力口径见
 /// specification/08-tooling.md §2.5。
 ///
 /// @param type 序列化 type 名。
@@ -147,16 +149,20 @@ struct PropTarget {
 
 /// @brief 连「空构造」都不存在的类型：`au::T{}` 本身就是编译错误。
 ///
-/// 三类成因：类模板无默认模板实参（`Provider`/`Repeater`/`ReorderableList`，三个 `*Provider` 是它们的
-/// 别名，构造要写出 `Provider<Theme>`）；只有位置参数构造且无默认构造（`Hero`）；不在 `aurora` 命名空间下
-/// （`BreakpointBuilder`，它根本不经 `au::` 限定）。生成器无从猜出模板实参或构造实参，**照原类型名发射**
+/// 两类成因：类模板无默认模板实参（`Provider`/`Repeater`/`ReorderableList`，三个 `*Provider` 是它们的
+/// 别名，构造要写出 `Provider<Theme>`）；只有位置参数构造且无默认构造（`Hero` 要 tag + 子节点，
+/// `Dismissible` 要子节点）。生成器无从猜出模板实参或构造实参，**照原类型名发射**
 /// （比悄悄替换成别的控件更诚实）并在 stderr 点名——产物须手工改这一行才能编译。
-/// 名单逐项由「73 类型 × 3 风格」产物编译体检暴露，非凭空猜测。
+///
+/// 名单逐项由产物编译体检暴露，自 2026-11 起由常驻矩阵
+/// `tests/integration/itest_codegen_matrix.cpp` 持续复核。曾登记 `BreakpointBuilder`，理由是「不经
+/// `au::` 限定」——该理由与源码不符（它在 `aurora` 命名空间内、且有 `= default` 构造），矩阵实测
+/// `au::BreakpointBuilder{}` 可编译，故已移出本表；它仍留在 `is_bespoke_ctor`（子树来自构建闭包）。
 ///
 /// @param type 序列化 type 名。
 /// @return 类型是否连默认构造都不存在（au::T 大括号形态编译不过）。
 [[nodiscard]] constexpr auto is_unconstructible(std::string_view type) noexcept -> bool {
-    constexpr std::array<std::string_view, 8> k_raw = {"BreakpointBuilder",  "Hero",         "LocaleProvider",
+    constexpr std::array<std::string_view, 8> k_raw = {"Dismissible",        "Hero",         "LocaleProvider",
                                                        "MediaQueryProvider", "Provider",     "ReorderableList",
                                                        "Repeater",           "ThemeProvider"};
     return std::ranges::find(k_raw, type) != k_raw.end();
@@ -170,7 +176,7 @@ struct PropTarget {
         return false;
     }
     AURORA_LOG_WARN("codegen", type,
-                    " has no constructible form to emit (needs template/positional arguments, or is not under au::); "
+                    " has no constructible form to emit (needs template or positional arguments); "
                     "the au::",
                     type, "{} in the output must be rewritten by hand before it compiles");
     return true;
@@ -846,6 +852,24 @@ struct PropEmit {
     return type == "PullToRefresh" || type == "Scroll";
 }
 
+/// @brief 只可经 `std::shared_ptr` 持有的类型：拷贝与移动均被 delete，不能按值交给 `Node`。
+///
+/// `Node` 的通用构造是 `std::make_shared<T>(std::forward<W>(w))`——按值接管要求**可移动**。这类控件把
+/// 拷贝与移动一并 delete（`WebView` 的注释理由是「widget 经 `shared_ptr` 持有，拷贝会产生两份同源
+/// 控件」，该理由只对拷贝成立），于是 `au::Node n = au::webview::WebView(…)` 编译红。产物必须显式
+/// 交出堆对象：`au::Node{std::make_shared<au::webview::WebView>(au::webview::WebViewProps()…)}`。
+///
+/// 属性仍走构造形参（它们是链式写件型，见 `props_chain_writers`）；子节点无槽位，与 `is_bespoke_ctor`
+/// 同口径告警丢弃。分步风格的落点见 `to_code_sb`（声明 `shared_ptr`、写件走 `->`、交给父节点时拷贝
+/// 指针而非移动）。
+///
+/// 名单由常驻矩阵实测边界（`tests/integration/itest_codegen_matrix.cpp`）：某型改回可移动后须同步
+/// 删除本表条目并从豁免清单移除，矩阵才会把它重新纳入编译面。
+///
+/// @param type 序列化 type 名。
+/// @return 该类型是否只能由 `std::shared_ptr` 持有（拷贝与移动均 delete）。
+[[nodiscard]] constexpr auto shared_ptr_owned(std::string_view type) noexcept -> bool { return type == "WebView"; }
+
 /// @brief 子节点是**构造首参**（`T(std::vector<Node>, TProps = {})`）的链式聚合容器。
 ///
 /// 子节点已从属性聚合里移出（聚合只管可序列化属性），但容器仍须在构造期接管子项，于是首参就是
@@ -900,6 +924,8 @@ struct PropEmit {
 /// @brief 生成一个节点的构造表达式（Fluent 与 DesignatedInit 共用，两风格同一条发射路径）。
 ///
 /// 形态选择（每条都必须是可编译的真实构造）：
+/// 0. 只可 `shared_ptr` 持有的类型（`shared_ptr_owned`）→ `au::Node{std::make_shared<au::T>(au::TProps()…)}`；
+///    按值交给 `Node` 编译不过——它们的拷贝与移动都是 delete。
 /// 1. 不在链式写件名单里的类型（`Stack`/`Spacer`/`TabBar`…）→ `au::T{}` 或初始化列表形
 ///    `au::T{ 子项 }`；属性无处安放（见 `props_chain_writers` 的说明与 specification/08-tooling.md §2.5）。
 /// 2. 无子节点 → `au::T(au::TProps().set_x(…))`。
@@ -923,10 +949,17 @@ struct PropEmit {
     const std::string cls = cpp_class(type);
     (void)note_construction(type);
     const std::vector<std::string> kids = accept_children(type, kids_all);
+    const std::string pr = cpp_props(type);
+    if (shared_ptr_owned(type)) {
+        // 拷贝与移动均 delete ⇒ 不能按值交给 Node，只能交出 make_shared 产物（见 shared_ptr_owned）。
+        if (!kids.empty()) {
+            AURORA_LOG_WARN("codegen", type, " has ", kids.size(), " child node(s) but takes no child slot; omitted");
+        }
+        return "au::Node{std::make_shared<au::" + cls + ">(au::" + pr + "()" + props_str + ")}";
+    }
     if (!props_chain_writers(type)) {
         return "au::" + cls + (kids.empty() ? std::string{"{}"} : emit_child_list(kids, indent));
     }
-    const std::string pr = cpp_props(type);
     if (kids.empty()) {
         return wrap_props_ctor(cls, pr, props_str);
     }
@@ -983,7 +1016,9 @@ struct PropEmit {
 /// @brief 分步赋值形式：`auto __wN = au::T{…};` 后逐属性 `__wN.key = value;`，返回本节点变量名。
 ///
 /// 语句按**后序**落盘：子节点先声明并逐属性配好，再以 `au::Node{std::move(__wN)}` 交进父节点的构造实参
-/// （控件不可拷贝，`Widget(const&) = delete`，只能移动交出；交完即不再复用该变量）。
+/// （控件不可拷贝，`Widget(const&) = delete`，只能移动交出；交完即不再复用该变量）。只可 `shared_ptr`
+/// 持有的类型（`shared_ptr_owned`）是例外：声明成 `auto __wN = std::make_shared<au::T>()`、属性写件走
+/// `->`、交给父节点时拷贝指针副本（它连移动都是 delete）。
 /// 变量编号仍按前序分配（根 = `__w0`）。
 ///
 /// 这是三种风格里唯一**完整**的一种：基类属性（`width`/`height`/`show`/`overflow`/a11y 三键）、
@@ -1002,29 +1037,43 @@ struct PropEmit {
     const std::string var = std::string{"__w"} + std::to_string(counter++);
     const std::string cls = detail::cpp_class(type);
 
-    std::vector<std::string> all_kids{};  // 已递归生成的子节点移动表达式（交构造实参用）
+    std::vector<std::string> all_kids{};  // 已递归生成的子节点交出表达式（交构造实参用）
     const auto *children_val = node.at("children");
     if (children_val != nullptr && children_val->is_array()) {
         for (const auto &kid : *children_val) {
-            if (kid.is_object()) {
-                all_kids.push_back("au::Node{std::move(" + to_code_sb(kid, indent, os, counter) + ")}");
+            if (!kid.is_object()) {
+                continue;
             }
+            const std::string kid_var = to_code_sb(kid, indent, os, counter);
+            const std::string kid_type = kid.contains("type") ? kid.at("type")->as_or<std::string>("") : "Column";
+            // 共享持有的子件交出指针副本（它不可移动）；其余控件移动交出所有权。
+            all_kids.push_back(detail::shared_ptr_owned(kid_type) ? "au::Node{" + kid_var + "}"
+                                                                  : "au::Node{std::move(" + kid_var + ")}");
         }
     }
 
+    const bool owned = detail::shared_ptr_owned(type);
     os << pad << "auto " << var << " = ";
     (void)detail::note_construction(type);
     // bespoke 构造的类型无法在构造期交出子节点（见 accept_children 的告警），此处只落成空构造。
-    const std::vector<std::string> kids = detail::accept_children(type, all_kids);
-    if (kids.empty()) {
+    std::vector<std::string> kids = detail::accept_children(type, all_kids);
+    if (owned && !kids.empty()) {
+        AURORA_LOG_WARN("codegen", type, " has ", kids.size(), " child node(s) but takes no child slot; omitted");
+        kids.clear();
+    }
+    if (owned) {
+        // 拷贝与移动均 delete ⇒ 只能是堆对象（见 shared_ptr_owned），属性写件因而走 `->`。
+        os << "std::make_shared<au::" << cls << ">()";
+    } else if (kids.empty()) {
         os << "au::" << cls << "{}";
     } else {
         // 子节点只能在构造期传入：构造后再给继承来的 `children_` 赋值是静默 no-op。
         os << "au::" << cls << detail::emit_child_list(kids, indent);
     }
     os << ";\n";
+    const std::string ref = owned ? var + "->" : var + ".";
     for (const auto &emit : detail::emit_prop_targets(type, props, true)) {
-        os << pad << var << '.' << emit.lhs;
+        os << pad << ref << emit.lhs;
         if (emit.via_setter) {
             os << '(' << emit.expr << ");\n";
         } else {
