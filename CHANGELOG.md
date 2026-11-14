@@ -24,6 +24,8 @@ freeze: minor-versions-are-additive
 
 ### Added
 
+- `WindowResizeGrip`（`widget/window_resize_grip.h`）：无边框窗口的拖边缩放。单子容器，把边缘带上的按下翻译成 `WindowChrome::begin_resize(edge)`——此前该槽全仓无调用方，`Borderless` 窗口只能拖不能缩。八档边档（四边 + 四角，角落两倍带宽且优先）+ 四档光标（`ResizeNS` / `ResizeEW` / `ResizeNWSE` / `ResizeNESW`），带宽按最短边四分之一钳制、`band = 0` 关闭手势；`WindowMode` 非 `Normal` 时整条不命中。唯一属性 `band`（默认 6 dp）。契约见 [`codespec/specification/04-widget.md`](codespec/specification/04-widget.md) §3.6。
+- `PageRouteBuilder`（`navigation/route.h`）：声明式路由入口，链式 `set_animated` / `set_kind` / `set_curve` / `set_duration`，`build()` 交出 `Route`。未调用 `set_animated` 时与 `RouteTransition{}` 的缺省一致。
 - `DisplayList::add_image(Image &&)` 移动重载：接管调用方的像素缓冲并预热内容摘要，供「图像是本次调用临时产物」的场合使用。录制态的 `Painter::composite(const Painter &)` 改走该重载（先 `to_image()` 产出快照再移动入池），省掉整帧缓冲的第二次拷贝。契约见 [`codespec/specification/03-layout-render.md`](codespec/specification/03-layout-render.md)。
 
 ### Changed
@@ -34,6 +36,11 @@ freeze: minor-versions-are-additive
 - **字形混合、渐变与圆角裁剪走批量路径**：子像素混合在圆角裁剪内按行取「覆盖率恒为 1」的区间整段写入，端点再用单点覆盖度复核；线性渐变在色标完整覆盖 `[0,1]` 且非降序时按段批量混合（径向渐变不受影响）；圆角裁剪的候选表改为定长数组，不再逐次分配。输出与逐像素路径逐位一致。
 - **字形缓存、弹簧动画与序列化热路径减少重复工作**：`GlyphAtlas` 的 LRU 由「链表 + 迭代器映射」改为记录内使用序号（命中只回写标量，淘汰按序号扫描，顺序与逐次提升等价），`insert` 返回条目常驻指针，插入后免去再次查找；弹簧动画在构造期缓存闭式解系数，`value(t)` 只做常数组合；动画绑定仅在所属控制器本帧置脏时写回；序列化注册表只填充一次，`component_schema` 按已注册类型缓存（按值深拷贝返回，调用方改动不回流），类型搜索改为逐字节大小写不敏感比较，不再为每个候选名分配临时串。
 - **扇形、描边、缩放贴图与区域混合按「覆盖率恒为 1」的区间批量写入**：`fill_sector` 的径向核心区间按行解析求出（角向核心以两条径向边的垂距判定），核心区不再逐像素走 `atan2` / `fmod` / `sqrt`；`draw_line` / `stroke_polyline` 的距离比较改在平方域完成，内部带整段写入；`draw_rounded_border` 的直边段改为按行批量（圆角象限仍逐像素）；`draw_image` 缩放路径逐列预计算源列下标与插值权重、按行取源行指针，alpha 归一改查表，全透明像素只抬升目标 alpha；`blend_region` 把混合模式折算成三张 256 项查表，`mask_region` 的线性渐变因子改为按行预算。以上批量仅在无圆角裁剪且全局透明度为 1 时启用，其余情形回落原逐像素路径，输出逐位不变。
+
+### Fixed
+
+- **路由转场的曲线与时长逐条生效**：`NavigatorHost::begin_transition` 原来只在首次转场 `bind` 一次，曲线固定 `Curves::ease_in_out()`、时长取首条路由，此后所有路由共用。现按每次切换重建控制器与补间（先 `Animator::remove` 再 `bind`，控制器地址恒不变故旧绑定必被摘净），`RouteTransition::curve` / `duration_seconds` 真正生效。
+- **`pop()` / `pop_to_root()` 不再硬编码淡出**：改读正在离场那条路由（栈顶）的转场配置，声明了 `animated` 就按其形态 / 曲线 / 时长合成；未声明则退回缺省 `Fade` + `ease_in_out` + 0.3 秒（保持改动前的返回观感，不让既有应用从淡出突变为瞬切）。反向播放（`Slide` 返回时翻转方向）仍未实现，见 [`codespec/specification/05-event-navigation.md`](codespec/specification/05-event-navigation.md) §7.1。
 
 ## [1.0.0-alpha.11] - 2026-11-12
 
