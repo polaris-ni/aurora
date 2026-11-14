@@ -53,7 +53,7 @@ class Modifier {
     /// @param p [in] 内边距像素；负值在入链前降级为 0 并记录 layout 降级诊断。
     /// @return 追加 Padding 节点后的新链副本（本链不变）。
     [[nodiscard]] auto padding(float p) const -> Modifier {
-        const float clamped = p < 0.0F ? (Diagnostics::degraded("layout", "Modifier::padding degrade to 0"), 0.0F) : p;
+        const float clamped = p < 0.0F ? (Diagnostics::degraded("Modifier::padding degrade to 0", "layout"), 0.0F) : p;
         Modifier c = *this;
         c.nodes_.push_back(std::make_shared<Padding>(clamped));
         return c;

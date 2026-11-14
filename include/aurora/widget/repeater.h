@@ -131,10 +131,10 @@ class Repeater : public Container {
 
         const std::size_t d = widget_tree_depth(*this);
         if (d > max_depth_) {
-            Diagnostics::degraded("repeater",
-                                  "Repeater subtree depth " + std::to_string(d) + " exceeds max_depth " +
+            // 形参序是 (message, where, code)：人读的句子进 message，控件类型进 where。
+            Diagnostics::degraded("Repeater subtree depth " + std::to_string(d) + " exceeds max_depth " +
                                       std::to_string(max_depth_) + "; truncating expansion",
-                                  "repeater.h:rebuild_if_needed");
+                                  "Repeater");
             children_.clear();
         }
     }

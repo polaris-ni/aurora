@@ -76,7 +76,7 @@ class ReorderableList : public Container {
     /// @param gap 项间距（dp，负值降级为 0 并记录 degraded 诊断）。
     ReorderableList(State<std::vector<T>> items, ItemBuilder builder, float gap = 0.0F)
         : items_(std::move(items)), builder_(std::move(builder)),
-          gap_(gap < 0.0F ? (Diagnostics::degraded("layout", "ReorderableList gap is negative, degraded to 0"), 0.0F)
+          gap_(gap < 0.0F ? (Diagnostics::degraded("ReorderableList gap is negative, degraded to 0", "layout"), 0.0F)
                           : gap) {
         // 落位动画与近边缘 auto-scroll 均由每帧 tick 驱动（同 Dismissible/ToastHost 模式）。
         // 基类 Widget 成员不能进派生类初始化列表，只能在构造体内置位。

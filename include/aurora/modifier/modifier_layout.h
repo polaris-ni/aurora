@@ -15,7 +15,7 @@ class Padding : public ModifierNode {
     /// @brief 构造均匀内边距修饰。
     /// @param pad 四边相同的内边距宽度（dp）；负值降级为 0 并经 Diagnostics::degraded 上报。
     explicit Padding(float pad)
-        : pad_(pad < 0.0F ? (Diagnostics::degraded("layout", "Padding degrade to 0"), 0.0F) : pad) {}
+        : pad_(pad < 0.0F ? (Diagnostics::degraded("Padding degrade to 0", "layout"), 0.0F) : pad) {}
 
     /// @brief 节点类别鉴别。
     /// @return 恒为 Kind::Layout（本节点参与测量）。
@@ -51,7 +51,7 @@ class PaddingEdges : public ModifierNode {
     explicit PaddingEdges(const EdgeInsets &insets) : insets_(insets) {
         // 负值降级为 0
         if (insets_.left < 0.0F || insets_.top < 0.0F || insets_.right < 0.0F || insets_.bottom < 0.0F) {
-            Diagnostics::degraded("layout", "PaddingEdges negative value degraded to 0");
+            Diagnostics::degraded("PaddingEdges negative value degraded to 0", "layout");
             insets_.left = std::max(0.0F, insets_.left);
             insets_.top = std::max(0.0F, insets_.top);
             insets_.right = std::max(0.0F, insets_.right);

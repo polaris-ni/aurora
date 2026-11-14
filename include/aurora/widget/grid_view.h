@@ -53,12 +53,12 @@ class GridView : public Widget {
         : count_(count < 0 ? 0 : count),
           columns_(columns > 0
                        ? columns
-                       : (Diagnostics::degraded("layout", "GridView columns is not positive, degraded to 1"), 1)),
+                       : (Diagnostics::degraded("GridView columns is not positive, degraded to 1", "layout"), 1)),
           builder_(std::move(builder)),
           cell_extent_(
               cell_extent > 0.0F
                   ? cell_extent
-                  : (Diagnostics::degraded("layout", "GridView cell_extent is not positive, degraded to 96"), 96.0F)) {
+                  : (Diagnostics::degraded("GridView cell_extent is not positive, degraded to 96", "layout"), 96.0F)) {
         set_relayout_boundary(true);  // 视口尺寸由父约束决定、不依赖子节点（虚拟化）
     }
 
@@ -422,14 +422,14 @@ class GridView : public Widget {
             const int declared = props.at("columns")->as_or<std::int32_t>(0);
             columns_ = declared > 0
                            ? declared
-                           : (Diagnostics::degraded("layout", "GridView columns is not positive, degraded to 1"), 1);
+                           : (Diagnostics::degraded("GridView columns is not positive, degraded to 1", "layout"), 1);
         }
         if (props.contains("cell_extent")) {
             const auto declared = props.at("cell_extent")->as_or<float>(0.0F);
             cell_extent_ =
                 declared > 0.0F
                     ? declared
-                    : (Diagnostics::degraded("layout", "GridView cell_extent is not positive, degraded to 96"), 96.0F);
+                    : (Diagnostics::degraded("GridView cell_extent is not positive, degraded to 96", "layout"), 96.0F);
         }
         if (props.contains("cache_extent")) {
             set_cache_extent(props.at("cache_extent")->as_or<float>(0.0F));

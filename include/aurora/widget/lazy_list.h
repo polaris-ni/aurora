@@ -59,7 +59,7 @@ class LazyList : public Widget {
           item_extent_(
               item_extent > 0.0F
                   ? item_extent
-                  : (Diagnostics::degraded("layout", "LazyList item_extent is not positive, degraded to 48"), 48.0F)) {
+                  : (Diagnostics::degraded("LazyList item_extent is not positive, degraded to 48", "layout"), 48.0F)) {
         set_relayout_boundary(true);  // 视口尺寸由父约束决定、不依赖子节点（虚拟化）
     }
 
@@ -534,7 +534,7 @@ class LazyList : public Widget {
             item_extent_ =
                 declared > 0.0F
                     ? declared
-                    : (Diagnostics::degraded("layout", "LazyList item_extent is not positive, degraded to 48"), 48.0F);
+                    : (Diagnostics::degraded("LazyList item_extent is not positive, degraded to 48", "layout"), 48.0F);
         }
         if (props.contains("cache_extent")) {
             set_cache_extent(props.at("cache_extent")->as_or<float>(0.0F));

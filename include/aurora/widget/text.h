@@ -574,7 +574,7 @@ class Text : public LeafWidget, public TextProps {
     /// @return 自身引用，便于链式调用。
     auto font_size(float pt) -> Text & {
         if (pt <= 0.0F) {
-            Diagnostics::degraded("widget", "Text font size is <= 0, degraded to 14pt");
+            Diagnostics::degraded("Text font size is <= 0, degraded to 14pt", "widget");
             set_font_size(14.0F);
         } else {
             set_font_size(pt);
