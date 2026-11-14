@@ -27,10 +27,10 @@
 //     可观测）。`AudioWorklet` + `SharedArrayBuffer` 才是桌面对位的正解，但它要求
 //     `-pthread` 构建与跨源隔离，见 specification/06-app-platform.md §12.1 线程模型。
 //
-// 采集（麦克风）：`getUserMedia` 是**异步权限流**，与本契约的同步 `start() -> bool`
-// 不同形，且首切片不接。故 `WebAudioCaptureBackend` 恒为 disabled 桩
-// （`start()` 恒 false → `create_microphone_source()` 显式报 audio-device-unavailable，
-// 符合「录制是显式能力，不静默降级」）。
+// 采集（麦克风）：`getUserMedia` 是**异步权限流**，与本契约的同步 `start() -> bool` 不同形，
+// 折中口径见 `WebAudioCaptureBackend` 类注——`start()` 发起授权并建环即返回 true（宿主无
+// `mediaDevices` 才 false），授权结果异步落地：running 后 JS 把输入帧推入环（渲染环的角色
+// 对调），C++ 排空拍读出并调 `on_pcm`（主线程）；拒绝/失败经 `failed()` 观测，不投递假数据。
 // ============================================================
 
 #include <cstdint>
@@ -88,20 +88,43 @@ class WebAudioDeviceBackend final : public AudioDeviceBackend {
     std::unique_ptr<Impl> impl_;
 };
 
-/// @brief Web Audio 采集后端：**首切片未接线**的 disabled 桩（文件头第 5 条申报）。
+/// @brief Web Audio 采集后端（浏览器默认输入设备；库内部，非公共 API）。
+///
+/// `getUserMedia` 是**异步权限流**，与本契约的同步 `start() -> bool` 不同形——折中口径：
+/// `start()` 只发起授权并建环（宿主无 `mediaDevices` / 非安全上下文才返回 false），授权结果
+/// 经会话状态字异步落地：`running` 后 `onaudioprocess` 把输入帧推入 wasm 环（与渲染方向
+/// 同一份 `WebAudioRing`、角色对调），C++ 排空拍（`emscripten_set_interval`）从环读出并
+/// 调 `on_pcm`（**主线程**，与渲染排空拍同线程）。授权拒绝 / 设备缺失 / 建链失败 ⇒
+/// `failed()` 翻 true 且不再有样本投递（与 WASAPI 的 `failed()` 中段失败观察口同位）；
+/// 录制侧表现为样本停 0，无静默假数据。
 class WebAudioCaptureBackend final : public AudioCaptureBackend {
   public:
-    WebAudioCaptureBackend() = default;
-    ~WebAudioCaptureBackend() override = default;
-    /// @brief 虽是无状态桩，仍与 Alsa/Wasapi 采集端同口径：后端只以
+    WebAudioCaptureBackend();
+    ~WebAudioCaptureBackend() override;
+    /// @brief 虽然核心状态在 wasm 全局槽，仍与 Alsa/Wasapi 采集端同口径：后端只以
     ///        unique_ptr<AudioCaptureBackend> 就地持有，复制/移动一律封死。
     WebAudioCaptureBackend(const WebAudioCaptureBackend &) = delete;
     auto operator=(const WebAudioCaptureBackend &) -> WebAudioCaptureBackend & = delete;
     WebAudioCaptureBackend(WebAudioCaptureBackend &&) = delete;
     auto operator=(WebAudioCaptureBackend &&) -> WebAudioCaptureBackend & = delete;
 
+    /// @brief 启动采集：发起 `getUserMedia` 授权 + 建环与排空定时器。
+    ///        返回 false = 宿主无 `mediaDevices`（非安全上下文 / 裸 Node），能力如实缺席；
+    ///        **true 不等于已拿到麦克风**（授权异步，见类注）。
     auto start(CaptureFn on_pcm) -> bool override;
+    /// @brief 停止采集并回收（停 track、拆链、关上下文；同线程 ⇒ 返回后即无回调）。
     auto stop() -> void override;
+    /// @brief 中段失败观察口：true = 授权被拒 / 建链失败（回调不再到达）。
+    ///        未启动或仍在授权中为 false（与 WASAPI 的 `failed()` 同位语义）。
+    [[nodiscard]] auto failed() const -> bool;
+
+  private:
+    struct Impl;
+    /// @brief 排空拍回调（`emscripten_set_interval` 的蹦床）：从环读出输入帧调 `on_pcm`。
+    ///        真实定义仅在 AURORA_ENABLE_AUDIO_WEBAUDIO 分支的编译单元内；disabled 桩分支
+    ///        提供 no-op 定义（start 恒 false，永不注册定时器，仅用于满足 ODR）。
+    static auto pump(void *user_data) -> void;
+    std::unique_ptr<Impl> impl_;
 };
 
 namespace detail {
@@ -136,6 +159,14 @@ class WebAudioRing {
     [[nodiscard]] auto consumed_frames() const -> long long { return consumed_; }
     [[nodiscard]] auto underruns() const -> int { return underruns_; }
 
+    // ---- 采集方向（写端 = JS，读端 = C++ 排空拍；与上方渲染方向同一份环、角色对调） ----
+    /// @brief 采集方向环内可读帧数（对端写指针的最新值直接从内存读）。
+    [[nodiscard]] auto capture_avail_frames() const -> int;
+    /// @brief 采集方向读出至多 `frames` 帧（推进读指针），返回实读帧数。
+    auto capture_read(float *interleaved, int frames) -> int;
+    /// @brief 采集方向已投递帧数（`capture_read` 累计；真机判据用）。
+    [[nodiscard]] auto capture_delivered_frames() const -> long long { return delivered_; }
+
   private:
     std::vector<float> data_;
     int capacity_frames_ = 0;
@@ -146,6 +177,7 @@ class WebAudioRing {
     std::int32_t underruns_ = 0;
     std::int32_t last_reader_ = 0;
     long long consumed_ = 0;
+    long long delivered_ = 0;  ///< 采集方向累计投递帧数（capture_read 累计）
 };
 
 }  // namespace detail

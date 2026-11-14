@@ -167,11 +167,15 @@ AURORA_TEST_CASE(device_format_and_gauge_stay_in_contract) {
     }
 }
 
-AURORA_TEST_CASE(capture_backend_declares_it_is_not_wired) {
-    // 采集是**显式能力**：桩/未接线时 start 恒 false ⇒ create_microphone_source 显式
-    // 报 audio-device-unavailable，不静默降级（契约见 media/audio.h 的 AudioContext 条）。
+AURORA_TEST_CASE(capture_backend_declares_honestly_where_unsupported) {
+    // 采集是**显式能力**：宿主无 `mediaDevices`（非安全上下文 / 裸 Node / disabled 桩）时
+    // start 恒 false ⇒ create_microphone_source 显式报 audio-device-unavailable，不静默降级
+    // （契约见 media/audio.h 的 AudioContext 条）；有 mediaDevices 的浏览器内 true 表示
+    // 「授权流程已发起」，结果经 failed() / 样本投递体现。
     aurora::WebAudioCaptureBackend cap;
+    AURORA_TEST_CHECK_FALSE(cap.failed());  // 未启动即查：无失败可言
     AURORA_TEST_CHECK_FALSE(cap.start([](const float *, int, int, int) {}));
+    AURORA_TEST_CHECK_FALSE(cap.failed());  // start false ⇒ 未进入授权流，谈不上失败
     cap.stop();  // 未启动即 stop 安全
     AURORA_TEST_CHECK_FALSE(cap.start([](const float *, int, int, int) {}));
     cap.stop();

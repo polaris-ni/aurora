@@ -40,6 +40,7 @@ freeze: minor-versions-are-additive
 
 ### Fixed
 
+- **Web Audio 采集接线（wasm 麦克风）**：`WebAudioCaptureBackend::start()` 此前恒 false、wasm 上 `create_microphone_source()` 显式报错。现发起 `getUserMedia` 授权并建环即返回（宿主无 `mediaDevices` / 非安全上下文如实 false），resolve 后 JS 把输入帧推入 wasm 环（渲染环角色对调）、C++ 排空拍读出并按 mono + 协商采样率调 `on_pcm`（主线程）；环满整块丢弃并计数，拒绝 / 建链失败经观察口 `failed()` 申报、不再投递样本（与 WASAPI / ALSA / CoreAudio 的中段失败观察口同位）；`stop()` 先于授权 resolve 由取消标记收尾，不泄漏孤儿上下文。契约见 [`codespec/specification/03-layout-render.md`](codespec/specification/03-layout-render.md) §9.4。
 - **Wayland 动画光标逐帧重提交**：动画光标（`wait` / `watch` 等，`image_count > 1`）此前恒取 `images[0]` 首帧静止显示。现按主题帧延迟表由客户端逐帧重提交（帧序推进抽在零平台依赖的 `detail::FrameClock`，`utest_frame_clock` 无头全证；帧循环驱动、空闲等待按最近截止收敛、停摆单轮至多连跳 64 帧），形状 / 缩放变化或指针 re-enter 回第 0 帧重放整段动画，口径见 [`codespec/specification/03-layout-render.md`](codespec/specification/03-layout-render.md) 光标条目。
 - **Wayland 键盘长按自动重复**：`wl_keyboard.repeat_info` 此前被忽略、客户端不合成重复，文本框长按退格 / 输入在 Wayland 上无自动重复（与 Win32 / X11 行为分叉）。现按合成器广播的 rate / delay 由客户端合成重复 `Down`（走与真实按下同一条事件路径；帧循环驱动、空闲等待按最近截止收敛，停摆后单轮至多补 16 条），抬起 / 失焦停表；时序策略抽在零平台依赖的 `detail::KeyRepeatState`（`utest_key_repeat` 无头全证），口径见 [`codespec/specification/05-event-navigation.md`](codespec/specification/05-event-navigation.md) §2。
 - **路由转场的曲线与时长逐条生效**：`NavigatorHost::begin_transition` 原来只在首次转场 `bind` 一次，曲线固定 `Curves::ease_in_out()`、时长取首条路由，此后所有路由共用。现按每次切换重建控制器与补间（先 `Animator::remove` 再 `bind`，控制器地址恒不变故旧绑定必被摘净），`RouteTransition::curve` / `duration_seconds` 真正生效。

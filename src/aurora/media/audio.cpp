@@ -857,7 +857,8 @@ auto create_default_device_backend() -> std::unique_ptr<AudioDeviceBackend> {
 // disabled 桩 start 恒 false → create_microphone_source 显式报错，录制不静默降级。
 [[maybe_unused]] auto create_default_capture_backend() -> std::unique_ptr<AudioCaptureBackend> {
 #ifdef AURORA_PLATFORM_WASM
-    return std::make_unique<WebAudioCaptureBackend>();  // 采集未接线（见 audio_webaudio.h 申报）
+    return std::make_unique<WebAudioCaptureBackend>();  // 采集已接线（getUserMedia 异步授权口径见 audio_webaudio.h
+                                                        // 类注）
 #elif defined(AURORA_ENABLE_AUDIO_COREAUDIO)
     return std::make_unique<CoreAudioCaptureBackend>();  // 需宿主声明 NSMicrophoneUsageDescription（见同名头）
 #elif defined(AURORA_ENABLE_AUDIO_ALSA)

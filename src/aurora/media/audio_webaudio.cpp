@@ -64,6 +64,33 @@ auto WebAudioRing::sync_reader() -> void {
     last_reader_ = now;
 }
 
+auto WebAudioRing::capture_avail_frames() const -> int {
+    const int w = writer_;  // 采集方向：写端是 JS（onaudioprocess 推入）
+    const int r = reader_;
+    return (w - r + capacity_frames_) % capacity_frames_;
+}
+
+auto WebAudioRing::capture_read(float *interleaved, int frames) -> int {
+    if (interleaved == nullptr || frames <= 0) {
+        return 0;
+    }
+    const int n = std::min(frames, capture_avail_frames());
+    const int stride = channels_;
+    // 环形读出按「帧 × 声道」做偏移，裸指针/迭代器算术是本结构的既有形态（同 write 的豁免口径）。
+    // NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+    for (int i = 0; i < n; ++i) {
+        const int pos = (reader_ + i) % capacity_frames_;
+        for (int c = 0; c < stride; ++c) {
+            interleaved[(static_cast<std::ptrdiff_t>(i) * stride) + c] =
+                data_[(static_cast<std::ptrdiff_t>(pos) * stride) + c];
+        }
+    }
+    // NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+    reader_ = (reader_ + n) % capacity_frames_;
+    delivered_ += n;
+    return n;
+}
+
 }  // namespace aurora::detail
 
 namespace aurora {
@@ -353,11 +380,211 @@ auto WebAudioDeviceBackend::consumed_frames() const -> long long {
     return impl_->ring.consumed_frames();
 }
 
-auto WebAudioCaptureBackend::start(CaptureFn /*on_pcm*/) -> bool {
-    return false;  // 采集未接线（getUserMedia 异步权限流与本契约不同形），见头文件申报
+// ---- 采集（麦克风）----
+
+/// @brief 采集排空拍的交付块长：与 JS 侧 ScriptProcessor 块同量级，一次投递一整块的倍数。
+constexpr int AURORA_WA_CAPTURE_DELIVER_FRAMES = AURORA_WA_PROCESSOR_BLOCK;
+
+// 会话句柄布局（与渲染侧 `__auroraWa` 同款）：state 字是 C++ 与 JS 授权流的唯一交接面——
+// 0 = 授权中，1 = running（链已建、样本开始入环），2 = 拒绝/失败（不再投递）。
+// EM_JS/EM_ASM 体是 JavaScript：clang-format 按 C++ 解析会拆坏 === / => / 实参括号，故整块不排版。
+// clang-format off
+EM_JS(int, wa_capture_supported, (), {
+    return (typeof navigator !== 'undefined' && navigator.mediaDevices &&
+            typeof navigator.mediaDevices.getUserMedia === 'function')
+               ? 1
+               : 0;
+});
+// clang-format on
+
+// 发起 getUserMedia 授权并预建环视图：resolve 后建 AudioContext + MediaStreamSource +
+// ScriptProcessor 输入链，输入帧按 head（JS 推进）/tail（C++ 推进）两地址写入 wasm 环；
+// 环满整块丢弃并累加 drop 计数（实时流不可回压，丢当下留后拍）。拒绝/失败写 state=2。
+// 注意 SPN 必须连到 destination 才会被拉流：经零增益节点防麦克风外放啸叫。
+// 声道**恒 mono**：麦克风原生即单声道，浏览器自动上/下混；与 WASAPI 采集「设备差异不外露」
+// 同口径（桌面侧多声道由设备协商，此处显式取 1）。
+// EM_JS/EM_ASM 体是 JavaScript：clang-format 按 C++ 解析会拆坏 === / => / 实参括号，故整块不排版。
+// clang-format off
+EM_JS(int, wa_capture_open,
+      (intptr_t out_rate, intptr_t data_ptr, intptr_t head_ptr, intptr_t tail_ptr, intptr_t drop_ptr,
+       int capacity_frames, int channels), {
+          try {
+              if (typeof navigator === 'undefined' || !navigator.mediaDevices ||
+                  typeof navigator.mediaDevices.getUserMedia !== 'function') {
+                  return -1;
+              }
+              const session = {state: 0, ctx: null, node: null, stream: null};
+              globalThis.__auroraWaCap = session;
+              navigator.mediaDevices.getUserMedia({audio: {echoCancellation: false, noiseSuppression: false, autoGainControl: false}})
+                  .then((stream) => {
+                      if (session.cancelled) {
+                          // stop() 先于授权 resolve：track 直接停掉，链不再建（防泄漏孤儿上下文）
+                          stream.getTracks().forEach((t) => t.stop());
+                          return;
+                      }
+                      try {
+                          const ctx = new AudioContext();
+                          const source = ctx.createMediaStreamSource(stream);
+                          const node = ctx.createScriptProcessor(2048, channels, 1);
+                          const ring = new Float32Array(HEAPU8.buffer, data_ptr, capacity_frames * channels);
+                          node.onaudioprocess = (e) => {
+                              const n = e.inputBuffer.length;
+                              const w = HEAP32[head_ptr >> 2];
+                              const r = HEAP32[tail_ptr >> 2];
+                              const avail = (w - r + capacity_frames) % capacity_frames;
+                              if (capacity_frames - 1 - avail < n) {
+                                  HEAP32[drop_ptr >> 2] += 1;  // 环满：整块丢弃
+                                  return;
+                              }
+                              for (let c = 0; c < channels; c++) {
+                                  const input = e.inputBuffer.getChannelData(c);
+                                  for (let i = 0; i < n; i++) {
+                                      ring[((w + i) % capacity_frames) * channels + c] = input[i];
+                                  }
+                              }
+                              HEAP32[head_ptr >> 2] = (w + n) % capacity_frames;
+                          };
+                          const mute = ctx.createGain();
+                          mute.gain.value = 0;
+                          source.connect(node);
+                          node.connect(mute);
+                          mute.connect(ctx.destination);
+                          session.ctx = ctx;
+                          session.node = node;
+                          session.stream = stream;
+                          HEAP32[out_rate >> 2] = Math.round(ctx.sampleRate);
+                          session.state = 1;
+                      } catch (err) {
+                          session.state = 2;
+                      }
+                  })
+                  .catch(() => {
+                      session.state = 2;  // 权限拒绝 / 设备缺失
+                  });
+              return 0;
+          } catch (e) {
+              return -1;
+          }
+      });
+// clang-format on
+
+// 会话状态：-1 无会话，0 = 授权中，1 = running，2 = 拒绝/失败。
+// EM_JS/EM_ASM 体是 JavaScript：clang-format 按 C++ 解析会拆坏 === / => / 实参括号，故整块不排版。
+// clang-format off
+EM_JS(int, wa_capture_state, (), {
+    const s = globalThis.__auroraWaCap;
+    if (!s) {
+        return -1;
+    }
+    return s.state;
+});
+// clang-format on
+
+// 拆链、停 track、关上下文并清除全局槽（防下次实例读到别人的节点）。
+// EM_JS/EM_ASM 体是 JavaScript：clang-format 按 C++ 解析会拆坏 === / => / 实参括号，故整块不排版。
+// clang-format off
+EM_JS(void, wa_capture_teardown, (), {
+    const s = globalThis.__auroraWaCap;
+    if (s) {
+        s.cancelled = true;  // 授权 promise 仍可能在途：标记后其 resolve 分支自行停 track
+        try {
+            if (s.node) {
+                s.node.onaudioprocess = null;
+                s.node.disconnect();
+            }
+            if (s.stream) {
+                s.stream.getTracks().forEach((t) => t.stop());
+            }
+            if (s.ctx) {
+                s.ctx.close();
+            }
+        } catch (e) { /* 已停 */ }
+        delete globalThis.__auroraWaCap;
+    }
+});
+// clang-format on
+
+[[maybe_unused]] constexpr int wa_capture_ring_capacity() {
+    // 环容量 ≈ 0.5s @ 48kHz mono（协商率未知，按上限预算；44.1k 下余量更大）。
+    return std::max(4 * AURORA_WA_PROCESSOR_BLOCK, 48000 / 2);
 }
 
-auto WebAudioCaptureBackend::stop() -> void {}
+struct WebAudioCaptureBackend::Impl {
+    detail::WebAudioRing ring{wa_capture_ring_capacity(), 1};  // 采集恒 mono（见 wa_capture_open 注）
+    CaptureFn deliver;  // 空 = 未启动
+    std::vector<float> scratch;  // 单拍投递缓冲
+    int rate = 48000;  // 协商采样率（授权 resolve 后由 JS 写回； resolve 前按 48k 预算环）
+    bool pumping = false;
+    int timer_id = 0;  // `emscripten_set_interval` 句柄（0 = 无）
+};
+
+WebAudioCaptureBackend::WebAudioCaptureBackend() : impl_(std::make_unique<Impl>()) {}
+
+WebAudioCaptureBackend::~WebAudioCaptureBackend() { stop(); }
+
+auto WebAudioCaptureBackend::start(CaptureFn on_pcm) -> bool {
+    if (impl_->pumping || wa_capture_state() != -1) {
+        return false;  // 已启动，或上一会话尚未收摊
+    }
+    if (wa_capture_supported() == 0) {
+        return false;  // 宿主无 mediaDevices（非安全上下文 / 裸 Node）：能力如实缺席
+    }
+    impl_->scratch.assign(static_cast<std::size_t>(AURORA_WA_CAPTURE_DELIVER_FRAMES) * impl_->ring.channels(), 0.0F);
+    impl_->deliver = std::move(on_pcm);
+    int rate = 0;
+    // NOLINTBEGIN(cppcoreguidelines-pro-type-reinterpret-cast): 零导出符号的跨语言边界只传
+    // 地址——JS 侧按 intptr_t 建 HEAP 视图（与渲染侧同款纪律）
+    const int rc = wa_capture_open(reinterpret_cast<intptr_t>(&rate), reinterpret_cast<intptr_t>(impl_->ring.data()),
+                                   reinterpret_cast<intptr_t>(impl_->ring.writer_position()),
+                                   reinterpret_cast<intptr_t>(impl_->ring.reader_position()),
+                                   reinterpret_cast<intptr_t>(impl_->ring.underrun_counter()),
+                                   impl_->ring.capacity_frames(), impl_->ring.channels());
+    // NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast)
+    if (rc != 0) {
+        impl_->deliver = nullptr;
+        return false;
+    }
+    impl_->rate = rate > 0 ? rate : 48000;
+    impl_->timer_id = emscripten_set_interval(&WebAudioCaptureBackend::pump, AURORA_WA_PUMP_INTERVAL_MS, impl_.get());
+    if (impl_->timer_id == 0) {
+        wa_capture_teardown();
+        impl_->deliver = nullptr;
+        return false;
+    }
+    impl_->pumping = true;
+    return true;  // true = 授权流程已发起；结果经 failed()/样本投递体现（见类注）
+}
+
+auto WebAudioCaptureBackend::pump(void *user_data) -> void {
+    auto *impl = static_cast<WebAudioCaptureBackend::Impl *>(user_data);  // NOLINT: Emscripten 回调签名
+    const int state = wa_capture_state();
+    if (state != 1) {
+        return;  // 授权中（0）等下一拍；拒绝/失败（2）不再投递，stop() 负责收摊
+    }
+    // 拖干环里现存的帧（至多一块的整数倍，长任务后不过补——与渲染侧追帧口径一致）。
+    for (;;) {
+        const int got = impl->ring.capture_read(impl->scratch.data(), AURORA_WA_CAPTURE_DELIVER_FRAMES);
+        if (got <= 0) {
+            break;
+        }
+        if (impl->deliver != nullptr) {
+            impl->deliver(impl->scratch.data(), got, impl->rate, 1);
+        }
+    }
+}
+
+auto WebAudioCaptureBackend::stop() -> void {
+    if (impl_ == nullptr || !impl_->pumping) {
+        return;
+    }
+    emscripten_clear_interval(impl_->timer_id);
+    impl_->timer_id = 0;
+    impl_->pumping = false;
+    impl_->deliver = nullptr;
+    wa_capture_teardown();
+}
+
+auto WebAudioCaptureBackend::failed() const -> bool { return impl_ != nullptr && wa_capture_state() == 2; }
 
 }  // namespace aurora
 
@@ -393,9 +620,22 @@ auto WebAudioDeviceBackend::underruns() const -> int { return 0; }
 
 auto WebAudioDeviceBackend::consumed_frames() const -> long long { return 0; }
 
+auto WebAudioCaptureBackend::pump(void * /*user_data*/) -> void {
+    // 桩构建：start() 恒 false，永不注册 emscripten_set_interval，本回调不会被调用；
+    // 仅补齐声明以满足 ODR（非内联静态成员须有定义，否则 LTO / whole-program 链接报未实现）。
+}
+
+struct WebAudioCaptureBackend::Impl final {};
+
+WebAudioCaptureBackend::WebAudioCaptureBackend() : impl_(std::make_unique<Impl>()) {}
+
+WebAudioCaptureBackend::~WebAudioCaptureBackend() = default;
+
 auto WebAudioCaptureBackend::start(CaptureFn /*on_pcm*/) -> bool { return false; }
 
 auto WebAudioCaptureBackend::stop() -> void {}
+
+auto WebAudioCaptureBackend::failed() const -> bool { return false; }  // start 恒 false ⇒ 无中段失败可言
 
 }  // namespace aurora
 
