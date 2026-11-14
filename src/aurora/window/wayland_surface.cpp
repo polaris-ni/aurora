@@ -34,6 +34,7 @@
 #include "aurora/window/detail/csd_geometry.h"
 #include "aurora/window/detail/csd_shadow_compose.h"
 #include "aurora/window/detail/ime_composition.h"
+#include "aurora/window/detail/key_repeat.h"
 #include "aurora/window/detail/title_bar_painter.h"
 #include "aurora/window/detail/wayland_clipboard.h"
 #include "aurora/window/detail/wayland_drag.h"
@@ -110,6 +111,10 @@ struct WaylandSurface::Impl {
     xkb_keymap *keymap = nullptr;
     xkb_state *xkb_st = nullptr;
     ModifierKey mods = ModifierKey::None;
+    // 键盘自动重复（Wayland 无服务端重复，客户端合成；时序策略见 key_repeat.h）：
+    // `repeat_info` 广播 rate/delay → configure；Down/Up → press/release；kb_leave → cancel。
+    // 合成挂在帧循环上：poll_platform_events 每帧 emit_due，wait_events 按最近截止收敛超时。
+    detail::KeyRepeatState kb_repeat;
 
     // wl_shm 双缓冲槽：attach 后 buffer 归合成器（busy），release 事件归还。
     struct Slot {
@@ -368,6 +373,8 @@ struct WaylandSurface::Impl {
     auto apply_style_size_limits() const -> void;
     auto on_seat_capabilities(std::uint32_t caps) -> void;
     auto on_key(std::uint32_t key, std::uint32_t state_v) const -> void;
+    /// @brief 合成本轮到期的自动重复（帧循环每帧调用；见 key_repeat.h 的时序策略）。
+    auto pump_key_repeats() -> void;
     auto on_keymap(std::int32_t fd, std::uint32_t sz) -> void;
     auto on_modifiers(std::uint32_t depressed, std::uint32_t latched, std::uint32_t locked, std::uint32_t group)
         -> void;
@@ -740,6 +747,8 @@ void kb_leave(void *data, wl_keyboard * /*k*/, std::uint32_t /*serial*/, wl_surf
     Impl &d = *static_cast<Impl *>(data);
     d.active = false;
     d.update_state();
+    // 键盘焦点易主：按住键可能永远等不到 `Up`，重复状态无条件停表。
+    d.kb_repeat.cancel();
 #if defined(AURORA_HAVE_WL_TEXT_INPUT) && AURORA_HAVE_WL_TEXT_INPUT
     // 键盘输入焦点易主：显式 disable，否则输入法组合仍会打进本表面（v3 焦点由客户端声明）；
     // 此刻上层焦点未变、provider 仍报非零盒，故必须先翻 ti_ime_wanted 再刷新。
@@ -750,9 +759,16 @@ void kb_leave(void *data, wl_keyboard * /*k*/, std::uint32_t /*serial*/, wl_surf
 
 void kb_key(void *data, wl_keyboard * /*k*/, std::uint32_t serial, std::uint32_t /*time*/, std::uint32_t key,
             std::uint32_t state_v) {
+    Impl &d = *static_cast<Impl *>(data);
     // 键盘按键也是 `set_selection` 认可的输入 serial 来源：Ctrl+C 一类快捷复制由它支撑。
-    static_cast<Impl *>(data)->last_input_serial = serial;
-    static_cast<Impl *>(data)->on_key(key, state_v);
+    d.last_input_serial = serial;
+    // 自动重复登记（Wayland 无服务端重复，客户端合成）：按住计时在 Down 起算、Up 停表。
+    if (state_v == WL_KEYBOARD_KEY_STATE_PRESSED) {
+        d.kb_repeat.press(std::chrono::steady_clock::now(), key);
+    } else {
+        d.kb_repeat.release(key);
+    }
+    d.on_key(key, state_v);
 }
 
 void kb_modifiers(void *data, wl_keyboard * /*k*/, std::uint32_t /*serial*/, std::uint32_t depressed,
@@ -760,9 +776,10 @@ void kb_modifiers(void *data, wl_keyboard * /*k*/, std::uint32_t /*serial*/, std
     static_cast<Impl *>(data)->on_modifiers(depressed, latched, locked, group);
 }
 
-void kb_repeat(void * /*data*/, wl_keyboard * /*k*/, std::int32_t /*rate*/, std::int32_t /*delay*/) {
-    // 键盘自动重复由客户端负责（Wayland 无服务端重复）：当前版本不合成重复 KeyEvent，
-    // 文本编辑长按重复输入留待后续（与 X11 DetectableAutoRepeat 行为差异已知）。
+void kb_repeat(void *data, wl_keyboard * /*k*/, std::int32_t rate, std::int32_t delay) {
+    // 键盘自动重复由客户端负责（Wayland 无服务端重复）：登记 rate/delay，重复 Down 由
+    // `pump_key_repeats` 按帧循环合成（时序策略见 key_repeat.h；与 Win32 自动重复位同语义）。
+    static_cast<Impl *>(data)->kb_repeat.configure(rate, delay);
 }
 
 constexpr wl_keyboard_listener AURORA_KEYBOARD_LISTENER = {.keymap = kb_keymap,
@@ -1043,6 +1060,15 @@ auto WaylandSurface::Impl::on_seat_capabilities(std::uint32_t caps) -> void {
     } else if (!has_kb && keyboard != nullptr) {
         wl_keyboard_destroy(keyboard);
         keyboard = nullptr;
+    }
+}
+
+auto WaylandSurface::Impl::pump_key_repeats() -> void {
+    const int due = kb_repeat.emit_due(std::chrono::steady_clock::now());
+    // 重复合成走与真实按下同一条路径（on_key 的 PRESSED 分支）：KeyEvent 与 TextInputEvent
+    // 都按当前 xkb 状态 / 修饰位产出，与 X11 DetectableAutoRepeat、Win32 自动重复位语义一致。
+    for (int i = 0; i < due; ++i) {
+        on_key(kb_repeat.keycode(), WL_KEYBOARD_KEY_STATE_PRESSED);
     }
 }
 
@@ -2255,6 +2281,8 @@ auto WaylandSurface::poll_platform_events() -> void {
     if (d.dpy == nullptr) {
         return;
     }
+    // 自动重复的合成点：每帧必经（wgpu 宿主原样转发本方法），掉帧后由状态机按上限补条。
+    d.pump_key_repeats();
     // 刷新「当前发起窗口」槽：拖出由控件在事件派发期内发起（`Widget::begin_system_drag`），
     // 而事件派发只发生在**本窗口**的事件泵内，故此刻登记即唯一正确的发起桥（多窗口场景）。
     if (d.drag != nullptr) {
@@ -2313,6 +2341,12 @@ auto WaylandSurface::wait_events(double timeout_ms) -> void {
     wl_display_flush(d.dpy);
     // 无限等待按 1000ms 分段兜底（对齐 Win32/X11）：唤醒渠道丢失也最迟 1s 自然醒。
     const double capped = (timeout_ms < 0.0 || timeout_ms > 1000.0) ? 1000.0 : timeout_ms;
+    // 有按住键在参与自动重复时，poll 超时按最近截止收敛——否则空闲深睡会睡过重复点，
+    // 长按出字变成一秒一蹦。到期后回到帧循环，由 pump_key_repeats 合成。
+    double wait = capped;
+    if (const auto ms = d.kb_repeat.ms_until_due(std::chrono::steady_clock::now()); ms.has_value()) {
+        wait = std::min(wait, std::max(0.0, *ms));
+    }
     std::vector<pollfd> fds;
     fds.reserve(2 + (d.atspi != nullptr ? 2 : 0));
     fds.push_back(pollfd{.fd = wl_display_get_fd(d.dpy), .events = POLLIN, .revents = 0});
@@ -2337,7 +2371,7 @@ auto WaylandSurface::wait_events(double timeout_ms) -> void {
             fds.push_back(pollfd{.fd = w.fd, .events = ev, .revents = 0});
         }
     }
-    const int rc = ::poll(fds.data(), static_cast<nfds_t>(fds.size()), static_cast<int>(std::ceil(capped)));
+    const int rc = ::poll(fds.data(), static_cast<nfds_t>(fds.size()), static_cast<int>(std::ceil(wait)));
     if (rc > 0 && (fds[0].revents & POLLIN) != 0) {  // NOLINT(*-signed-bitwise)
         wl_display_read_events(d.dpy);
     } else {

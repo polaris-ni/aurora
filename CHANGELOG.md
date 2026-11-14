@@ -40,6 +40,7 @@ freeze: minor-versions-are-additive
 
 ### Fixed
 
+- **Wayland 键盘长按自动重复**：`wl_keyboard.repeat_info` 此前被忽略、客户端不合成重复，文本框长按退格 / 输入在 Wayland 上无自动重复（与 Win32 / X11 行为分叉）。现按合成器广播的 rate / delay 由客户端合成重复 `Down`（走与真实按下同一条事件路径；帧循环驱动、空闲等待按最近截止收敛，停摆后单轮至多补 16 条），抬起 / 失焦停表；时序策略抽在零平台依赖的 `detail::KeyRepeatState`（`utest_key_repeat` 无头全证），口径见 [`codespec/specification/05-event-navigation.md`](codespec/specification/05-event-navigation.md) §2。
 - **路由转场的曲线与时长逐条生效**：`NavigatorHost::begin_transition` 原来只在首次转场 `bind` 一次，曲线固定 `Curves::ease_in_out()`、时长取首条路由，此后所有路由共用。现按每次切换重建控制器与补间（先 `Animator::remove` 再 `bind`，控制器地址恒不变故旧绑定必被摘净），`RouteTransition::curve` / `duration_seconds` 真正生效。
 - **`pop()` / `pop_to_root()` 不再硬编码淡出**：改读正在离场那条路由（栈顶）的转场配置，声明了 `animated` 就按其形态 / 曲线 / 时长合成；未声明则退回缺省 `Fade` + `ease_in_out` + 0.3 秒（保持改动前的返回观感，不让既有应用从淡出突变为瞬切）。反向播放（`Slide` 返回时翻转方向）仍未实现，见 [`codespec/specification/05-event-navigation.md`](codespec/specification/05-event-navigation.md) §7.1。
 

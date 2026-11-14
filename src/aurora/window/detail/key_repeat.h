@@ -67,6 +67,9 @@ class KeyRepeatState {
         }
     }
 
+    /// @brief 无条件停止重复（键盘焦点离开本表面时调用——按住键可能永远等不到 `Up`）。
+    auto cancel() -> void { active_ = false; }
+
     /// @brief 是否处于「按住待重复」状态（且合成器给出了合法 rate）。
     [[nodiscard]] auto active() const -> bool { return active_; }
 
@@ -133,7 +136,7 @@ class KeyRepeatState {
     int delay_ms_ = 1;  ///< 首次重复前的按住时长（毫秒）
     bool active_ = false;  ///< 是否有按住键在参与重复
     std::uint32_t keycode_ = 0U;  ///< 参与重复的 evdev 键码
-    TimePoint deadline_{};  ///< 下一次重复的到期时刻
+    TimePoint deadline_;  ///< 下一次重复的到期时刻（仅在 active_ 为真时有意义，press 时赋值）
 };
 
 }  // namespace aurora::detail
