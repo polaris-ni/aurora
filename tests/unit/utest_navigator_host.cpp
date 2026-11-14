@@ -57,6 +57,17 @@ auto display_types(const NavigatorHost &host) -> std::vector<std::string> {
     return names;
 }
 
+/// 读回转场进度（宿主把 `progress_` 作为唯一信号源交给订阅方）。
+auto progress_of(NavigatorHost &host) -> double {
+    StateSink sigs;
+    host.collect_signals(sigs);
+    if (sigs.sources().empty()) {
+        return -1.0;
+    }
+    const auto *src = dynamic_cast<const detail::SourceOf<double> *>(sigs.sources().front().get());
+    return src != nullptr ? src->value() : -1.0;
+}
+
 }  // namespace
 
 AURORA_TEST_CASE(host_push_builds_stack) {
@@ -302,6 +313,104 @@ AURORA_TEST_CASE(host_destructor_detaches_from_animator) {
     AURORA_TEST_CHECK_FALSE(anim.has_active());
     anim.tick(1.0);
     AURORA_TEST_CHECK_FALSE(anim.has_active());
+}
+
+AURORA_TEST_CASE(host_transition_curve_is_taken_from_each_route) {
+    Animator anim;
+    NavigatorHost host(anim);
+    host.push(Route{solid_page(Color{255, 0, 0}), "home"});
+    BuildContext const ctx;
+    host.mount(ctx);
+
+    // 缓入：0.5 处的进度是 0.5³ = 0.125，与线性的 0.5 区分得开。
+    host.push(Route{
+        solid_page(Color{0, 0, 255}), "a",
+        RouteTransition{
+            .animated = true, .kind = TransitionKind::Fade, .curve = Curves::ease_in(), .duration_seconds = 0.4}});
+    anim.tick(0.2);
+    AURORA_TEST_CHECK_NEAR(progress_of(host), 0.125, 1e-3F);
+
+    // 紧接着换一条线性曲线：若绑定沿用首条曲线，这里仍会是 0.125。
+    host.push(
+        Route{solid_page(Color{0, 160, 0}), "b",
+              RouteTransition{
+                  .animated = true, .kind = TransitionKind::Fade, .curve = Curves::linear(), .duration_seconds = 0.4}});
+    anim.tick(0.2);
+    AURORA_TEST_CHECK_NEAR(progress_of(host), 0.5, 1e-3F);
+}
+
+AURORA_TEST_CASE(host_transition_duration_is_taken_from_each_route) {
+    Animator anim;
+    NavigatorHost host(anim);
+    host.push(Route{solid_page(Color{255, 0, 0}), "home"});
+    BuildContext const ctx;
+    host.mount(ctx);
+
+    host.push(Route{solid_page(Color{0, 0, 255}), "short",
+                    RouteTransition{.animated = true, .kind = TransitionKind::Fade, .duration_seconds = 0.1}});
+    anim.tick(0.1);
+    AURORA_TEST_CHECK_NEAR(progress_of(host), 1.0, 1e-3F);
+    AURORA_TEST_CHECK_FALSE(anim.has_active());
+
+    // 第二条 0.6 秒：若时长仍沿用首条的 0.1 秒，这里会已到 1 且动画器闲置。
+    host.push(Route{solid_page(Color{0, 160, 0}), "long",
+                    RouteTransition{.animated = true, .kind = TransitionKind::Fade, .duration_seconds = 0.6}});
+    anim.tick(0.3);
+    AURORA_TEST_CHECK_NEAR(progress_of(host), 0.5, 1e-3F);
+    AURORA_TEST_CHECK_TRUE(anim.has_active());
+}
+
+AURORA_TEST_CASE(host_pop_uses_departing_route_kind) {
+    Animator anim;
+    NavigatorHost host(anim);
+    host.push(Route{solid_page(Color{255, 0, 0}), "home"});
+    BuildContext const ctx;
+    host.mount(ctx);
+    host.push(Route{
+        solid_page(Color{0, 0, 255}), "detail",
+        RouteTransition{
+            .animated = true, .kind = TransitionKind::Slide, .curve = Curves::linear(), .duration_seconds = 0.4}});
+    anim.tick(0.4);  // 推入完成
+
+    AURORA_TEST_REQUIRE_TRUE(host.pop());
+    std::vector<std::string> types = display_types(host);
+    AURORA_TEST_REQUIRE_EQ(types.size(), 1U);
+    AURORA_TEST_CHECK_EQ(types[0], std::string{"TransitionLayer"});
+
+    // 滑动到一半：旧页（detail，蓝）左移、新页（home，红）从右侧进入，两半区各自纯色。
+    // 若出栈仍硬编码 Fade，两半区都会是混色。
+    anim.tick(0.2);
+    host.layout(bounded(80.0F, 60.0F), ctx);
+    Painter p;
+    p.begin(80, 60);
+    host.paint(p, full_rect(80.0F, 60.0F), ctx);
+    AURORA_TEST_CHECK_EQ(p.get_pixel(20, 30), Color{0, 0, 255});
+    AURORA_TEST_CHECK_EQ(p.get_pixel(60, 30), Color{255, 0, 0});
+}
+
+AURORA_TEST_CASE(host_pop_without_declaration_keeps_default_fade) {
+    Animator anim;
+    NavigatorHost host(anim);
+    host.push(Route{solid_page(Color{255, 0, 0}), "home"});
+    BuildContext const ctx;
+    host.mount(ctx);
+    host.push(Route{solid_page(Color{0, 0, 255}), "detail"});  // 未声明 animated
+
+    AURORA_TEST_REQUIRE_TRUE(host.pop());
+    const std::vector<std::string> types = display_types(host);
+    AURORA_TEST_REQUIRE_EQ(types.size(), 1U);
+    AURORA_TEST_CHECK_EQ(types[0], std::string{"TransitionLayer"});
+    AURORA_TEST_CHECK_TRUE(anim.has_active());
+
+    // 0.3 秒的一半：缺省淡出仍生效，中心像素既不是纯旧页也不是纯新页。
+    anim.tick(0.15);
+    host.layout(bounded(80.0F, 60.0F), ctx);
+    Painter p;
+    p.begin(80, 60);
+    host.paint(p, full_rect(80.0F, 60.0F), ctx);
+    const Color mid = p.get_pixel(40, 30);
+    AURORA_TEST_CHECK_TRUE(mid != Color{255, 0, 0});
+    AURORA_TEST_CHECK_TRUE(mid != Color{0, 0, 255});
 }
 
 }  // namespace aurora::test_cases::utest_navigator_host

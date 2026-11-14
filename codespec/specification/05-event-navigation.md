@@ -217,6 +217,10 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 
 **自带拖拽区的容器必须把自身显式入链**：基类 `Widget::hit_test_chain`（`src/aurora/widget/widget.cpp`）只在「后代链非空 / `wants_click()` / `wants_scroll()` / 带 Input 修饰」之一成立时才把控件自身追加进链尾。因此靠 `on_pointer_event` 自绘拖拽带、又不 `wants_click()` 的容器（典型为 `Splitter` 的分隔条）若在其拖拽带上返回**空**后代链，就会整条链为空，被派发器判为「点在空白处」而根本不投递 Press——拖拽在任何后端都失效，且与 `on_hit_test`（点命中）口径不一致而难以察觉。此类控件须在拖拽带内返回 `std::vector{HitNode{this, weak_from_this(), bounds.origin}}`，并在带内无交互后代的空白点同样自入链，否则拖拽过程中指针一旦越出拖拽带，后续 Move 会因链空被丢弃。契约由 `utest_splitter` 的 `hit_chain_at_divider_includes_splitter` 与 `divider_drag_via_dispatcher_updates_ratio_and_clamps` 守护。
 
+**边缘带只交自身、不下降**：`WindowResizeGrip` 的边缘带压在内容之上，带内必须返回空后代链（由基类按 `wants_click()` 补入自身），带外才返回子件链。带内若继续下降，拖动窗口边缘会先落到内容里的按钮上；而带内返回空链又不声明 `wants_click()`，则整条链为空、被派发器判为「点在空白」——两种写法都错，契约只有一种。
+
+**按位置变化的光标档**：`Widget::cursor_shape()` 没有位置参数，故需要「同一控件内按指针位置给不同形状」的控件（`WindowResizeGrip` 的八档边档 → 四种缩放光标）必须在**命中测试阶段**把档位写进成员，再由 `cursor_shape()` 读出。命中测试先于悬停光标解析发生（`EventDispatcher` 先 `hit_test_chain` 再 `update_hover`/`resolve_cursor`），因此指针沿边框移动时形状即刻跟随；若改在 `Move` 事件里手工推光标，派发器只在链上形状变化时下发，离开边缘后会上一个缩放光标粘住不走。
+
 **滚动条带自交自身、不下降**（CHG-075）：带滚动条的容器在条带（轨道 / 滑块）内必须把自身纳入命中链（否则 Press 落空、拖拽失效），且 `on_pointer_event` 在条带内**不下降**给内容子树——拖拽与轨道翻页只在条带内消费，条带外才照常命中内容。这与「自带拖拽区的容器必须把自身显式入链」同构（拖动带 = 滚动条带），由 `utest_scrollbar_containers` 的 `drag_within_band_does_not_descend_to_content` 守护。
 
 ### 3.2.1 覆盖绘制与命中链（追加命中盒）
@@ -689,14 +693,25 @@ player.attach(app.animator());
 
 `RouteTransition` 是转场描述值：`animated`（是否用转场动画）/ `kind`（`TransitionKind`）/ `curve`（缺省 `Curves::linear()`）/ `duration_seconds`（缺省 `0.3`）。
 
-**现状限制（转场侧尚未接线）**：
+**转场配置逐条生效**：`NavigatorHost` 每切换一次都按该次的 `RouteTransition` 重建控制器与补间（先 `Animator::remove` 再 `bind`，控制器地址恒不变故旧绑定必被摘净），`curve` / `duration_seconds` / `kind` 三项都按声明值生效，不存在「所有路由共用首条曲线与时长」。
 
-- `NavigatorHost` 的转场曲线**硬编码** `Curves::ease_in_out()`（其 `anim_.bind` 一处），逐路由的 `RouteTransition::curve` 当前不生效——该字段是声明位，不是已兑现的能力。
-- `pop()` / `pop_to_root()` **强制** `TransitionKind::Fade`，仅 `push` 读 `RouteTransition::kind`。
-- `TransitionKind` 目前只有 `Fade` / `Slide` 两态。
-- 没有声明式 `PageRouteBuilder`（路由即转场描述）封装，现形是 `NavigatorHost` + `Route` 的命令式接法。
+- `push` / `push_replacement`：取**被推入**那条路由的配置。
+- `pop` / `pop_to_root`：取**正在离场**那条路由（即栈顶）的配置。声明了 `animated` 就按其形态 / 曲线 / 时长合成；未声明则退回缺省 `Fade` + `Curves::ease_in_out()` + 0.3 秒——缺省只是缺省，不代表配置被忽略。
+- 反向播放未实现：`TransitionLayer` 只按 `kind` 取一个方向（`Slide` 恒为旧页左出、新页右入），返回时不翻转。要反转得给合成层加方向位并重拍滑动路径的像素基线，属独立小批。
+- `TransitionKind` 目前只有 `Fade` / `Slide` 两态；`RouteTransition` 的字段与缺省值不因本批改变。
 
-可中断 / 交互式转场所需的原语已在动画层就位（`AnimationController::set_progress` 定位不改状态语义、`Keyframes` 分段曲线、`SpringAnimation` 的即插收敛），上表限制属导航层接线，不属这些原语缺失。
+**声明式入口**：`PageRouteBuilder(Node root, std::string name = "")` 把「页面 + 转场」一次写成，链式 `set_animated(bool = true)` / `set_kind(TransitionKind)` / `set_curve(Curve)` / `set_duration(double)`，`transition()` 读回配置、`build()` 交出 `Route`。未调用 `set_animated` 时与 `RouteTransition{}` 的缺省一致（不动画、Fade、线性、0.3 秒）。
+
+```cpp
+au::nav.push(au::PageRouteBuilder{detail_page(), "detail"}
+                 .set_animated()
+                 .set_kind(au::TransitionKind::Slide)
+                 .set_curve(au::Curves::ease_out())
+                 .set_duration(0.4)
+                 .build());
+```
+
+可中断 / 交互式转场所需的原语已在动画层就位（`AnimationController::set_progress` 定位不改状态语义、`Keyframes` 分段曲线、`SpringAnimation` 的即插收敛），上述未兑现项属导航层接线，不属这些原语缺失。
 
 ### 7.2 Navigator
 
@@ -751,6 +766,7 @@ player.attach(app.animator());
 - `NavigatorHost` 持有注册表并在转场期注入子树环境。
 - **换页自带布局级标脏**：`NavigatorHost` 每次重建展示层（`push` / `pop` / `pop_to_root` / `push_replacement` / `open_uri`）都发一次含布局脏的重绘请求，非动画路径（未带 `RouteTransition` 的 `push`、`open_uri` 深链）同样自标脏；消费者无需再经 `set_on_route_changed` 手工请求重绘。
 - **配对缺失**（仅旧页或仅新页有该 tag）时退化为普通淡入淡出。
+- **方向**：`Slide` 合成恒为「旧页向原方向退出、新页从对侧进入」，出栈时同样如此（不翻转方向，见 §7.1）。
 
 ```cpp
 au::Navigator nav{ au::Route{ build_home(), "home" } };

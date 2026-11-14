@@ -91,4 +91,33 @@ AURORA_TEST_CASE(route_root_mutable_access) {
     AURORA_TEST_CHECK_EQ(view.root().id(), std::string_view{"page-root"});
 }
 
+AURORA_TEST_CASE(page_route_builder_applies_chainable_config) {
+    auto page = std::make_shared<SolidBox>();
+    const Route r = PageRouteBuilder{Node{page}, "detail"}
+                        .set_animated()
+                        .set_kind(TransitionKind::Slide)
+                        .set_curve(Curves::ease_out())
+                        .set_duration(0.5)
+                        .build();
+
+    AURORA_TEST_CHECK_EQ(r.name(), std::string{"detail"});
+    AURORA_TEST_CHECK_EQ(&r.root().widget(), page.get());
+    AURORA_TEST_CHECK_TRUE(r.transition().animated);
+    AURORA_TEST_CHECK_TRUE(r.transition().kind == TransitionKind::Slide);
+    AURORA_TEST_CHECK_NEAR(r.transition().duration_seconds, 0.5, 1e-4F);
+    // 曲线按值持有：与显式构造的同一曲线逐值相同。
+    AURORA_TEST_CHECK_NEAR(r.transition().curve.transform(0.25), Curves::ease_out().transform(0.25), 1e-6F);
+}
+
+AURORA_TEST_CASE(page_route_builder_defaults_match_transition_defaults) {
+    // 未调用 set_animated 时与 RouteTransition{} 的缺省一致：不动画、Fade、线性、0.3 秒。
+    const RouteTransition defaults;
+    const Route r = PageRouteBuilder{Node{SolidBox{}}, "home"}.build();
+
+    AURORA_TEST_CHECK_FALSE(r.transition().animated);
+    AURORA_TEST_CHECK_TRUE(r.transition().kind == defaults.kind);
+    AURORA_TEST_CHECK_NEAR(r.transition().duration_seconds, defaults.duration_seconds, 1e-6F);
+    AURORA_TEST_CHECK_NEAR(r.transition().curve.transform(0.25), defaults.curve.transform(0.25), 1e-6F);
+}
+
 }  // namespace aurora::test_cases::utest_route

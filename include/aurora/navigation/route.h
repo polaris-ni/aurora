@@ -61,4 +61,62 @@ class Route {
     RouteTransition transition_;
 };
 
+/// @brief 声明式页面路由构造器（specification/05-event-navigation.md §7.1）：
+/// 把「页面子树 + 名称 + 转场」一次写成，产物仍是 `Route`，不引入第二套栈语义。
+///
+/// 用法：`PageRouteBuilder{detail_page, "detail"}.set_animated().set_kind(TransitionKind::Slide).build()`。
+/// 未调用 `set_animated` 时与 `RouteTransition{}` 的缺省一致（不动画、Fade、线性、0.3 秒）。
+class PageRouteBuilder {
+  public:
+    /// @brief 构造构造器：装载页面子树根与可选名称。
+    /// @param root 页面子树根节点。
+    /// @param name 路由名称（默认空串，仅用于标识/调试）。
+    explicit PageRouteBuilder(Node root, std::string name = "") : root_(std::move(root)), name_(std::move(name)) {}
+
+    /// @brief 设置是否使用转场动画。
+    /// @param animated true = 入栈/出栈时合成转场；默认参数即 true。
+    /// @return 自身引用（链式调用）。
+    auto set_animated(bool animated = true) -> PageRouteBuilder & {
+        transition_.animated = animated;
+        return *this;
+    }
+
+    /// @brief 设置转场形态。
+    /// @param kind 转场类型（Fade / Slide）。
+    /// @return 自身引用（链式调用）。
+    auto set_kind(TransitionKind kind) -> PageRouteBuilder & {
+        transition_.kind = kind;
+        return *this;
+    }
+
+    /// @brief 设置转场缓动曲线。
+    /// @param curve 缓动曲线（按值持有）。
+    /// @return 自身引用（链式调用）。
+    auto set_curve(Curve curve) -> PageRouteBuilder & {
+        transition_.curve = std::move(curve);
+        return *this;
+    }
+
+    /// @brief 设置转场时长。
+    /// @param seconds 时长（秒；非正值由 `AnimationController` 夹取为 1e-6）。
+    /// @return 自身引用（链式调用）。
+    auto set_duration(double seconds) -> PageRouteBuilder & {
+        transition_.duration_seconds = seconds;
+        return *this;
+    }
+
+    /// @brief 读回当前转场配置。
+    /// @return 转场配置的常量引用（生命周期随本构造器）。
+    [[nodiscard]] auto transition() const -> const RouteTransition & { return transition_; }
+
+    /// @brief 交出成品路由（页面、名称与转场配置一并移交）。
+    /// @return 新建的 `Route`（`Node` 内部为 `shared_ptr`，故与本构造器共享同一页面子树）。
+    [[nodiscard]] auto build() const -> Route { return Route{root_, name_, transition_}; }
+
+  private:
+    Node root_;
+    std::string name_;
+    RouteTransition transition_;
+};
+
 }  // namespace aurora

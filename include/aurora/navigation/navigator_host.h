@@ -53,13 +53,13 @@ class NavigatorHost : public Widget {
     auto operator=(NavigatorHost &&) -> NavigatorHost & = delete;
 
     /// @brief 压入新页面（成为当前页）。animated 时启动转场。
-    /// @param route 待压入的路由（转场形态与时长取自其 `transition()`）；栈空时同样入栈但无转场。
+    /// @param route 待压入的路由（转场形态、曲线与时长取自其 `transition()`）；栈空时同样入栈但无转场。
     auto push(Route route) -> void {
         const RouteTransition &tr = route.transition();
         if (tr.animated && nav_.current_root()) {
             old_ = nav_.current_root();
             kind_ = tr.kind;
-            begin_transition(tr.duration_seconds);
+            begin_transition(tr);
         } else {
             old_ = Node{};
             transitioning_ = false;
@@ -75,7 +75,7 @@ class NavigatorHost : public Widget {
         if (tr.animated && nav_.current_root()) {
             old_ = nav_.current_root();
             kind_ = tr.kind;
-            begin_transition(tr.duration_seconds);
+            begin_transition(tr);
         } else {
             old_ = Node{};
             transitioning_ = false;
@@ -84,28 +84,31 @@ class NavigatorHost : public Widget {
         rebuild_display();
     }
 
-    /// @brief 弹栈；仅剩根路由时拒绝（返回 false）。转场默认淡出。
-    /// @return 弹出成功返回 true（此时以 0.3 秒淡出转场切到上一层）；栈深 ≤1 返回 false 且不改栈、不起转场。
+    /// @brief 弹栈；仅剩根路由时拒绝（返回 false）。
+    /// @return 弹出成功返回 true（此时按被弹出路由的转场配置切回上一层，见 `departing_transition`）；
+    ///         栈深 ≤1 返回 false 且不改栈、不起转场。
     [[nodiscard]] auto pop() -> bool {
         if (!nav_.can_pop()) {
             return false;
         }
         if (nav_.current_root()) {
             old_ = nav_.current_root();
-            kind_ = TransitionKind::Fade;
-            begin_transition(0.3);
+            const RouteTransition tr = departing_transition();
+            kind_ = tr.kind;
+            begin_transition(tr);
         }
         const bool ok = nav_.pop();
         rebuild_display();
         return ok;
     }
 
-    /// @brief 回到根路由（清空到仅剩首个）。转场默认淡出。
+    /// @brief 回到根路由（清空到仅剩首个）。转场配置取自栈顶（被丢弃的那一页）。
     auto pop_to_root() -> void {
         if (nav_.current_root()) {
             old_ = nav_.current_root();
-            kind_ = TransitionKind::Fade;
-            begin_transition(0.3);
+            const RouteTransition tr = departing_transition();
+            kind_ = tr.kind;
+            begin_transition(tr);
         }
         nav_.pop_to_root();
         rebuild_display();
@@ -254,16 +257,36 @@ class NavigatorHost : public Widget {
     }
 
   private:
-    auto begin_transition(double duration_seconds) -> void {
+    /// @brief 离场路由的转场配置：声明了 `animated` 就用它自己的形态 / 曲线 / 时长，否则退回历史默认。
+    ///
+    /// 默认值是 `Fade` + `Curves::ease_in_out()` + 0.3 秒——本批之前 `pop` / `pop_to_root` 恒按此合成，
+    /// 若改成「未声明即无转场」，所有既有应用的返回都会从淡出突变为瞬切。缺省只是缺省，声明了就以声明为准。
+    /// @return 本轮离场使用的转场配置（`animated` 恒为真：离场必有合成层，只是时长可能极短）。
+    [[nodiscard]] auto departing_transition() const -> RouteTransition {
+        const RouteTransition &declared = nav_.current().transition();
+        if (declared.animated) {
+            return declared;
+        }
+        return RouteTransition{
+            .animated = true, .kind = TransitionKind::Fade, .curve = Curves::ease_in_out(), .duration_seconds = 0.3};
+    }
+
+    /// @brief 按本次转场配置起播：曲线与时长逐条生效，故控制器与补间随每次切换重建。
+    ///
+    /// `Animator::bind` 内部会 `drive(c)` 把控制器压进登记表，连续 `bind` 同一控制器会重复推进；
+    /// 而 `Animator::remove(c)` 按控制器地址摘除其全部绑定。`ctrl_` 是成员、地址恒不变，
+    /// 故「先 remove 再 bind」既能换掉旧曲线，也不会留下第二份推进。
+    /// @param tr 本轮转场配置（形态另经 `kind_` 生效；此处消费曲线与时长）。
+    auto begin_transition(const RouteTransition &tr) -> void {
         transitioning_ = true;
         progress_.set(0.0);
-        if (!bound_) {
-            // 绑定一次：时长取首条转场；曲线固定 Curves::ease_in_out()，逐路由 RouteTransition::curve 当前未接线（MVP
-            // 不逐路由重建控制器，避免重复注册）。
-            ctrl_ = AnimationController{std::max(duration_seconds, 1e-6)};
-            anim_.bind(ctrl_, Tween<double>{0.0, 1.0, Curves::ease_in_out()}, progress_);
-            bound_ = true;
+        if (bound_) {
+            anim_.remove(ctrl_);
+            bound_ = false;
         }
+        ctrl_ = AnimationController{tr.duration_seconds};
+        anim_.bind(ctrl_, Tween<double>{0.0, 1.0, tr.curve}, progress_);
+        bound_ = true;
         ctrl_.forward(0.0);
         mark_needs_layout();
     }
