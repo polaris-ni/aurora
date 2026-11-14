@@ -4,7 +4,7 @@
 |:---|:---|
 | 变更编号 | CHG-077 |
 | 提出日期 | 2026-11-14 |
-| 当前状态 | 实施中 |
+| 当前状态 | 已归档 |
 | 关联需求 | 无 |
 | 影响面 | `NavigatorHost` 的转场驱动改为**每次切换重建**控制器与补间（`begin_transition` 一处），使 `RouteTransition::curve` / `duration_seconds` 真正生效；`pop()` / `pop_to_root()` 不再硬编码 `Fade` + 0.3 秒，改读本轮被弹出路由的转场配置（未声明 `animated` 时保留历史默认淡出）；`route.h` 新增声明式 `PageRouteBuilder`（薄封装，把「页面 + 转场」写成一次构造）；`TransitionKind` 仍为 `Fade` / `Slide` 两态，不扩枚举；零新增错误码、零新增主题令牌、`aurora_api.json` 的属性面零变化（`PageRouteBuilder` 不是控件）；影响判据面：`utest_navigator_host`、`utest_route`、`codespec/specification/05-event-navigation.md` §7.1 的「现状限制」段、`CHANGELOG.md` 的 `Added` / `Fixed` 条目。 |
 
@@ -62,7 +62,7 @@
 6. 绑定不重复登记：连续做 5 次带转场的切换后 `anim` 的活跃控制器数仍为 1（用「tick 一次后进度只前进一次」间接判定：每次切换后 tick 到 1 都能恰好停下，不多推进）；宿主析构后 `anim` 无残留（既有 `utest_navigator_host` 的摘除用例继续通过）。
 7. 判据非空转须真注入变异：① 把 `begin_transition` 退回「只在首次 bind」⇒ 判据 1 的第二条读数与判据 2 转红；② 把 `pop` 的配置读回写死 `Fade` ⇒ 判据 3 的滑动分支转红；③ 令 `pop` 在未声明时也不转场 ⇒ 判据 3 的淡出分支转红。每处记录「改了什么、哪条转红、还原后是否回绿」。
 
-    - 判据 7 变异自证记录：① 已执行——把 `begin_transition` 退回「`!bound_` 时才 bind、曲线写死 `Curves::ease_in_out()`」，重建后 `utest_navigator_host` 恰好两例转红（`host_transition_curve_is_taken_from_each_route`、`host_transition_duration_is_taken_from_each_route`），其余 14 例不受影响；还原后 16/16 全绿。②③ 尚未执行（均在 `navigator_host.h`，改动即触发整包重建；留待下次触碰该头时补做）。
+    - 判据 7 变异自证记录：① 已执行——把 `begin_transition` 退回「`!bound_` 时才 bind、曲线写死 `Curves::ease_in_out()`」，重建后 `utest_navigator_host` 恰好两例转红（`host_transition_curve_is_taken_from_each_route`、`host_transition_duration_is_taken_from_each_route`），其余 14 例不受影响；还原后 16/16 全绿。② 已执行——把 `departing_transition` 的读回改成**无条件**返回 `Fade`（曲线与时长仍取声明值），`host_pop_uses_departing_route_kind` 转红（两条半区像素断言都失败），`host_pop_without_declaration_keeps_default_fade` 与其余 14 例不受影响。③ 已执行——给 `pop()` 的起播条件加一个合取项 `nav_.current().transition().animated`，`host_pop_without_declaration_keeps_default_fade` 与 `host_pop_transitions_and_completes` 两例转红（展示层从 `TransitionLayer` 退化为 `Provider`、`Animator` 无活跃控制器、中心像素为纯旧页），`host_pop_uses_departing_route_kind` 不受影响。②③ 还原后 16/16 复绿。
 
 ## 回写落点
 
@@ -76,3 +76,4 @@
 - 落码：`include/aurora/navigation/navigator_host.h`（按配置重建绑定、`pop` / `pop_to_root` 读离场路由）、`include/aurora/navigation/route.h`（`PageRouteBuilder`）。
 - 用例：`utest_navigator_host` 新增四例（曲线逐条、时长逐条、`pop` 按离场路由形态、未声明时保留缺省淡出）、`utest_route` 新增两例（链式配置生效、缺省与 `RouteTransition{}` 一致）。
 - 文档：`codespec/specification/05-event-navigation.md` §7.1（转场配置逐条生效、`pop` 口径、`PageRouteBuilder`）与 §7.4（方向不翻转）、根目录 CHANGELOG 的 `Added` / `Fixed`。
+- 收尾：回写落点逐项核实——§7.1 已改为按配置驱动并写明缺省值与 `PageRouteBuilder` 写法，§7.4 已记「出栈不翻转方向」；`codespec/specification/04-widget.md` 无 `NavigatorHost` 控件条目故不动；`codespec/SPECIFICATIONS.md` 特性表无导航行故不动；CHANGELOG 的 `Added`（`PageRouteBuilder`）与 `Fixed`（逐路由曲线时长、`pop` 强制淡出）两条已记。代码侧缺口为 0（反向播放按 §7.1 归独立小批），状态随批次流转（已提议 → 实施中 → 已归档）。
