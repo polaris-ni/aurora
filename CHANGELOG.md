@@ -24,6 +24,7 @@ freeze: minor-versions-are-additive
 
 ### Added
 
+- **Win32 系统拖入支持 `image/png`**：`CF_DIBV5` 位图块经折算层 `png_bytes_from_dibv5` 转码（DIBV5 → RGBA8 解码 `detail::load_dibv5` + PNG 编码走图像编解码注册表）后在拖入格式清单中如实广告，`DragPayload::image()` 在 Windows 上从此可读到拖入的位图。转码支持 24 位 BI_RGB 与 32 位 BI_RGB / BI_BITFIELDS / BI_ALPHABITFIELDS（掩码折算通道、负高度为自顶向下、无 alpha 掩码按不透明），8/16 位与 RLE 变体如实拒绝；转码失败暂按该桥既有空口径交出（升级为 `system-drag-read-failed` 的判据变更另行安排）。契约见 [`codespec/specification/06-app-platform.md`](codespec/specification/06-app-platform.md) §8.9。
 - `WindowResizeGrip`（`widget/window_resize_grip.h`）：无边框窗口的拖边缩放。单子容器，把边缘带上的按下翻译成 `WindowChrome::begin_resize(edge)`——此前该槽全仓无调用方，`Borderless` 窗口只能拖不能缩。八档边档（四边 + 四角，角落两倍带宽且优先）+ 四档光标（`ResizeNS` / `ResizeEW` / `ResizeNWSE` / `ResizeNESW`），带宽按最短边四分之一钳制、`band = 0` 关闭手势；`WindowMode` 非 `Normal` 时整条不命中。唯一属性 `band`（默认 6 dp）。契约见 [`codespec/specification/04-widget.md`](codespec/specification/04-widget.md) §3.6。
 - `PageRouteBuilder`（`navigation/route.h`）：声明式路由入口，链式 `set_animated` / `set_kind` / `set_curve` / `set_duration`，`build()` 交出 `Route`。未调用 `set_animated` 时与 `RouteTransition{}` 的缺省一致。
 - `DisplayList::add_image(Image &&)` 移动重载：接管调用方的像素缓冲并预热内容摘要，供「图像是本次调用临时产物」的场合使用。录制态的 `Painter::composite(const Painter &)` 改走该重载（先 `to_image()` 产出快照再移动入池），省掉整帧缓冲的第二次拷贝。契约见 [`codespec/specification/03-layout-render.md`](codespec/specification/03-layout-render.md)。

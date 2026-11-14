@@ -7,7 +7,8 @@
 /// DragAction（Ask/Private → None）、Wayland 线上 MIME 名 ↔ 规范 MIME（`text/plain` 参数剥离、
 /// 进程内 `aurora/widget` 不登记）与 `dnd_action` 位 ↔ DragAction（Copy→Move 优先序、Ask → None）、
 /// 拖入侧 proposed 的来源（OS 报告值优先、修饰键覆盖、锁定态位不污染、OS 缺席按 Copy 兜底）、
-/// 同步载荷阈值常量锚定、make_drop_event 的字段装配（含 X11 的 mimes 通道优先于 Win32 数值通道）。
+/// 同步载荷阈值常量锚定、make_drop_event 的字段装配（含 X11 的 mimes 通道优先于 Win32 数值通道）、
+/// `CF_DIBV5` → `image/png` 转码（32 位 BITFIELDS 掩码折算 + 行序 + alpha 兜底、畸形块拒绝）。
 ///
 /// 变异自证（改坏实现应转红的三条）：
 ///  * 摘掉 `proposed_action_for` 的锁定态位掩码 → `..._ignores_lock_bits` 转红；
@@ -26,7 +27,12 @@
 ///  * 把 `NSFilenamesPboardType` 登记进 macOS uri-list 表 → 同例转红（其载荷是路径串数组而非
 ///    URI 清单，登记即声称能读一种解码不了的形态）；
 ///  * 让 macOS 动作折算复用 Win32 的 `DROPEFFECT` 位序 → `..._drag_operation_bits_map_both_ways`
-///    转红（Link=2 而 Move=16，位序三平台两样）。
+///    转红（Link=2 而 Move=16，位序三平台两样）；
+///  * 把 `load_dibv5` 的行序判定反转 → `translate_dibv5_bitfields_round_trips_through_png` 与
+///    `translate_dibv5_without_alpha_mask_is_opaque` 转红（正高度被当成负高度求补，维度检查
+///    直接拒绝，两例的 `png.ok()` 前置断言都红）；
+///  * 把无 alpha 掩码时的兜底从「不透明」改成「采纳 alpha 字节」→
+///    `translate_dibv5_without_alpha_mask_is_opaque` 转红（源侧故意写 42 的垃圾字节被采纳）。
 
 #include <cmath>
 #include <cstdint>
@@ -36,6 +42,7 @@
 
 #include "aurora/app/mime_types.h"
 #include "aurora/event/event.h"
+#include "aurora/image/image_codec.h"
 #include "aurora/window/detail/system_drag_translate.h"
 #include "framework/aurora_test.h"
 
@@ -62,6 +69,7 @@ using aurora::drag::mimes_from_wayland_offer_names;
 using aurora::drag::mimes_from_win32_clip_formats;
 using aurora::drag::mimes_from_x11_target_names;
 using aurora::drag::modifiers_from_win32_mk_flags;
+using aurora::drag::png_bytes_from_dibv5;
 using aurora::drag::result_from_win32_drag_out;
 using aurora::drag::wayland_dnd_action_from;
 using aurora::drag::wayland_offer_names_from_mime;
@@ -641,6 +649,114 @@ AURORA_TEST_CASE(translate_macos_registered_lists_are_the_single_source) {
     }
     AURORA_TEST_CHECK_EQ(macos_supported_drag_operations(), static_cast<std::uint32_t>(MacOSDragOperation::Copy) |
                                                                 static_cast<std::uint32_t>(MacOSDragOperation::Move));
+}
+
+// ---- CF_DIBV5 → image/png 转码（Win32 拖入侧） ----
+//
+// 判据基线由手工拼装的字节块给出（不依赖平台编码器）：2×2 像素、自底向上 BGRA，
+// 期望解码回的 RGBA 与拼装值逐字节一致——PNG 容器字节再经仓内解码器读回比对。
+
+namespace {
+
+/// @brief 拼装一段最小 `CF_DIBV5` 块：BITMAPV5HEADER（124 字节）+ 32 位 BI_BITFIELDS 像素区。
+/// @param width 像素宽。
+/// @param height 像素高（正值 = 自底向上；负值 = 自顶向下）。
+/// @param pixels BGRA 交错像素（长度 = w*h*4，按**自底向上**的存储序给出）。
+/// @param top_down_alpha 置 false 时 alpha 掩码写 0（按不透明折算），置 true 时写 0xFF000000U。
+[[nodiscard]] auto make_dibv5_block(int width, int height, const std::vector<std::uint8_t> &pixels, bool with_alpha)
+    -> std::vector<std::uint8_t> {
+    const auto put32 = [](std::vector<std::uint8_t> &out, std::size_t off, std::uint32_t v) {
+        out[off] = static_cast<std::uint8_t>(v & 0xFFU);
+        out[off + 1U] = static_cast<std::uint8_t>((v >> 8U) & 0xFFU);
+        out[off + 2U] = static_cast<std::uint8_t>((v >> 16U) & 0xFFU);
+        out[off + 3U] = static_cast<std::uint8_t>((v >> 24U) & 0xFFU);
+    };
+    std::vector<std::uint8_t> block(124U, 0U);
+    put32(block, 0, 124U);  // bV5Size
+    put32(block, 4, static_cast<std::uint32_t>(width));
+    put32(block, 8, static_cast<std::uint32_t>(height));
+    put32(block, 12, 1U);  // bV5Planes
+    put32(block, 14, 32U);  // bV5BitCount（低 16 位即 WORD 位宽）
+    put32(block, 16, 3U);  // BI_BITFIELDS
+    put32(block, 40, 0x00FF0000U);  // bV5RedMask
+    put32(block, 44, 0x0000FF00U);  // bV5GreenMask
+    put32(block, 48, 0x000000FFU);  // bV5BlueMask
+    put32(block, 52, with_alpha ? 0xFF000000U : 0U);  // bV5AlphaMask
+    block.insert(block.end(), pixels.begin(), pixels.end());
+    return block;
+}
+
+}  // namespace
+
+AURORA_TEST_CASE(translate_dibv5_bitfields_round_trips_through_png) {
+    // 2×2 自底向上 BGRA：第一存储行（图像底行）红/绿，第二存储行（图像顶行）蓝/半透明白。
+    const std::vector<std::uint8_t> stored = {
+        0,   0,   255, 255,  // 底行左：红（B=0,G=0,R=255,A=255）
+        0,   255, 0,   255,  // 底行右：绿
+        255, 0,   0,   255,  // 顶行左：蓝
+        255, 255, 255, 128  // 顶行右：白，半透明
+    };
+    const auto block = make_dibv5_block(2, 2, stored, true);
+    const auto png = png_bytes_from_dibv5(block);
+    AURORA_TEST_REQUIRE_TRUE(png.ok());
+    AURORA_TEST_CHECK_TRUE(!png.value().empty());
+
+    // PNG 容器读回：像素应与拼装值逐字节一致（RGBA 顺序），证明通道折算与行序都对。
+    const auto decoded = aurora::image::decode_memory(png.value());
+    AURORA_TEST_REQUIRE_TRUE(decoded.ok());
+    AURORA_TEST_CHECK_EQ(decoded.value().width, 2);
+    AURORA_TEST_CHECK_EQ(decoded.value().height, 2);
+    const std::vector<std::uint8_t> top_row{decoded.value().pixels[0], decoded.value().pixels[1],
+                                            decoded.value().pixels[2], decoded.value().pixels[3]};
+    // 顶行左源像素是 (255,0,0,255) 的 BGRA = 蓝 → RGBA 应为 (0,0,255,255)。
+    AURORA_TEST_CHECK_EQ(top_row, std::vector<std::uint8_t>{0, 0, 255, 255});
+    const std::vector<std::uint8_t> top_right{decoded.value().pixels[4], decoded.value().pixels[5],
+                                              decoded.value().pixels[6], decoded.value().pixels[7]};
+    // 顶行右源像素 BGRA (255,255,255,128) → RGBA (255,255,255,128)，alpha 经掩码折算保留。
+    AURORA_TEST_CHECK_EQ(top_right, std::vector<std::uint8_t>{255, 255, 255, 128});
+    const std::vector<std::uint8_t> bottom_left{decoded.value().pixels[8], decoded.value().pixels[9],
+                                                decoded.value().pixels[10], decoded.value().pixels[11]};
+    // 底行左源像素 BGRA (0,0,255,255) → RGBA (255,0,0,255)。
+    AURORA_TEST_CHECK_EQ(bottom_left, std::vector<std::uint8_t>{255, 0, 0, 255});
+}
+
+AURORA_TEST_CASE(translate_dibv5_without_alpha_mask_is_opaque) {
+    // alpha 掩码为 0 的 BI_BITFIELDS：alpha 字节不可信（Windows 上常为垃圾值），按不透明折算。
+    const std::vector<std::uint8_t> stored = {255, 255, 255, 42};  // 1×1，alpha 字节故意写 42
+    const auto block = make_dibv5_block(1, 1, stored, false);
+    const auto png = png_bytes_from_dibv5(block);
+    AURORA_TEST_REQUIRE_TRUE(png.ok());
+    const auto decoded = aurora::image::decode_memory(png.value());
+    AURORA_TEST_REQUIRE_TRUE(decoded.ok());
+    AURORA_TEST_CHECK_EQ(decoded.value().pixels[3], std::uint8_t{255});  // 不透明，未采纳 42
+    AURORA_TEST_CHECK_EQ(decoded.value().pixels[0], std::uint8_t{255});  // R
+    AURORA_TEST_CHECK_EQ(decoded.value().pixels[1], std::uint8_t{255});  // G
+    AURORA_TEST_CHECK_EQ(decoded.value().pixels[2], std::uint8_t{255});  // B
+}
+
+AURORA_TEST_CASE(translate_dibv5_rejects_malformed_blocks) {
+    // 头截断：不足 40 字节连维度都读不出来。
+    AURORA_TEST_CHECK_FALSE(png_bytes_from_dibv5(std::vector<std::uint8_t>(16U, 0U)).ok());
+    // 维度越界：0x7FFFFFFF 的宽高必须被上限截下，而不是让行距乘法回绕后越界读。
+    {
+        std::vector<std::uint8_t> block(124U, 0U);
+        const auto put32 = [](std::vector<std::uint8_t> &out, std::size_t off, std::uint32_t v) {
+            out[off] = static_cast<std::uint8_t>(v & 0xFFU);
+            out[off + 1U] = static_cast<std::uint8_t>((v >> 8U) & 0xFFU);
+            out[off + 2U] = static_cast<std::uint8_t>((v >> 16U) & 0xFFU);
+            out[off + 3U] = static_cast<std::uint8_t>((v >> 24U) & 0xFFU);
+        };
+        put32(block, 0, 124U);
+        put32(block, 4, 0x7FFFFFFFU);
+        put32(block, 8, 0x7FFFFFFFU);
+        put32(block, 14, 32U);
+        AURORA_TEST_CHECK_FALSE(png_bytes_from_dibv5(block).ok());
+    }
+    // 像素区截断：2×2 的块只给一行像素。
+    {
+        const std::vector<std::uint8_t> stored = {0, 0, 255, 255, 0, 255, 0, 255};
+        AURORA_TEST_CHECK_FALSE(png_bytes_from_dibv5(make_dibv5_block(2, 2, stored, true)).ok());
+    }
 }
 
 }  // namespace aurora::test_cases::utest_system_drag_translate

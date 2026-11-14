@@ -23,6 +23,7 @@
 #include <string_view>
 #include <vector>
 
+#include "aurora/core/result.h"
 #include "aurora/core/types.h"
 #include "aurora/event/event.h"
 
@@ -352,5 +353,16 @@ struct DragInFrame {
 /// @param frame 平台侧原始数据。
 /// @return 填好 `phase` / `position` / `formats` / `modifiers` / `proposed` 的事件。
 [[nodiscard]] auto make_drop_event(SystemDropPhase phase, const DragInFrame &frame) -> SystemDropEvent;
+
+/// @brief `CF_DIBV5` 位图块 → `image/png` 字节（Win32 拖入侧的转码，纯函数）。
+///
+/// Win32 数据对象上带 alpha 的位图只有 `CF_DIBV5` 一档，而拖放词汇表的图像档是 `image/png`，
+/// 故入向必须做一次 DIBV5 → RGBA8 → PNG 的转码（方向与拖出侧的 PNG → DIBV5 相反）。解码
+/// 委托 `detail::load_dibv5`，编码走仓内图像编解码注册表（PNG 编码器始终注册，故该转码在
+/// 所有构建可兑现）。解码或编码失败都按结构化 `Error` 交出——调用方按「格式不可兑现」处置，
+/// 不把失败伪装成空载荷。
+/// @param dib DIB 块字节（从 `bV5Size` 字段起，不含 `BITMAPFILEHEADER`）。
+/// @return PNG 容器字节；位图块不完整 / 变体不支持 / 编码器缺席时为结构化 `Error`。
+[[nodiscard]] auto png_bytes_from_dibv5(const std::vector<std::uint8_t> &dib) -> Result<std::vector<std::uint8_t>>;
 
 }  // namespace aurora::drag

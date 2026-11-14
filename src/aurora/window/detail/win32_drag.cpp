@@ -59,12 +59,13 @@ class DragOutEngine;
 namespace {
 
 // 首批可兑现的剪贴板格式：**formats 清单声明即能兑现**，故只列本桥真正能取到字节的格式。
-// `CF_DIBV5` → `image/png` 需要 DIBV5 → PNG **转码**（编码侧），本桥取不到，落地前不列——
-// 声明了却取不到等于谎报。折算层的映射表已备好该档；拖出侧方向相反（PNG 解码 → DIBV5，
-// stb 后端始终注册）已可兑现，见下方拖出数据对象的 `make_dibv5_global`。
+// `CF_DIBV5` 经折算层的 `png_bytes_from_dibv5` 转码（DIBV5 → RGBA8 → PNG，两步都是仓内
+// 纯函数/注册表能力，所有构建可兑现）后兑现为 `image/png`；清单顺序即优先级，位图排最后。
+// 拖出侧方向相反（PNG 解码 → DIBV5，`make_dibv5_global`）。
 constexpr std::uint16_t AURORA_DROP_IN_CLIP_FORMATS[] = {
     static_cast<std::uint16_t>(drag::Win32ClipFormat::Hdrop),
     static_cast<std::uint16_t>(drag::Win32ClipFormat::UnicodeText),
+    static_cast<std::uint16_t>(drag::Win32ClipFormat::DibV5),
 };
 
 /// @brief 枚举数据对象上的可用格式（只取本桥能兑现的那几档，顺序按数组声明 = 优先级）。
@@ -262,6 +263,22 @@ class DataObjectRef {
     if (mime == AURORA_MIME_TEXT_PLAIN) {
         const auto text = read_unicode_text(data);
         return text.has_value() ? std::vector<std::uint8_t>(text->begin(), text->end()) : std::vector<std::uint8_t>{};
+    }
+    if (mime == AURORA_MIME_IMAGE_PNG) {
+        // `image/png` 在 Win32 数据对象上以 `CF_DIBV5` 承载：取出位图块后经折算层转码成 PNG
+        // 容器字节（DIBV5 → RGBA8 → PNG，两步都是仓内能力，所有构建可兑现）。转码失败按
+        // 本函数其余格式同款的**空口径**交出——把「广告了却取不出」升级为
+        // `system-drag-read-failed` 是判据变更，仍另行安排（见上方函数头注记），本批不夹带。
+        const auto format = drag::win32_clip_format_from_mime(mime);
+        if (!format.has_value()) {
+            return std::vector<std::uint8_t>{};
+        }
+        const auto dib = read_clip_bytes(data, static_cast<CLIPFORMAT>(*format));
+        if (dib.empty()) {
+            return std::vector<std::uint8_t>{};
+        }
+        auto png = drag::png_bytes_from_dibv5(dib);
+        return png.ok() ? std::move(png.value()) : std::vector<std::uint8_t>{};
     }
     const auto format = drag::win32_clip_format_from_mime(mime);
     if (!format.has_value()) {

@@ -1,5 +1,6 @@
 #include "aurora/core/image.h"
 
+#include <bit>
 #include <filesystem>
 #include <fstream>
 
@@ -81,6 +82,132 @@ auto load_bmp(const std::vector<std::uint8_t> &b) -> Result<Image> {
             img.pixels[d + 1] = b[s + 1];  // G  NOLINT
             img.pixels[d + 2] = b[s + 0];  // B  NOLINT
             img.pixels[d + 3] = 255;  // A  NOLINT
+        }
+    }
+    return img;
+}
+
+auto load_dibv5(const std::vector<std::uint8_t> &b) -> Result<Image> {
+    // BITMAPINFOHEADER 起步的 DIB 块至少 40 字节；更小的块连维度字段都读不出来。
+    if (b.size() < 40) {
+        return make_error(ErrorCode::IOParseFailed, "Image::load: DIB header truncated");
+    }
+    const auto byte_at = [&b](std::size_t off) -> std::uint8_t {
+        // 像素区完整性在下方用 64 位算术核过；头字段读取按有界访问兜底，越界即视为截断。
+        return off < b.size() ? b[off] : static_cast<std::uint8_t>(0U);
+    };
+    const auto le32 = [&byte_at](std::size_t off) -> std::uint32_t {
+        return static_cast<std::uint32_t>(byte_at(off)) | (static_cast<std::uint32_t>(byte_at(off + 1U)) << 8U) |
+               (static_cast<std::uint32_t>(byte_at(off + 2U)) << 16U) |
+               (static_cast<std::uint32_t>(byte_at(off + 3U)) << 24U);
+    };
+    const auto le16 = [&byte_at](std::size_t off) -> std::uint16_t {
+        return static_cast<std::uint16_t>(static_cast<std::uint32_t>(byte_at(off)) |
+                                          (static_cast<std::uint32_t>(byte_at(off + 1U)) << 8U));
+    };
+    const std::uint32_t header_size = le32(0);
+    if (header_size < 40 || header_size > b.size()) {
+        return make_error(ErrorCode::IOParseFailed, "Image::load: invalid DIB header size");
+    }
+    const std::uint32_t raw_w = le32(4);
+    // bV5Height 是有符号 LONG：负值表示自顶向下行序，绝对值才是行数。
+    const std::uint32_t raw_h_signed = le32(8);
+    const bool top_down = (raw_h_signed & 0x80000000U) != 0U;
+    const std::uint32_t raw_h = top_down ? (0xFFFFFFFFU - raw_h_signed + 1U) : raw_h_signed;
+    const std::uint16_t bit_count = le16(14);
+    const std::uint32_t compression = le32(16);
+    // 维度先设上限再参与算术：攻击者可控的 0x7FFFFFFF 会让行距/行数乘法在 32 位上回绕放行。
+    if (raw_w == 0 || raw_h == 0 || raw_w > AURORA_BMP_MAX_DIMENSION || raw_h > AURORA_BMP_MAX_DIMENSION) {
+        return make_error(ErrorCode::IOParseFailed, "Image::load: invalid DIB dimensions");
+    }
+    // 与 load_bmp 同一条「如实不为」纪律：行距与这里假设不符的变体（8/16 位调色板、RLE）一律
+    // 拒绝，不按错误行距越界读整幅像素区。
+    const bool is_24_rgb = bit_count == 24 && compression == 0;
+    const bool is_32 =
+        bit_count == 32 && (compression == 0 || compression == 3 || compression == 6);  // BI_RGB / BITFIELDS / ALPHA
+    if (!is_24_rgb && !is_32) {
+        return make_error(ErrorCode::IOParseFailed, "Image::load: unsupported DIB variant (bit depth / compression)");
+    }
+    // 通道掩码：BI_RGB 用隐含值；BITFIELDS 族从头部（bV5*Mask，偏移 40/44/48/52）或
+    // 40 字节头后随的掩码 DWORD 取（Windows 对 40 字节头 + BITFIELDS 的历史布局）。
+    std::uint32_t mask_r = 0x00FF0000U;
+    std::uint32_t mask_g = 0x0000FF00U;
+    std::uint32_t mask_b = 0x000000FFU;
+    std::uint32_t mask_a = 0U;
+    std::size_t pixel_off = header_size;
+    if (compression != 0) {
+        const bool masks_in_header = header_size >= 52;
+        const std::size_t mask_count = compression == 6 ? 4U : 3U;  // ALPHABITFIELDS 带 4 份
+        if (masks_in_header) {
+            mask_r = le32(40);
+            mask_g = le32(44);
+            mask_b = le32(48);
+            if (header_size >= 56) {
+                mask_a = le32(52);
+            }
+        } else {
+            const std::size_t masks_bytes = mask_count * 4U;
+            if (b.size() < header_size + masks_bytes) {
+                return make_error(ErrorCode::IOParseFailed, "Image::load: DIB mask table truncated");
+            }
+            mask_r = le32(header_size);
+            mask_g = le32(header_size + 4U);
+            mask_b = le32(header_size + 8U);
+            if (mask_count == 4U) {
+                mask_a = le32(header_size + 12U);
+            }
+            pixel_off = header_size + masks_bytes;
+        }
+        // 掩码重叠或为空都会让通道折算出错值：直接拒绝，不猜。
+        if ((mask_r & mask_g) != 0 || (mask_r & mask_b) != 0 || (mask_g & mask_b) != 0 || (mask_r & mask_a) != 0 ||
+            (mask_g & mask_a) != 0 || (mask_b & mask_a) != 0) {
+            return make_error(ErrorCode::IOParseFailed, "Image::load: overlapping DIB channel masks");
+        }
+    }
+    const std::size_t bytes_per_pixel = is_32 ? 4U : 3U;
+    const std::size_t row_bytes =
+        is_32 ? static_cast<std::size_t>(raw_w) * 4U : (((static_cast<std::size_t>(raw_w) * 3U) + 3U) / 4U) * 4U;
+    const std::uint64_t need = static_cast<std::uint64_t>(row_bytes) * static_cast<std::uint64_t>(raw_h);
+    if (pixel_off > b.size() || need > static_cast<std::uint64_t>(b.size() - pixel_off)) {
+        return make_error(ErrorCode::IOParseFailed, "Image::load: DIB pixel data truncated");
+    }
+    // 掩码 → (移位, 位宽)：通道值按位宽折算到 8 位（非 8 位掩码如 10/12 位用就近缩放）。
+    const auto channel_of = [](std::uint32_t pixel, std::uint32_t mask, std::uint8_t fallback) -> std::uint8_t {
+        if (mask == 0) {
+            return fallback;
+        }
+        const auto bits = static_cast<unsigned>(mask);
+        const auto shift = static_cast<unsigned>(std::countr_zero(bits));
+        const auto width = static_cast<unsigned>(std::popcount(bits));
+        const std::uint32_t raw = (pixel & mask) >> shift;
+        if (width >= 8U) {
+            return static_cast<std::uint8_t>(raw >> (width - 8U));
+        }
+        const std::uint32_t max = (1U << width) - 1U;
+        return static_cast<std::uint8_t>(((raw * 255U) + (max / 2U)) / max);
+    };
+    const int w = static_cast<int>(raw_w);
+    const int h = static_cast<int>(raw_h);
+    Image img;
+    img.width = w;
+    img.height = h;
+    img.pixels.resize(static_cast<std::size_t>(w) * static_cast<std::size_t>(h) * 4U);
+    for (std::uint32_t y = 0; y < raw_h; ++y) {
+        // 自底向上（height 为正）：DIB 第 y 行对应图像第 (h-1-y) 行；自顶向下逐行对应。
+        const std::uint32_t image_y = top_down ? y : (raw_h - 1U - y);
+        const std::size_t src_row = pixel_off + (static_cast<std::size_t>(y) * row_bytes);
+        const std::size_t dst_row = static_cast<std::size_t>(image_y) * static_cast<std::size_t>(w) * 4U;
+        for (int x = 0; x < w; ++x) {
+            const std::size_t s = src_row + (static_cast<std::size_t>(x) * bytes_per_pixel);
+            const std::uint32_t pixel = is_32 ? le32(s)
+                                              : static_cast<std::uint32_t>(byte_at(s)) |
+                                                    (static_cast<std::uint32_t>(byte_at(s + 1U)) << 8U) |
+                                                    (static_cast<std::uint32_t>(byte_at(s + 2U)) << 16U);
+            const std::size_t d = dst_row + (static_cast<std::size_t>(x) * 4U);
+            img.pixels[d + 0] = channel_of(pixel, mask_r, 0U);  // R
+            img.pixels[d + 1] = channel_of(pixel, mask_g, 0U);  // G
+            img.pixels[d + 2] = channel_of(pixel, mask_b, 0U);  // B
+            img.pixels[d + 3] = channel_of(pixel, mask_a, 255U);  // A：无 alpha 掩码按不透明
         }
     }
     return img;

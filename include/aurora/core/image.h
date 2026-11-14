@@ -29,6 +29,13 @@ namespace detail {
 /// @param b BMP 字节缓冲。
 /// @return 解码结果；非 24 位未压缩变体返回结构化 Error。
 [[nodiscard]] auto load_bmp(const std::vector<std::uint8_t> &b) -> Result<Image>;
+/// @brief 解析 `CF_DIBV5` 位图块（BITMAPV5HEADER + 掩码/像素区，无 BMP 文件头）→ RGBA8。
+/// 供系统拖放 / 剪贴板入向的 `image/png` 转码复用。支持 24 位 BI_RGB 与 32 位 BI_RGB /
+/// BI_BITFIELDS / BI_ALPHABITFIELDS（掩码按 bV5RedMask 等字段折算通道，行序按 bV5Height
+/// 符号——负值为自顶向下）；8/16 位与 RLE 变体返回结构化 Error。
+/// @param b DIB 块字节（从 bV5Size 字段起；源侧若给了 `BITMAPFILEHEADER` 须先剥去）。
+/// @return 解码结果；头部不完整、维度越界、像素区截断或变体不支持时为结构化 Error。
+[[nodiscard]] auto load_dibv5(const std::vector<std::uint8_t> &b) -> Result<Image>;
 }  // namespace detail
 
 /// @brief 图像资源：像素以 RGBA8 线性存储。

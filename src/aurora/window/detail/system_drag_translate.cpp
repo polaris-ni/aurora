@@ -8,8 +8,11 @@
 #include <array>
 #include <unordered_set>
 #include <utility>
+#include <vector>
 
 #include "aurora/app/mime_types.h"
+#include "aurora/core/image.h"
+#include "aurora/image/image_codec.h"
 
 namespace aurora::drag {
 
@@ -470,6 +473,18 @@ auto make_drop_event(const SystemDropPhase phase, const DragInFrame &frame) -> S
     // 修饰键 → 动作的翻译全库只有 system_drag::proposed_action_for 这一处，折算层复用而非重写。
     event.proposed = system_drag::proposed_action_for(frame.modifiers, frame.os_suggested);
     return event;
+}
+
+auto png_bytes_from_dibv5(const std::vector<std::uint8_t> &dib) -> Result<std::vector<std::uint8_t>> {
+    const auto decoded = detail::load_dibv5(dib);
+    if (!decoded.ok()) {
+        // 解码失败如实上抛：调用方（Win32 桥）按「格式不可兑现」处置，不把失败伪装成空载荷。
+        return make_error(ErrorCode::IOImageDecodeFailed,
+                          "drag: CF_DIBV5 payload is not a decodable DIB block: " + decoded.error().message);
+    }
+    // PNG 编码走注册表：png_write 编码器始终注册（拖出侧 PNG → DIBV5 已依赖同一注册表），
+    // 故该转码在所有构建可兑现，无需新增构建开关。
+    return image::encode(decoded.value(), image::EncodeOptions{.format = image::ImageFormat::PNG});
 }
 
 }  // namespace aurora::drag
