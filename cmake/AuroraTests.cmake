@@ -327,6 +327,11 @@ if (AURORA_BUILD_TESTS)
     # 类型清单与 check_api_schema_sync 同源（都读 aurora_api.json），故新增控件自动进矩阵。
     set(AURORA_CODEGEN_MATRIX_DIR "${CMAKE_BINARY_DIR}/generated")
     set(AURORA_CODEGEN_MATRIX_INC "${AURORA_CODEGEN_MATRIX_DIR}/codegen_matrix.inc")
+    # 目录在 configure 期就建出来：上面那条 include 路径对**每个** runner TU 生效，而 lint 腿
+    # 只配不编（生成目标不会跑）——目录不存在时 `run_clang_tidy.py --emscripten` 的 argv 校验会
+    # 判「include dir missing」整片拒跑（实测 wasm lint 腿 458 条受影响）。生成命令自己的
+    # make_directory 照旧保留：真跑生成时该目录一定在。
+    file(MAKE_DIRECTORY "${AURORA_CODEGEN_MATRIX_DIR}")
     if (TARGET gen_codegen_matrix)
         add_custom_command(
                 OUTPUT "${AURORA_CODEGEN_MATRIX_INC}"
