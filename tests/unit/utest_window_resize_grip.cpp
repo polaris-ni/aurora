@@ -103,9 +103,7 @@ AURORA_TEST_CASE(grip_reports_edge_and_cursor_per_position) {
         const auto chain = grip->hit_test_chain(at, box, ctx);
         AURORA_TEST_REQUIRE_EQ(chain.size(), std::size_t{1});
         AURORA_TEST_CHECK_EQ(chain.front().ptr, static_cast<Widget *>(grip.get()));
-        const auto cursor = grip->cursor_shape();
-        AURORA_TEST_REQUIRE_TRUE(cursor.has_value());
-        AURORA_TEST_CHECK_TRUE(*cursor == p.cursor);
+        AURORA_TEST_CHECK_TRUE(aurora::testing::require_value(grip->cursor_shape()) == p.cursor);
 
         // 同一位置按下即发起对应边档的缩放（每档独立表面与宿主，记录不串档）。
         RecordingSurface surface;

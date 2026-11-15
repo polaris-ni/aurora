@@ -72,6 +72,7 @@ from lint_db import (  # noqa: E402  (path bootstrap above must run first)
     argv_from_command,
     count_generated_tus,
     default_exclude,
+    is_lint_exempt,
     load_db,
     load_tus,
     norm,
@@ -496,12 +497,23 @@ def main() -> int:
     generated_skipped = count_generated_tus(compile_db, a.build_dir)
     if generated_skipped:
         print(f"[lint] build-dir generated TUs excluded: {generated_skipped}")
+    # 点名豁免（口径见 lint_db.LINT_EXEMPT_SOURCES）：同样计数留痕，不做静默丢弃。
+    exempt_skipped = [t for t in tus if is_lint_exempt(t)]
+    if exempt_skipped:
+        tus = [t for t in tus if not is_lint_exempt(t)]
+        print(f"[lint] exempt from analysis (generated build-time input): {len(exempt_skipped)} TU(s) "
+              f"{[norm(t) for t in exempt_skipped]}")
     if not tus:
-        print("error: no translation units selected.", file=sys.stderr)
-        return 2
+        if exempt_skipped:
+            # 选集里只剩豁免项：本遍无待分析 TU，是合法结果而非「选集错」。产物照写（tu_count=0），
+            # 让 CI 侧读到的仍是一份可自证「本遍确实跑过」的凭据，而不是「门禁没跑」。
+            print("[lint] every selected TU is exempt; nothing to analyse")
+        else:
+            print("error: no translation units selected.", file=sys.stderr)
+            return 2
     shard_desc = ""
     tu_total = len(tus)  # 切分前的全量条数：分片产物据此自证「这片是全量的哪一份」
-    if a.shard:
+    if a.shard and tus:
         idx, total = a.shard
         # 切分只在 sorted 清单上做一次 `tus[idx::total]`：顺序唯一确定「谁归哪片」，故同一份
         # 编译库上重复取片稳定、各片两两不相交、并集恰为全量。切片数取模而非按目录分组，是为了
@@ -697,6 +709,8 @@ def main() -> int:
             # 核对 configure 没漏开关、生成物排除确实生效（口径见 BUILD_OPTIONS.md §4.5）。
             "enabled_options": detect_enabled_options(load_db(compile_db)),
             "generated_skipped": generated_skipped,
+            # 点名豁免的 TU 条数：与 generated_skipped 同口径的自述项（见 lint_db.LINT_EXEMPT_SOURCES）。
+            "exempt_skipped": len(exempt_skipped),
             "broken_tus": sorted([[f, m] for f, m in broken.items()]),
             "by_check": by_check.most_common(),
             "by_file": by_file.most_common(),

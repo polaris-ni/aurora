@@ -227,6 +227,21 @@ def count_generated_tus(compile_db: str, build_dir: str | None = None) -> int:
     return n
 
 
+# 分析豁免（仓库相对路径）：TU 的输入是**构建期生成物**，而生成那枚产物的代价等同整编一遍
+# aurora（gen_codegen_matrix 链接库本体取 to_code）时，lint 腿「只配不编」没有廉价途径拿到它。
+# 缺产物时该 TU 只剩一条 clang-diagnostic-error，并且**编译未过的 TU 会把框架头里的检查结果
+# 一并吐出来**（实测 itest_codegen_matrix：6 条噪音盖住真实信号）。两条路都比「不分析」更差：
+# 前者红、后者假绿。故显式豁免并计数留痕——该 TU 的价值（生成物可编译）由每个真正编译 runner
+# 的作业承担，lint 侧不重复付这份成本。
+LINT_EXEMPT_SOURCES = ("tests/integration/itest_codegen_matrix.cpp",)
+
+
+def is_lint_exempt(source: str) -> bool:
+    """该源文件是否在分析豁免清单里（按路径后缀比对，兼容绝对 / 相对两种传入形态）。"""
+    t = norm(source)
+    return any(t == s or t.endswith("/" + s) for s in LINT_EXEMPT_SOURCES)
+
+
 def deps_command(args: list[str]) -> list[str] | None:
     """把某条编译命令改造成「只输出依赖列表」的预处理命令。
 

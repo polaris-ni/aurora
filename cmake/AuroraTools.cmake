@@ -205,6 +205,25 @@ aurora_add_tool(gen_contrast_tools tools/gen/gen_contrast.cpp)
 # 交给编译器判定，不比字符串。类型清单取 aurora_api.json（与 check_api_schema_sync 同源）。
 # 运行：cmake --build build --target gen_codegen_matrix
 aurora_add_tool(gen_codegen_matrix tools/gen/gen_codegen_matrix.cpp)
+if (EMSCRIPTEN)
+    # 本工具**在构建期运行**（custom command 里由 CMAKE_CROSSCOMPILING_EMULATOR = node 拉起），
+    # 是仓内唯一一枚交叉构建下仍需读宿主文件的任务：入参是仓库里的 aurora_api.json，产物写进
+    # 构建目录。Emscripten 默认 MEMFS 两样都办不到（ifstream 打不开宿主绝对路径，产物写进内存盘
+    # 随即蒸发）——wasm 腿实测「cannot read .../aurora_api.json」。NODERAWFS 让 node 直接透传
+    # 宿主文件系统，与测试 runner 同一口径（见 cmake/AuroraTests.cmake 的注）。
+    # 走 NODERAWFS 就须自管堆（该形态产物默认堆不可增长，本工具要解析 200KB+ 的 API JSON 并
+    # 发射上万行产物，默认 16MB 初始堆不够）。按 -pthread 分叉，与测试 runner 同一口径
+    # （见 cmake/AuroraTests.cmake 的注）：单线程腿开 GROWTH；-pthread 腿定容 256MB——
+    # 共享内存在线程运行期增长会触发上游引擎的内存边界缺陷，宁可一次给足。
+    target_link_options(gen_codegen_matrix PRIVATE -sNODERAWFS=1)
+    if (AURORA_ENABLE_WASM_PTHREADS)
+        target_link_options(gen_codegen_matrix PRIVATE
+                -sALLOW_MEMORY_GROWTH=0
+                -sINITIAL_MEMORY=268435456)
+    else ()
+        target_link_options(gen_codegen_matrix PRIVATE -sALLOW_MEMORY_GROWTH=1)
+    endif ()
+endif ()
 
 # 可复现生成：运行 gen_api_tools 直接写 aurora_api.json（跨平台，无需 shell 重定向）。
 # gen_api_tools 全量重写时保留既有 error_codes/debug 段（见 gen_api.cpp）；

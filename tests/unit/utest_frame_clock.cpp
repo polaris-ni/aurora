@@ -24,6 +24,7 @@ namespace aurora::test_cases::utest_frame_clock {
 using aurora::detail::FrameClock;
 using Clock = FrameClock::Clock;
 using TimePoint = FrameClock::TimePoint;
+using aurora::testing::require_value;
 
 [[nodiscard]] auto at(TimePoint base, long long ms) -> TimePoint { return base + std::chrono::milliseconds{ms}; }
 
@@ -53,9 +54,7 @@ AURORA_TEST_CASE(frame_clock_burst_is_capped) {
     // 停摆 1000ms = 100 个换帧点：单轮至多连跳 64 帧，其余由后续帧继续。
     AURORA_TEST_CHECK_EQ(clock.advance_due(at(t0, 1000)), 64);
     // 上限触发后从当前时刻按当前帧延迟重新起算，不是无限期顶格连跳。
-    const auto next = clock.ms_until_due(at(t0, 1000));
-    AURORA_TEST_REQUIRE_TRUE(next.has_value());
-    AURORA_TEST_CHECK_NEAR(*next, 10.0, 1.0);
+    AURORA_TEST_CHECK_NEAR(require_value(clock.ms_until_due(at(t0, 1000))), 10.0, 1.0);
     AURORA_TEST_CHECK_EQ(clock.advance_due(at(t0, 1009)), -1);
     AURORA_TEST_CHECK_EQ(clock.advance_due(at(t0, 1010)), 65);
 }
@@ -91,12 +90,8 @@ AURORA_TEST_CASE(frame_clock_ms_until_due_shapes_wait) {
     clock.load({33U, 16U, 50U});
     const TimePoint t0 = Clock::now();
     clock.start(t0);
-    const auto before = clock.ms_until_due(at(t0, 10));
-    AURORA_TEST_REQUIRE_TRUE(before.has_value());
-    AURORA_TEST_CHECK_NEAR(*before, 23.0, 1.0);
-    const auto due = clock.ms_until_due(at(t0, 33));
-    AURORA_TEST_REQUIRE_TRUE(due.has_value());
-    AURORA_TEST_CHECK_NEAR(*due, 0.0, 0.5);
+    AURORA_TEST_CHECK_NEAR(require_value(clock.ms_until_due(at(t0, 10))), 23.0, 1.0);
+    AURORA_TEST_CHECK_NEAR(require_value(clock.ms_until_due(at(t0, 33))), 0.0, 0.5);
     // 未 start 时不参与等待收敛。
     FrameClock idle;
     idle.load({33U, 16U, 50U});

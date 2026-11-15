@@ -55,6 +55,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lint_db import (  # noqa: E402  (path bootstrap above must run first)
     default_exclude,
     is_auto_generated,
+    is_lint_exempt,
     load_db,
     norm,
     preprocess_deps,
@@ -254,6 +255,14 @@ def main() -> int:
                         print(f"  ... probed {i}/{len(universe)}", flush=True)
             selected = sorted(set(selected))
 
+    # 点名豁免（口径见 lint_db.LINT_EXEMPT_SOURCES）：其输入是构建期生成物，lint 腿「只配不编」
+    # 拿不到那枚产物——留在选集里必红，剔掉才与 run_clang_tidy 的口径一致。计数留痕。
+    exempt = [tu for tu in selected if is_lint_exempt(tu)]
+    if exempt:
+        selected = [tu for tu in selected if not is_lint_exempt(tu)]
+        print("[select] exempt from analysis (generated build-time input): "
+              f"{len(exempt)} TU(s) {[norm(os.path.relpath(t, root)) for t in exempt]}")
+
     # ---- 守卫：认得的 C/C++ 改动却一个 TU 都没选中 = 选集链路坏了 ----
     # （changed-only 模式下空集是合法空闲：只改了头、改动集里没有 TU 本体，留给全量 lint；
     #   故该守卫只在闭包模式下生效。）
@@ -261,15 +270,19 @@ def main() -> int:
     for deps in deps_map.values():
         known |= set(deps)
     known_rel = {norm(os.path.relpath(p, root)) for p in known if p.startswith(root + "/")}
-    applicable = [c for c in cpp_changed if c in known_rel]
-    unmatched = [c for c in cpp_changed if c not in known_rel]
+    # 豁免项不计入 applicable：否则「只改了豁免 TU」会把闭包模式的守卫误判成选集链路坏了。
+    applicable = [c for c in cpp_changed if c in known_rel and not is_lint_exempt(c)]
+    unmatched = [c for c in cpp_changed if c not in known_rel and not is_lint_exempt(c)]
     if not a.changed_only and mode != "none" and applicable and not selected:
         print("error: change set touches C/C++ files known to this compile database, "
               "yet 0 translation units were selected - the selection link is broken "
               "(must not be reported as clean).", file=sys.stderr)
         return 2
     if mode == "subset" and not selected:
-        mode, reason = "none", "no translation unit in this database reads the changed files"
+        # 豁免剔除会同样把选集清空，但原因不同：区分开，否则日志把「证据已豁免」读成「没读到」。
+        mode = "none"
+        reason = ("only exempt translation units are affected (generated build-time input)"
+                  if exempt else "no translation unit in this database reads the changed files")
 
     # ---- 分片：子集小到不值时就少用几片，空片交给 CI 显式 idle ----
     n = len(selected)

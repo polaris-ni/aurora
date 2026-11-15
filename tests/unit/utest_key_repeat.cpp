@@ -25,6 +25,7 @@ namespace aurora::test_cases::utest_key_repeat {
 using aurora::detail::KeyRepeatState;
 using Clock = KeyRepeatState::Clock;
 using TimePoint = Clock::time_point;
+using aurora::testing::require_value;
 
 /// @brief 以基准时刻 + 毫秒偏移构造时间点（用例内统一口径，避免各处手拼 duration）。
 [[nodiscard]] auto at(TimePoint base, long long ms) -> TimePoint { return base + std::chrono::milliseconds{ms}; }
@@ -52,9 +53,7 @@ AURORA_TEST_CASE(key_repeat_burst_is_capped) {
     // 帧循环停摆 100 个间隔：单轮至多补 16 条，其余由后续帧继续（不灌爆事件队列）。
     AURORA_TEST_CHECK_EQ(st.emit_due(at(t0, 400 + (40 * 100))), 16);
     // 上限触发后从当前时刻按整间隔重新计时，不是无限期顶格补。
-    const auto next = st.ms_until_due(at(t0, 400 + (40 * 100)));
-    AURORA_TEST_REQUIRE_TRUE(next.has_value());
-    AURORA_TEST_CHECK_NEAR(*next, 40.0, 1.0);
+    AURORA_TEST_CHECK_NEAR(require_value(st.ms_until_due(at(t0, 400 + (40 * 100)))), 40.0, 1.0);
     AURORA_TEST_CHECK_EQ(st.emit_due(at(t0, 400 + (40 * 100) + 39)), 0);
     AURORA_TEST_CHECK_EQ(st.emit_due(at(t0, 400 + (40 * 100) + 40)), 1);
 }
@@ -108,16 +107,10 @@ AURORA_TEST_CASE(key_repeat_ms_until_due_shapes_wait) {
     const TimePoint t0 = Clock::now();
     st.press(t0, 30U);
     // 首条前读数 = 剩余 delay；到期时刻读数归零（poll 超时取 0，立即回帧循环合成）。
-    const auto before = st.ms_until_due(at(t0, 100));
-    AURORA_TEST_REQUIRE_TRUE(before.has_value());
-    AURORA_TEST_CHECK_NEAR(*before, 300.0, 1.0);
-    const auto due = st.ms_until_due(at(t0, 400));
-    AURORA_TEST_REQUIRE_TRUE(due.has_value());
-    AURORA_TEST_CHECK_NEAR(*due, 0.0, 0.5);
+    AURORA_TEST_CHECK_NEAR(require_value(st.ms_until_due(at(t0, 100))), 300.0, 1.0);
+    AURORA_TEST_CHECK_NEAR(require_value(st.ms_until_due(at(t0, 400))), 0.0, 0.5);
     // 过期后读数也是 0（不给出负数超时）。
-    const auto overdue = st.ms_until_due(at(t0, 500));
-    AURORA_TEST_REQUIRE_TRUE(overdue.has_value());
-    AURORA_TEST_CHECK_NEAR(*overdue, 0.0, 0.5);
+    AURORA_TEST_CHECK_NEAR(require_value(st.ms_until_due(at(t0, 500))), 0.0, 0.5);
     // 未 press 时不参与等待收敛。
     KeyRepeatState idle;
     idle.configure(25, 400);
