@@ -450,9 +450,10 @@
 
 4. **「76 型 × 3 风格」全量产物编译矩阵** —— 已落。`tools/gen/gen_codegen_matrix.cpp` 按 `aurora_api.json` 的在册类型生成矩阵，`tests/integration/itest_codegen_matrix.cpp` 整份 include 后随 runner 编译，故「产物可编译」由编译器判定；当前 68 型 × 3 风格 = **204 格全部编译**，其余 8 型登记在 `tools/gen/codegen_matrix_exemptions.txt`（6 个模板 / 别名型、2 个仅位置构造型），两类均为设计边界。矩阵当场抓到的三处产物面漂移已全部收口：`WebView` 的「禁复制与移动」由 `shared_ptr_owned` 发射分支解决（`au::Node{std::make_shared<…>(…)}`，分步风格改 `->` 写件并拷贝指针交出），`is_unconstructible` 名单补入 `Dismissible`、移出实测可编译的 `BreakpointBuilder`。
 
-仍余两处挂账，性质均为「代码 / 判据未完成」而非「外部证据待取」：
+仍余一处挂账，性质为「代码 / 判据未完成」而非「外部证据待取」：
 
-5. **八处 `font_size` 常量基线未随批迁移**（第二十四批自身登记）：`button.h` / `text_input.h` 两枚表行 provider 各回 14.0F，`chip.h` / `radio_spin.h` 两枚、`tab_bar.h`、`dropdown.h` 回 13.0F，`segmented_control.h` 回 14.0F。迁移会动像素与 golden，故挂账随观感批次处理。
+5. **八处 `font_size` 常量基线未随批迁移** —— **结案：经逐处核对，八处早已不是常量基线**（第二十四批登记时的读数已被后续批覆盖，本行保留编号只改结论）。三档回落点全部落在「作用域主题的字阶正文档」：迁移后的表行件 `ButtonProps::font_size_default` / `TextInputProps::font_size_default`（`button.h` / `text_input.h`）读 `inherit_theme(ctx).type_scale.body_medium.size_pt`，未迁移控件各自的 `effective_font_size(ctx)`（`chip.h` 的 `resolve_font_size`、`radio_spin.h` 两处、`tab_bar.h`、`dropdown.h`、`segmented_control.h`）读同一档并在非正读数时兜底 `TypeScale{}` 的声明值；`aurora_api.json` 里九个 `font_size` 条目的 `default_expr` 亦全为 `type_scale.body_medium`。八处各有用例钉住「未表态随作用域主题、表态即脱离」：`utest_button`（`button_font_size_follows_type_scale_when_unset`）、`utest_text_input`（`font_size_follows_type_scale_when_unset`，本批补：Props 读件 + 撤表态回随 + 0pt 兜底 + 度量随字阶变高）、`utest_chip`、`utest_tab_bar_api`、`utest_dropdown`、`utest_segmented_control`、`utest_radio_spin`（同一用例的 ① - ⑤ 覆盖 RadioGroup 与 SpinBox 两处）。变异自证（改实现看断言转不转红，走最小运行器绕开 PCH 级联）：把 `TextInputProps::font_size_default` 退回 `return 14.0F` ⇒ 该套件恰好一例转红（Diff 8.5 = 22.5 − 14.0），其余套件不受影响；把 `SpinBox::effective_font_size` 退回常量 ⇒ `utest_radio_spin` 的字号用例转红（Diff 10 = 24 − 14）。两处还原后全绿。故本项**不产生像素与 golden 变更**（行为本就如此），第二十四批那条「迁移会动像素」的预判未成立。
+
 6. **未测项其九（OS 无障碍开关推送）** 仍未接线。
 
-因此本提案状态保持「实施中」：与代码侧已闭合、仅余平台运行读数待取的提案相比，本件存在明确的代码侧未完成项，不满足归档判据。
+因此本提案状态保持「实施中」：第 5 项已结案，仅剩第 6 项——它同时是「未测项其九」，规格侧已明文写死「Win32 / Linux 无统一读点、全平台自动跟随不在承诺内」，故它是**已声明的非目标**而非隐蔽缺口；是否按「非目标」处置（从而满足归档判据）待定。

@@ -5,7 +5,8 @@
 /// 上屏落字 / 限长 / 失焦取消 / 参与测量）、Shift+方向键扩选的字符数与退格删选区、
 /// Home/End 跳端点与扩选（含经派发器送达焦点控件）、序列化往返与默认键省略、
 /// Ctrl+X 在剪贴板写入失败时不删选区且留诊断、`value` 可写来源行的双向绑定（键入写穿当前源 /
-/// 换源 / 反序列化写穿）、八枚色行与线宽的主题令牌回落及撤表态恢复随主题
+/// 换源 / 反序列化写穿）、八枚色行与线宽的主题令牌回落及撤表态恢复随主题、`font_size` 派生档
+/// 随作用域字阶（表态脱离 / 撤表态回随 / 非正读数的兜底）
 
 #include <algorithm>
 #include <memory>
@@ -1222,6 +1223,41 @@ AURORA_TEST_CASE(explicit_declaration_stops_theme_follow_and_clear_restores_it) 
     // 未表态 ⇒ 生效值随作用域换肤：同一控件在两档主题下解出各自的令牌。
     const auto [env_l, light] = themed_ctx(Theme::light());
     AURORA_TEST_CHECK_TRUE(ti.text_color(light) == Theme::light().roles.on_surface);
+}
+
+// `font_size` 是派生档而非常量基线：未表态随作用域主题的字阶正文档，表态后不再跟随，撤表态即回随
+// 主题；主题把正文档写成非正数时不退化成零高度可编辑区。
+AURORA_TEST_CASE(font_size_follows_type_scale_when_unset) {
+    Theme tuned;
+    tuned.type_scale.body_medium.size_pt = 22.5F;
+    const auto [env, ctx] = themed_ctx(tuned);
+    (void)env;
+
+    // ① 表行回落点（公共读件在 Props 上）：无作用域取进程级 light 档，注入后跟字阶。
+    AURORA_TEST_CHECK_NEAR(TextInputProps{}.font_size(BuildContext{}), 14.0F, 1e-4F);
+    AURORA_TEST_CHECK_NEAR(TextInputProps{}.font_size(ctx), 22.5F, 1e-4F);
+
+    // ② 表态即脱离主题；撤表态（`clear` 是公共面上唯一的撤法）回到随主题。
+    TextInputProps stated;
+    stated.set_font_size(11.0F);
+    AURORA_TEST_CHECK_NEAR(stated.font_size(ctx), 11.0F, 1e-4F);
+    stated.clear(TextInputProps::font_size_row());
+    AURORA_TEST_CHECK_NEAR(stated.font_size(ctx), 22.5F, 1e-4F);
+
+    // ③ 回落点确实进了度量路径：放大字阶的作用域下同一控件排得更高（两实例各排一次——
+    //    同实例连排会命中布局缓存、整段跳过 `on_layout`）。
+    TextInput tuned_box;
+    TextInput bare_box;
+    LayoutEngine::layout(tuned_box, bounded(300.0F, 300.0F), ctx);
+    LayoutEngine::layout(bare_box, bounded(300.0F, 300.0F));
+    AURORA_TEST_CHECK_GT(tuned_box.size().height, bare_box.size().height);
+
+    // ④ 主题被写成 0pt：兜底取 `TypeScale{}` 的声明值，不退化成零高度文本。
+    Theme degenerate;
+    degenerate.type_scale.body_medium.size_pt = 0.0F;
+    const auto [env_d, ctx_d] = themed_ctx(degenerate);
+    (void)env_d;
+    AURORA_TEST_CHECK_NEAR(TextInputProps{}.font_size(ctx_d), 14.0F, 1e-4F);
 }
 
 }  // namespace aurora::test_cases::utest_text_input
