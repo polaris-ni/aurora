@@ -537,7 +537,7 @@ if (p.is_mobile() && p.capabilities().multitouch) { /* 启用多指手势 */ }
 
 本自由函数是**无缓存的现读**（每次一记注册表 / 文件访问），供启动期解算与显式探测；运行期跟随不要以轮询它实现——`Application` 聚合后端上报（Win32 = `WM_SETTINGCHANGE`）成应用级读点 `os_color_scheme_state()` / `set_on_os_color_scheme()`，口径与聚合范围见 §6.2。
 
-**OS 无障碍偏好查询**：`os_accessibility_settings()`（同为 `window/platform.h` 的自由函数）返回 `AccessibilitySettings` 的三枚可跟随位——`high_contrast` / `reduce_motion` / `font_scale`；`screen_reader_active` 不归它管（由无障碍桥在激活时回填，见 §7.2）。与 `os_color_scheme()` 同款**无缓存现读**，各平台读点与局限：
+**OS 无障碍偏好查询**：`os_accessibility_settings()`（同为 `window/platform.h` 的自由函数）返回 `AccessibilitySettings` 的三枚可跟随位——`high_contrast` / `reduce_motion` / `font_scale`；`screen_reader_active` 不归它管（由无障碍桥在激活时回填，见 [`01-core.md`](01-core.md) §7.2）。与 `os_color_scheme()` 同款**无缓存现读**，各平台读点与局限：
 
 | 平台 | 高对比 | 减弱动效 | 字号缩放 |
 |:--|:--|:--|:--|
