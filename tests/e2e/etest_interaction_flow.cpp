@@ -56,6 +56,32 @@ constexpr auto AURORA_INPUT_FOCUSED = au::Color{255, 248, 220, 255};
 /// @brief 取值名生成器：直接用后端短名，报告里一眼定位失败后端。
 [[nodiscard]] auto flow_backend_name(const e2e::Backend &backend) -> std::string { return e2e::backend_name(backend); }
 
+/// @brief 用例内钉住「减弱动效」档并在析构复原（进程级单例，必须成对）。
+///
+/// 本文件的第三条用例断言「交互会起一段动画」。真实后端建窗时会把 OS 无障碍偏好播种进单例
+/// （`os_accessibility_settings()`，见 `window_factory.cpp`），而宿主机若关掉了系统动画
+/// （CI 的 Windows 镜像默认关，开发机也可能），`reduce_motion` 置位后动画按设计一步落端点——
+/// 断言随之红，且失败原因与被测逻辑无关。故用例显式钉住关档，让判据只回答「交互有没有启动
+/// 动画」这一件事，而不是「这台机器开没开动画」。
+class ScopedReduceMotionPin {
+  public:
+    /// @brief 钉住动效档（其余两枚位保持当前值不变）。
+    /// @param reduce true = 减弱动效（动画一步落端点）；false = 正常播放。
+    explicit ScopedReduceMotionPin(bool reduce) : saved_(au::current_accessibility_settings()) {
+        au::AccessibilitySettings next = saved_;
+        next.reduce_motion = reduce;
+        au::set_accessibility_settings(next);
+    }
+    ~ScopedReduceMotionPin() { au::set_accessibility_settings(saved_); }
+    ScopedReduceMotionPin(const ScopedReduceMotionPin &) = delete;
+    auto operator=(const ScopedReduceMotionPin &) -> ScopedReduceMotionPin & = delete;
+    ScopedReduceMotionPin(ScopedReduceMotionPin &&) = delete;
+    auto operator=(ScopedReduceMotionPin &&) -> ScopedReduceMotionPin & = delete;
+
+  private:
+    au::AccessibilitySettings saved_;
+};
+
 /// @brief 后端矩阵 fixture。
 class InteractionBackends : public testing::TestWithParam<e2e::Backend> {};
 
@@ -387,6 +413,9 @@ AURORA_TEST_P(InteractionBackends, animation_converges_after_interaction) {
     spec.visibility = au::WindowVisibility::Hidden;
 
     auto session = open_checked(spec);
+    // 钉在开窗之后：建窗时已按 OS 真值播种（见类注），此处覆盖回「正常播放」以确保判据与
+    // 宿主机的系统动画开关无关。
+    const ScopedReduceMotionPin motion_pin{false};
     GlideScene scene = build_glide_scene();
     AURORA_TEST_REQUIRE(static_cast<bool>(session.present(scene.root)));
     AURORA_TEST_REQUIRE(static_cast<bool>(session.pump_until_settled()));
