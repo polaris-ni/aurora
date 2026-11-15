@@ -1,4 +1,4 @@
-// macos_platform.cpp — `os_color_scheme()` 的 macOS 分支实现。
+// macos_platform.cpp — `os_color_scheme()` / `os_accessibility_settings()` 的 macOS 分支实现。
 //
 // 为何独立 TU：`os_color_scheme()` 是公共头（`window/platform.h`）里的 inline 函数，其
 // macOS 分支要问 AppKit 的 `NSAppearance`，公共头不能引入 `<AppKit/AppKit.h>`（会污染
@@ -34,6 +34,22 @@ auto macos_os_color_scheme() -> ColorScheme {
         }
         return ([best isEqualToString:NSAppearanceNameDarkAqua] != NO) ? ColorScheme::Dark : ColorScheme::Light;
     }
+}
+
+auto macos_os_accessibility_settings() -> AccessibilitySettings {
+    AccessibilitySettings settings;
+    @autoreleasepool {
+        NSWorkspace *workspace = [NSWorkspace sharedWorkspace];
+        if (workspace == nil) {
+            return settings;  // AppKit 未就绪：默认档（三项全关 = 接入前行为），不猜
+        }
+        // BOOL 的位宽随架构不同（ARM64 = bool、x86_64 = signed char），一律按 `!= NO` 归一化。
+        settings.reduce_motion = [workspace accessibilityDisplayShouldReduceMotion] != NO;
+        settings.high_contrast = [workspace accessibilityDisplayShouldIncreaseContrast] != NO;
+        // macOS 没有系统级的「字号缩放」读数（系统设置的 Text Size 只作用于单个应用），故
+        // `font_scale` 保持 1.0——这一项在 macOS 上如实无证据，不冒充有。
+    }
+    return settings;
 }
 
 }  // namespace aurora::detail

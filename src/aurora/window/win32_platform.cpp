@@ -47,6 +47,66 @@ auto win32_os_color_scheme() -> ColorScheme {
     return value == 0 ? ColorScheme::Dark : ColorScheme::Light;
 }
 
+#ifndef SPI_GETCLIENTAREAANIMATION
+// Windows SDK 版本旋钮，不可改名；旧 SDK 可能缺该定义（与 window_factory.cpp 同款垫片）。
+// NOLINTNEXTLINE(*-macro-usage, *-identifier-naming)
+#define SPI_GETCLIENTAREAANIMATION 0x1042
+#endif
+
+namespace {
+
+/// @brief 读一个 `HKCU\Software\Microsoft\Accessibility` 下的 REG_DWORD 值。
+/// @param name 值名（宽字符）。
+/// @param fallback 键/值缺失、类型或宽度不符时的返回值。
+/// @return 读到的 DWORD，否则 `fallback`。
+auto read_accessibility_dword(const wchar_t *name, DWORD fallback) -> DWORD {
+    HKEY key = nullptr;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Accessibility", 0, KEY_READ, &key) != ERROR_SUCCESS) {
+        return fallback;
+    }
+    DWORD value = fallback;
+    DWORD size = sizeof(value);
+    DWORD type = 0;
+    // 注册表 API 以 BYTE* 承载 DWORD 缓冲：协议约定的宽度重解释，非别名违规（同类见上方实现）。
+    const LSTATUS status = RegQueryValueExW(key, name, nullptr, &type,
+                                            reinterpret_cast<LPBYTE>(&value),  // NOLINT(*-reinterpret-cast)
+                                            &size);
+    RegCloseKey(key);
+    if (status != ERROR_SUCCESS || type != REG_DWORD || size != sizeof(value)) {
+        return fallback;
+    }
+    return value;
+}
+
+}  // namespace
+
+auto win32_os_accessibility_settings() -> AccessibilitySettings {
+    // 三档各读各的系统真源，读不到的项保持结构默认值（不猜）。三条读取成本都是一次系统调用
+    // 或一次开键查询，本函数按「每次直读、不缓存」的口径实现（见 platform.h 头注）。
+    AccessibilitySettings settings;
+
+    // 高对比：SPI_GETHIGHCONTRAST 的 dwFlags 带 HCF_HIGHCONTRASTON 即置位。
+    HIGHCONTRASTW hc{};
+    hc.cbSize = sizeof(hc);
+    if (SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(hc), &hc, 0) != FALSE) {
+        settings.high_contrast = (hc.dwFlags & HCF_HIGHCONTRASTON) != 0U;
+    }
+
+    // 减弱动效：系统「客户端区动画」关掉即视为请求减弱（`SPI_GETCLIENTAREAANIMATION` 返回 BOOL）。
+    BOOL animations_on = TRUE;
+    if (SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &animations_on, 0) != FALSE) {
+        settings.reduce_motion = animations_on == FALSE;
+    }
+
+    // 字号缩放：TextScaleFactor 是百分比整数（100 = 不缩放，系统上限 225）。读不到 / 非法时 1.0；
+    // 低于 100 的值系统不会写，出现即按 1.0 处理（不肯为异常读数缩小正文）。
+    const DWORD text_scale = read_accessibility_dword(L"TextScaleFactor", 100U);
+    if (text_scale >= 100U && text_scale <= 400U) {
+        settings.font_scale = static_cast<float>(text_scale) / 100.0F;
+    }
+    return settings;
+}
+
 }  // namespace aurora::detail
 
 #endif  // AURORA_PLATFORM_WINDOWS

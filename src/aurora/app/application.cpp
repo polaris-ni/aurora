@@ -210,6 +210,13 @@ auto Application::refresh_os_color_scheme() -> void {
     on_os_color_scheme_changed(aurora::os_color_scheme());
 }
 
+auto Application::refresh_os_accessibility_settings() -> void {
+    // 与 `refresh_os_color_scheme` 同一口径：现读一次系统真值、经唯一出口写入，幂等。
+    // 出口换成进程级单例（`set_accessibility_settings`）而不是应用级 State——三档开关本就是
+    // 进程级输入，窗口侧的跟随由每帧差量比对完成，不经应用级聚合。
+    set_accessibility_settings(aurora::os_accessibility_settings());
+}
+
 // =============================================================================
 // 应用级默认音频上下文（惰性创建；媒体/audio.h §9.4）
 // =============================================================================

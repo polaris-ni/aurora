@@ -252,6 +252,26 @@ struct MacOSSurface::Impl {
         }
     }
 
+    /// @brief 询问 AppKit 当前无障碍偏好（高对比 / 减弱动效）并在变化时写进进程级单例。
+    ///
+    /// 为什么写单例而不逐窗上报：三档开关住在 `AccessibilitySettings`（进程级事实），本库的窗口
+    /// 每帧用 `Window::sync_accessibility_fold()` 比对那份单例并自行差量标脏——与 Win32 侧
+    /// `WM_SETTINGCHANGE` 同一口径。触发点两处：`app_ready` 置位时的基线、内容视图收到的
+    /// `NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification`。
+    /// @note 只写三枚开关位；`screen_reader_active` 由无障碍桥自己维护，这里不碰。
+    auto sync_accessibility() const -> void {
+        if (!app_ready) {
+            return;
+        }
+        const AccessibilitySettings fold = aurora::detail::macos_os_accessibility_settings();
+        const AccessibilitySettings current = aurora::current_accessibility_settings();
+        if (fold.high_contrast == current.high_contrast && fold.reduce_motion == current.reduce_motion &&
+            fold.resolved_font_scale() == current.resolved_font_scale()) {
+            return;  // 同值不写：避免打断同进程里刚注入的自定义档
+        }
+        aurora::set_accessibility_settings(fold);
+    }
+
     /// @brief 安装系统拖放桥（窗口壳建好之后调用：登记与发起都以内容视图为落点）。
     ///
     /// 失败即本窗口不参与系统拖放，如实记日志降级、不谎报已有通路。
@@ -288,6 +308,8 @@ struct MacOSSurface::Impl {
             [app setActivationPolicy:NSApplicationActivationPolicyRegular];
             [app finishLaunching];
             app_ready = true;
+            // 无障碍偏好基线：窗口建立时读一次写进进程级单例（启动即跟随系统的高对比 / 减弱动效）。
+            sync_accessibility();
 
             transparent = style.transparent;
             // 装饰档位映射的真源在 `detail/macos_decoration.h`（纯布尔结论，可在任意 runner 上
@@ -380,6 +402,13 @@ struct MacOSSurface::Impl {
             // Impl::view 是随窗口存活的非拥有观察指针，之后的 makeFirstResponder / 拖放登记
             // 与 destroy_window 内的 setContentView:nil 都以窗口的持有为准。
             [view release];
+            // 无障碍偏好（高对比 / 减弱动效）变化：NSWorkspace 广播，内容视图为观察者。
+            // 选择器式登记（非 block 式）：通知中心不持有观察者，MRC 下无需管理 token 的所有权。
+            [[NSNotificationCenter defaultCenter]
+                addObserver:[window contentView]
+                   selector:@selector(auroraAccessibilityDisplayOptionsDidChange:)
+                       name:NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification
+                     object:nil];
             [window makeFirstResponder:view];
 
             delegate = [[AuroraMacWindowDelegate alloc] initWithImpl:this];
@@ -445,6 +474,10 @@ struct MacOSSurface::Impl {
         a11y_root = nullptr;
         drag.reset();
         recent_docs.reset();
+        // 先摘除无障碍偏好观察者：视图随窗口销毁，留着登记会在下一次系统广播打到悬垂指针。
+        if (view != nil) {
+            [[NSNotificationCenter defaultCenter] removeObserver:view];
+        }
         if (window != nil) {
             [window setDelegate:nil];
             [window orderOut:nil];
@@ -602,6 +635,14 @@ auto dispatch_mouse(aurora::MacOSSurface::Impl *impl, NSEvent *event, MouseActio
     [super viewDidChangeEffectiveAppearance];
     if (impl != nullptr) {
         impl->sync_color_scheme();
+    }
+}
+
+// 系统无障碍偏好（高对比 / 减弱动效）变化：写进进程级单例，各窗下一帧自行差量标脏。
+- (void)auroraAccessibilityDisplayOptionsDidChange:(NSNotification *)note {
+    (void)note;
+    if (impl != nullptr) {
+        impl->sync_accessibility();
     }
 }
 

@@ -537,6 +537,17 @@ if (p.is_mobile() && p.capabilities().multitouch) { /* 启用多指手势 */ }
 
 本自由函数是**无缓存的现读**（每次一记注册表 / 文件访问），供启动期解算与显式探测；运行期跟随不要以轮询它实现——`Application` 聚合后端上报（Win32 = `WM_SETTINGCHANGE`）成应用级读点 `os_color_scheme_state()` / `set_on_os_color_scheme()`，口径与聚合范围见 §6.2。
 
+**OS 无障碍偏好查询**：`os_accessibility_settings()`（同为 `window/platform.h` 的自由函数）返回 `AccessibilitySettings` 的三枚可跟随位——`high_contrast` / `reduce_motion` / `font_scale`；`screen_reader_active` 不归它管（由无障碍桥在激活时回填，见 §7.2）。与 `os_color_scheme()` 同款**无缓存现读**，各平台读点与局限：
+
+| 平台 | 高对比 | 减弱动效 | 字号缩放 |
+|:--|:--|:--|:--|
+| Win32 | `SystemParametersInfoW(SPI_GETHIGHCONTRAST)` 的 `HCF_HIGHCONTRASTON` | `SPI_GETCLIENTAREAANIMATION` 为 FALSE | `HKCU\Software\Microsoft\Accessibility\TextScaleFactor`（百分比，100 = 不缩放） |
+| macOS | `NSWorkspace.accessibilityDisplayShouldIncreaseContrast` | `accessibilityDisplayShouldReduceMotion` | **无系统级读数**（Text Size 只作用于单个应用）⇒ 恒 1.0 |
+| Linux | GTK `settings.ini` 的 `gtk-theme` 含 `HighContrast`（主题名约定，非专用键） | 同文件的 `gtk-enable-animations=false` | 真值在 dconf（库侧不引入 D-Bus）⇒ 恒 1.0 |
+| 其余 | 恒关 | 恒关 | 恒 1.0 |
+
+读到的新值写进**进程级单例** `current_accessibility_settings()`：本库窗口每帧按它做差量比对（`Window::sync_accessibility_fold()`，见 [`07-environment-modifier.md`](07-environment-modifier.md) §5.1），故「读到新值 → 写单例」即完成整棵树的跟随，不需要逐窗上报。**什么时候读**三档：① 首个真实窗口建立时 `create_window` 播种一次（进程内一次；**无头 Surface 不播**——那是应用与测试注入档位的接缝，见 `window_factory.cpp` 的 `seed_os_accessibility_once`）；② 运行期 Win32 在 `WM_SETTINGCHANGE`（区名 `ImmersiveColorSet` 或 `Accessibility`，其余区名早退）重读并写回，macOS 由内容视图收到的 `NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification` 触发；③ **Linux 没有对等广播**——系统开关变化后只能由应用显式调 `Application::refresh_os_accessibility_settings()`（幂等；应用侧也可用它做「重读一次」的按钮）。
+
 **桌面外壳证据查询**：`desktop_environment()`（`window/platform.h`）返回 `DesktopEnvironment{Unknown, Gnome, Kde, Other}`，是主题风格轴的第二枚输入——`platform().kind` 表 OS 家族，分不出同一台 Linux 机器跑的是 GNOME 还是 KDE，而这两者的观感应当不同。它**不并进** `Platform` 快照：`platform()` 的口径是「编译期 OS + 自动探测 Surface」，且大量既有断言逐字段比较它的取值，扩字段会牵动它们。证据链为 `XDG_CURRENT_DESKTOP`（冒号分隔、逐段折小写做子串匹配，KDE 先于 GNOME）→ `DESKTOP_SESSION` → 两段都非空却一个也不认识记 `Other`、两段皆缺记 `Unknown`；**只有 Linux / BSD 分支读进程环境**，Windows / macOS / WASM / Android / 无头恒返回 `Unknown`——它们的外壳证据在 `kind` 那一轴，由环境变量表态反而制造假证据。`Unknown`（证据缺失）与 `Other`（环境说了但不认识）分列，探测**没有失败态**。读取口径与 `os_color_scheme()` 相反：本函数每次现读（供诊断与测试如实取数），风格解算侧的缓存落在 `Theme::default_style()`（进程级静态局部量），故换桌面外壳要重启应用；两轴差异的理由见 [`07-environment-modifier.md`](07-environment-modifier.md) §5.2。实现体全库唯一一份在 `src/aurora/theming/detail/theme_probe.cpp`，本函数只做转发——第二处 `getenv` 读取会让「主题按 KDE 解算、平台探测说没有外壳」这类矛盾各自漂移。判据表是纯函数，14 格逐格断言与环境变量四态域不变量由 `utest_theme_probe` 锚定。
 
 ---

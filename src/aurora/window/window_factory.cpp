@@ -43,6 +43,9 @@
 #include "aurora/window/wgpu_wayland_surface.h"
 #endif
 
+// 无障碍偏好播种（`os_accessibility_settings`）跨后端共用，故本头必须在下面的条件块之外。
+#include "aurora/window/platform.h"
+
 // Glfw 分支仅在 AURORA_BACKEND_GLFW 定义时编译，避免默认构建引入 GLFW/OpenGL 依赖
 // （保证零三方依赖的默认库）。
 #ifdef AURORA_BACKEND_GLFW
@@ -72,8 +75,36 @@ namespace aurora {
 // 尚未生效，`GetDeviceCaps` 只能回 96（= scale 1.0）。此处是「任何窗口创建之前」的最后可用
 // 落点，与 `specification/03-layout-render.md` 的承诺一致。函数自身幂等（进程级 static 守卫），
 // 直接构造 `Win32Host` 的消费者仍由 `Impl` 构造体内那处兜底。
+/// @brief 首次真实窗口建立时把 OS 无障碍偏好播种进进程级单例（进程内一次）。
+///
+/// 播种的是什么：高对比 / 减弱动效 / 字号缩放三档（`os_accessibility_settings()`）。本库的窗口
+/// 每帧拿这份单例比对（`Window::sync_accessibility_fold()`），故播一次即让「启动时系统已开高对比
+/// 或调过字号」生效，不必等用户先动一次开关；运行期变化由各后端推送（Win32 `WM_SETTINGCHANGE`、
+/// macOS `NSWorkspace` 通知）继续更新。
+///
+/// 为什么只播一次、且只对真实后端播：单例同时是**应用与测试的注入点**（`set_accessibility_settings`）。
+/// 每次建窗都写会覆盖应用在首个窗口之后设置的自定义档；无头 Surface 则是单测注入的固定接缝，
+/// 一旦播种就再也测不了「开关置位后如何表现」。两个约束合起来的口径是「OS 只在第一次有机会
+/// 说话」——此后的真值来源是显式设置或后端推送。
+static auto seed_os_accessibility_once() -> void {
+    static bool seeded = false;
+    if (seeded) {
+        return;
+    }
+    seeded = true;
+    set_accessibility_settings(os_accessibility_settings());
+}
+
 static auto make_window(std::unique_ptr<Surface> surf, const WindowOptions &o) -> std::unique_ptr<Window> {
     enable_dpi_awareness();
+#ifdef AURORA_BACKEND_HEADLESS
+    // 无头 Surface 不播种：它是测试注入无障碍档位的接缝（见上）。
+    if (dynamic_cast<const HeadlessSurface *>(surf.get()) == nullptr) {
+        seed_os_accessibility_once();
+    }
+#else
+    seed_os_accessibility_once();
+#endif
     auto w = std::make_unique<Window>(std::move(surf));
     w->set_title(o.title);
     return w;

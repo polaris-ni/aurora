@@ -418,6 +418,21 @@ class Application {
     /// @note 平台无探测能力或探测失败时返回 `Unspecified`（不回落明/暗，与 State 口径一致）。
     auto refresh_os_color_scheme() -> void;
 
+    /// @brief 显式重读 OS 无障碍偏好（高对比 / 减弱动效 / 字号缩放）并写进进程级单例。
+    ///
+    /// 正常路径不需要调用：首个真实窗口建立时 `create_window` 已播种一次，之后 Win32
+    /// （`WM_SETTINGCHANGE`）与 macOS（`NSWorkspace` 通知）各自推送。**Linux 是个例外**——那里没有
+    /// 与 `WM_SETTINGCHANGE` 对等的广播，`refresh_os_accessibility_settings()` 是系统开关变化后
+    /// 让界面跟上的唯一手段（可由应用在自己的设置页收尾、或定时器里调）。
+    ///
+    /// 幂等：与当前单例逐位相同即不写（也不触发任何标脏——各窗的差量比对见
+    /// `Window::sync_accessibility_fold()`）。与 `refresh_os_color_scheme()` 的差别是它写的是
+    /// **进程级单例**而不是应用级 State：无障碍三档本来就是进程级输入，没有 per-app 聚合口径。
+    /// @note Side-effects: 读系统设置（Win32 三次系统调用 / macOS 两次 ObjC 消息 / Linux 一次
+    ///       配置文件读）。
+    /// @note Thread: main-thread only
+    auto refresh_os_accessibility_settings() -> void;
+
     /// @brief 设置运行时严格模式（specification/01-core.md §4.3 / CI 门禁）。
     /// `run()` 期间套用到线程级开关；默认 Off。
     /// @param m 严格模式值（run() / render_to_png() 期间生效）。

@@ -210,6 +210,8 @@ struct Win32Host::Impl {  // NOLINT(clang-analyzer-optin.performance.Padding)
     std::function<void(float)> scale_handler;  ///< DPI 缩放变化上报（`WM_DPICHANGED` 后触发）。
     Surface::OsColorSchemeHandler os_scheme_handler;  ///< OS 明暗偏好变化上报（`WM_SETTINGCHANGE` 探测到切换后触发）。
     ColorScheme os_scheme_cache = ColorScheme::Unspecified;  ///< 上次推送的 OS 档位（去重：相同档位不重复上报）。
+    /// 上次写进进程级单例的 OS 无障碍偏好（去重：相同档位不重复写；见 `handle_setting_change`）。
+    AccessibilitySettings os_accessibility_cache{};
     /// @brief 无障碍桥（由窗口宿主持有，GDI / D3D11 两个 Surface 共用同一实例）。
     std::unique_ptr<detail::Win32UiaBridge> a11y;
     /// @brief 宿主接管 `WM_GETOBJECT` 的钩子（默认空 → 走内置桥）。
@@ -361,6 +363,12 @@ struct Win32Host::Impl {  // NOLINT(clang-analyzer-optin.performance.Padding)
 Win32Host::Impl::Impl(int w, int h, const std::string &title, const WindowStyleOptions &style,
                       WindowVisibility visibility)
     : style(style), os_scheme_cache(detail::win32_os_color_scheme()), title(title) {
+    // OS 无障碍偏好基线（去重基准）：本窗口建立前的单例播种由 `window_factory` 的
+    // `make_window` 统一做（进程内一次，见该处注释）；这里只把同一份读数记成基线，供
+    // `WM_SETTINGCHANGE` 判「相对基线变了没」。构造期读而不每帧读：三条读取各是一次系统调用 /
+    // 开键查询，帧路径不该付这笔钱。
+    os_accessibility_cache = detail::win32_os_accessibility_settings();
+
     // OS 明暗偏好基线（见上方注释）：构造期读一次注册表，之后 WM_SETTINGCHANGE 只上报
     // 「相对本基线的变化」——否则首条消息会把 attach_surface 已推入的档位当新变化重复上报。
     // DPI 感知必须早于**任何**窗口创建：`create_window` 路径已由 `make_window` 前移启用；
@@ -850,11 +858,16 @@ auto Win32Host::Impl::handle_setting_change([[maybe_unused]] WPARAM wp, LPARAM l
     // 系统广播的设置变化里，明暗外观切换以 `ImmersiveColorSet` 标识（lParam 指向该宽串）；
     // lParam 为空表示未指明哪项变化，保守重读。注册表成本仅一次开键+查询，可忽略，
     // 而「错过一次切换」的代价（界面停在旧档直到重建窗口）远大于多重读。
+    // 无障碍三档（高对比 / 减弱动效 / 字号缩放）走同一族广播：高对比与明暗共用
+    // `ImmersiveColorSet`，字号缩放的广播区名是 `Accessibility`（Win10 1709+ 实测）。两者放行，
+    // 其余区域名的变化与本文两族无关，仍早退。
+    bool relevant = lp == 0;  // lParam 为空 = 未指明哪项变化，保守重读
     if (lp != 0) {
         const auto *area =
             reinterpret_cast<const wchar_t *>(lp);  // NOLINT(*-pro-type-reinterpret-cast, *-no-int-to-ptr)
-        if (std::wcscmp(area, L"ImmersiveColorSet") != 0) {
-            return 0;  // 与明暗无关的设置变化：不重读、不上报
+        relevant = std::wcscmp(area, L"ImmersiveColorSet") == 0 || std::wcscmp(area, L"Accessibility") == 0;
+        if (!relevant) {
+            return 0;  // 与明暗 / 无障碍都无关的设置变化：不重读、不上报
         }
     }
     const ColorScheme fresh = detail::win32_os_color_scheme();
@@ -862,6 +875,18 @@ auto Win32Host::Impl::handle_setting_change([[maybe_unused]] WPARAM wp, LPARAM l
         os_scheme_cache = fresh;
         if (os_scheme_handler) {
             os_scheme_handler(fresh);
+        }
+    }
+    if (relevant) {
+        // 三档一次读全（成本三次系统调用）后按**整体**比较：只改字号也要写回，故不能逐位短路。
+        // 写的是进程级单例——多窗口共享同一份真值，各窗下一帧的 `sync_accessibility_fold()` 自行
+        // 差量标脏，本层不必逐窗口上报。
+        const AccessibilitySettings fold = detail::win32_os_accessibility_settings();
+        if (fold.high_contrast != os_accessibility_cache.high_contrast ||
+            fold.reduce_motion != os_accessibility_cache.reduce_motion ||
+            fold.resolved_font_scale() != os_accessibility_cache.resolved_font_scale()) {
+            os_accessibility_cache = fold;
+            set_accessibility_settings(fold);
         }
     }
     return 0;

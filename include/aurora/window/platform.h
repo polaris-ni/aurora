@@ -4,6 +4,7 @@
 #include <fstream>
 #include <string>
 
+#include "aurora/core/accessibility.h"
 #include "aurora/core/platform.h"
 #include "aurora/environment/media_query.h"
 #include "aurora/theming/color_scheme.h"
@@ -301,6 +302,22 @@ namespace detail {
 }  // namespace detail
 #endif
 
+#ifdef AURORA_PLATFORM_WINDOWS
+namespace detail {
+/// @brief Win32 读取 OS 无障碍偏好（`os_accessibility_settings` 的 Windows 分支实现）。
+/// 定义见 `src/aurora/window/win32_platform.cpp`——公共头不引入 `<windows.h>`。
+/// @return 高对比 / 减弱动效 / 字号缩放三档；读不到的项保持该结构的默认值（不猜）。
+[[nodiscard]] auto win32_os_accessibility_settings() -> AccessibilitySettings;
+}  // namespace detail
+#elif defined(AURORA_PLATFORM_MACOS) && defined(AURORA_BACKEND_MACOS)
+namespace detail {
+/// @brief macOS `NSWorkspace` 读取 OS 无障碍偏好（`os_accessibility_settings` 的 macOS 分支实现）。
+/// 定义见 `src/aurora/window/macos_platform.cpp`——公共头不引入 `<AppKit/AppKit.h>`。
+/// @return 高对比 / 减弱动效两档取 `accessibilityDisplay*` 读数；字号缩放无系统级全局值，恒 1.0。
+[[nodiscard]] auto macos_os_accessibility_settings() -> AccessibilitySettings;
+}  // namespace detail
+#endif
+
 /// @brief 显式查询 OS 明暗偏好（明暗三级优先链的最低层）。
 ///
 /// 各平台实现与局限：
@@ -358,6 +375,67 @@ namespace detail {
     return ColorScheme::Unspecified;
 #else
     return ColorScheme::Unspecified;
+#endif
+}
+
+/// @brief 显式查询 OS 无障碍偏好（高对比 / 减弱动效 / 字号缩放）。
+///
+/// 与 `os_color_scheme()` 同一口径：**每次调用直读、不缓存**（OS 侧随时可能被改动，读取成本按
+/// 平台见下），调用方负责把它写进进程级单例（`set_accessibility_settings`）——本库的窗口每帧
+/// 用 `Window::sync_accessibility_fold()` 比对那份单例，故「读到新值 → 写单例」即完成跟随。
+///
+/// 各平台实现与局限：
+/// - **Windows**：`SystemParametersInfoW` 读 `SPI_GETHIGHCONTRAST`（`HCF_HIGHCONTRASTON`）与
+///   `SPI_GETCLIENTAREAANIMATION`（关 = 减弱动效）；字号缩放读注册表
+///   `HKCU\Software\Microsoft\Accessibility\TextScaleFactor`（REG_DWORD，百分比，100 = 不缩放）。
+///   运行期切换由 `Win32Host` 的 `WM_SETTINGCHANGE` 重读并写回单例。
+/// - **macOS**：`NSWorkspace.accessibilityDisplayShouldIncreaseContrast` /
+///   `accessibilityDisplayShouldReduceMotion`。macOS 没有系统级「字号缩放」读数（Text Size 只作用于
+///   单个应用），故 `font_scale` 恒 1.0；运行期切换经内容视图的 AppKit 通知重读。
+/// - **Linux**：GTK 配置启发式（与 `os_color_scheme()` 读同一份 `settings.ini`）——
+///   `gtk-enable-animations=false` 判减弱动效、`gtk-theme` 含 `HighContrast` 判高对比；
+///   字号缩放无统一读点（GNOME 的 `text-scaling-factor` 在 dconf，库侧不引入 D-Bus），恒 1.0。
+///   **无运行期推送**：Linux 侧没有与 `WM_SETTINGCHANGE` 对等的广播通路，只能在启动时读一次，
+///   之后由应用显式调用 `Application::refresh_os_accessibility_settings()` 重取。
+/// - 其余平台：默认档（三项全关），与接入前逐位一致。
+/// @return OS 无障碍偏好；读不到的项保持默认值，不猜。
+[[nodiscard]] inline auto os_accessibility_settings() -> AccessibilitySettings {
+#ifdef AURORA_PLATFORM_WINDOWS
+    // 实现见 src/aurora/window/win32_platform.cpp：<windows.h> 与注册表查询不进公共头。
+    return detail::win32_os_accessibility_settings();
+#elif defined(AURORA_PLATFORM_LINUX)
+    AccessibilitySettings settings;
+    const char *xdg = std::getenv("XDG_CONFIG_HOME");
+    const char *home = std::getenv("HOME");
+    const std::string base =
+        (xdg != nullptr && *xdg != '\0') ? std::string(xdg) : std::string(home == nullptr ? "" : home) + "/.config";
+    for (const char *ver : {"gtk-4.0", "gtk-3.0"}) {
+        std::ifstream in(base + "/" + ver + "/settings.ini");
+        if (!in.is_open()) {
+            continue;
+        }
+        std::string line;
+        bool any_line = false;
+        while (std::getline(in, line)) {
+            any_line = true;
+            // `gtk-enable-animations=false`：GTK 侧的「减弱动效」（GNOME 的无障碍开关写的就是这一键）。
+            if (line.find("gtk-enable-animations") != std::string::npos && line.find("false") != std::string::npos) {
+                settings.reduce_motion = true;
+            }
+            // 高对比只是主题名约定（无专用键）：与 `os_color_scheme()` 判 `-dark` 同一档证据。
+            if (line.find("gtk-theme") != std::string::npos && line.find("HighContrast") != std::string::npos) {
+                settings.high_contrast = true;
+            }
+        }
+        if (any_line) {
+            return settings;
+        }
+    }
+    return settings;
+#elif defined(AURORA_PLATFORM_MACOS) && defined(AURORA_BACKEND_MACOS)
+    return detail::macos_os_accessibility_settings();
+#else
+    return AccessibilitySettings{};
 #endif
 }
 
