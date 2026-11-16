@@ -559,7 +559,7 @@ au::Column{}
 
 **命中复杂度契约**：`hit_test_char{,_inclusive}` 与 `display_` 变体均为单趟扫描 O(n)，**禁止**退化为「逐边界重算前缀」的 O(n²)。
 
-**Shape 缓存**：`shape_line(line, faces, px, opts)` 是全库唯一 shaping 入口，其外包一层进程级 LRU 缓存，键为 `{line, px, opts, faces_key}`，双上限 **4096 条 / 8 MiB**，命中即复用已 shape 的 `ShapedLine::glyphs` 并跳过 `hb_shape`，结果与重算逐位一致。公共 API：`FontEngine::shape_cache_stats()`（返回 `ShapeCacheStats{hits, misses, entries, bytes}`）与 `FontEngine::shape_cache_clear()`；二者**不受 `AURORA_ENABLE_PROFILING` 门控，任何构建下均可读**。字体注入接口内部自动清空 shape 缓存，避免字体集合变更后复用旧字形索引。
+**Shape 缓存**：`shape_line(line, faces, px, opts)` 是全库唯一 shaping 入口，其外包一层进程级 LRU 缓存，键为 `{line, px, opts, faces_key, chain_key}`，双上限 **4096 条 / 8 MiB**，命中即复用已 shape 的 `ShapedLine::glyphs` 并跳过 `hb_shape`，结果与重算逐位一致。命中路径**零堆分配**：查找用只借用行视图与 opts 的透明探针，不为构造 owning 键拷贝整行文本；返回值是缓存条目内字形数组的 `std::span<const ShapedGlyph>` 而非整份副本。该视图的有效期到对应条目被淘汰为止——刚命中的条目已被提到 MRU，淘汰只从 LRU 尾部取，故「取出即消费」的调用形态安全；调用方**不得**跨行或跨帧长期持有（长循环里早先取出的条目可能被后续插入挤掉）。行切分同样返回指向调用方文本的 `std::string_view`，不再逐字符建串，故绘制/度量/光标/命中四条路径的单行文本调用都不再产生行与 run 的字符串拷贝。公共 API：`FontEngine::shape_cache_stats()`（返回 `ShapeCacheStats{hits, misses, entries, bytes}`）与 `FontEngine::shape_cache_clear()`；二者**不受 `AURORA_ENABLE_PROFILING` 门控，任何构建下均可读**。字体注入接口内部自动清空 shape 缓存，避免字体集合变更后复用旧字形索引。
 
 > **Headless 行为**：字体加载**不按后端分支**——`render/font_discovery` 无条件注册内置 Noto Sans（见上文「默认字体」），`HeadlessSurface` 下走同一 FreeType 栅格化路径，`draw_text` 实际写入内存帧缓冲。这正是上文「含 Headless 逐位确定」与 §10.1 像素级 golden 回归成立的前提，涉及真实字形绘制的问题在无头下同样可复现。
 

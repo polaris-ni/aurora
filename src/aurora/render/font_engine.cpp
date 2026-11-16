@@ -54,7 +54,7 @@ constexpr float AURORA_LOGICAL_DPI = 96.0F;
 constexpr float AURORA_POINTS_PER_INCH = 72.0F;
 
 // ---------- UTF-8 工具（utf8_cp_len 已收口到 aurora::utf8_cp_len，见 core/utf8.h） ----------
-auto utf8_decode(const std::string &s, std::size_t &i, unsigned &cp) -> int {
+auto utf8_decode(std::string_view s, std::size_t &i, unsigned &cp) -> int {
     const auto c0 = static_cast<unsigned char>(s.at(i));
     int len = utf8_cp_len(c0);
     // 序列长度只由首字节决定，故截断的多字节序列（"…\xF0" 之类）会让下方后续字节访问
@@ -84,10 +84,10 @@ auto utf8_decode(const std::string &s, std::size_t &i, unsigned &cp) -> int {
     return len;
 }
 
-[[nodiscard]] auto cp_count(const std::string &s) -> std::size_t {
+[[nodiscard]] auto cp_count(std::string_view s) -> std::size_t {
     std::size_t c = 0;
     std::size_t i = 0;
-    const std::string::size_type n = s.size();
+    const std::size_t n = s.size();
     while (i < n) {
         unsigned cp = 0;
         utf8_decode(s, i, cp);
@@ -223,34 +223,75 @@ struct ShapeCacheKey {
     }
 };
 
+// 查找探针：只借用调用方的行视图与排版选项，供**透明查找**用——命中路径不再为构造键
+// 拷贝整行文本与回退链（长行每帧每行一次的堆分配）。
+//
+// 只在 `shape_line` 的一次查找期间存活，不得存进任何容器（`line` 与 `opts` 均为借用）。
+struct ShapeCacheProbe {
+    std::string_view line;
+    int px = 0;
+    const TextLayoutOpts *opts = nullptr;
+    std::uint64_t faces_key = 0;
+    std::uint64_t chain_key = 0;
+};
+
+// 键与探针共用的混合式：两者相等时哈希必须逐位相同，故行文本一律按 `string_view` 求哈希
+// （不与 `std::hash<std::string>` 混用：跨类型哈希一致不在标准保证内）。
+[[nodiscard]] auto shape_hash_of(std::string_view line, int px, const TextLayoutOpts &opts, std::uint64_t faces_key,
+                                 std::uint64_t chain_key) noexcept -> std::size_t {
+    auto h = std::hash<std::string_view>{}(line);
+    const auto mix = [&](std::uint64_t v) -> void {
+        h ^= static_cast<std::size_t>(v) + 0x9e3779b97f4a7c15ULL + (h << 6U) + (h >> 2U);
+    };
+    mix(static_cast<std::uint64_t>(px));
+    std::uint32_t u = 0;
+    std::memcpy(&u, &opts.letter_spacing, 4);
+    mix(u);
+    std::memcpy(&u, &opts.word_spacing, 4);
+    mix(u);
+    mix(opts.italic ? 0x1001ULL : 0ULL);
+    // direction 进缓存键：nullopt=guess（0），显式 LTR/RTL 各占一档。
+    mix(opts.direction.has_value() ? (0x2000ULL + static_cast<std::uint64_t>(*opts.direction)) : 0ULL);
+    // 回退链进缓存键：链决定选面。摘要由构造处预计算（见 chain_key 字段的注释：哈希函数
+    // 是 noexcept，不能在里面哈希字符串）。faces_key 已覆盖解析出的面序列，链摘要只补
+    // 「两条链解析出同一组面」时的那部分差异 —— 保守方向：宁可少命中，不可命中错的。
+    mix(chain_key);
+    // fixed_cell_advance_px 不影响 shaping 输出（只改 pen 推进），但推进相关的度量函数
+    // 复用本缓存的 glyphs，故必须进键 —— 否则开了档与没档会互相命中，字距静默错位。
+    mix(opts.fixed_cell_advance_px.has_value()
+            ? (0x4000ULL +
+               static_cast<std::uint64_t>(std::lround(static_cast<double>(*opts.fixed_cell_advance_px) * 64.0)))
+            : 0ULL);
+    mix(faces_key);
+    return h;
+}
+
+// 透明哈希：键与探针各一条重载，保证同内容同哈希。
 struct ShapeCacheKeyHash {
+    // 标准以固定小写名 `is_transparent` 识别透明重载，与本仓类型别名命名规则冲突，就地豁免。
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    using is_transparent = void;
     auto operator()(const ShapeCacheKey &k) const noexcept -> std::size_t {
-        auto h = std::hash<std::string>{}(k.line);
-        const auto mix = [&](std::uint64_t v) -> void {
-            h ^= static_cast<std::size_t>(v) + 0x9e3779b97f4a7c15ULL + (h << 6U) + (h >> 2U);
-        };
-        mix(static_cast<std::uint64_t>(k.px));
-        std::uint32_t u = 0;
-        std::memcpy(&u, &k.opts.letter_spacing, 4);
-        mix(u);
-        std::memcpy(&u, &k.opts.word_spacing, 4);
-        mix(u);
-        mix(k.opts.italic ? 0x1001ULL : 0ULL);
-        // direction 进缓存键：nullopt=guess（0），显式 LTR/RTL 各占一档。
-        mix(k.opts.direction.has_value() ? (0x2000ULL + static_cast<std::uint64_t>(*k.opts.direction)) : 0ULL);
-        // 回退链进缓存键：链决定选面。摘要由构造处预计算（见 chain_key 字段的注释：哈希函数
-        // 是 noexcept，不能在里面哈希字符串）。faces_key 已覆盖解析出的面序列，链摘要只补
-        // 「两条链解析出同一组面」时的那部分差异 —— 保守方向：宁可少命中，不可命中错的。
-        mix(k.chain_key);
-        // fixed_cell_advance_px 不影响 shaping 输出（只改 pen 推进），但推进相关的度量函数
-        // 复用本缓存的 glyphs，故必须进键 —— 否则开了档与没档会互相命中，字距静默错位。
-        mix(k.opts.fixed_cell_advance_px.has_value()
-                ? (0x4000ULL +
-                   static_cast<std::uint64_t>(std::lround(static_cast<double>(*k.opts.fixed_cell_advance_px) * 64.0)))
-                : 0ULL);
-        mix(k.faces_key);
-        return h;
+        return shape_hash_of(k.line, k.px, k.opts, k.faces_key, k.chain_key);
     }
+    auto operator()(const ShapeCacheProbe &p) const noexcept -> std::size_t {
+        return shape_hash_of(p.line, p.px, *p.opts, p.faces_key, p.chain_key);
+    }
+};
+
+struct ShapeCacheKeyEqual {
+    // 同上：`is_transparent` 是标准约定的标记名。
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    using is_transparent = void;
+    auto operator()(const ShapeCacheKey &a, const ShapeCacheKey &b) const noexcept -> bool { return a == b; }
+    // 探针比较沿用键自身的 noexcept 口径（理由见 `ShapeCacheKey::operator==` 上方注释）。
+    // NOLINTNEXTLINE(bugprone-exception-escape)
+    auto operator()(const ShapeCacheKey &a, const ShapeCacheProbe &b) const noexcept -> bool {
+        return a.px == b.px && a.opts == *b.opts && a.faces_key == b.faces_key && a.chain_key == b.chain_key &&
+               a.line == b.line;
+    }
+    // NOLINTNEXTLINE(bugprone-exception-escape)
+    auto operator()(const ShapeCacheProbe &a, const ShapeCacheKey &b) const noexcept -> bool { return (*this)(b, a); }
 };
 
 // LRU + 双限（条目数 / 估算字节数）淘汰。单线程 UI 模型，无锁。
@@ -259,8 +300,9 @@ class ShapeCache {
     // 注意：不标 noexcept——成员 map/stats 构造理论上可抛 bad_alloc，让其正常传播而非 terminate。
     ShapeCache(std::size_t max_entries, std::size_t max_bytes) : max_entries_(max_entries), max_bytes_(max_bytes) {}
 
-    [[nodiscard]] auto find(const ShapeCacheKey &k) -> const std::vector<ShapedGlyph> * {
-        const auto it = map_.find(k);
+    // 透明查找：探针只借用行视图与 opts，命中路径零分配（旧式按值键会拷贝整行）。
+    [[nodiscard]] auto find(const ShapeCacheProbe &p) -> const std::vector<ShapedGlyph> * {
+        const auto it = map_.find(p);
         if (it == map_.end()) {
             ++stats_.misses;
             return nullptr;
@@ -270,12 +312,15 @@ class ShapeCache {
         return &it->second.first;
     }
 
-    auto insert(ShapeCacheKey k, std::vector<ShapedGlyph> glyphs) -> void {
+    // 返回入库条目内字形数组的地址：调用方直接引用，省掉命中/未命中各一次整份拷贝。
+    // 指针有效期到该条目被淘汰（LRU）或 clear() 为止。
+    auto insert(ShapeCacheKey k, std::vector<ShapedGlyph> glyphs) -> const std::vector<ShapedGlyph> * {
         const std::size_t bytes = glyph_bytes(glyphs);
         evict_to_fit(1, bytes);
         const auto node = lru_.insert(lru_.begin(), std::move(k));
-        map_.emplace(*node, std::make_pair(std::move(glyphs), node));
+        const auto res = map_.emplace(*node, std::make_pair(std::move(glyphs), node));
         sync_stats();
+        return &res.first->second.first;
     }
 
     auto clear() -> void {
@@ -305,7 +350,7 @@ class ShapeCache {
     auto sync_stats() -> void { stats_.entries = map_.size(); }
     std::list<ShapeCacheKey> lru_;  // MRU 在前
     std::unordered_map<ShapeCacheKey, std::pair<std::vector<ShapedGlyph>, std::list<ShapeCacheKey>::iterator>,
-                       ShapeCacheKeyHash>
+                       ShapeCacheKeyHash, ShapeCacheKeyEqual>
         map_;
     std::size_t max_entries_;
     std::size_t max_bytes_;
@@ -347,32 +392,37 @@ class ShapeCache {
 }
 
 // 前向声明（定义见下方）：_uncached 是真正跑 hb_shape 的纯函数体。
-[[nodiscard]] auto shape_line_uncached(const std::string &line, const std::vector<FontFace *> &faces, int px,
+[[nodiscard]] auto shape_line_uncached(std::string_view line, const std::vector<FontFace *> &faces, int px,
                                        const TextLayoutOpts &opts) -> ShapedLine;
 
-// 带缓存的 shape_line：命中直接返回（拷贝字形序列，跳过 hb_shape）；未命中走 _uncached 并回写。
-[[nodiscard]] auto shape_line(const std::string &line, const std::vector<FontFace *> &faces, int px,
-                              const TextLayoutOpts &opts) -> ShapedLine {
-    ShapedLine out;
+// 带缓存的 shape_line：命中直接返回缓存条目视图（不拷贝字形），未命中走 _uncached、入库后返回同一条目。
+//
+// 返回值指向缓存内部（LRU 节点），有效期到**该行条目被淘汰**为止：刚返回的条目已是 MRU，
+// 淘汰只从 LRU 尾部取，故「取出 → 立刻消费」的调用形态下不会失效；调用方不得跨多行/跨帧
+// 长期持有（缓存上限 4096 条，长循环里早先取出的条目可能被后续插入挤掉）。
+[[nodiscard]] auto shape_line(std::string_view line, const std::vector<FontFace *> &faces, int px,
+                              const TextLayoutOpts &opts) -> std::span<const ShapedGlyph> {
     if (line.empty()) {
-        return out;
+        return {};
     }
-    const ShapeCacheKey key{
-        .line = line, .px = px, .opts = opts, .faces_key = faces_key_of(faces), .chain_key = chain_key_of(opts)};
-    if (const auto *cached = shape_cache().find(key)) {
-        out.glyphs = *cached;  // 命中：跳过 hb_shape。纯函数输出，与重算逐位一致（golden 零影响）。
-        AURORA_PROFILE_COUNT(shape_cache_hits, 1);
-        return out;
+    const std::uint64_t faces_key = faces_key_of(faces);
+    const std::uint64_t chain_key = chain_key_of(opts);
+    const ShapeCacheProbe probe{.line = line, .px = px, .opts = &opts, .faces_key = faces_key, .chain_key = chain_key};
+    if (const auto *cached = shape_cache().find(probe)) {
+        AURORA_PROFILE_COUNT(shape_cache_hits, 1);  // 命中：跳过 hb_shape，与重算逐位一致（golden 零影响）。
+        return *cached;
     }
-    ShapedLine fresh = shape_line_uncached(line, faces, px, opts);
-    shape_cache().insert(key, fresh.glyphs);
     AURORA_PROFILE_COUNT(shape_cache_misses, 1);
-    return fresh;
+    // 键按值持有整行文本与 opts（条目跨帧存活），故 miss 路径仍拷贝一次；命中路径零分配。
+    ShapeCacheKey key{
+        .line = std::string{line}, .px = px, .opts = opts, .faces_key = faces_key, .chain_key = chain_key};
+    ShapedLine fresh = shape_line_uncached(line, faces, px, opts);
+    return *shape_cache().insert(std::move(key), std::move(fresh.glyphs));
 }
 
 // 把一行文本按「面回退（find_glyph）」切成连续同面 run；每个 run 经 hb 做 OpenType shaping，
 // 得到字形序号 / 偏移 / 推进，按绘制顺序合并为整行 ShapedGlyph 序列。
-[[nodiscard]] auto shape_line_uncached(const std::string &line, const std::vector<FontFace *> &faces, int px,
+[[nodiscard]] auto shape_line_uncached(std::string_view line, const std::vector<FontFace *> &faces, int px,
                                        const TextLayoutOpts &opts) -> ShapedLine {
     ShapedLine out;
     if (line.empty()) {
@@ -392,7 +442,7 @@ class ShapeCache {
     std::vector<CpInfo> cps;
     {
         std::size_t i = 0;
-        const std::string::size_type n = line.size();
+        const std::size_t n = line.size();
         while (i < n) {
             const std::size_t bs = i;
             unsigned cp = 0;
@@ -428,7 +478,8 @@ class ShapeCache {
             ++kk;
         }
         k = kk;
-        const std::string run_str = line.substr(run_byte_start, run_byte_end - run_byte_start);
+        // 视图切片：run 文本不再逐段建串（原实现每 run 一次堆分配，长行多面回退时按 run 数放大）。
+        const std::string_view run_str = line.substr(run_byte_start, run_byte_end - run_byte_start);
         if (run_str.empty()) {
             continue;
         }
@@ -498,18 +549,18 @@ class ShapeCache {
 }
 
 // 按 '\n' 切分为行（'\n' 为单字节 0x0A，绝不出现在多字节序列内）。
-[[nodiscard]] auto split_lines(const std::string &text) -> std::vector<std::string> {
-    std::vector<std::string> lines;
-    std::string cur;
-    for (const char ch : text) {
-        if (ch == '\n') {
-            lines.push_back(cur);
-            cur.clear();
-        } else {
-            cur.push_back(ch);
+// 行以视图返回、指向调用方文本：旧实现逐字符 push_back 进 std::string 再整串拷入 vector，
+// 单行文本也要两次分配、长行还要反复扩容——绘制/度量/光标/命中四条路径每次调用都付。
+[[nodiscard]] auto split_lines(std::string_view text) -> std::vector<std::string_view> {
+    std::vector<std::string_view> lines;
+    std::size_t start = 0;
+    for (std::size_t i = 0; i < text.size(); ++i) {
+        if (text[i] == '\n') {
+            lines.push_back(text.substr(start, i - start));
+            start = i + 1;
         }
     }
-    lines.push_back(cur);
+    lines.push_back(text.substr(start));  // 与旧实现一致：空文本也给出一行空行
     return lines;
 }
 
@@ -525,7 +576,7 @@ class ShapeCache {
 
 // 整行前缀推进：前 count 个字形（绘制顺序）的 pen 推进，与 draw_text_impl 逐位同源
 // （同 px、同 hb 推进、同 letter/word_spacing 语义）。spacing_scale 把 dp 间距换算到 px 空间。
-[[nodiscard]] auto line_prefix(const std::vector<ShapedGlyph> &glyphs, const TextLayoutOpts &opts, float spacing_scale,
+[[nodiscard]] auto line_prefix(std::span<const ShapedGlyph> glyphs, const TextLayoutOpts &opts, float spacing_scale,
                                std::size_t count) -> float {
     float w = 0.0F;
     const std::size_t m = std::min(count, glyphs.size());
@@ -533,7 +584,7 @@ class ShapeCache {
         if (j > 0) {
             w += opts.letter_spacing * spacing_scale;  // 相邻字形间加字距，整串共 (n-1) 次
         }
-        const auto &g = glyphs.at(j);
+        const auto &g = glyphs[j];
         w += glyph_advance_px(g, opts);
         if (g.cp == ' ' && opts.word_spacing != 0.0F) {
             w += opts.word_spacing * spacing_scale;
@@ -559,15 +610,15 @@ class ShapeCache {
             // RTL：逻辑下标 ↔ 视觉位置镜像。逻辑首字符在右缘：逻辑 caret i（前 i 个
             // 字符的左边界）= 右起第 i 个视觉字形处 = 视觉前缀 (n - i) 的推进。
             if (opts.direction == TextDirection::RTL) {
-                const std::size_t n = sl.glyphs.size();
-                return line_prefix(sl.glyphs, opts, spacing_scale, n - std::min(local, n));
+                const std::size_t n = sl.size();
+                return line_prefix(sl, opts, spacing_scale, n - std::min(local, n));
             }
-            return line_prefix(sl.glyphs, opts, spacing_scale, local);
+            return line_prefix(sl, opts, spacing_scale, local);
         }
         acc += lcount + 1;  // +1 计 '\n'
     }
     const auto sl = shape_line(lines.back(), faces, px, opts);
-    return line_prefix(sl.glyphs, opts, spacing_scale, sl.glyphs.size());
+    return line_prefix(sl, opts, spacing_scale, sl.size());
 }
 
 // 整串宽度（px 像素，多行取最宽行）：与 prefix_advance_px 同源的整串版。
@@ -577,7 +628,7 @@ class ShapeCache {
     float max_w = 0.0F;
     for (const auto &line : lines) {
         const auto sl = shape_line(line, faces, px, opts);
-        max_w = std::max(max_w, line_prefix(sl.glyphs, opts, spacing_scale, sl.glyphs.size()));
+        max_w = std::max(max_w, line_prefix(sl, opts, spacing_scale, sl.size()));
     }
     return max_w;
 }
@@ -613,13 +664,13 @@ class ShapeCache {
     std::size_t line_char_offset = 0;  // 当前行首在全局文本中的字符下标（含前导 '\n'）
     for (const auto &line_str : lines) {
         const auto sl = shape_line(line_str, faces, px, opts);
-        const std::size_t m = sl.glyphs.size();
+        const std::size_t m = sl.size();
         w = 0.0F;  // 每行 pen 推进归零（与 draw_text_impl 每行重置 pen_x 一致）
         for (std::size_t j = 0; j < m; ++j) {
             if (j > 0) {
                 w += opts.letter_spacing * spacing_scale;
             }
-            const auto &g = sl.glyphs.at(j);
+            const auto &g = sl[j];
             w += glyph_advance_px(g, opts);
             if (g.cp == ' ' && opts.word_spacing != 0.0F) {
                 w += opts.word_spacing * spacing_scale;
@@ -767,8 +818,8 @@ auto emit_glyphs_with_context(const EmitContext &ctx, const std::string &text, c
     for (const auto &line_str : lines) {
         const auto sl = shape_line(line_str, *ctx.faces, ctx.px, opts);
         float pen_x = std::floor(origin_x + 0.5F);  // 每行 pen 推进归零并 snap 到整数像素
-        for (std::size_t j = 0; j < sl.glyphs.size(); ++j) {
-            const auto &sg = sl.glyphs.at(j);
+        for (std::size_t j = 0; j < sl.size(); ++j) {
+            const auto &sg = sl[j];
             // 双向格式控制符（LRE/RLE/PDF/LRO/RLO/LRI/RLI/FSI/PDI 与 LRM/RLM）为零宽不可见
             // 标记：跳过字形加载、光栅化与绘制，连字形推进一并跳过（其 x_adv 已在 shape 阶段
             // 置零）。确保任何字体（含无对应字形→.notdef 豆腐盒）下都不出现可见墨迹或占位宽度。
@@ -849,7 +900,7 @@ auto emit_glyphs_with_context(const EmitContext &ctx, const std::string &text, c
             if (sg.cp == ' ' && opts.word_spacing != 0.0F) {
                 pen_x += opts.word_spacing * ctx.scale;
             }
-            if (j + 1 < sl.glyphs.size()) {
+            if (j + 1 < sl.size()) {
                 pen_x += opts.letter_spacing * ctx.scale;
             }
         }
@@ -1093,7 +1144,7 @@ auto FontEngine::monospace_cell(const Font &f, float scale) -> CellMetrics {
     for (const std::string &ref : {std::string{"0"}, std::string{"\xE2\x94\x80"}}) {
         const auto sl = shape_line(ref, *ctx->faces, ctx->px, TextLayoutOpts{});
         float acc = 0.0F;
-        for (const auto &g : sl.glyphs) {
+        for (const auto &g : sl) {
             acc += g.x_adv;
         }
         cell_w = std::max(cell_w, static_cast<int>(std::lround(acc)));
