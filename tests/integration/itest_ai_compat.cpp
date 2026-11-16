@@ -15,7 +15,6 @@
 
 // TestController 依赖 HeadlessSurface，无头后端随库恒编入，本头恒可引入。
 #include "aurora/app/test_controller.h"
-
 #include "aurora/app/validate_ui.h"
 #include "aurora/aurora.h"
 #include "aurora/widget/codegen.h"
@@ -196,7 +195,6 @@ AURORA_TEST_CASE(full_pipeline_roundtrip_to_code) {
 // 目标用「类型 + 同类型序号」而非 key 的原因：`serialization::from_json` 只产出
 // `shared_ptr<Widget>` 树，子节点 id 无法经 `Widget::child_nodes()`（const 引用）回填。
 // ===========================================================================
-
 
 namespace {
 
@@ -426,6 +424,5 @@ AURORA_TEST_CASE(interact_script_reports_missing_target) {
     AURORA_TEST_CHECK_MSG(err.find("target not found") != std::string::npos,
                           "error must name the cause (got: " + err + ")");
 }
-
 
 }  // namespace aurora::test_cases::itest_ai_compat

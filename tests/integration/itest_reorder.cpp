@@ -14,15 +14,13 @@
 #include <vector>
 
 // TestController 依赖 HeadlessSurface，无头后端随库恒编入，本头恒可引入。
-#include "aurora/app/test_controller.h"
-
 #include "aurora/app/scroll_storage.h"
+#include "aurora/app/test_controller.h"
 #include "aurora/aurora.h"
 #include "aurora/render/painter.h"
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::itest_reorder {
-
 
 namespace {
 
@@ -164,6 +162,5 @@ AURORA_TEST_CASE(reorder_and_scroll_restore_coexist) {
 
     ScrollStorage::instance().clear_all();
 }
-
 
 }  // namespace aurora::test_cases::itest_reorder

@@ -191,8 +191,7 @@ AURORA_TEST_CASE(frame_loop_drains_system_drag_session_end) {
     // 不谎报；与通知激活 / 热键命中同一时点语义）。
     (void)system_drag::remove_test_backend();
     if (!system_drag::install_test_backend()) {
-        AURORA_TEST_SKIP(
-            "system drag inert backend unavailable (AURORA_ENABLE_DEBUG not set)");
+        AURORA_TEST_SKIP("system drag inert backend unavailable (AURORA_ENABLE_DEBUG not set)");
     }
 
     WindowOptions o;

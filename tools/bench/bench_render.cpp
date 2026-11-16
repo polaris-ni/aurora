@@ -27,7 +27,6 @@
 #include "aurora/render/font_engine.h"
 #include "bench_common.h"
 
-
 namespace {
 
 // Create a fixed-size Headless window (set scale before begin_frame; physical buffer = logical x scale).
@@ -383,4 +382,3 @@ auto main() -> int {
     AURORA_LOG_RAW("bench", "\n", aurora::bench::AURORA_BENCH_DISCLAIMER, "\n");
     return aurora::bench::finalize_process("bench_render", "raster-matrix") ? 0 : 1;
 }
-

@@ -3,12 +3,11 @@
 // 演示 item-controller 的典型脚本：建树（给节点打 key）→ pump 首帧 → 按 key 查找 →
 // 交互（点击 / 输入文本）→ pump_and_settle 收敛 → 属性断言。全程无窗口系统，
 // 结果打印到 stdout（CI / 远程环境可跑）。
-#include "demo_common.h"
-
-
 #include <cstdio>
 #include <memory>
 #include <string>
+
+#include "demo_common.h"
 
 namespace {
 
@@ -82,4 +81,3 @@ auto run() -> int {
 
 // NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int { return run(); }
-

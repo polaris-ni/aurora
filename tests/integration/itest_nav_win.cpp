@@ -34,7 +34,6 @@ auto make_page(const std::string &label) -> Node {
 
 // ---- Surface 帧生命周期（依赖 Headless 后端）----
 
-
 AURORA_TEST_CASE(headless_surface_frame_lifecycle) {
     auto surf = std::make_unique<HeadlessSurface>();
     const auto bf = surf->begin_frame(200, 150);
@@ -87,7 +86,6 @@ AURORA_TEST_CASE(app_run_frame_loop_counts_max_frames) {
     AURORA_TEST_CHECK_EQ(frames, 4);
     AURORA_TEST_CHECK_EQ(app.window()->surface().frame_count(), 4);
 }
-
 
 // ---- Route ----
 
@@ -156,7 +154,6 @@ AURORA_TEST_CASE(navigator_stack_ops_and_callback_counts) {
 
 // ---- 集成：Navigator 切页 + Window 逐页上屏 ----
 
-
 AURORA_TEST_CASE(navigator_page_switch_presented_via_window) {
     Navigator nav{Route{make_page("Root"), "root"}};
     HeadlessOptions opts;
@@ -176,6 +173,5 @@ AURORA_TEST_CASE(navigator_page_switch_presented_via_window) {
     AURORA_TEST_CHECK_TRUE(r.ok());
     AURORA_TEST_CHECK_EQ(win->surface().frame_count(), 2);
 }
-
 
 }  // namespace aurora::test_cases::itest_nav_win

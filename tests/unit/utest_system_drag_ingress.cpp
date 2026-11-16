@@ -98,8 +98,7 @@ AURORA_TEST_CASE(ingress_dispatch_reports_none_without_a_sink) {
 
 AURORA_TEST_CASE(ingress_inert_backend_suppresses_the_real_sink) {
     if (!install_test_drag_in()) {
-        AURORA_TEST_SKIP(
-            "drag-in inert backend unavailable (AURORA_ENABLE_DEBUG not set)");
+        AURORA_TEST_SKIP("drag-in inert backend unavailable (AURORA_ENABLE_DEBUG not set)");
     }
     bool sink_called = false;
     SystemDropEvent event = enter_event();
@@ -117,8 +116,7 @@ AURORA_TEST_CASE(ingress_inert_backend_suppresses_the_real_sink) {
 
 AURORA_TEST_CASE(ingress_inert_backend_removal_restores_the_real_sink) {
     if (!install_test_drag_in()) {
-        AURORA_TEST_SKIP(
-            "drag-in inert backend unavailable (AURORA_ENABLE_DEBUG not set)");
+        AURORA_TEST_SKIP("drag-in inert backend unavailable (AURORA_ENABLE_DEBUG not set)");
     }
     reset_test_drag_in();  // 复位即恢复真实派发（不卸载后端对象）
     SystemDropEvent event = enter_event();
@@ -164,8 +162,7 @@ AURORA_TEST_CASE(ingress_feeds_the_real_dispatcher_chain) {
 
 AURORA_TEST_CASE(ingress_inert_takeover_blocks_the_real_dispatcher_chain) {
     if (!install_test_drag_in()) {
-        AURORA_TEST_SKIP(
-            "drag-in inert backend unavailable (AURORA_ENABLE_DEBUG not set)");
+        AURORA_TEST_SKIP("drag-in inert backend unavailable (AURORA_ENABLE_DEBUG not set)");
     }
     const auto box = make_target();
     SystemDropEvent event = enter_event();

@@ -19,7 +19,6 @@
 
 namespace aurora::test_cases::itest_relayout_boundary {
 
-
 namespace {
 
 /// 计数 on_layout 调用次数的祖先控件：撑满父约束（自身非 boundary），持有单个子节点。
@@ -93,6 +92,5 @@ AURORA_TEST_CASE(scrolling_boundary_does_not_relayout_ancestors) {
 
     set_strict_mode(prev);
 }
-
 
 }  // namespace aurora::test_cases::itest_relayout_boundary

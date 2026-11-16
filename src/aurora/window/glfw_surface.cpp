@@ -68,9 +68,8 @@
 #ifdef AURORA_PLATFORM_WINDOWS
 #include "aurora/window/win32_capture.h"
 #endif
-#include "aurora/window/window_state.h"
-
 #include "aurora/render/rhi/gpu_gl_rhi.h"
+#include "aurora/window/window_state.h"
 
 namespace aurora {
 

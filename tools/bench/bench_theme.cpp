@@ -61,7 +61,6 @@
 #include "aurora/widget/widget.h"
 #include "bench_common.h"
 
-
 namespace {
 
 // 场景口径：1280x720 逻辑尺寸、scale 1.0；探针数两档；计时前的热身帧与插桩帧数。
@@ -544,4 +543,3 @@ auto main() -> int {
     AURORA_LOG_RAW("bench", "\n", aurora::bench::AURORA_BENCH_DISCLAIMER, "\n");
     return aurora::bench::finalize_process("bench_theme", "read-face") ? 0 : 1;
 }
-
