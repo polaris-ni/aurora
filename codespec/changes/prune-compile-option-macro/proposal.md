@@ -4,7 +4,7 @@
 |:---|:---|
 | 变更编号 | CHG-078 |
 | 提出日期 | 2026-11-16 |
-| 当前状态 | 实施中 |
+| 当前状态 | 已归档 |
 | 关联需求 | SPEC.PLATFORM.ZERO-IFDEF.001 |
 | 影响面 | 构建选项三档共十一项。A 档删宏（含 option 与导出宏）四枚：`AURORA_BACKEND_HEADLESS`（恒注入，纯死守卫清理）、`AURORA_ENABLE_GLFW_GPU_GL`（并入 `AURORA_BACKEND_GLFW`）、`AURORA_ENABLE_SIMD`（恒开，`-ffp-contract=off` 改无条件注入）、`AURORA_ENABLE_TEST_HOOKS`（并入 `AURORA_ENABLE_DEBUG`）；B 档删 option、宏降级为「父开关 ^ 平台」推导五枚：`AURORA_ENABLE_AUDIO_WASAPI` / `AURORA_ENABLE_AUDIO_ALSA` / `AURORA_ENABLE_AUDIO_COREAUDIO` / `AURORA_ENABLE_AUDIO_WEBAUDIO`、`AURORA_ENABLE_WEBVIEW_WEBVIEW2`（宏名、TU 门控与 `feature_flags` 镜像全保留，仅手工 `-D` 旋钮消失）；C 档删内部宏两枚：`AURORA_ENABLE_NET_TLS_SCHANNEL` / `AURORA_ENABLE_NET_TLS_SECURE_TRANSPORT` 并入 `AURORA_ENABLE_NET_TLS_SYSTEM ^ 平台宏`。公共头十二文件（`application.h` / `test_controller.h` / `surface.h` / `window.h` / `native_surfaces.h` / `glfw_surface.h` / `gpu_gl_rhi.h` / `painter_simd.h` / `painter_simd.inl` / `feature_flags.h` / `event.h` / `os_hotkey.h`）去门控与注释改写；实现十三文件（`window_factory.cpp` / `test_controller.cpp` / `notification.cpp` / `scroll_bench.cpp` / `feature_flags.cpp` / `glfw_surface.cpp` / `drag_payload.cpp` / `os_hotkey.cpp` / `system_drag_ingress.h` / TLS 四文件）；`FeatureFlags` 删 `backend_headless` / `simd` 两字段；测试与工具约四十文件去门控与文案改写；`codespec/BUILD_OPTIONS.md` / `codespec/ARCHITECTURE.md` / `codespec/GUIDELINE.md` / `codespec/CODING_STANDARDS.md` / specification 三篇 / `codespec/debug_api.toml` / `codespec/manual-test/10-window.md` / `codespec/manual-test/23-net.md` 文档回写；`.github/workflows/ci.yml` 矩阵同步；根目录 `CHANGELOG.md` 记破坏性变更。 |
 
@@ -191,3 +191,12 @@
 - `codespec/manual-test/23-net.md`：C 档系统栈日志文本 / `TC-NET-001` 判据。
 - `codespec/changes/prune-compile-option-macro/proposal.md`：状态流转与验收记录。
 - 根目录 CHANGELOG.md 与根目录 aurora_api.json（不属 codespec 树，故不列为回写落点，随批必做）：Breaking / Changed 条目与迁移路径；以 `--target aurora_api_json` 重建。
+
+## 验收记录
+
+- 状态流转：已提议 → 实施中 → 已归档（2026-11-16）。
+- 全仓检索：六枚已删宏在 `include/` / `src/` / `tests/` / `tools/` / `examples/` / `cmake/` / `.github/` 零命中；B 档五枚宏仍存在于推导注入点与 `feature_flags` 镜像；`codespec/` 仅保留历史手工测试记录与迁移说明中的字面名（非门控用途）。
+- 构建与测试：LLVM 构建目录 configure + 库 + runner 全绿；`ctest -j16` **483/483 全过**（含 `utest_feature_flags` 21 字段、`utest_simd_parity`、`registry_integrity`、`utest_net_tls`）；31 项 `check_*` 门禁全绿；`format-check` 1368/1368 合规；`aurora_api_json` 刷新后 `check_api_schema_sync` 绿。
+- 增量 tidy：`select_lint_tus.py --git-diff HEAD~3 --changed-only` 选出 44 TU，`run_clang_tidy.py --jobs 4` 全过（unique findings 0 / blocking 0）；两个平台专属探针 TU 不在本机编译库（预期）。
+- 编译面证据：`compile_commands.json` 对六枚已删宏零命中；干净构建目录 configure 实测——六枚已删旋钮与 B 档五枚推导宏在全新 `CMakeCache.txt` 中均不再声明（option 已删）；既有构建目录残留的缓存变量成为未使用项，不改变任何行为（迁移说明已注明）。
+- 未执行：Windows / macOS / wasm 远端 CI 腿（由推送后的 CI 矩阵覆盖）；`nm -g` 静态库符号集逐符号 diff（导出宏与结构体字段不产生符号名变化，编译面零命中已是更直接的证据）。
