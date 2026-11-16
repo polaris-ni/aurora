@@ -314,6 +314,8 @@ class Animator {
     template <typename T>
     auto bind(AnimationController &c, Tween<T> tw, State<T> &target) -> void {
         drive(c);
+        // 脏门控已在闭包里：控制器未标脏时不会走到 `State::set`。上提到 `tick` 只能省下一次
+        // `std::function` 调用，却要多一趟遍历，故两处 `bind` 都保持现结构。
         on_tick_.push_back(Binding{&c, [&c, tw = std::move(tw), &target]() -> auto {
                                        if (c.dirty()) {
                                            target.set(tw.value(c.value()));

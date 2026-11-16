@@ -35,13 +35,16 @@ class GlyphAtlas {
 
     /// @brief 查缓存；命中则更新 LRU 并返回条目指针，未命中返回 nullptr。
     /// @param key 字形缓存键（由 face_id/glyph_index/px/mode/italic/synthetic_bold 复合而成）。
-    /// @return 命中时返回条目常驻指针（生命周期受本图集管理）；未命中返回 `nullptr`。
+    /// @return 命中时返回条目指针；该指针**仅在下次 `insert` / `clear` 之前有效**——插入超出容量
+    ///         会触发淘汰，指向被淘汰条目的指针随即悬垂。调用方不得跨插入保存本指针。
     [[nodiscard]] auto find(std::uint64_t key) -> const Entry *;
 
     /// @brief 插入并标记最近使用；超出容量时淘汰最久未用条目。
     /// @param key 字形缓存键（同 `find`）。
     /// @param entry 待缓存的字形光栅化条目（按值传入，由图集接管所有权）。
     /// @return 条目在本图集内的常驻指针（未命中插入后无需再次 `find` 即可直接使用）。
+    /// @note 返回值与原指针同样只在下次 `insert` / `clear` 前有效（本次插入自身不淘汰新条目，
+    ///       但下一次插入可能）。
     auto insert(std::uint64_t key, Entry entry) -> const Entry *;
 
     /// @brief 清空全部缓存。
@@ -52,6 +55,10 @@ class GlyphAtlas {
     ///
     /// 命中只回写序号（一次哈希内的标量写），不再做链表 erase/push_front；
     /// 超容量时按序号扫描淘汰最久未用者，保证与逐次 LRU 提升完全相同的淘汰顺序。
+    ///
+    /// 为什么淘汰保留全表扫描而不改最小堆：溢出后的插入是**冷路径**（每新增一个字形才发生一次，
+    /// 且同一次插入本就要付光栅化与缓冲拷贝），而命中是热路径。按使用序号维护堆会把 O(log n)
+    /// 的比较与下沉搬到每次命中上，热路径变贵、冷路径只省一次线性比较——次数上得不偿失。
     struct Record {
         Entry entry;  ///< 字形条目本体
         std::uint64_t last_used = 0;  ///< 最近使用序号（越大越新）

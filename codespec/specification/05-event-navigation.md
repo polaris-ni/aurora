@@ -368,6 +368,15 @@ void MyWidget::on_pointer_event(MouseEvent &e) {
 
 典型接线：`PullToRefresh` 包住 `Scroll`（外层，`wants_scroll()` 恒真且仅当子树在顶部时吃余量下拉）、`Scroll` 内嵌 `LazyList`（内层先滚，到顶/到底才把余量让给外层）。内层到端点、外层接手的端到端行为由 `utest_dispatcher` 的 `wheel_margin_bubbles_from_inner_scroll_to_pull_to_refresh` 钉住（全量冒 / 零冒 / 部分冒 / 反方向门控四种组合）。
 
+### 3.4 悬停链与触控捕获链的持有形态
+
+两条跨事件的链都只保存**自己的副本或快照**，不引用调用方的临时链：
+
+- **悬停链**（`EventDispatcher::hover_chain_`）：`update_hover` 把新链写入成员缓冲，容量足够时复用同一块存储（稳态下每次 Move 不再新分配）。成本只剩「逐元素 `weak_ptr` 计数 +1」——这是必须复制的部分：调用方的链由本拍命中测试就地持有，`update_hover` 返回后仍要用于本拍派发，生命周期不覆盖下一次事件。
+- **鼠标指针捕获链**（`pointer_capture_`）：按下时把命中链整体移入表项（不拷贝），Move 期间以引用复用；Release 先把链移出表项再擦除，以引用派发后释放。
+- **触控捕获链**（`TouchDispatcher` 的 `capture`）：以共享只读快照（`std::shared_ptr<const std::vector<HitNode>>`）持有，活跃期多个触点共享同一份、不再逐拍复制整链。快照发布后**不得原地修改**——任何「清空再填充」都会让仍持有该快照的读者看到半新半旧的链。
+- **失效与判活**：链每次由新的命中测试产出才整体替换；控件析构不改写既有快照，链内 `weak_ptr` 失效即视为该节点已回收，通知前 `lock()` 判活并跳过（口径同 §3.3），绝不解引用裸指针。
+
 ---
 
 ## 4 焦点管理

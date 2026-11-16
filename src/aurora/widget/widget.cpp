@@ -344,16 +344,18 @@ auto Widget::layout(const Constraints &c, const BuildContext &ctx) -> Size {
         cc.max.height = c.max.height;
     }
 
-    std::function measure = [this, &ctx](const Constraints &inner) -> Size { return this->on_layout(inner, ctx); };
-
-    const Modifier &mod = modifier();
-    for (const auto &it : std::views::reverse(mod.nodes())) {
-        const ModifierNode *node = it.get();
-        auto inner = std::move(measure);
-        measure = [node, inner](const Constraints &child_c) -> Size { return node->layout(child_c, inner); };
-    }
-
-    size_ = measure(cc);
+    // 修饰链测量：逐层只捕获「外层闭包引用 + 层号」两个机器字，构成传给 `layout` 的
+    // `std::function` 时落在小对象缓冲内；旧写法逐层按值捕获上一层 `std::function`
+    // （32 字节，超出缓冲），每个修饰节点一次堆分配，随控件数量与图层深度放大。
+    const std::vector<std::shared_ptr<ModifierNode>> &nodes = modifier().nodes();
+    auto measure_at = [&](auto &&self, std::size_t index, const Constraints &inner) -> Size {
+        if (index >= nodes.size()) {
+            return on_layout(inner, ctx);
+        }
+        return nodes[index]->layout(
+            inner, [&self, index](const Constraints &child_c) -> Size { return self(self, index + 1, child_c); });
+    };
+    size_ = measure_at(measure_at, 0, cc);
     // 首次成功测量：`window_bounds()` 据此区分「从未布局过」（返回空值）与「布局过但零尺寸」
     // （是有效答案——零尺寸控件同样有确定位置）。上方两条早返回路径不置位：`show == false` 本次
     // 未参与测量；布局缓存命中则由「缓存存在本身以测量过一次为前提」隐含已测量。
@@ -940,12 +942,21 @@ auto Widget::window_bounds() const -> std::optional<Rect> {
         // 比对回本控件在父子视图里的盒。虚拟化容器的 live_ 项不在 `child_nodes()` 里，那种形态
         // 走下面的 nullopt 出口（几何不可定），不猜。
         const std::vector<Node> &siblings = parent->child_nodes();
-        const auto it =
-            std::ranges::find_if(siblings, [&child](const Node &n) -> bool { return &n.widget() == child; });
-        if (it == siblings.end()) {
-            return std::nullopt;
+        // 兄弟下标的可校验缓存：命中只做一次「下标未越界 + 该槽仍是本控件」的地址比对，
+        // 未命中（首次查询、父容器增删兄弟导致位移）才退回线性扫描并回写下标。上溯链每层
+        // 只查一次，故缓存让重复查询（弹层锚定 / 焦点滚入视野 / 无障碍盒查询）从每层 O(兄弟数)
+        // 降到 O(1)；有效性由指针比对而非失效通知保证——容器改子表无需知情。
+        std::size_t index = child->sibling_index_hint_;
+        if (index >= siblings.size() || &siblings[index].widget() != child) {
+            const auto it =
+                std::ranges::find_if(siblings, [&child](const Node &n) -> bool { return &n.widget() == child; });
+            if (it == siblings.end()) {
+                return std::nullopt;
+            }
+            index = static_cast<std::size_t>(it - siblings.begin());
+            child->sibling_index_hint_ = index;
         }
-        const Rect cb = it->bounds();
+        const Rect cb = siblings[index].bounds();
         if (child == this) {
             self_in_parent = cb;  // 只取**本控件自身**那一份；后续迭代拿到的是祖先的盒
         }

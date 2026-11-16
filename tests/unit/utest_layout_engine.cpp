@@ -87,6 +87,7 @@ AURORA_TEST_CASE(size_intent_change_signals_parent_for_relayout) {
     // 停留旧值（`window_bounds()` 读到过期盒，原生子视图几何据此下发即不跟随）。
     // 判据：子树脏汇聚回调须以**父（Column）**为 origin 触发一次布局脏；若只以子控件为 origin
     // （boundary 短路吞掉了父侧失效），即回归。
+    // 本用例即「boundary 祖先重排传播」的现役覆盖，勿再以「缺单测」为由另起一条。
     auto col = std::make_shared<Column>();
     auto child = std::make_shared<Text>("x");
     child->width(px(50.0F));

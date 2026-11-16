@@ -227,7 +227,8 @@ class TouchDispatcher {
 
   private:
     /// @brief 按指针 ID 缓存的命中链（指针捕获表）。某指针 `id` 由活跃→非活跃（抬起）时清除对应链，避免悬空引用。
-    std::unordered_map<int, std::vector<HitNode>> pointer_capture_;
+    ///        以共享只读视图持有，活跃期 Move 复用同一份链而不整条复制。
+    std::unordered_map<int, std::shared_ptr<const std::vector<HitNode>>> pointer_capture_;
 
     /// @brief 连击判定状态（按「按键 + 指针」独立计数）；阈值取 `click_window_ms` / `click_radius_dp`。
     ClickTracker click_tracker_;

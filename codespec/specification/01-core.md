@@ -410,7 +410,7 @@ auto node = au::find_node_by_path(root, path);  // widget/inspect.h，位于 aur
 
 **主线程队列与值班租约**（`core/main_queue.h` 的 `MainQueue`，不变量）
 
-跨线程回投只有一个进程级队列：全静态门面，队列、值班位、世代计数与唤醒通道同址同锁，「投进谁家队列」与「叫谁起床」不再由安装者决定。消费权经 `on_duty(wake)` 领取 RAII 租约 `Lease`；同一时刻至多一个循环在岗，CAS 只拒**并发**（归还后重入的循环可再次领取，覆盖 WASM `raf_tick` 后重跑 `run()` 的形态）。
+跨线程回投只有一个进程级队列：全静态门面，队列、值班位、世代计数与唤醒通道同址同锁，「投进谁家队列」与「叫谁起床」不再由安装者决定。世代号与打烊标记在锁内判定并落值、以原子发布，`current_epoch()` / `is_closing()` 免锁读取（发起路径不必为读这两个标量各加一次锁）。消费权经 `on_duty(wake)` 领取 RAII 租约 `Lease`；同一时刻至多一个循环在岗，CAS 只拒**并发**（归还后重入的循环可再次领取，覆盖 WASM `raf_tick` 后重跑 `run()` 的形态）。
 
 - **世代号**：`on_duty` 成功时单调分配（自 1 起，永不重置 / 复用 / 回退）。`current_epoch()` 是值班世代的全函数——在岗返回当前世代号，否则恒为 `0`；`has_on_duty()` 只是该式的可读别名，判据单源。接受判据（与入队原子）：`current_epoch() != 0 && (expected_epoch == 0 || expected_epoch == current_epoch())`。三条推论：打烊期一切投递（含代际无关的网络 / 协程）拒绝；重入 run 领到更大的新世代 ⇒ 上一世在途任务拒绝；同世在途任务放行。`expected_epoch == 0` 是「代际无关」哨兵，发起时捕获世代的追踪任务恒为 ≥1。
 - **两相失败**：**发起时**（`au::async` / `Task<T>::then`）按时间相三分——在岗 ⇒ 正常发起并捕获本世世代；打烊窗口（`is_closing()`）⇒ **出生即取消**（不排工，立即返回 `is_cancelled()` 的 Task，`then` 恒不执行、`on_cancel` 登记即触发）；其余无值班 ⇒ 纯编程错误，经 `on_contract_violation` 硬失败（FATAL 日志 + 默认 terminate，与线程局部 strict 开关无关，故 worker 线程上的违规同样被拦）。**落地时**（`MainQueue::post` / `try_post`）无值班或世代失配 ⇒ 合法生命周期事实：不投递、不 terminate，记 ERROR 诊断并累加 `dropped_count()`；`post` 返回 void（失败无可行动作），契约边界需要失败知识处走 `try_post`（返回 false，且不触发失败处理器）。**不存在「空槽就地执行」的回退**——旧语义会让回调在 worker 线程写 `State`，正是本机制要根除的跨线程写入。
@@ -508,6 +508,11 @@ JSON 库的全量依赖。四条边界约束：
 类型谓词：`is_null()` / `is_bool()` / `is_int()` / `is_uint()` / `is_double()` / `is_raw_number()` /
 `is_string()` / `is_array()` / `is_object()`，外加合成谓词 `is_number()`（Int ∪ UInt ∪ Double ∪
 RawNumber）与 `is_integer()`（Int ∪ UInt）。
+
+**对象键查找是线性扫描，不加并行键索引**：`Object` 是公共类型别名（`std::vector<std::pair<std::string, Value>>`），
+调用方可直接构造、持有并按 `std::vector` 语义改动它；任何旁挂索引都会与别名的可写语义脱钩（经别名改键时
+索引不更新），而把别名换成带索引的类型属公共 API 变更。本层对象是描述符 / 属性表一类小对象（十余键），
+线性扫描的常数与缓存局部性优于哈希查找；插入序仍是序列化与 `diff` 的唯一顺序依据。
 
 ### 9.3 读出口三族
 

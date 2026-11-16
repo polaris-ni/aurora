@@ -1,7 +1,8 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/render/painter.h
 /// 测试说明: 覆盖 Painter 的画布分配与零基底、fill_rect 覆写与 alpha 混合、clear_rect 复位、draw_rect 描边、
-/// 裁剪栈（矩形/圆角/边界查询）、global_alpha 乘入、blend_pixel、draw_image 缩放、线性渐变方向、
+/// 裁剪栈（矩形/圆角/边界查询）、`blend_region` / `mask_region` 的裁剪交集、global_alpha 乘入、
+/// blend_pixel、draw_image 缩放、线性渐变方向、
 /// draw_line 覆盖、shift_pixels 垂直搬移、to_image 导出与 get_pixel 越界兜底、draw_text_runs 与逐个
 /// draw_text 的逐位一致及空批无操作、带 opts/aa_mode 的批量入口与逐个 draw_text(..., aa_mode, opts) 逐位一致、
 /// 圆角填充的行级全覆写快路径与逐像素 coverage 在胶囊/普通圆角（含非整数锚点）上逐位一致
@@ -144,6 +145,37 @@ AURORA_TEST_CASE(rect_clip_confines_drawing) {
 
     p.pop_clip();
     AURORA_TEST_CHECK_FALSE(p.has_clip());
+}
+
+// 区域级效果（`blend_region` / `mask_region`）必须与逐像素原语同口径读裁剪栈：迭代域先与
+// 裁剪矩形求交。反证方式是把求交退回「只按窗口与传入区域求界」——以下两条的「区外」断言即转红
+// （区外像素被效果改写），这是裁剪交集在批量路径上生效的唯一可观测证据。
+AURORA_TEST_CASE(blend_region_respects_rect_clip) {
+    Painter p;
+    p.begin(8, 8);
+    p.fill_rect(rect_at(0.0F, 0.0F, 8.0F, 8.0F), Color::white());
+    const Color outside = p.get_pixel(6, 6);
+
+    p.push_clip(rect_at(0.0F, 0.0F, 4.0F, 4.0F));
+    p.blend_region(rect_at(0.0F, 0.0F, 8.0F, 8.0F), BlendMode::Multiply, Color::black(), 1.0F);
+    p.pop_clip();
+
+    AURORA_TEST_CHECK_EQ(p.get_pixel(1, 1), Color::black());  // 区内生效
+    AURORA_TEST_CHECK_EQ(p.get_pixel(6, 6), outside);  // 裁剪外逐位不变
+}
+
+AURORA_TEST_CASE(mask_region_respects_rect_clip) {
+    Painter p;
+    p.begin(8, 8);
+    p.fill_rect(rect_at(0.0F, 0.0F, 8.0F, 8.0F), Color::white());
+    const Color outside = p.get_pixel(6, 6);
+
+    p.push_clip(rect_at(0.0F, 0.0F, 4.0F, 4.0F));
+    p.mask_region(rect_at(0.0F, 0.0F, 8.0F, 8.0F), ShaderMaskKind::LinearFade, 1.0F);
+    p.pop_clip();
+
+    AURORA_TEST_CHECK_NE(p.get_pixel(1, 3), outside);  // 区内淡出生效
+    AURORA_TEST_CHECK_EQ(p.get_pixel(6, 6), outside);  // 裁剪外逐位不变
 }
 
 AURORA_TEST_CASE(text_respects_rect_clip_in_y) {

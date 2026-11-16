@@ -196,6 +196,9 @@ struct ShapedLine {
 // hb_shape（每帧纯 CPU 空烧约 10ms 的主因），返回与重算逐位一致的字形序列——不改变任何
 // 输出像素（golden 零影响），故无条件开启（非 AURORA_ENABLE_PROFILING 门控）。
 struct ShapeCacheKey {
+    /// 键按值持有整行文本，而不是调用方保活的 `string_view`：`shape_line` 的入参既可能是控件
+    /// 的临时字符串，也可能是每次重排都重建的缓冲，寿命远短于缓存条目（最多 4096 条、跨帧存活）。
+    /// 持有视图会在调用方释放后留下悬垂键——查找、哈希与比较随即读已释放内存，且故障不可复现。
     std::string line;
     int px = 0;
     TextLayoutOpts opts;

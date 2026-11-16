@@ -301,6 +301,10 @@ auto Value::get(std::string_view key) const -> Result<T> {
 // 读：指针路径
 // ============================================================================
 
+// 对象键线性查找：`Object` 是**公共类型别名**（`std::vector<std::pair<std::string, Value>>`），
+// 调用方可直接构造与持有它，任何并行键索引都会与该别名的可写语义脱钩（别名外改键不会更新索引），
+// 改别名本身又是公共 API 变更。本层对象是描述符/属性表一类小对象（十余键），线性扫描的
+// 常数与缓存局部性优于哈希索引。故保留线性查找。
 auto Value::find(std::string_view key) noexcept -> Value * {  // NOLINT(bugprone-exception-escape)
     if (!std::holds_alternative<Object>(data_)) {
         return nullptr;

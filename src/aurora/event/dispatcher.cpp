@@ -258,28 +258,30 @@ auto EventDispatcher::dispatch_mouse(Widget &root, MouseEvent &e, FocusManager *
 namespace {
 
 /// @brief 单触点的路由结果：本帧命中链 + 合成手势动作。
+///        命中链按共享只读视图持有：活跃期 Move 只增引用计数，不再整条深拷贝。
 struct TouchRoute {
-    std::vector<HitNode> chain;
+    std::shared_ptr<const std::vector<HitNode>> chain;
     MouseAction action = MouseAction::Move;
 };
 
 // ① 命中链解析 + 指针捕获维护：按下时命中并缓存整条链，活跃期复用，抬起即清除。
 [[nodiscard]] auto route_touch_point(Widget &root, const Rect &root_rect,
-                                     std::unordered_map<int, std::vector<HitNode>> &capture, const TouchPoint &p)
-    -> TouchRoute {
+                                     std::unordered_map<int, std::shared_ptr<const std::vector<HitNode>>> &capture,
+                                     const TouchPoint &p) -> TouchRoute {
     TouchRoute r;
     const auto cit = capture.find(p.id);
     const bool was_down = (cit != capture.end());
     if (p.is_active) {
         if (was_down) {
-            r.chain = cit->second;  // 活跃期复用缓存链
+            r.chain = cit->second;  // 活跃期复用缓存链（共享读，不复制命中链）
             r.action = MouseAction::Move;
             return r;
         }
         // 首次按下：命中测试并缓存整条命中链（指针捕获）。
-        r.chain = root.hit_test_chain(p.position, root_rect, BuildContext{});
+        auto hit = root.hit_test_chain(p.position, root_rect, BuildContext{});
         r.action = MouseAction::Press;
-        if (!r.chain.empty()) {
+        if (!hit.empty()) {
+            r.chain = std::make_shared<const std::vector<HitNode>>(std::move(hit));
             capture[p.id] = r.chain;
         }
         return r;
@@ -338,7 +340,7 @@ auto TouchDispatcher::dispatch(Widget &root, TouchEvent &e, FocusManager *fm) ->
 
     for (const TouchPoint &p : e.points) {
         const TouchRoute route = route_touch_point(root, root_rect, pointer_capture_, p);
-        if (route.chain.empty()) {
+        if (!route.chain || route.chain->empty()) {
             continue;  // 抬起的悬空点 / 完全未命中
         }
         any = true;
@@ -346,9 +348,9 @@ auto TouchDispatcher::dispatch(Widget &root, TouchEvent &e, FocusManager *fm) ->
         // Press 时把焦点交给命中链上最近的「可聚焦」控件（与 MouseEvent 路径一致）；
         // 整条链不可获焦则清焦点（点到纯展示区域时旧选区不残留）。
         if (route.action == MouseAction::Press && fm != nullptr) {
-            fm->set_focus(focus_target_of(route.chain), FocusDirection::Forward, FocusArrival::Pointer);
+            fm->set_focus(focus_target_of(*route.chain), FocusDirection::Forward, FocusArrival::Pointer);
         }
-        broadcast_touch(route.chain, e);
+        broadcast_touch(*route.chain, e);
         // 合成事件同样过一遍连击判定（双 tap 语义）：与鼠标路径共用同一状态机与阈值口径，
         // 触点 id 天然提供「同一指针」判据，多指并发时各自独立计数。
         MouseEvent synth;
@@ -357,7 +359,7 @@ auto TouchDispatcher::dispatch(Widget &root, TouchEvent &e, FocusManager *fm) ->
         synth.button = MouseButton::Left;
         synth.pointer_id = p.id;
         click_tracker_.resolve(synth, click_window_ms, click_radius_dp);
-        deliver_synthesized(route.chain, p, route.action, synth.click_count);
+        deliver_synthesized(*route.chain, p, route.action, synth.click_count);
     }
 
     set_current_focus_manager(prev);

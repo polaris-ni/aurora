@@ -369,20 +369,29 @@ auto from_json(const Json &j) -> Result<std::shared_ptr<Widget>> {
 namespace {
 
 // 对象差异：新增键 add、消失键 remove、共同键递归。
+//
+// 两处成本控制都在本层：① 路径串用同一块缓冲 `assign(path) + append` 复用容量，而不是每键
+// 拼一次 `path + "/" + key` 的临时串；② 共同键先判子树相等再拼路径（相等子树不产出补丁，
+// 拼接与随后的递归判等都省掉）。`find` 只查一次——原先 `contains` + `at` 是两次线性扫描。
 auto diff_objects(const Json &a, const Json &b, const std::string &path, std::vector<JsonPatchOp> &out) -> void {
+    std::string child;
     for (const auto &e : b.entries()) {
-        if (!a.contains(e.key)) {
-            out.push_back(JsonPatchOp{.op = "add", .path = path + "/" + std::string(e.key), .value = e.value});
+        if (a.find(e.key) == nullptr) {
+            child.assign(path).append(1, '/').append(e.key);
+            out.push_back(JsonPatchOp{.op = "add", .path = child, .value = e.value});
         }
     }
     for (const auto &e : a.entries()) {
-        if (!b.contains(e.key)) {
-            out.push_back(JsonPatchOp{.op = "remove", .path = path + "/" + std::string(e.key), .value = Json{}});
+        if (b.find(e.key) == nullptr) {
+            child.assign(path).append(1, '/').append(e.key);
+            out.push_back(JsonPatchOp{.op = "remove", .path = child, .value = Json{}});
         }
     }
     for (const auto &e : b.entries()) {
-        if (a.contains(e.key)) {
-            diff_into(*a.at(e.key), e.value, path + "/" + std::string(e.key), out);
+        const Json *sub = a.find(e.key);
+        if (sub != nullptr && *sub != e.value) {
+            child.assign(path).append(1, '/').append(e.key);
+            diff_into(*sub, e.value, child, out);
         }
     }
 }
@@ -501,6 +510,8 @@ auto component_schema(const std::string &name) -> Json {
     // 已注册类型的 schema 只由类型名决定（工厂表在核心注册完成后固定），而 search/list 会按类型
     // 反复取同一份；缓存后按值返回拷贝，调用方拿到的仍是独立对象，与逐次重建的输出一致。
     // 未注册类型不入缓存：其 schema 构建代价低，也避免任意调用名把缓存撑大。
+    // 缓存刻意不设失效入口：schema 只由类型名决定、工厂表在核心注册后固定；若将来支持运行时
+    // 扩充注册表，须在同一处清空本缓存并复核调用线程。
     // NOLINTNEXTLINE(bugprone-dynamic-static-initializers) 单线程 UI 路径；函数内静态初始化顺序无关
     static std::map<std::string, Json> cache;
     if (const auto it = cache.find(name); it != cache.end()) {

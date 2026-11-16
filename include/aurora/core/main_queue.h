@@ -31,7 +31,8 @@ namespace aurora {
 /// @brief 进程级唯一主线程投递队列（全静态纯门面；对标 `ThreadPool` 的宿主单例形态）。
 ///
 /// 队列、值班位、世代计数、唤醒通道同址同锁：值班判定与入队在一把锁内完成，
-/// 不存在「还租约后落孤儿项」的竞态。`core` 不认识 `Application`——唤醒方式由上岗者
+/// 不存在「还租约后落孤儿项」的竞态。世代号与打烊标记另以原子随锁内写入一同发布，
+/// 锁外读方（发起路径）无需为读这两个标量再排队。`core` 不认识 `Application`——唤醒方式由上岗者
 /// 经 `on_duty` 注入，本类型只负责「叫谁起床」，不决定任务归属。
 ///
 /// @note Thread: thread-safe（所有静态方法可任意线程调用）
@@ -81,8 +82,8 @@ class MainQueue {
             }
             try {
                 std::scoped_lock const lk(state().mtx);
-                if (state().epoch == epoch_) {
-                    state().epoch = 0;
+                if (state().epoch.load(std::memory_order_relaxed) == epoch_) {
+                    state().epoch.store(0, std::memory_order_release);
                     state().wake = nullptr;  // 唤醒通道随登记一并摘除
                 }
             } catch (...) {  // NOLINT(bugprone-empty-catch)
@@ -136,7 +137,7 @@ class MainQueue {
         /// @brief 开窗（仅经 `closing_scope()`）：锁内置位打烊标志。
         Closing() : active_(true) {
             std::scoped_lock const lk(state().mtx);
-            state().closing = true;
+            state().closing.store(true, std::memory_order_release);
         }
         /// @brief 关窗：仅在自己名开窗时清位（幂等）。
         ///
@@ -148,7 +149,7 @@ class MainQueue {
             }
             try {
                 std::scoped_lock const lk(state().mtx);
-                state().closing = false;
+                state().closing.store(false, std::memory_order_release);
             } catch (...) {  // NOLINT(bugprone-empty-catch)
                 // 收起窗口的系统级失败不可恢复：析构路径不外抛，守卫本身照常销毁。
                 // 此处的静默是本体的设计意图（不记录、不再抛），不是漏处理。
@@ -166,12 +167,15 @@ class MainQueue {
     /// @return 成功领回租约；**此刻**已有值班者时为空 `nullopt`（调用方据此拒绝并发 run）。
     [[nodiscard]] static auto on_duty(std::function<void()> wake) -> std::optional<Lease> {
         std::scoped_lock const lk(state().mtx);
-        if (state().epoch != 0) {
+        if (state().epoch.load(std::memory_order_relaxed) != 0) {
             return std::nullopt;  // CAS 只拒「此刻有人」；归还后的重入循环可再次领取
         }
-        state().epoch = ++state().epoch_seq;  // 单调分配，永不重置/复用（防重入 run 世代撞旧）
+        // 单调分配，永不重置/复用（防重入 run 世代撞旧）；release 发布使锁外读方拿到
+        // 与世代配套的唤醒通道视图。
+        const std::uint64_t granted = ++state().epoch_seq;
+        state().epoch.store(granted, std::memory_order_release);
         state().wake = std::move(wake);
-        return Lease{state().epoch};
+        return Lease{granted};
     }
 
     /// @brief 打开打烊窗口（仅 `loop_end` 用）：租约已还、正在收尾排空的有界标记。
@@ -251,11 +255,11 @@ class MainQueue {
     }
 
     /// @brief 值班世代的全函数：在岗返回当前世代号（≥1），不在岗（未上岗/已 release）恒返回 0。
+    ///
+    /// 锁外读取：世代号以原子发布，发起侧（`async`/`then`）每任务读一次，
+    /// 不必为此与队列互斥量串行。
     /// @return 当前在岗世代号或 0。
-    [[nodiscard]] static auto current_epoch() -> std::uint64_t {
-        std::scoped_lock const lk(state().mtx);
-        return state().epoch;
-    }
+    [[nodiscard]] static auto current_epoch() -> std::uint64_t { return state().epoch.load(std::memory_order_acquire); }
 
     /// @brief 是否有循环在岗（`current_epoch() != 0` 的可读别名，判据单源不漂移）。
     /// @return 有值班者为 true。
@@ -277,10 +281,7 @@ class MainQueue {
 
     /// @brief 是否处于打烊窗口（`loop_end` 收尾排空中；`is_closing() ⇒ current_epoch()==0`）。
     /// @return 打烊窗口内为 true。
-    [[nodiscard]] static auto is_closing() -> bool {
-        std::scoped_lock const lk(state().mtx);
-        return state().closing;
-    }
+    [[nodiscard]] static auto is_closing() -> bool { return state().closing.load(std::memory_order_acquire); }
 
     /// @brief 落地相打烊取消的累计计数（「丢弃可观测、非静默」的核对面）。
     /// @return 被拒绝的投递数。
@@ -290,13 +291,16 @@ class MainQueue {
 
   private:
     /// @brief 进程级单例状态（锁 + 队列 + 值班位 + 世代 + 打烊窗 + 计数，同址同锁）。
+    ///
+    /// `epoch` 与 `closing` 以原子发布：写侧仍在本锁内完成「判定 + 落值」，
+    /// 读侧（`current_epoch` / `is_closing`）免锁读取，发起路径不再为读两个标量各加一次锁。
     struct State {
-        std::mutex mtx;  ///< 罩住以下全部字段（含 wake 的调用副本除外）
+        std::mutex mtx;  ///< 罩住队列、唤醒通道与世代的**写入**（`epoch`/`closing` 的锁外读除外）
         std::deque<std::function<void()>> queue;  ///< 待主线程执行的任务
         std::function<void()> wake;  ///< 在岗唤醒通道；空 = 未登记
-        std::uint64_t epoch = 0;  ///< 当前在岗世代号；0 = 不在岗
-        std::uint64_t epoch_seq = 0;  ///< 单调分配器（永不重置/复用/回退）
-        bool closing = false;  ///< 打烊窗口标记（`Closing` 守卫有界开关）
+        std::atomic<std::uint64_t> epoch{0};  ///< 当前在岗世代号；0 = 不在岗（release 写 / acquire 读）
+        std::uint64_t epoch_seq = 0;  ///< 单调分配器（永不重置/复用/回退；仅锁内读写）
+        std::atomic<bool> closing{false};  ///< 打烊窗口标记（`Closing` 守卫有界开关）
         std::atomic<std::uint64_t> dropped{0};  ///< 落地相打烊取消计数（锁外读）
     };
     /// @brief 惰性构造的函数级单例；跨 TU 初始化顺序在此不存在。
@@ -310,7 +314,8 @@ class MainQueue {
     /// @param expected_epoch 投递方声明的世代；0 = 代际无关。
     /// @return 可入队为 true。
     [[nodiscard]] static auto accept_locked(std::uint64_t expected_epoch) -> bool {
-        return state().epoch != 0 && (expected_epoch == 0 || expected_epoch == state().epoch);
+        const std::uint64_t epoch = state().epoch.load(std::memory_order_relaxed);
+        return epoch != 0 && (expected_epoch == 0 || expected_epoch == epoch);
     }
     /// @brief 落地拒绝的观测面（**须持 `state().mtx`**）：计数 + ERROR 日志 + 诊断，绝不抛出。
     static auto reject_locked() -> void {

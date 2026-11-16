@@ -336,6 +336,8 @@ auto FlexLayouter::layout(const Flex &config, const Constraints &parent, const s
     // 主轴对齐 pass：leading / between。
     ctx.main_axis_align_pass();
     // 定位后处理 pass：逐子项定位 + 反向镜像。
+    // `rects` 的所有权随即移交给 `result.children`，不能充当可复用缓冲；`sizes` / `baselines`
+    // 由每次新建的上下文持有，而 `layout` 是静态入口、没有成员可挂池化缓冲，故不复用。
     std::vector<Rect> rects;
     ctx.place_children_pass(rects);
 

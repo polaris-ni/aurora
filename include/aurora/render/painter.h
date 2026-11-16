@@ -441,6 +441,11 @@ class Painter {
     /// @return 交集非空返回 true；为空返回 false（调用方应早退）。
     [[nodiscard]] auto shrink_to_clips(int &x0, int &y0, int &x1, int &y1) const -> bool;
 
+    /// @brief 重算裁剪交集缓存（`clip_x0_` … `clip_y1_`）：各层矩形求交后取整，
+    ///        与 `ClipRegion::coverage` 的 `rect.contains` 门槛像素级等价；栈空时即画布范围。
+    ///        仅在裁剪栈变更（begin / push_clip / push_clip_rounded / pop_clip）时调用。
+    auto rebuild_clip_bounds() -> void;
+
     /// @brief 给定扫描线 y，计算圆角裁剪 SDF ≤ t 的全覆写 x 范围（半开区间）。
     /// @param cr 圆角裁剪区域。
     /// @param y 扫描线（物理像素行）。
@@ -471,8 +476,20 @@ class Painter {
     int height_ = 0;  ///< 物理缓冲高（dp × scale 取整）
     float scale_ = 1.0F;  ///< device pixel ratio（dp → 物理像素）
     std::vector<std::uint8_t> pixels_;  ///< RGBA8 帧缓冲（宽 × 高 × 4 字节）
+    /// @brief `draw_image` 缩放路径的单列映射（源列下标 + 插值权重）。
+    struct ImageColumn {
+        int i0 = 0;  ///< 源列左下标（已钳制到图宽内）
+        int i1 = 0;  ///< 源列右下标（已钳制到图宽内）
+        float tx = 0.0F;  ///< 列内插值权重
+    };
+    /// @brief 缩放路径的列映射暂存：按容量复用，避免每次调用分配三张临时表。
+    std::vector<ImageColumn> image_columns_;
     std::vector<ClipRegion> clip_stack_;  ///< 裁剪栈（矩形 + 圆角，滚动/圆角容器用）
     bool has_rounded_clip_ = false;  ///< 裁剪栈中是否存在圆角裁剪（blend_pixel 快速路径判定）
+    int clip_x0_ = 0;  ///< 裁剪交集左界（含；物理像素，push/pop 时重算）
+    int clip_y0_ = 0;  ///< 裁剪交集上界（含）
+    int clip_x1_ = -1;  ///< 裁剪交集右界（含；< 左界表示空交集）
+    int clip_y1_ = -1;  ///< 裁剪交集下界（含）
     double global_alpha_ = 1.0;  ///< 全局绘制透明度（set_alpha 设置）
     bool skip_dl_record_ =
         false;  ///< Window 脏区裁剪绘制期间设为 true，抑制 DL 录制/回放（partial clip 下录制会丢失 clip 外子节点）

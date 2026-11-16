@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -1674,12 +1675,35 @@ class Widget : public std::enable_shared_from_this<Widget>, public detail::Props
     /// 而父侧 Node 几何停留旧值——`window_bounds()` 读到的是过期盒（原生子视图几何据此下发
     /// 即不跟随父侧新盒）。
     auto mark_size_intent_changed() -> void {
-        mark_needs_layout();  // 标脏自身（含 request_frame）
-        // 无条件向父侧传播，绕开 `mark_needs_layout_impl` 里的 boundary 短路（见上）。父多为
-        // 非 boundary 容器 ⇒ 整树重排、父侧 Node 几何随之刷新；父若自身也是 boundary（如滚动
-        // 视口）⇒ 其局部重排会以新约束重新下发子盒，同样正确。
-        if (layout_parent_ != nullptr) {
-            layout_parent_->mark_needs_layout_impl(true);
+        needs_layout_ = true;
+        layout_cache_valid_ = false;
+#ifdef AURORA_ENABLE_DEBUG
+        debug::detail::record_dirty(debug::DirtyKind::Layout, type_name(), debug::current_debug_frame(), false);
+#endif
+        // 尺寸意图必须穿透自身 boundary 的短路：从父侧起置位并上溯到第一个 boundary（含）。
+        // 只走一遍祖先链：旧写法先 `mark_needs_layout()` 再从父侧二次传播，父链被重扫两遍、
+        // `invalidate_display_list_up` 与 `request_frame` 也各发两次。
+        Widget *origin = layout_parent_;
+        for (Widget *p = origin; p != nullptr; p = p->layout_parent_) {
+            p->needs_layout_ = true;
+            p->layout_cache_valid_ = false;
+#ifdef AURORA_ENABLE_DEBUG
+            debug::detail::record_dirty(debug::DirtyKind::Layout, p->type_name(), debug::current_debug_frame(), true);
+#endif
+            if (p->is_relayout_boundary()) {
+                break;
+            }
+        }
+        // 失效自本控件覆盖到根（一次即可）；发帧以父侧为 origin——子树脏汇聚点看到的是
+        // 「父的重排」，与尺寸意图改变的是父分给本控件的盒这一事实一致。
+        invalidate_display_list_up();
+        if (origin != nullptr) {
+            if (on_dirty) {
+                on_dirty(true);  // 本控件自身的观察回调（单测/自定义驱动）仍需看到这次脏
+            }
+            origin->request_frame(true);
+        } else {
+            request_frame(true);
         }
     }
     /// @brief 布局脏标记的实现体：公开入口 `mark_needs_layout` 委托至此。
@@ -1728,6 +1752,12 @@ class Widget : public std::enable_shared_from_this<Widget>, public detail::Props
     Constraints cached_constraints_{};  ///< 上一次成功布局时的输入约束（缓存键）
     Size cached_size_{};  ///< 上一次成功布局得到的尺寸
     Widget *layout_parent_ = nullptr;  ///< 布局父节点（容器在布局入口设置）
+    /// @brief 「本控件在父侧 `child_nodes()` 中的下标」的可校验缓存（`window_bounds()` 专用）。
+    ///
+    /// 上溯链每层都要在父侧子表里找回自己；命中先用「下标未越界 + 该槽仍是本控件」的地址比对
+    /// 校验，失配才退回线性扫描并回写。有效性靠指针比对而非失效通知，父容器增删兄弟无需知情；
+    /// `static_cast<std::size_t>(-1)` 表示尚未查询过。
+    mutable std::size_t sibling_index_hint_ = static_cast<std::size_t>(-1);
     /// @brief 本控件是否持有在途系统拖出会话（`begin_system_drag()` 发起成功即置位）。
     ///
     /// 析构即取消（见 `~Widget`）：异步会话跨越多个帧，控件可能在会话期间被移除，不取消则

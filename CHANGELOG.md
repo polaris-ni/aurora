@@ -27,10 +27,6 @@ freeze: minor-versions-are-additive
 - **编译开关收敛：删除四枚导出宏与两个 `FeatureFlags` 字段**。`AURORA_BACKEND_HEADLESS` / `AURORA_ENABLE_GLFW_GPU_GL` 从安装导出清单移除，`AURORA_ENABLE_SIMD` / `AURORA_ENABLE_TEST_HOOKS` 不再以 PUBLIC 编译定义下发；`debug::FeatureFlags` 删 `backend_headless` 与 `simd` 两字段，`feature_flags().to_json()` 随之删 `AURORA_BACKEND_HEADLESS` / `AURORA_ENABLE_SIMD` 两键。无头后端与 SIMD 恒编入、能力查询不再需要；测试注入点改由 `AURORA_ENABLE_DEBUG` 单宏裁切（默认组合行为逐位不变）。
 - **音频/WebView 平台子开关不再读取手工 `-D`**：`AURORA_ENABLE_AUDIO_WASAPI` / `AURORA_ENABLE_AUDIO_ALSA` / `AURORA_ENABLE_AUDIO_COREAUDIO` / `AURORA_ENABLE_AUDIO_WEBAUDIO` / `AURORA_ENABLE_WEBVIEW_WEBVIEW2` 的 option 删除，宏由父开关 ^ 平台推导注入（宏名、TU 门控与 `feature_flags` 镜像字段名不变，默认构建导出面不变）；`AURORA_ENABLE_NET_TLS_SCHANNEL` / `AURORA_ENABLE_NET_TLS_SECURE_TRANSPORT` 两枚 PRIVATE 内部宏删除，改为 `AURORA_ENABLE_NET_TLS_SYSTEM ^ 平台宏` 门控。
 
-### Changed
-
-- 无头后端恒编入、`HeadlessSurface` 恒声明；GLFW 后端构建即含 GPU GL 通道（运行期初始化失败自动回退软件路径，`gpu_backend()` 语义不变）；`-ffp-contract=off` 与 MSVC `/fp:precise` 改为无条件注入，保证 SIMD/标量逐位一致的前提不随开关消失。系统 TLS 栈的 configure 日志括注由引擎宏名改为引擎名（Schannel / SecureTransport）。
-
 ### Migration
 
 - 用 `-DAURORA_ENABLE_SIMD=OFF` / `-DAURORA_ENABLE_TEST_HOOKS=OFF` / `-DAURORA_ENABLE_GLFW_GPU_GL=ON` / `-DAURORA_ENABLE_AUDIO_*=ON|OFF` / `-DAURORA_ENABLE_WEBVIEW_WEBVIEW2=ON|OFF` 的构建脚本：这些缓存变量成为未使用项，删除即可（能力按父开关与平台推导，默认行为不变）。
@@ -48,12 +44,15 @@ freeze: minor-versions-are-additive
 
 ### Changed
 
+- 无头后端恒编入、`HeadlessSurface` 恒声明；GLFW 后端构建即含 GPU GL 通道（运行期初始化失败自动回退软件路径，`gpu_backend()` 语义不变）；`-ffp-contract=off` 与 MSVC `/fp:precise` 改为无条件注入，保证 SIMD/标量逐位一致的前提不随开关消失。系统 TLS 栈的 configure 日志括注由引擎宏名改为引擎名（Schannel / SecureTransport）。
 - **渲染热路径去冗余开销，输出逐位不变**：gamma 表就绪检查从 `set_pixel` / `blend_subpixel` 的每像素自查提升到各绘制原语入口（整帧起点统一就绪一次）；半透明矩形快速路径改走 SIMD 批量混合；目标尺寸与源尺寸相同、锚点为整数且源全不透明的贴图走整行直拷，跳过长宽均为 1:1 的双线性采样。
 - **状态内核与事件派发减少每帧分配与重复上溯**：`State::set` 在响应式入口外改为原地提交（不再构造捕获共享指针与值的闭包）；提交去重由每轮清空并逐边插入的两个哈希集改为纪元戳向量；拖拽捕获期间的每个鼠标移动事件不再深拷贝整条命中链，悬停/命中链的收集也不再逐层新建 `vector`。布局脏标记改为沿布局父链一次上溯（原实现逐层回程各发一次发帧请求，深度 d 的树为 O(d²)）。
 - **布局热路径不再整体拷贝子项表**：`FlexLayouter` 的布局上下文改为只读借用调用方传入的子项 `vector`。
 - **字形混合、渐变与圆角裁剪走批量路径**：子像素混合在圆角裁剪内按行取「覆盖率恒为 1」的区间整段写入，端点再用单点覆盖度复核；线性渐变在色标完整覆盖 `[0,1]` 且非降序时按段批量混合（径向渐变不受影响）；圆角裁剪的候选表改为定长数组，不再逐次分配。输出与逐像素路径逐位一致。
 - **字形缓存、弹簧动画与序列化热路径减少重复工作**：`GlyphAtlas` 的 LRU 由「链表 + 迭代器映射」改为记录内使用序号（命中只回写标量，淘汰按序号扫描，顺序与逐次提升等价），`insert` 返回条目常驻指针，插入后免去再次查找；弹簧动画在构造期缓存闭式解系数，`value(t)` 只做常数组合；动画绑定仅在所属控制器本帧置脏时写回；序列化注册表只填充一次，`component_schema` 按已注册类型缓存（按值深拷贝返回，调用方改动不回流），类型搜索改为逐字节大小写不敏感比较，不再为每个候选名分配临时串。
 - **扇形、描边、缩放贴图与区域混合按「覆盖率恒为 1」的区间批量写入**：`fill_sector` 的径向核心区间按行解析求出（角向核心以两条径向边的垂距判定），核心区不再逐像素走 `atan2` / `fmod` / `sqrt`；`draw_line` / `stroke_polyline` 的距离比较改在平方域完成，内部带整段写入；`draw_rounded_border` 的直边段改为按行批量（圆角象限仍逐像素）；`draw_image` 缩放路径逐列预计算源列下标与插值权重、按行取源行指针，alpha 归一改查表，全透明像素只抬升目标 alpha；`blend_region` 把混合模式折算成三张 256 项查表，`mask_region` 的线性渐变因子改为按行预算。以上批量仅在无圆角裁剪且全局透明度为 1 时启用，其余情形回落原逐像素路径，输出逐位不变。
+- **裁剪判界与绘制入口的每次调用开销再降一档**：`Painter` 在裁剪栈变更时重算各层矩形交集并缓存为整数包围盒，`set_pixel` / `blend_subpixel` 以一次整数比较替代逐像素裁剪栈遍历（存在圆角层时只对交集内像素算 SDF 覆盖度）；线性渐变把「末标早于 1」的停止点补成覆盖 `[0,1]` 后复用分段路径，尾部平台区亦走批量写入；`Widget::layout` 的修饰链测量改为逐层只捕获外层闭包引用与层号，构造 `std::function` 不再逐层堆分配；`MainQueue` 的世代号与打烊标记改为锁内落值并以原子发布，`current_epoch()` / `is_closing()` 免锁读取。输出逐位不变。
+- **序列化差量与窗口盒查询的重复工作再降一档**：`diff_objects` 复用同一块路径缓冲（不再逐键拼 `path + "/" + key` 临时串）、对共同键先判子树相等再拼路径，且键查找只做一次（原 `contains` + `at` 是两次线性扫描）；`Widget::window_bounds` 的兄弟定位加「下标 + 地址比对」可校验缓存（失配才线性扫描并回写），稳态上溯从 O(树深 × 兄弟数) 降为 O(树深)。输出逐位不变。
 
 ### Fixed
 

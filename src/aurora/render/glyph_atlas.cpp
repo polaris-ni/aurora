@@ -45,6 +45,8 @@ auto GlyphAtlas::clear() -> void {
 }
 
 auto GlyphAtlas::evict_oldest() -> void {
+    // 冷路径：仅在插入把条目数顶出容量时调用一次。线性扫描换取命中路径的「一次标量写」
+    // （理由见头文件 Record 的注释：命中远多于溢出插入，堆化会把比较搬到热路径上）。
     auto oldest = map_.begin();
     for (auto it = map_.begin(); it != map_.end(); ++it) {
         if (it->second.last_used < oldest->second.last_used) {

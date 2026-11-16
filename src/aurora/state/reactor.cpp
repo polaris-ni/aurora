@@ -60,6 +60,8 @@ SourceNode::SourceNode() : id_(next_source_id().fetch_add(1)) {}
 SourceNode::~SourceNode() = default;
 
 auto SourceNode::add_observer(Observer &observer) -> void {
+    // 线性去重：单个来源的观察者数通常是个位数，且登记只在依赖集合变化时发生；
+    // 为 O(1) 去重再维护一张哈希索引，会给每个来源常驻一份桶数组与分配，收益为负。
     for (const auto *existing : observers_) {
         if (existing == &observer) {
             return;
@@ -285,6 +287,8 @@ auto Engine::mark(SourceNode &src, std::uint32_t epoch) -> void {
 auto Engine::deliver() -> void {
     std::vector<std::shared_ptr<RunRecord>> batch = std::move(pending_);
     pending_.clear();
+    // 批次规模是个位数（一次提交触达的终端数），`std::sort` 在该区间本就退化为插入排序；
+    // 因果链查找的上界是嵌套深度。两者都不构成可测量开销，故保持全序 + 线性查找。
     std::sort(batch.begin(), batch.end(),
               [](const std::shared_ptr<RunRecord> &left, const std::shared_ptr<RunRecord> &right) -> bool {
                   return left->seq() < right->seq();

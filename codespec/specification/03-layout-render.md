@@ -463,6 +463,10 @@ au::Column{}
 
 `push_clip` 与 `pop_clip` **必须成对**。
 
+裁剪交集缓存在每次栈变更（`begin` / `push_clip` / `push_clip_rounded` / `pop_clip`）时重算：各层矩形求交后取整（左 / 上取 `ceil`、右 / 下取 `floor`，含边界），与 `ClipRegion::coverage` 的 `rect.contains` 门槛像素级等价。`set_pixel` / `blend_subpixel` 因此用一次整数比较即可丢弃区域外写入，不再逐像素遍历裁剪栈；存在圆角层时也只对交集内像素计算 SDF 覆盖度。
+
+线性渐变的停止点在入口规范化：色标与颜色等长、非降序、首标不晚于 0 且末标早于 1 时，补一个取尾色的终点色标后走分段批量路径——补出的段两端同色，插值结果与逐像素采样的尾色回退逐位一致；其余形态（首标晚于 0、乱序、长度不符）保持逐像素采样。
+
 **高 DPI**
 
 `set_scale(float)` / `scale()`：高 DPI 下把 dp 坐标几何放大到物理像素帧缓冲。像素级写入：`blend_pixel` 直接落在物理像素、不再乘 scale；`draw_text` 的**文本原点**仍先按 dp→物理像素换算（`origin × scale_`）再光栅，只有**字形位图本身**不再二次缩放（见 `Painter::draw_text`）。
