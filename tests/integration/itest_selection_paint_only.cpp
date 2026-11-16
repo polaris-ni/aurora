@@ -20,9 +20,7 @@ using au::Column;
 using au::Constraints;
 using au::EventDispatcher;
 using au::FocusManager;
-#ifdef AURORA_BACKEND_HEADLESS
-using au::HeadlessSurface;  // 仅 AURORA_BACKEND_HEADLESS 下编译；宏关闭时本文件走 SKIP 桩
-#endif
+using au::HeadlessSurface;  // 无头后端随库恒编入
 using au::MouseAction;
 using au::MouseButton;
 using au::MouseEvent;
@@ -56,7 +54,6 @@ class SpyWidget : public au::LeafWidget {
 }  // namespace
 
 AURORA_TEST_CASE(drag_selection_paint_only_skips_relayout) {
-#ifdef AURORA_BACKEND_HEADLESS
     // 512×512 模拟最大化/大窗：拖选若引发全树重排会被本用例暴露。
     constexpr int w = 512;
     constexpr int h = 512;
@@ -110,9 +107,6 @@ AURORA_TEST_CASE(drag_selection_paint_only_skips_relayout) {
     // 选区内无关子控件（spy）内容未变：Display List 命中直接回放，不再调用 on_paint。
     // （frame_count==2 已确认本帧重新上屏；layout_calls==1 确认未重排。）
     AURORA_TEST_CHECK_EQ(spy->paint_calls, 1);
-#else
-    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS not enabled, HeadlessSurface is not compiled");
-#endif
 }
 
 }  // namespace aurora::test_cases::itest_selection_paint_only

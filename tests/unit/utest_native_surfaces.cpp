@@ -58,16 +58,12 @@ AURORA_TEST_CASE(aggregate_header_exposes_surface_contract) {
     static_assert(!std::is_move_constructible_v<Surface>);
     AURORA_TEST_CHECK_TRUE(std::is_abstract_v<Surface>);
 
-#ifdef AURORA_BACKEND_HEADLESS
     // 聚合头注释契约：Headless 零三方依赖、默认可用。
     HeadlessSurface const surface;
     AURORA_TEST_CHECK_EQ(surface.frame_count(), 0);
     AURORA_TEST_CHECK_NEAR(surface.size().width, 0.0F, 1e-4F);
     AURORA_TEST_CHECK_NEAR(surface.size().height, 0.0F, 1e-4F);
     AURORA_TEST_CHECK_NULL(surface.data());
-#else
-    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS is not enabled: the aggregate header hides HeadlessSurface");
-#endif
 }
 
 AURORA_TEST_CASE(backend_surface_set_cursor_contract) {

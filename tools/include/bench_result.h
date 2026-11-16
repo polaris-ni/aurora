@@ -102,11 +102,8 @@ enum class ResultStatus : std::uint8_t {
     return "x11";
 #elif defined(AURORA_BACKEND_WAYLAND)
     return "wayland";
-#elif defined(AURORA_BACKEND_HEADLESS)
-    return "headless";
 #else
-    return "unknown";
-#endif
+    return "headless";
 }
 
 [[nodiscard]] inline auto build_type_id() -> std::string {

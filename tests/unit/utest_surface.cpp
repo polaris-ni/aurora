@@ -1,7 +1,7 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/window/surface.h
 /// 测试说明: Surface 抽象契约（默认虚实现、非拷贝、快照/截屏默认路径、最小测试桩）与
-/// HeadlessSurface 帧生命周期、PNG 落盘、状态/重绘 seam（Headless 部分受 AURORA_BACKEND_HEADLESS 门控）
+/// HeadlessSurface 帧生命周期、PNG 落盘、状态/重绘 seam（无头后端随库恒编入）
 
 #include <chrono>
 #include <filesystem>
@@ -116,7 +116,6 @@ AURORA_TEST_CASE(surface_is_non_copyable_and_abstract) {
 }
 
 AURORA_TEST_CASE(headless_surface_frame_lifecycle) {
-#ifdef AURORA_BACKEND_HEADLESS
     // 构造期传入初始尺寸：size() 在 begin_frame 之前即返回正确值（HEADLESS 特有契约）。
     HeadlessSurface surface("", Size{.width = 100.0F, .height = 80.0F});
     AURORA_TEST_CHECK_NEAR(surface.size().width, 100.0F, 1e-4F);
@@ -144,13 +143,9 @@ AURORA_TEST_CASE(headless_surface_frame_lifecycle) {
     surface.wait_events(-1.0);
     const double elapsed_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
     AURORA_TEST_CHECK_LT(elapsed_ms, 900.0);
-#else
-    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS is not enabled; HeadlessSurface is not compiled");
-#endif
 }
 
 AURORA_TEST_CASE(headless_surface_png_present_writes_file) {
-#ifdef AURORA_BACKEND_HEADLESS
     const auto path = std::filesystem::path(testing::isolation::temp_dir()) / "utest_surface_headless.png";
     std::error_code ec;
     std::filesystem::remove(path, ec);
@@ -161,13 +156,9 @@ AURORA_TEST_CASE(headless_surface_png_present_writes_file) {
     AURORA_TEST_REQUIRE_TRUE(surface.present().ok());
     AURORA_TEST_CHECK_TRUE(std::filesystem::exists(path));
     AURORA_TEST_CHECK_EQ(surface.frame_count(), 1);
-#else
-    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS is not enabled; HeadlessSurface is not compiled");
-#endif
 }
 
 AURORA_TEST_CASE(headless_surface_state_seams_dispatch_handlers) {
-#ifdef AURORA_BACKEND_HEADLESS
     HeadlessSurface surface;
 
     WindowState last_state = WindowState::Visible;
@@ -201,13 +192,9 @@ AURORA_TEST_CASE(headless_surface_state_seams_dispatch_handlers) {
     bare.simulate_window_mode(WindowMode::Minimized);
     bare.simulate_present_request();
     AURORA_TEST_CHECK_TRUE(true);
-#else
-    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS is not enabled; HeadlessSurface is not compiled");
-#endif
 }
 
 AURORA_TEST_CASE(headless_surface_records_cursor_sequence) {
-#ifdef AURORA_BACKEND_HEADLESS
     // 光标形状（ROADMAP 完成判据的 Headless 验收入口）：Headless 无系统光标，
     // 覆写 set_cursor 为「按序记录」，使「派发器解析 → Application 接线 → Surface 生效」
     // 整条链路无须 OS 窗口即可确定性断言。此处只验记录 seam 自身的契约。
@@ -233,9 +220,6 @@ AURORA_TEST_CASE(headless_surface_records_cursor_sequence) {
     surface.clear_cursor_log();
     AURORA_TEST_CHECK_TRUE(surface.cursor_log().empty());
     AURORA_TEST_CHECK_FALSE(surface.last_cursor().has_value());
-#else
-    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS is not enabled; HeadlessSurface is not compiled");
-#endif
 }
 
 }  // namespace aurora::test_cases::utest_surface

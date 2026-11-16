@@ -13,11 +13,8 @@
 #include <string>
 #include <vector>
 
-#ifdef AURORA_BACKEND_HEADLESS
-// TestController 的实现体同样以 AURORA_BACKEND_HEADLESS 门控（依赖 HeadlessSurface），
-// 故宏关闭时不得引入声明，否则链接期缺符号。
+// TestController 依赖 HeadlessSurface，无头后端随库恒编入，本头恒可引入。
 #include "aurora/app/test_controller.h"
-#endif
 
 #include "aurora/app/validate_ui.h"
 #include "aurora/aurora.h"
@@ -200,7 +197,6 @@ AURORA_TEST_CASE(full_pipeline_roundtrip_to_code) {
 // `shared_ptr<Widget>` 树，子节点 id 无法经 `Widget::child_nodes()`（const 引用）回填。
 // ===========================================================================
 
-#ifdef AURORA_BACKEND_HEADLESS
 
 namespace {
 
@@ -431,6 +427,5 @@ AURORA_TEST_CASE(interact_script_reports_missing_target) {
                           "error must name the cause (got: " + err + ")");
 }
 
-#endif  // AURORA_BACKEND_HEADLESS
 
 }  // namespace aurora::test_cases::itest_ai_compat

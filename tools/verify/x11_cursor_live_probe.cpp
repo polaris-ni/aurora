@@ -17,7 +17,7 @@
 //   cmake --build build-verify --target aurora_verify_x11_cursor
 //   ./build-verify/aurora_verify_x11_cursor
 // 构建（方式 ② 手写命令，须先有一个已构建好的 X11 后端构建目录 build-x11）：
-//   g++ -std=c++20 -DAURORA_BACKEND_X11 -DAURORA_BACKEND_HEADLESS -DAURORA_ENABLE_SIMD \
+//   g++ -std=c++20 -DAURORA_BACKEND_X11 \
 //       -I include -I src -I third_party -I tools/verify \
 //       -I build-x11/third_party/freetype/include -I third_party/harfbuzz/src \
 //       tools/verify/x11_cursor_live_probe.cpp -o /tmp/x11_cursor_live_probe \

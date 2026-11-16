@@ -19,7 +19,6 @@
 
 namespace aurora::test_cases::itest_relayout_boundary {
 
-#ifdef AURORA_BACKEND_HEADLESS
 
 namespace {
 
@@ -95,12 +94,5 @@ AURORA_TEST_CASE(scrolling_boundary_does_not_relayout_ancestors) {
     set_strict_mode(prev);
 }
 
-#else
-
-AURORA_TEST_CASE(scrolling_boundary_does_not_relayout_ancestors) {
-    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS not enabled: HeadlessSurface/Window frame driver is not compiled");
-}
-
-#endif
 
 }  // namespace aurora::test_cases::itest_relayout_boundary

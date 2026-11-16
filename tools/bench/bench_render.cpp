@@ -27,7 +27,6 @@
 #include "aurora/render/font_engine.h"
 #include "bench_common.h"
 
-#ifdef AURORA_BACKEND_HEADLESS
 
 namespace {
 
@@ -385,15 +384,3 @@ auto main() -> int {
     return aurora::bench::finalize_process("bench_render", "raster-matrix") ? 0 : 1;
 }
 
-#else  // !AURORA_BACKEND_HEADLESS
-
-// 无头后端未编译：本基准的唯一绘制目标是 `HeadlessSurface`，无替代实现——跳过并如实说明，
-// 不编译失败（基准的判据本身也无从成立）。
-auto main() -> int {
-    aurora::bench::process_result().identify("bench_render", "raster-matrix");
-    aurora::bench::process_result().skip("backend-unavailable");
-    AURORA_LOG_RAW("bench", "bench_render: skipped (AURORA_BACKEND_HEADLESS not enabled, no paint target)\n");
-    return aurora::bench::finalize_process("bench_render", "raster-matrix") ? 0 : 1;
-}
-
-#endif  // AURORA_BACKEND_HEADLESS

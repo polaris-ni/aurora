@@ -34,7 +34,6 @@ auto make_page(const std::string &label) -> Node {
 
 // ---- Surface 帧生命周期（依赖 Headless 后端）----
 
-#ifdef AURORA_BACKEND_HEADLESS
 
 AURORA_TEST_CASE(headless_surface_frame_lifecycle) {
     auto surf = std::make_unique<HeadlessSurface>();
@@ -89,15 +88,6 @@ AURORA_TEST_CASE(app_run_frame_loop_counts_max_frames) {
     AURORA_TEST_CHECK_EQ(app.window()->surface().frame_count(), 4);
 }
 
-#else
-
-AURORA_TEST_CASE(headless_surface_frame_lifecycle) {
-    AURORA_TEST_SKIP(
-        "AURORA_BACKEND_HEADLESS not enabled: "
-        "HeadlessSurface/create_window(HeadlessOptions) is not compiled");
-}
-
-#endif
 
 // ---- Route ----
 
@@ -166,7 +156,6 @@ AURORA_TEST_CASE(navigator_stack_ops_and_callback_counts) {
 
 // ---- 集成：Navigator 切页 + Window 逐页上屏 ----
 
-#ifdef AURORA_BACKEND_HEADLESS
 
 AURORA_TEST_CASE(navigator_page_switch_presented_via_window) {
     Navigator nav{Route{make_page("Root"), "root"}};
@@ -188,14 +177,5 @@ AURORA_TEST_CASE(navigator_page_switch_presented_via_window) {
     AURORA_TEST_CHECK_EQ(win->surface().frame_count(), 2);
 }
 
-#else
-
-AURORA_TEST_CASE(navigator_page_switch_presented_via_window) {
-    AURORA_TEST_SKIP(
-        "AURORA_BACKEND_HEADLESS not enabled: "
-        "HeadlessSurface/create_window(HeadlessOptions) is not compiled");
-}
-
-#endif
 
 }  // namespace aurora::test_cases::itest_nav_win

@@ -40,7 +40,7 @@ auto expected_surface_kind() -> SurfaceKind {
 #elif defined(AURORA_BACKEND_GLFW)
     return SurfaceKind::Glfw;
 #else
-    // 含 `AURORA_BACKEND_HEADLESS` 与「全部被剪裁」两种情形：实现两条分支都回 Headless。
+    // 无头后端恒编入：无真实显示后端时回退 Headless。
     return SurfaceKind::Headless;
 #endif
 }

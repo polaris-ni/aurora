@@ -230,7 +230,7 @@ AURORA_TEST_CASE(system_drag_test_backend_lifecycle) {
 
     if (!system_drag::install_test_backend()) {
         AURORA_TEST_SKIP(
-            "system drag inert backend unavailable (AURORA_ENABLE_DEBUG/AURORA_ENABLE_TEST_HOOKS not both set)");
+            "system drag inert backend unavailable (AURORA_ENABLE_DEBUG not set)");
     }
 
     DragOffer offer;
@@ -297,10 +297,10 @@ AURORA_TEST_CASE(async_read_does_not_block_the_frame_loop) {
     // DragPayload 直连（read_async）。契约：登记后同步侧零兑现（发起不阻塞），
     // pump 一拍全量兑现且只兑现一次，内容与同步读取全等。
     // 本用例依赖排空阶段钩子（test_in_drain_phase / test_withhold_format / test_set_read_timeout），
-    // 仅在 inert 后端编入时（AURORA_ENABLE_DEBUG + AURORA_ENABLE_TEST_HOOKS）可观测；否则跳过。
+    // 仅在 inert 后端编入时（AURORA_ENABLE_DEBUG 开启）可观测；否则跳过。
     if (!system_drag::install_test_backend()) {
         AURORA_TEST_SKIP(
-            "system drag inert backend unavailable (AURORA_ENABLE_DEBUG/AURORA_ENABLE_TEST_HOOKS not both set)");
+            "system drag inert backend unavailable (AURORA_ENABLE_DEBUG not set)");
     }
 
     constexpr std::size_t payload_bytes = 8U << 20U;  // 8 MiB：同步读完足以卡住帧循环的量级
@@ -438,7 +438,7 @@ AURORA_TEST_CASE(async_callback_runs_in_drain_phase_not_message_pump) {
     // 依赖 test_in_drain_phase 钩子，仅在 inert 后端编入时可观测；否则跳过。
     if (!system_drag::install_test_backend()) {
         AURORA_TEST_SKIP(
-            "system drag inert backend unavailable (AURORA_ENABLE_DEBUG/AURORA_ENABLE_TEST_HOOKS not both set)");
+            "system drag inert backend unavailable (AURORA_ENABLE_DEBUG not set)");
     }
 
     std::unordered_map<std::string, std::vector<std::uint8_t>> data;
@@ -470,7 +470,7 @@ AURORA_TEST_CASE(without_drain_the_callback_never_fires) {
     (void)system_drag::remove_test_backend();
     if (!system_drag::install_test_backend()) {
         AURORA_TEST_SKIP(
-            "system drag inert backend unavailable (AURORA_ENABLE_DEBUG/AURORA_ENABLE_TEST_HOOKS not both set)");
+            "system drag inert backend unavailable (AURORA_ENABLE_DEBUG not set)");
     }
 
     std::unordered_map<std::string, std::vector<std::uint8_t>> data;
@@ -501,7 +501,7 @@ AURORA_TEST_CASE(session_end_settles_in_flight_reads_in_place) {
     (void)system_drag::remove_test_backend();
     if (!system_drag::install_test_backend()) {
         AURORA_TEST_SKIP(
-            "system drag inert backend unavailable (AURORA_ENABLE_DEBUG/AURORA_ENABLE_TEST_HOOKS not both set)");
+            "system drag inert backend unavailable (AURORA_ENABLE_DEBUG not set)");
     }
 
     std::unordered_map<std::string, std::vector<std::uint8_t>> data;
@@ -564,7 +564,7 @@ AURORA_TEST_CASE(withheld_payload_times_out_with_read_failed) {
     (void)system_drag::remove_test_backend();
     if (!system_drag::install_test_backend()) {
         AURORA_TEST_SKIP(
-            "system drag inert backend unavailable (AURORA_ENABLE_DEBUG/AURORA_ENABLE_TEST_HOOKS not both set)");
+            "system drag inert backend unavailable (AURORA_ENABLE_DEBUG not set)");
     }
     // 先设超时再登记：deadline 在登记时按当前超时算，次序反了超时点就落到默认 5s 上。
     system_drag::test_set_read_timeout(std::chrono::milliseconds{20});
@@ -655,7 +655,7 @@ AURORA_TEST_CASE(begin_returns_immediately_and_delivers_on_frame_loop) {
     (void)system_drag::remove_test_backend();
     if (!system_drag::install_test_backend()) {
         AURORA_TEST_SKIP(
-            "system drag inert backend unavailable (AURORA_ENABLE_DEBUG/AURORA_ENABLE_TEST_HOOKS not both set)");
+            "system drag inert backend unavailable (AURORA_ENABLE_DEBUG not set)");
     }
 
     int end_calls = 0;
@@ -698,7 +698,7 @@ AURORA_TEST_CASE(cancel_is_callable_outside_and_inside_a_session) {
     (void)system_drag::remove_test_backend();
     if (!system_drag::install_test_backend()) {
         AURORA_TEST_SKIP(
-            "system drag inert backend unavailable (AURORA_ENABLE_DEBUG/AURORA_ENABLE_TEST_HOOKS not both set)");
+            "system drag inert backend unavailable (AURORA_ENABLE_DEBUG not set)");
     }
 
     int end_calls = 0;
@@ -730,7 +730,7 @@ AURORA_TEST_CASE(move_confirmation_precedes_end_and_rollback_on_failure) {
     (void)system_drag::remove_test_backend();
     if (!system_drag::install_test_backend()) {
         AURORA_TEST_SKIP(
-            "system drag inert backend unavailable (AURORA_ENABLE_DEBUG/AURORA_ENABLE_TEST_HOOKS not both set)");
+            "system drag inert backend unavailable (AURORA_ENABLE_DEBUG not set)");
     }
 
     std::vector<std::string> ledger;
@@ -784,7 +784,7 @@ AURORA_TEST_CASE(drag_offer_image_and_hotspot_round_trip_through_backend) {
     (void)system_drag::remove_test_backend();
     if (!system_drag::install_test_backend()) {
         AURORA_TEST_SKIP(
-            "system drag inert backend unavailable (AURORA_ENABLE_DEBUG/AURORA_ENABLE_TEST_HOOKS not both set)");
+            "system drag inert backend unavailable (AURORA_ENABLE_DEBUG not set)");
     }
 
     DragOffer offer;
@@ -829,7 +829,7 @@ AURORA_TEST_CASE(widget_drag_session_callback_sequences_cover_five_paths) {
     (void)system_drag::remove_test_backend();
     if (!system_drag::install_test_backend()) {
         AURORA_TEST_SKIP(
-            "system drag inert backend unavailable (AURORA_ENABLE_DEBUG/AURORA_ENABLE_TEST_HOOKS not both set)");
+            "system drag inert backend unavailable (AURORA_ENABLE_DEBUG not set)");
     }
 
     const auto run_path = [](SystemDragOutcome outcome, DragAction action, const char *expect_tail) {
@@ -897,7 +897,7 @@ AURORA_TEST_CASE(widget_without_offer_dispatches_no_end) {
     (void)system_drag::remove_test_backend();
     if (!system_drag::install_test_backend()) {
         AURORA_TEST_SKIP(
-            "system drag inert backend unavailable (AURORA_ENABLE_DEBUG/AURORA_ENABLE_TEST_HOOKS not both set)");
+            "system drag inert backend unavailable (AURORA_ENABLE_DEBUG not set)");
     }
 
     DragSourceBox source;
@@ -926,7 +926,7 @@ AURORA_TEST_CASE(widget_destruction_cancels_in_flight_session) {
     (void)system_drag::remove_test_backend();
     if (!system_drag::install_test_backend()) {
         AURORA_TEST_SKIP(
-            "system drag inert backend unavailable (AURORA_ENABLE_DEBUG/AURORA_ENABLE_TEST_HOOKS not both set)");
+            "system drag inert backend unavailable (AURORA_ENABLE_DEBUG not set)");
     }
 
     auto end_calls = std::make_shared<int>(0);
@@ -984,7 +984,7 @@ AURORA_TEST_CASE(begin_callback_runs_inline_without_nested_pump) {
     (void)system_drag::remove_test_backend();
     if (!system_drag::install_test_backend()) {
         AURORA_TEST_SKIP(
-            "system drag inert backend unavailable (AURORA_ENABLE_DEBUG/AURORA_ENABLE_TEST_HOOKS not both set)");
+            "system drag inert backend unavailable (AURORA_ENABLE_DEBUG not set)");
     }
 
     DragSourceBox box;

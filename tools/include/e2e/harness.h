@@ -95,10 +95,8 @@ enum class Backend : std::uint8_t {
     switch (backend) {
         case Backend::Auto:  // NOLINT(*-branch-clone)
             return true;
-#ifdef AURORA_BACKEND_HEADLESS
         case Backend::Headless:
             return true;
-#endif
 #ifdef AURORA_BACKEND_WIN32
         case Backend::Win32:
             return true;
@@ -171,9 +169,8 @@ struct Frame {
 // 控件树查询面
 // ------------------------------------------------------------
 // 全部建立在**公共自描述通道**上（`Node::id` / `Widget::type_name` / `Widget::serialize_props`
-// / `Widget::child_nodes`），故不依赖 `TestController`——后者整头受 `AURORA_BACKEND_HEADLESS`
-// 门控，若查询面依赖它，则在「关掉无头后端但开真实后端」的构建里 E2E 恰好失去查询能力，
-// 与本内核的存在理由相悖。
+// / `Widget::child_nodes`），故不依赖 `TestController`——那会引入对无头帧循环驱动的耦合，
+// 与本内核「查询面在任何真实后端构建里都可用」的存在理由相悖。
 // ============================================================
 
 /// @brief 前序收集整棵控件树（`Node` 无父指针，自顶向下遍历 `Widget::child_nodes()`）。
@@ -396,12 +393,7 @@ class Session {
     /// 对已建成的 Surface 做 `dynamic_cast<const HeadlessSurface *>`（`HeadlessSurface` 是公共类型），
     /// **不新增公共查询 API**。
     [[nodiscard]] auto fell_back_to_headless() const -> bool {
-#ifdef AURORA_BACKEND_HEADLESS
         return dynamic_cast<const HeadlessSurface *>(&surface()) != nullptr;
-#else
-        // 无头后端未编译：`create_native_window` 没有回退目标，恒不成立。
-        return false;
-#endif
     }
 
     // ---- 根控件 ----

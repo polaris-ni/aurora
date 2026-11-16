@@ -5,7 +5,6 @@
 // 结果打印到 stdout（CI / 远程环境可跑）。
 #include "demo_common.h"
 
-#ifdef AURORA_BACKEND_HEADLESS
 
 #include <cstdio>
 #include <memory>
@@ -84,11 +83,3 @@ auto run() -> int {
 // NOLINTNEXTLINE(bugprone-exception-escape)
 auto main() -> int { return run(); }
 
-#else
-
-auto main() -> int {
-    std::printf("demo_test_controller: AURORA_BACKEND_HEADLESS not enabled, skipped\n");
-    return 0;
-}
-
-#endif

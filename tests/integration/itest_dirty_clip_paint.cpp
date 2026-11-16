@@ -2,7 +2,7 @@
 /// 目标单元: include/aurora/window/window.h（脏区 sink）、include/aurora/widget/scroll.h（离屏缓冲脏带）
 /// 测试说明: 验证 Window::present_root 脏区裁剪绘制——「仅绘制脏区（保留上帧缓冲 + clear_rect +
 ///           push_clip）」与「整帧重绘」逐位一致，且脏区外像素不被改写；用 HeadlessSurface::data()
-///           直接读取设备像素缓冲比对（Headless 部分受 AURORA_BACKEND_HEADLESS 门控）；
+///           直接读取设备像素缓冲比对（无头后端随库恒编入）；
 ///           本测试不含计时断言。另覆盖「绘制落在自身盒外」的一类脏区缺陷：基类统一焦点环
 ///           外扩于控件盒，获焦帧须入裁剪才能上屏、失焦帧须入裁剪才能重绘掉上一帧的环，
 ///           普通 sink 与 Scroll 离屏缓冲脏带两条标脏路径都要覆盖。环的显隐另由焦点到达方式
@@ -23,15 +23,13 @@ namespace aurora::test_cases::itest_dirty_clip_paint {
 
 namespace {
 
-#ifdef AURORA_BACKEND_HEADLESS
 // 创建已定尺寸的 Headless 窗口（HeadlessSurface 尺寸由首次 begin_frame 确立）。
-// HeadlessSurface 仅在 AURORA_BACKEND_HEADLESS 下编译；宏关闭时本文件走 SKIP 桩。
+// HeadlessSurface 随库恒编入。
 auto make_window(int w, int h) -> au::Window {
     auto surface = std::make_unique<au::HeadlessSurface>();
     (void)surface->begin_frame(w, h);
     return au::Window{std::move(surface)};
 }
-#endif
 
 auto copy_pixels(const std::uint8_t *src, size_t n) -> std::vector<std::uint8_t> {
     std::vector<std::uint8_t> out(n);
@@ -100,7 +98,6 @@ class DebugFlagsGuard final {
 }  // namespace
 
 AURORA_TEST_CASE(root_dirty_clip_matches_full_redraw) {
-#ifdef AURORA_BACKEND_HEADLESS
     // 场景 1：根控件整体变脏（脏区 = 全窗）——裁剪分支在 clip == 全窗时仍须与整帧一致。
     const auto chip = std::make_shared<au::Chip>();
     chip->set_label("hi");
@@ -124,13 +121,9 @@ AURORA_TEST_CASE(root_dirty_clip_matches_full_redraw) {
 
     AURORA_TEST_CHECK(count_diff(dirty, full) == 0);  // 脏区重绘 == 整帧重绘（逐位）
     AURORA_TEST_CHECK(count_diff(dirty, before) > 0);  // 颜色变更确实生效
-#else
-    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS not enabled, HeadlessSurface is not compiled");
-#endif
 }
 
 AURORA_TEST_CASE(nested_partial_dirty_clip_matches_full_redraw) {
-#ifdef AURORA_BACKEND_HEADLESS
     // 场景 2：嵌套小控件变脏（脏区 < 全窗）——真正锻炼部分裁剪路径：
     // 裁剪内与整帧重绘逐位一致；裁剪外（含同帧其它控件的文本）逐字节保持上帧内容。
     constexpr int w = 320;
@@ -187,9 +180,6 @@ AURORA_TEST_CASE(nested_partial_dirty_clip_matches_full_redraw) {
 
     // 脏区内确实重绘出了新颜色。
     AURORA_TEST_CHECK(count_diff(dirty, before) > 0);
-#else
-    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS not enabled, HeadlessSurface is not compiled");
-#endif
 }
 
 AURORA_TEST_CASE(debug_overlay_partial_clip_matches_full_redraw) {
@@ -199,7 +189,6 @@ AURORA_TEST_CASE(debug_overlay_partial_clip_matches_full_redraw) {
     if (!au::debug::feature_flags().debug) {
         AURORA_TEST_SKIP("AURORA_ENABLE_DEBUG not enabled: the overlay code path is compiled out");
     }
-#ifdef AURORA_BACKEND_HEADLESS
     DebugFlagsGuard flags_guard;  // 进程级全局：用例结束必须还原
     au::debug::DebugPaintFlags f;
     f.layout_guides = true;
@@ -254,13 +243,9 @@ AURORA_TEST_CASE(debug_overlay_partial_clip_matches_full_redraw) {
         }
     }
     AURORA_TEST_CHECK(outside_diff == 0);
-#else
-    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS not enabled, HeadlessSurface is not compiled");
-#endif
 }
 
 AURORA_TEST_CASE(focus_ring_band_repainted_when_focus_changes) {
-#ifdef AURORA_BACKEND_HEADLESS
     // 回归：基类统一焦点环画在控件盒**外** 2–4 dp（src/aurora/widget/widget.cpp 的 paint_content），
     // 而脏区曾只按控件自身 paint_bounds() 标记 → 环带落在脏区裁剪之外，两个方向同时出错：
     //  ① 获焦帧裁剪不含环带 → 环根本画不上屏；
@@ -312,13 +297,9 @@ AURORA_TEST_CASE(focus_ring_band_repainted_when_focus_changes) {
     AURORA_TEST_CHECK_EQ(ring_pixels_outside(after_blur, unfocused, w, h, box), 0U);
     // 回到未获焦外观：与帧 1 逐位一致（环带既无残留也无二次混合）。
     AURORA_TEST_CHECK(count_diff(after_blur, unfocused) == 0);
-#else
-    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS not enabled, HeadlessSurface is not compiled");
-#endif
 }
 
 AURORA_TEST_CASE(pointer_arrival_hides_the_ring_with_no_band_residual) {
-#ifdef AURORA_BACKEND_HEADLESS
     // 焦点到达方式（FocusArrival）改的只是环的显隐，脏区契约必须同样成立：键盘到达画出环后，
     // 指针再点同一控件（焦点未变、只到达方式变）须把上一帧的环带重绘干净。
     // set_focus 的「同一控件」分支不重发 on_focus_change，只按需标脏——漏标即留下残影像素，
@@ -361,13 +342,9 @@ AURORA_TEST_CASE(pointer_arrival_hides_the_ring_with_no_band_residual) {
     AURORA_TEST_CHECK(count_diff(hidden, ringed) > 0);  // 环确实被消掉了（非空转）
     AURORA_TEST_CHECK_EQ(ring_pixels_outside(hidden, unfocused, w, h, box), 0U);  // 盒外零残留
     AURORA_TEST_CHECK(count_diff(hidden, unfocused) == 0);  // 回到帧 1 外观
-#else
-    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS not enabled, HeadlessSurface is not compiled");
-#endif
 }
 
 AURORA_TEST_CASE(focus_ring_band_inside_scroll_repainted) {
-#ifdef AURORA_BACKEND_HEADLESS
     // 同一缺陷的第二条汇聚路径：后代落在 Scroll 的离屏内容缓冲内时，标脏经
     // `Scroll::on_descendant_dirty` 合并成缓冲局部脏带（内容坐标系）并只重录该带。脏带若不含
     // 后代的盒外环带，残留会固化在离屏缓冲里、随视口反复上屏（普通脏区 sink 修好也不覆盖此路）。
@@ -412,9 +389,6 @@ AURORA_TEST_CASE(focus_ring_band_inside_scroll_repainted) {
     AURORA_TEST_CHECK(win.present_root(root).ok());  // 帧 5：整帧重绘基准
     AURORA_TEST_CHECK(count_diff(after_blur, copy_pixels(hs.data(), n)) == 0);  // 无环带残留
     AURORA_TEST_CHECK(count_diff(after_blur, unfocused) == 0);  // 回到帧 1 外观
-#else
-    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS not enabled, HeadlessSurface is not compiled");
-#endif
 }
 
 }  // namespace aurora::test_cases::itest_dirty_clip_paint

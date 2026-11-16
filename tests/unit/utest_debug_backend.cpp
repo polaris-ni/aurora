@@ -4,7 +4,7 @@
 /// 显式路径规则、set_output_directory 往返与默认恢复）、capture（关闭态结构化错误、开启态
 /// 帧缓冲 PNG 落盘、OnScreenWindow 在无窗口后端 unsupported）、surface_state（开启态逐字段
 /// 快照 / 关闭态 unavailable）。测试 TU 不写宏门控：以 feature_flags().debug 运行时探测。
-/// Surface 用本 TU 内的最小桩实现（不依赖 AURORA_BACKEND_HEADLESS 等后端宏），临时文件落
+/// Surface 用本 TU 内的最小桩实现（不依赖任何后端宏），临时文件落
 /// 系统临时目录并在用例内清理。
 
 #include <cstdint>

@@ -1,6 +1,6 @@
 // tools/verify/glfw_gpu_features_live_probe.cpp — GL GPU 特性真机探针（非 CTest）。
 //
-// 覆盖：AURORA_BACKEND_GLFW + AURORA_ENABLE_GLFW_GPU_GL 构建下，常驻流式纹理与
+// 覆盖：AURORA_BACKEND_GLFW 构建下，常驻流式纹理与
 // GPU 层缓存（cache_layer）在真实 GL 驱动上的接线——无头 CI 无法证明的部分。
 //
 // 自动段（无需人工）：
@@ -145,7 +145,7 @@ auto main(int argc, char **argv) -> int {
 
     auto *sink = win.surface().gpu_backend();
     if (sink == nullptr) {
-        emit("[SKIP] this build has no GLFW GPU channel (AURORA_ENABLE_GLFW_GPU_GL=OFF or it fell back to software)");
+        emit("[SKIP] this build has no GLFW GPU channel (GPU init fell back to software)");
         return 2;
     }
     auto &backend = sink->backend();

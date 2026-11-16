@@ -27,7 +27,7 @@ AURORA_TEST_CASE(win32_surface_type_contract) {
 }
 
 AURORA_TEST_CASE(win32_media_query_maps_headless_surface) {
-#if defined(AURORA_BACKEND_WIN32) && defined(AURORA_BACKEND_HEADLESS)
+#ifdef AURORA_BACKEND_WIN32
     // win32_media_query 是纯映射函数：只读 Surface 的 scale_factor()/size()，
     // 叠加系统 DPI/屏幕度量与减弱动效设置——不创建窗口，可用 HeadlessSurface 注入。
     HeadlessSurface const surface("", Size{.width = 800.0F, .height = 600.0F});
@@ -50,7 +50,7 @@ AURORA_TEST_CASE(win32_media_query_maps_headless_surface) {
         (mq.screen_size.width >= mq.screen_size.height) ? ScreenOrientation::Landscape : ScreenOrientation::Portrait;
     AURORA_TEST_CHECK(mq.orientation == expected);
 #else
-    AURORA_TEST_SKIP("both AURORA_BACKEND_WIN32 and AURORA_BACKEND_HEADLESS must be enabled");
+    AURORA_TEST_SKIP("AURORA_BACKEND_WIN32 must be enabled");
 #endif
 }
 

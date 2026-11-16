@@ -192,22 +192,11 @@ AURORA_TEST_CASE(pump_events_is_safe_without_a_backend) {
 // 支持与否都必须「有答案」：不支持时不许假装成功（静默 no-op），更不许崩溃。
 // 有真实后端的平台已在上面的记录模式用例里覆盖语义面，这里不真发系统通知。
 AURORA_TEST_CASE(unsupported_platform_reports_a_structured_error) {
-// Headless 构建（含 macOS CI）按契约 `notify()` 直接成功，不属于「不支持」路径，故一并跳过。
-#if defined(AURORA_PLATFORM_WINDOWS) || (defined(AURORA_PLATFORM_LINUX) && !defined(AURORA_PLATFORM_ANDROID)) || \
-    defined(AURORA_PLATFORM_MACOS) || defined(AURORA_BACKEND_HEADLESS)
+    // 无头后端恒编入：无桌面平台也走「记录后成功」的回退分支（post_notification 的 #else），
+    // 「不支持平台报结构化错误」已无合法落点，本用例保留注册但恒 SKIP。
     AURORA_TEST_SKIP(
-        "this machine has a desktop notification backend (or headless build); "
+        "the headless fallback always reports success, so no platform takes the unsupported path; "
         "posting a real notification belongs to the live probe, not to the unit suite");
-#else
-    NotificationCenter::clear_last_notification();
-    const auto result = NotificationCenter::notify(sample_notification());
-    AURORA_TEST_REQUIRE_FALSE(result.ok());
-    AURORA_TEST_CHECK_EQ(result.error().code_enum, ErrorCode::NotificationPostFailed);
-    AURORA_TEST_CHECK_EQ(result.error().code, std::string{"notification-post-failed"});
-    AURORA_TEST_CHECK_FALSE(result.error().message.empty());
-    // 失败也要留痕：调用方据此决定退避还是降级到自己的 UI 提示条。
-    AURORA_TEST_CHECK_EQ(require_recorded().tag, std::string{"build-finished"});
-#endif
 }
 
 }  // namespace aurora::test_cases::utest_notification

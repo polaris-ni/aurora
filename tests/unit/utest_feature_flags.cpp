@@ -26,10 +26,9 @@ struct FlagKeyPair {
     bool FeatureFlags::*field;
 };
 
-/// 全部 23 个归一化镜像字段（与 BUILD_OPTIONS.md 命名分组一一对应）。
+/// 全部 21 个归一化镜像字段（与 BUILD_OPTIONS.md 命名分组一一对应）。
 [[nodiscard]] auto flag_key_table() -> const std::vector<FlagKeyPair> & {
     static const std::vector<FlagKeyPair> AURORA_FLAG_KEY_TABLE = {
-        {.key = "AURORA_BACKEND_HEADLESS", .field = &FeatureFlags::backend_headless},
         {.key = "AURORA_BACKEND_WIN32", .field = &FeatureFlags::backend_win32},
         {.key = "AURORA_BACKEND_D3D11", .field = &FeatureFlags::backend_d3d11},
         {.key = "AURORA_BACKEND_GLFW", .field = &FeatureFlags::backend_glfw},
@@ -37,7 +36,6 @@ struct FlagKeyPair {
         {.key = "AURORA_BACKEND_WAYLAND", .field = &FeatureFlags::backend_wayland},
         {.key = "AURORA_BACKEND_MACOS", .field = &FeatureFlags::backend_macos},
         {.key = "AURORA_BACKEND_WASM", .field = &FeatureFlags::backend_wasm},
-        {.key = "AURORA_ENABLE_SIMD", .field = &FeatureFlags::simd},
         {.key = "AURORA_ENABLE_PROFILING", .field = &FeatureFlags::profiling},
         {.key = "AURORA_ENABLE_TRACING", .field = &FeatureFlags::tracing},
         {.key = "AURORA_ENABLE_DEBUG", .field = &FeatureFlags::debug},
@@ -61,7 +59,6 @@ struct FlagKeyPair {
 AURORA_TEST_CASE(value_initialized_flags_are_all_false) {
     // 契约：FeatureFlags 值初始化默认全 false（真实取值由 feature_flags() 按宏填充）。
     constexpr FeatureFlags defaults{};
-    AURORA_TEST_CHECK_FALSE(defaults.backend_headless);
     AURORA_TEST_CHECK_FALSE(defaults.backend_win32);
     AURORA_TEST_CHECK_FALSE(defaults.backend_d3d11);
     AURORA_TEST_CHECK_FALSE(defaults.backend_glfw);
@@ -69,7 +66,6 @@ AURORA_TEST_CASE(value_initialized_flags_are_all_false) {
     AURORA_TEST_CHECK_FALSE(defaults.backend_wayland);
     AURORA_TEST_CHECK_FALSE(defaults.backend_macos);
     AURORA_TEST_CHECK_FALSE(defaults.backend_wasm);
-    AURORA_TEST_CHECK_FALSE(defaults.simd);
     AURORA_TEST_CHECK_FALSE(defaults.profiling);
     AURORA_TEST_CHECK_FALSE(defaults.tracing);
     AURORA_TEST_CHECK_FALSE(defaults.debug);

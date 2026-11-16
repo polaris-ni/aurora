@@ -17,7 +17,6 @@ namespace au = aurora;
 
 namespace aurora::test_cases::itest_window_options {
 
-#ifdef AURORA_BACKEND_HEADLESS
 
 AURORA_TEST_CASE(headless_options_png_path_writes_on_present) {
     const std::string png_path =
@@ -38,13 +37,6 @@ AURORA_TEST_CASE(headless_options_png_path_writes_on_present) {
     AURORA_TEST_CHECK_MSG(std::filesystem::exists(png_path), "png_path must be written on present");
 }
 
-#else  // !AURORA_BACKEND_HEADLESS
-
-AURORA_TEST_CASE(headless_options_png_path_writes_on_present) {
-    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS not enabled, the HeadlessOptions factory is unavailable");
-}
-
-#endif  // AURORA_BACKEND_HEADLESS
 
 #if defined(AURORA_PLATFORM_WINDOWS) && defined(AURORA_BACKEND_WIN32)
 

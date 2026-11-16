@@ -4,7 +4,7 @@
 /// （水平/垂直）、activate() 触发 on_click、无可聚焦候选时安全返回 false。
 /// 另含一条端到端回归：控件盒由**真实绘制遍历**写入 focus_bounds（不做任何手工设置），
 /// 方向键导航据此即可工作——该写入点是方向键导航唯一的几何来源。
-/// AURORA_BACKEND_HEADLESS 未开启时该用例降级为 SKIP 桩（无绘制路径可用）。
+/// 无头后端随库恒编入，绘制路径恒可用。
 
 #include <memory>
 #include <utility>
@@ -131,7 +131,6 @@ AURORA_TEST_CASE(activate_triggers_on_click) {
 }
 
 AURORA_TEST_CASE(directional_nav_uses_geometry_written_by_paint) {
-#ifdef AURORA_BACKEND_HEADLESS
     // 回归：focus_bounds 的生产写入点在绘制遍历（Widget::paint 按传入的绝对盒写入）。
     // 该写入点缺失时全部候选都是零盒 → 方向键分支没有任何 in_direction 候选 → 方向键
     // 静默失效；Tab 序只比较 tab_index，不受影响，故仅靠上面的 Tab 用例无法暴露。
@@ -179,9 +178,6 @@ AURORA_TEST_CASE(directional_nav_uses_geometry_written_by_paint) {
     // 水平方向无候选：不得误移动。
     AURORA_TEST_CHECK_FALSE(fm.move_focus(FocusDirection::Left));
     AURORA_TEST_CHECK_TRUE(fm.focused() == top.get());
-#else
-    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS not enabled: no paint path to drive focus_bounds writes");
-#endif
 }
 
 AURORA_TEST_CASE(no_focusable_candidates_returns_false) {

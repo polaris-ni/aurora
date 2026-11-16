@@ -210,7 +210,7 @@ AURORA_TEST_CASE(default_pool_is_process_wide_singleton) {
 }
 
 AURORA_TEST_CASE(frame_loop_drains_deferred_default_pool) {
-#if AURORA_CAP_THREADS == 0 && defined(AURORA_BACKEND_HEADLESS)
+#if AURORA_CAP_THREADS == 0
     // 无 pthreads 构建（浏览器 / 裸 Node）的宿主排空点回归位：`Application::step_frame()`
     // 帧尾（步骤 7）泵 default_pool。刻意用静态场景——首帧后无脏区即整段跳过 present，
     // 若排空点仍挂在上屏路径（旧接线）则任务在此饿死，本例即红。

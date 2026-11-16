@@ -5,8 +5,8 @@
 ///           两遍分离的窗口计数，渐变扫描线两组按各自返回值裁剪向量段、再按生产分发形态用标量补齐尾部
 ///           后比对整行。每组以同一份确定性伪随机输入分别喂三条路径，断言输出缓冲逐字节相等，并回报首个
 ///           差异的字节下标与两侧取值——恒等断言不算判据，能定位差异才算。
-///           ⚠️ 平台与能力分支一律写在**用例体内**：`AURORA_ENABLE_SIMD` 关闭或非 x86 架构时 SIMD 函数
-///           根本不存在，同名用例按既有纪律以 `AURORA_TEST_SKIP` 退让，声明本身不被 `#ifdef` 摘掉，
+///           ⚠️ 平台分支一律写在**用例体内**：非 x86 架构时 SIMD 函数根本不存在，
+///           同名用例按既有纪律以 `AURORA_TEST_SKIP` 退让，声明本身不被 `#ifdef` 摘掉，
 ///           以免 `registry_integrity` 在另一种构建里单边失踪。含 `painter_simd.inl` 是为拿到与
 ///           `painter.cpp` 同源的内联定义，不复刻一份实现去比对复刻件。
 
@@ -82,9 +82,9 @@ auto expect_identical(std::string_view label, const Bytes &golden, const Bytes &
 
 /// @brief 没有 SIMD 档位或不是 x86 时各用例的统一退让理由（`skip_case` 收 `std::string`，故留 C 串形态）。
 constexpr auto AURORA_NO_SIMD_REASON =
-    "this build has no SSE2/AVX2 kernels (AURORA_ENABLE_SIMD off or non-x86 target), parity has nothing to compare";
+    "this build has no SSE2/AVX2 kernels (non-x86 target), parity has nothing to compare";
 
-#if defined(AURORA_ENABLE_SIMD) && defined(AURORA_SIMD_X86)
+#ifdef AURORA_SIMD_X86
 
 /// @brief 五组共用的长度集合：全部不是 8 的倍数，混合与扫描线各有一处尾部回落。
 constexpr std::array<int, 5> AURORA_LENGTHS{1, 5, 7, 13, 37};
@@ -251,7 +251,7 @@ auto check_radial_gradient() -> void {
 }  // namespace
 
 AURORA_TEST_CASE(srgb_blend_region_is_bitwise_identical_across_kernels) {
-#if defined(AURORA_ENABLE_SIMD) && defined(AURORA_SIMD_X86)
+#ifdef AURORA_SIMD_X86
     init_gamma_tables();
     check_srgb_blend();
 #else
@@ -260,7 +260,7 @@ AURORA_TEST_CASE(srgb_blend_region_is_bitwise_identical_across_kernels) {
 }
 
 AURORA_TEST_CASE(linear_blend_region_is_bitwise_identical_across_kernels) {
-#if defined(AURORA_ENABLE_SIMD) && defined(AURORA_SIMD_X86)
+#ifdef AURORA_SIMD_X86
     check_linear_blend();
 #else
     AURORA_TEST_SKIP(AURORA_NO_SIMD_REASON);
@@ -268,7 +268,7 @@ AURORA_TEST_CASE(linear_blend_region_is_bitwise_identical_across_kernels) {
 }
 
 AURORA_TEST_CASE(box_blur_region_is_bitwise_identical_across_kernels) {
-#if defined(AURORA_ENABLE_SIMD) && defined(AURORA_SIMD_X86)
+#ifdef AURORA_SIMD_X86
     check_box_blur();
 #else
     AURORA_TEST_SKIP(AURORA_NO_SIMD_REASON);
@@ -276,7 +276,7 @@ AURORA_TEST_CASE(box_blur_region_is_bitwise_identical_across_kernels) {
 }
 
 AURORA_TEST_CASE(linear_gradient_scanline_is_bitwise_identical_across_kernels) {
-#if defined(AURORA_ENABLE_SIMD) && defined(AURORA_SIMD_X86)
+#ifdef AURORA_SIMD_X86
     check_linear_gradient();
 #else
     AURORA_TEST_SKIP(AURORA_NO_SIMD_REASON);
@@ -284,7 +284,7 @@ AURORA_TEST_CASE(linear_gradient_scanline_is_bitwise_identical_across_kernels) {
 }
 
 AURORA_TEST_CASE(radial_gradient_scanline_is_bitwise_identical_across_kernels) {
-#if defined(AURORA_ENABLE_SIMD) && defined(AURORA_SIMD_X86)
+#ifdef AURORA_SIMD_X86
     check_radial_gradient();
 #else
     AURORA_TEST_SKIP(AURORA_NO_SIMD_REASON);

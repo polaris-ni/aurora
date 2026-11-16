@@ -18,7 +18,7 @@
 //   cmake --build build-verify --target aurora_verify_macos_cursor
 //   ./build-verify/aurora_verify_macos_cursor
 // 构建（方式 ② clang++ 直编，须先有一个已构建好的 macOS 后端构建目录 build-macos）：
-//   clang++ -std=c++20 -ObjC++ -fobjc-arc -DAURORA_BACKEND_MACOS -DAURORA_BACKEND_HEADLESS \
+//   clang++ -std=c++20 -ObjC++ -fobjc-arc -DAURORA_BACKEND_MACOS \
 //     -I include -I src -I third_party -I tools/verify \
 //     -I build-macos/third_party/freetype/include -I third_party/harfbuzz/src \
 //     tools/verify/macos_cursor_live_probe.mm -o macos_cursor_live_probe \

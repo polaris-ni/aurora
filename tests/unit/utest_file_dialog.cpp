@@ -210,7 +210,7 @@ auto select_first_dir_row(file_dialog::detail::FilePickerModel &model) -> bool {
     return false;
 }
 
-#if defined(AURORA_UTEST_FILE_DIALOG_SELFDRAWN) && defined(AURORA_BACKEND_HEADLESS)
+#ifdef AURORA_UTEST_FILE_DIALOG_SELFDRAWN
 
 /// @brief 无头驱动一轮自绘会话的观测结果。
 struct SelfdrawnRun {
@@ -267,7 +267,7 @@ auto run_selfdrawn_case(const std::function<void(file_dialog::detail::FilePicker
     return out;
 }
 
-#endif  // AURORA_UTEST_FILE_DIALOG_SELFDRAWN && AURORA_BACKEND_HEADLESS
+#endif  // AURORA_UTEST_FILE_DIALOG_SELFDRAWN
 
 #endif  // defined(AURORA_PLATFORM_LINUX) || defined(AURORA_PLATFORM_MACOS)
 
@@ -1023,7 +1023,6 @@ AURORA_TEST_CASE(run_modal_drives_frames_until_done) {
 }
 
 AURORA_TEST_CASE(run_modal_stops_on_frame_budget) {
-#ifdef AURORA_BACKEND_HEADLESS
     PickerSeamGuard const seams;
     AURORA_TEST_REQUIRE_TRUE(file_dialog::detail::current_application_slot() == nullptr);
     WindowOptions o;
@@ -1042,9 +1041,6 @@ AURORA_TEST_CASE(run_modal_stops_on_frame_budget) {
     app.run_modal([]() -> bool { return false; });
     AURORA_TEST_CHECK_EQ(frames, 2);
     AURORA_TEST_CHECK_TRUE(file_dialog::detail::current_application_slot() == nullptr);
-#else
-    AURORA_TEST_SKIP("frame-budget escape needs the Headless backend");
-#endif
 }
 
 AURORA_TEST_CASE(run_modal_allows_one_stacked_modal) {
@@ -1101,7 +1097,7 @@ AURORA_TEST_CASE(run_modal_refuses_third_level) {
 // 端到端会话：脚本化确认 / 取消 / 保存 / 目录选择 / 两枚叠一层
 // ---------------------------------------------------------------------------
 
-#if defined(AURORA_UTEST_FILE_DIALOG_SELFDRAWN) && defined(AURORA_BACKEND_HEADLESS)
+#ifdef AURORA_UTEST_FILE_DIALOG_SELFDRAWN
 
 AURORA_TEST_CASE(session_confirm_returns_picked_paths) {
     HookGuard hooks;

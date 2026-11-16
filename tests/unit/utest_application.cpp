@@ -186,14 +186,13 @@ AURORA_TEST_CASE(plain_scene_dispatches_are_safe_noops) {
 }
 
 AURORA_TEST_CASE(frame_loop_drains_system_drag_session_end) {
-#ifdef AURORA_BACKEND_HEADLESS
     // 帧循环排空接线：系统拖出的异步结果（终结回调 / 在途读取）只在宿主帧内兑现——
     // 登记之后、帧推进之前零投递；帧内排空后当帧即投递且只投一次（宿主不排空 ⇒ 收不到，
     // 不谎报；与通知激活 / 热键命中同一时点语义）。
     (void)system_drag::remove_test_backend();
     if (!system_drag::install_test_backend()) {
         AURORA_TEST_SKIP(
-            "system drag inert backend unavailable (AURORA_ENABLE_DEBUG/AURORA_ENABLE_TEST_HOOKS not both set)");
+            "system drag inert backend unavailable (AURORA_ENABLE_DEBUG not set)");
     }
 
     WindowOptions o;
@@ -254,9 +253,6 @@ AURORA_TEST_CASE(frame_loop_drains_system_drag_session_end) {
     AURORA_TEST_CHECK_EQ(got_outcome, SystemDragOutcome::Succeeded);
     AURORA_TEST_CHECK_EQ(got_action, DragAction::Copy);
     AURORA_TEST_CHECK_EQ(read_calls, 1);  // 第二帧排空兑现
-#else
-    AURORA_TEST_SKIP("frame-loop drain probe needs the Headless backend");
-#endif
 }
 
 AURORA_TEST_CASE(app_builder_chains_fluently) {
@@ -277,7 +273,6 @@ AURORA_TEST_CASE(app_builder_chains_fluently) {
 }
 
 AURORA_TEST_CASE(application_wires_hover_cursor_to_surface) {
-#ifdef AURORA_BACKEND_HEADLESS
     // 光标形状完成判据的端到端验收：派发器解析出的悬停光标经 Application 接线落到 Surface。
     // 链路：app.dispatch(Move) → EventDispatcher::dispatch_mouse → update_hover → resolve_cursor
     //       → EventDispatcher::cursor_handler_ → Application::wire_cursor → Surface::set_cursor。
@@ -313,9 +308,6 @@ AURORA_TEST_CASE(application_wires_hover_cursor_to_surface) {
     move_to(500.0F, 500.0F);
     AURORA_TEST_REQUIRE_EQ(probe->cursor_log().size(), std::size_t{3});
     AURORA_TEST_CHECK_EQ(require_value(probe->last_cursor()), CursorShape::Arrow);
-#else
-    AURORA_TEST_SKIP("AURORA_BACKEND_HEADLESS is not enabled; HeadlessSurface is not compiled");
-#endif
 }
 
 // ---- 活动窗口查询 `Application::active_window()` ----

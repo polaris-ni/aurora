@@ -56,9 +56,7 @@ AURORA_TEST_CASE(backend_compiled_tracks_feature_macros) {
     // 纯编译期事实，逐后端与 feature 宏逐条比对：探测结果与构建配置必须一一对应，
     // 否则用例层按探测结果做的「跳过还是失败」裁决就会失真。
     bool headless = false;
-#ifdef AURORA_BACKEND_HEADLESS
     headless = true;
-#endif
     bool win32 = false;
 #ifdef AURORA_BACKEND_WIN32
     win32 = true;

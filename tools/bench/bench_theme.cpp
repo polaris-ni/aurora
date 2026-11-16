@@ -30,7 +30,7 @@
 //   therefore labelled `win_root_platform_family`; `injected_800_long_family` is the explicit second
 //   axis. Allocation counts are bit-identical across reruns while the millisecond columns jitter
 //   with machine load, so ratios are the conclusion.
-// - Requires a Headless build (`AURORA_BACKEND_HEADLESS`); usage: ./bench_theme
+// - Uses the headless backend compiled into the library; usage: ./bench_theme
 //
 // Scenes: a `ThemeProvider`-rooted grid of probe widgets (rows x cols, one probe per cell), in
 // three read forms -- `none` (probe reads nothing: the frame baseline), `by_value` (before shape),
@@ -61,7 +61,6 @@
 #include "aurora/widget/widget.h"
 #include "bench_common.h"
 
-#ifdef AURORA_BACKEND_HEADLESS
 
 namespace {
 
@@ -546,12 +545,3 @@ auto main() -> int {
     return aurora::bench::finalize_process("bench_theme", "read-face") ? 0 : 1;
 }
 
-#else
-
-auto main() -> int {
-    aurora::bench::process_result().identify("bench_theme", "read-face");
-    aurora::bench::process_result().skip("backend-unavailable");
-    return aurora::bench::finalize_process("bench_theme", "read-face") ? 0 : 1;
-}
-
-#endif  // AURORA_BACKEND_HEADLESS

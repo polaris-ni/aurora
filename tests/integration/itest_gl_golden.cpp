@@ -7,8 +7,7 @@
 ///           补齐「软件逐位 SSOT + GPU 容差」双层策略的后端对称性（GL 侧此前仅由真机探针承担）。
 ///           GL 读回行序自底向上（帧缓冲原序），由共享帧装配翻转归一。上下文经隐形 GLFW 窗口
 ///           取得：`GpuGlRhi` 的 MSAA/resolve 帧缓冲自持且不触默认帧缓冲，故窗口不参与渲染。
-///           `AURORA_BACKEND_GLFW` / `AURORA_ENABLE_GLFW_GPU_GL` 未开启，或无显示环境 / GL 3.3
-///           core 装载失败时按惯例落 skip 桩。
+///           GLFW 后端未开启，或无显示环境 / GL 3.3 core 装载失败时按惯例落 skip 桩。
 ///
 ///           不经 E2E 内核（`e2e::Session`）的理由：本 TU 验的是 **RHI 离屏重放**，不建 aurora
 ///           `Window`、不推进 `present_root`，读回走 `RhiFrameSink::read_pixels`（离屏 FBO），
@@ -22,7 +21,7 @@
 
 namespace au = aurora;
 
-#if defined(AURORA_BACKEND_GLFW) && defined(AURORA_ENABLE_GLFW_GPU_GL)
+#ifdef AURORA_BACKEND_GLFW
 
 #include <GLFW/glfw3.h>
 
@@ -154,18 +153,18 @@ AURORA_TEST_CASE(gpu_bar_chart_within_tolerance_of_software_golden) {
 namespace aurora::test_cases::itest_gl_golden {
 
 AURORA_TEST_CASE(gpu_polyline_within_tolerance_of_software_golden) {
-    AURORA_TEST_SKIP("AURORA_BACKEND_GLFW / AURORA_ENABLE_GLFW_GPU_GL not enabled, the GL raster path is unavailable");
+    AURORA_TEST_SKIP("AURORA_BACKEND_GLFW not enabled, the GL raster path is unavailable");
 }
 AURORA_TEST_CASE(gpu_sector_within_tolerance_of_software_golden) {
-    AURORA_TEST_SKIP("AURORA_BACKEND_GLFW / AURORA_ENABLE_GLFW_GPU_GL not enabled");
+    AURORA_TEST_SKIP("AURORA_BACKEND_GLFW not enabled");
 }
 AURORA_TEST_CASE(gpu_text_column_within_tolerance_of_software_golden) {
-    AURORA_TEST_SKIP("AURORA_BACKEND_GLFW / AURORA_ENABLE_GLFW_GPU_GL not enabled");
+    AURORA_TEST_SKIP("AURORA_BACKEND_GLFW not enabled");
 }
 AURORA_TEST_CASE(gpu_bar_chart_within_tolerance_of_software_golden) {
-    AURORA_TEST_SKIP("AURORA_BACKEND_GLFW / AURORA_ENABLE_GLFW_GPU_GL not enabled");
+    AURORA_TEST_SKIP("AURORA_BACKEND_GLFW not enabled");
 }
 
 }  // namespace aurora::test_cases::itest_gl_golden
 
-#endif  // AURORA_BACKEND_GLFW && AURORA_ENABLE_GLFW_GPU_GL
+#endif  // AURORA_BACKEND_GLFW

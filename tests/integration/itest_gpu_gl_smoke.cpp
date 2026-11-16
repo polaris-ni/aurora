@@ -53,18 +53,10 @@ static auto present_two_frames_gpu() -> int {
 #endif  // AURORA_BACKEND_GLFW
 
 AURORA_TEST_CASE(glfw_gpu_mode_present_smoke) {
-#if defined(AURORA_BACKEND_GLFW) && defined(AURORA_ENABLE_GLFW_GPU_GL)
+#ifdef AURORA_BACKEND_GLFW
     const int frames = present_two_frames_gpu();
     if (frames == 0) {
         AURORA_TEST_SKIP("no display environment (window open failed), GPU smoke has no window to verify");
-    }
-    AURORA_TEST_CHECK_EQ(frames, 2);
-#elif defined(AURORA_BACKEND_GLFW)
-    // GPU_GL 未编译：gpu_backend() 恒 nullptr，GPU 请求自动回退软件路径——仍应正常出帧。
-    const int frames = present_two_frames_gpu();
-    if (frames == 0) {
-        AURORA_TEST_SKIP(
-            "no display environment (window open failed), software fallback smoke has no window to verify");
     }
     AURORA_TEST_CHECK_EQ(frames, 2);
 #else
@@ -73,7 +65,7 @@ AURORA_TEST_CASE(glfw_gpu_mode_present_smoke) {
 }
 
 AURORA_TEST_CASE(glfw_gpu_backend_identity_contract) {
-#if defined(AURORA_BACKEND_GLFW) && defined(AURORA_ENABLE_GLFW_GPU_GL)
+#ifdef AURORA_BACKEND_GLFW
     auto session = open_gpu_window(160, 120, "itest_gpu_backend_identity");
     if (!session.ok()) {
         AURORA_TEST_SKIP("window open failed (no display/driver), the gpu_backend contract has no instance to verify");
@@ -85,13 +77,6 @@ AURORA_TEST_CASE(glfw_gpu_backend_identity_contract) {
     if (gpu_sink != nullptr) {
         AURORA_TEST_CHECK_EQ(gpu_sink->name(), std::string_view("gpu-gl"));
     }
-#elif defined(AURORA_BACKEND_GLFW)
-    auto session = open_gpu_window(160, 120, "itest_gpu_backend_identity");
-    if (!session.ok()) {
-        AURORA_TEST_SKIP("window open failed (no display/driver), the gpu_backend contract has no instance to verify");
-    }
-    // 未编译 GPU_GL：恒 nullptr（头文件契约）。
-    AURORA_TEST_CHECK_EQ(session.surface().gpu_backend(), nullptr);
 #else
     AURORA_TEST_SKIP(
         "AURORA_BACKEND_GLFW not enabled: neither the GlfwOptions factory "

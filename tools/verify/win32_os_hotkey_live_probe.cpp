@@ -266,7 +266,7 @@ auto run_auto_stage() -> int {
     if (!injected) {
         skip(
             "test backend injection is unavailable in this build (both AURORA_ENABLE_DEBUG and "
-            "AURORA_ENABLE_TEST_HOOKS are required); the degraded platform path is not covered here");
+            "AURORA_ENABLE_DEBUG is required); the degraded platform path is not covered here");
     } else {
         check(!aurora::OsHotkeyRegistry::enabled(), "install_test_backend(false) turns enabled() off");
         expect_register_failed("degraded platform path (no backend)",

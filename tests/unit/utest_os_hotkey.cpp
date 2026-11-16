@@ -4,7 +4,7 @@
 /// 不支持平台上的降级路径（enabled()==false 且 add() 返回 OsHotkeyRegisterFailed）、
 /// 同一组合重复注册被拒、以及无窗口/无后端环境下的构造与析构不崩溃。
 /// 全程**不注册真实系统热键**：受支持的平台上改走进程内 inert 测试后端
-/// （AURORA_ENABLE_DEBUG + AURORA_ENABLE_TEST_HOOKS 双宏齐备时可用），CI 上不干扰系统。
+/// （AURORA_ENABLE_DEBUG 开启时可用），CI 上不干扰系统。
 
 #include <string>
 
@@ -28,7 +28,7 @@ auto require_inert_backend(bool supported) -> void {
     if (!OsHotkeyRegistry::install_test_backend(supported)) {
         AURORA_TEST_SKIP(
             "os hotkey inert test backend unavailable "
-            "(AURORA_ENABLE_DEBUG/AURORA_ENABLE_TEST_HOOKS not both set)");
+            "(AURORA_ENABLE_DEBUG not set)");
     }
 }
 

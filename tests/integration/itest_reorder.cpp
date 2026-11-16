@@ -13,11 +13,8 @@
 #include <string>
 #include <vector>
 
-#ifdef AURORA_BACKEND_HEADLESS
-// TestController 的实现体同样以 AURORA_BACKEND_HEADLESS 门控（依赖 HeadlessSurface），
-// 故宏关闭时不得引入声明，否则链接期缺符号。
+// TestController 依赖 HeadlessSurface，无头后端随库恒编入，本头恒可引入。
 #include "aurora/app/test_controller.h"
-#endif
 
 #include "aurora/app/scroll_storage.h"
 #include "aurora/aurora.h"
@@ -26,7 +23,6 @@
 
 namespace aurora::test_cases::itest_reorder {
 
-#ifdef AURORA_BACKEND_HEADLESS
 
 namespace {
 
@@ -169,20 +165,5 @@ AURORA_TEST_CASE(reorder_and_scroll_restore_coexist) {
     ScrollStorage::instance().clear_all();
 }
 
-#else
-
-AURORA_TEST_CASE(drag_reorders_items_through_real_dispatch) {
-    AURORA_TEST_SKIP(
-        "AURORA_BACKEND_HEADLESS not enabled: TestController depends on "
-        "HeadlessSurface, which is not compiled");
-}
-
-AURORA_TEST_CASE(reorder_and_scroll_restore_coexist) {
-    AURORA_TEST_SKIP(
-        "AURORA_BACKEND_HEADLESS not enabled: TestController depends on "
-        "HeadlessSurface, which is not compiled");
-}
-
-#endif  // AURORA_BACKEND_HEADLESS
 
 }  // namespace aurora::test_cases::itest_reorder
