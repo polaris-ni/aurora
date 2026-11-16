@@ -19,11 +19,11 @@ namespace aurora::debug {
 /// @brief 当前 aurora 静态库编译时启用的 feature 宏集合（字段名 = 宏名去前缀小写）。
 /// 字段按 BUILD_OPTIONS.md 两层命名分组：AURORA_BACKEND_*（§3）、
 /// AURORA_ENABLE_* 内部能力（§4，含 AURORA_ENABLE_IMAGE_* 编解码能力，§4.6）。
-/// 注：布局约束缓存 / 遮挡剔除 / Display List 录制回放为恒开的架构级优化，无开关，故不在本结构内。
+/// 注：无头后端 / SIMD / 布局约束缓存 / 遮挡剔除 / Display List 录制回放为恒开的架构级
+/// 能力，无开关，故不在本结构内。
 /// 注：`AURORA_BUILD_INSPECTOR_SERVER` 定义在独立目标 aurora_inspector_server 上，
 /// 主库不可见，故不在本结构内。
 struct FeatureFlags {
-    bool backend_headless = false;  ///< AURORA_BACKEND_HEADLESS：内存/离线渲染后端（HeadlessSurface）。
     bool backend_win32 = false;  ///< AURORA_BACKEND_WIN32：Win32/GDI 表面后端（仅 _WIN32）。
     bool backend_d3d11 = false;  ///< AURORA_BACKEND_D3D11：D3D11 GPU 增量上屏表面后端（仅 Windows）。
     bool backend_glfw = false;  ///< AURORA_BACKEND_GLFW：GLFW + OpenGL 3.x 兼容 profile 表面后端。
@@ -31,7 +31,6 @@ struct FeatureFlags {
     bool backend_wayland = false;  ///< AURORA_BACKEND_WAYLAND：原生 Wayland 表面后端（wl_shm + xdg-shell）。
     bool backend_macos = false;  ///< AURORA_BACKEND_MACOS：AppKit/CoreGraphics 表面后端。
     bool backend_wasm = false;  ///< AURORA_BACKEND_WASM：Emscripten/Canvas 2D 浏览器表面后端。
-    bool simd = false;  ///< AURORA_ENABLE_SIMD：光栅内核 SIMD 双实现（SSE2 基线 + AVX2 运行时分发）。
     bool profiling = false;  ///< AURORA_ENABLE_PROFILING：渲染性能插桩（作用域计时 + 渲染计数器）。
     bool tracing = false;  ///< AURORA_ENABLE_TRACING：Chrome Trace Event 时间线落盘（隐含 profiling）。
     bool debug = false;  ///< AURORA_ENABLE_DEBUG：真实后端 DEBUG 能力（截图/控件树/性能快照/叠层/拾取）。
@@ -49,7 +48,7 @@ struct FeatureFlags {
     bool webview_webkitgtk =
         false;  ///< AURORA_ENABLE_WEBVIEW_WEBKITGTK：WebKitGTK 原生实现（Linux，PRIVATE 宏，只经本结构查询）。
 
-    /// @brief JSON 导出：键 = 完整宏名（如 "AURORA_BACKEND_HEADLESS"），值 = bool。
+    /// @brief JSON 导出：键 = 完整宏名（如 "AURORA_BACKEND_WIN32"），值 = bool。
     /// @return JSON 对象，全部字段的键序与本结构字段声明序一致。
     [[nodiscard]] auto to_json() const -> Json;
 };

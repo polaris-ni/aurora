@@ -14,8 +14,8 @@
 //
 // 为何不在公共头：本提案不新增公共 API 符号（`aurora_api.json` 预期零差异），且使用方只有平台桥
 // 与 `tests/`——二者都能 include src 内部头（`utest_ime_composition` 覆盖 `ime_composition` 的
-// 先例即如此）。测试三件套受 `AURORA_ENABLE_DEBUG && AURORA_ENABLE_TEST_HOOKS` 双宏裁切，Release
-// 下恒为 no-op，`dispatch` 本身不变（生产路径不受宏影响）。
+// 先例即如此）。测试三件套受 `AURORA_ENABLE_DEBUG` 单宏裁切，Release 下恒为 no-op，
+// `dispatch` 本身不变（生产路径不受宏影响）。
 //
 // 门控：无。本头在**所有**平台编译（含 wasm）。
 
@@ -45,7 +45,7 @@ using DragInSink = std::function<DragAction(SystemDropEvent &)>;
 [[nodiscard]] auto dispatch(SystemDropEvent &event, const DragInSink &sink) -> DragAction;
 
 /// @brief 安装 inert 拖入后端：此后 `dispatch` 抑制真实派发（测试完全接管拖入链）。
-/// @return 注入是否生效（双宏 `AURORA_ENABLE_DEBUG && AURORA_ENABLE_TEST_HOOKS` 未齐备时为 false）。
+/// @return 注入是否生效（`AURORA_ENABLE_DEBUG` 未开启时为 false）。
 [[nodiscard]] auto install_test_drag_in() -> bool;
 
 /// @brief 复位 inert 拖入后端（恢复真实派发）；未安装时为 no-op。

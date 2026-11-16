@@ -70,9 +70,7 @@
 #endif
 #include "aurora/window/window_state.h"
 
-#ifdef AURORA_ENABLE_GLFW_GPU_GL
 #include "aurora/render/rhi/gpu_gl_rhi.h"
-#endif
 
 namespace aurora {
 
@@ -171,7 +169,6 @@ struct GlfwSurface::Impl {
     int tex_w = 0;
     int tex_h = 0;
 
-#ifdef AURORA_ENABLE_GLFW_GPU_GL
     // ---- GPU 栅格（DisplayList → OpenGL 3.3 core 批渲染；非空 = GPU 模式生效）----
     // 初始化失败（函数表缺项/着色器链接失败/上下文过老）即置空回退软件纹理路径。
     std::unique_ptr<rhi::GpuGlRhi> gpu;
@@ -179,7 +176,6 @@ struct GlfwSurface::Impl {
     /// Release 恒空。mutable：data() 为 const 而读回时机由访问触发。
     mutable std::vector<std::uint8_t> gpu_readback;
     mutable bool gpu_readback_fresh = false;
-#endif
 
     WindowStateHandler window_state_handler;
     WindowModeHandler window_mode_handler;
@@ -227,7 +223,6 @@ struct GlfwSurface::Impl {
     auto wait_events(double timeout_ms) const -> void;
     static auto request_wake() -> void { glfwPostEmptyEvent(); }
     [[nodiscard]] auto data() const -> const std::uint8_t * {
-#ifdef AURORA_ENABLE_GLFW_GPU_GL
         if (gpu != nullptr) {
             // GPU 模式：像素在显存，经 DEBUG 抓帧缓存读回；懒读回——本帧首次访问才执行
             // （present 置失效），无消费者时零全屏 GPU→CPU 读回停顿。Release 恒空 → nullptr。
@@ -240,17 +235,10 @@ struct GlfwSurface::Impl {
             return nullptr;
 #endif
         }
-#endif
         return painter_impl.data();
     }
     [[nodiscard]] auto frame_count() const -> int { return frame; }
-    [[nodiscard]] auto gpu_backend() const -> rhi::RhiFrameSink * {
-#ifdef AURORA_ENABLE_GLFW_GPU_GL
-        return gpu.get();
-#else
-        return nullptr;
-#endif
-    }
+    [[nodiscard]] auto gpu_backend() const -> rhi::RhiFrameSink * { return gpu.get(); }
 
     auto ensure_gl_objects() -> void;
     auto upload_and_draw() -> void;
@@ -300,16 +288,7 @@ struct GlfwSurface::Impl {
 GlfwSurface::Impl::Impl(const Config &cfg) {
     // 进程级引用计数：首个窗口初始化 GLFW（失败即抛，不计入存活数）。
     glfw_acquire();
-    bool want_gpu = false;
-#ifdef AURORA_ENABLE_GLFW_GPU_GL
-    want_gpu = cfg.render_mode == RenderMode::HardwareGL;
-#else
-    if (cfg.render_mode == RenderMode::HardwareGL) {
-        AURORA_LOG_WARN("gpu-gl",
-                        "HardwareGL render mode requested but built without"
-                        " AURORA_ENABLE_GLFW_GPU_GL; using software texture path");
-    }
-#endif
+    bool want_gpu = cfg.render_mode == RenderMode::HardwareGL;
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, cfg.gl_major);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, cfg.gl_minor);
     // GPU 模式请求 core profile（GLSL 管线需要；软件模式维持兼容剖面走 1.1 立即模式）。
@@ -347,9 +326,7 @@ GlfwSurface::Impl::Impl(const Config &cfg) {
     if (window == nullptr && want_gpu) {
         // core profile 创建失败（驱动过老/远程桌面/虚拟机等）：降级软件模式重建窗口，不整体失败。
         AURORA_LOG_INFO("gpu-gl", "core-profile window creation failed; retrying with software compat profile");
-        // 本行在 AURORA_ENABLE_GLFW_GPU_GL 关闭的配置下看似死存储（其后续唯一读点在 #ifdef 内），
-        // 但它是降级路径对 want_gpu 的如实更新：GPU_GL 开启时该读点决定要不要装载 GL 函数表，删不得。
-        // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores): 死存储只在 GPU_GL=OFF 配置下成立，开启后读点要用它
+        // 降级路径如实更新 want_gpu：后续读点据此决定是否装载 GL 函数表，删不得。
         want_gpu = false;
         glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_COMPAT_PROFILE);
         window = glfwCreateWindow(create_w, create_h, cfg.title.c_str(), nullptr, nullptr);
@@ -362,7 +339,6 @@ GlfwSurface::Impl::Impl(const Config &cfg) {
     glfwMakeContextCurrent(window);
     glfwSwapInterval(1);  // 启用 VSync（帧循环调度，见 specification/06-app-platform.md §3.1）
 
-#ifdef AURORA_ENABLE_GLFW_GPU_GL
     if (want_gpu) {
         // 装载 GL 3.3 core 函数表（经 glfwGetProcAddress）并初始化 GPU 栅格后端；
         // 失败（函数表缺项/着色器链接失败/GL 错误）→ gpu 置空，软件纹理路径兜底。
@@ -376,7 +352,6 @@ GlfwSurface::Impl::Impl(const Config &cfg) {
             gpu.reset();
         }
     }
-#endif
 
     // 转发 GLFW 回调到本实例（ARCHITECTURE.md §3.1 事件来源）。用户指针存 Impl*，回调据此取回。
     glfwSetWindowUserPointer(window, this);
@@ -605,10 +580,7 @@ auto GlfwSurface::Impl::begin_frame(int width, int height) -> Result<bool> {
 
     // 默认帧缓冲清屏仅软件路径需要（立即模式全屏 quad 不覆盖区外的边角）；
     // GPU 路径 end_frame 整帧 blit 覆盖默认帧缓冲，清屏纯冗余。
-#ifdef AURORA_ENABLE_GLFW_GPU_GL
-    if (gpu == nullptr)
-#endif
-    {
+    if (gpu == nullptr) {
         glViewport(0, 0, fb_w, fb_h);
         glClearColor(0.961F, 0.961F, 0.969F, 1.0F);
         glClear(GL_COLOR_BUFFER_BIT);
@@ -617,7 +589,6 @@ auto GlfwSurface::Impl::begin_frame(int width, int height) -> Result<bool> {
 }
 
 auto GlfwSurface::Impl::present() -> Result<bool> {
-#ifdef AURORA_ENABLE_GLFW_GPU_GL
     if (gpu != nullptr) {
         // GPU 路径：栅格已在 GpuGlRhi::end_frame 内完成（blit 至默认帧缓冲），跳过 CPU 上传直接 swap。
         // 抓帧缓存置失效：data() 下次访问时懒读回（未访问即零 GPU→CPU 读回成本）。
@@ -626,7 +597,6 @@ auto GlfwSurface::Impl::present() -> Result<bool> {
         ++frame;
         return Result<bool>{true};
     }
-#endif
     upload_and_draw();
     glfwSwapBuffers(window);
     ++frame;
@@ -983,7 +953,6 @@ auto GlfwSurface::capture_window(const std::string &path) -> Result<bool> {
     // glfwGetCurrentContext 返回的是「当前上下文所属窗口」指针（GLFW ABI），据以还原。
     GLFWwindow *prev = glfwGetCurrentContext();
     glfwMakeContextCurrent(pimpl_->window);
-#ifdef AURORA_ENABLE_GLFW_GPU_GL
     if (pimpl_->gpu != nullptr) {
         const bool ok = pimpl_->gpu->read_pixels(gl_rows);
         glfwMakeContextCurrent(prev);
@@ -995,9 +964,7 @@ auto GlfwSurface::capture_window(const std::string &path) -> Result<bool> {
             return Result<bool>{
                 make_error(ErrorCode::GeneralNotSupported, "capture_window: framebuffer resized since last present")};
         }
-    } else
-#endif
-    {
+    } else {
         pimpl_->upload_and_draw();  // 重放上一帧 → back buffer 内容确定（不 swap，屏幕无变化）
         glFinish();  // 等待绘批落定后读回
         // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)

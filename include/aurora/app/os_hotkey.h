@@ -106,8 +106,8 @@ class OsHotkeyRegistry {
     [[nodiscard]] auto count() const -> std::size_t;
 
     // ---- 测试注入点（test-only，口径同 `Clipboard` 的注入面）----
-    // 声明常驻（消费端调用始终可编译），实现体按 `AURORA_ENABLE_DEBUG && AURORA_ENABLE_TEST_HOOKS`
-    // 双宏裁切，任一关闭（含 Release 下 DEBUG 自动关闭）时返回 false / no-op，平台行为不变。
+    // 声明常驻（消费端调用始终可编译），实现体按 `AURORA_ENABLE_DEBUG` 单宏裁切，
+    // 关闭（含 Release 下 DEBUG 自动关闭）时返回 false / no-op，平台行为不变。
     // 为何需要：单测不得真的抢占系统热键（CI 机器上会干扰系统与别的用例），
     // 但又必须覆盖「平台不支持」的降级路径——那在受支持的平台上没有别的办法复现。
 

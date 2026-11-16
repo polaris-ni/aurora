@@ -996,13 +996,11 @@ class App {
             auto kind = auto_detect_surface();
             std::unique_ptr<Window> window;
             switch (kind) {
-#ifdef AURORA_BACKEND_HEADLESS
                 case SurfaceKind::Headless:
                     if (auto res = create_window(HeadlessOptions{opts})) {
                         window = std::move(res.value());
                     }
                     break;
-#endif
 #ifdef AURORA_BACKEND_WIN32
                 case SurfaceKind::Win32:
                     if (auto res = create_window(Win32Options{opts})) {

@@ -13,7 +13,7 @@
 /// @endcode
 ///
 /// 说明：
-/// - `HeadlessSurface` 零三方依赖，默认即可用（由 `AURORA_BACKEND_HEADLESS` 控制）。
+/// - `HeadlessSurface` 零三方依赖，随库恒编入（无开关）。
 /// - `Win32Surface` 零三方依赖，仅当 `AURORA_BACKEND_WIN32` 定义（Windows 默认 ON）时包含。
 /// - `GlfwSurface` 仅当 `AURORA_BACKEND_GLFW` 定义（由 `AURORA_BACKEND_GLFW` 开关控制）时包含，
 /// 避免默认构建引入 GLFW/OpenGL 头文件与链接依赖。GLFW 以 `-DAURORA_BACKEND_GLFW=ON`

@@ -997,14 +997,11 @@ auto pump_dbus() -> void {
     }
     detail += "; [notify-send] " + attempt.error().message;
     return post_failed("every desktop notification backend failed: " + detail);
-#elif defined(AURORA_BACKEND_HEADLESS)
-    (void)notification;
-    // Headless：没有可投递的目标，但「请求了什么」已经如实记进 last_notification()，
-    // 按契约返回成功 —— 无桌面不是调用方的错。
-    return Result<void>{};
 #else
     (void)notification;
-    return post_failed("this platform has no notification implementation");
+    // 无头（含无桌面平台）：没有可投递的目标，但「请求了什么」已经如实记进
+    // last_notification()，按契约返回成功 —— 无桌面不是调用方的错。
+    return Result<void>{};
 #endif
 }
 

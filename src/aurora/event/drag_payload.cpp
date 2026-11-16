@@ -18,7 +18,7 @@
 #include "aurora/event/event.h"
 #include "aurora/image/image_codec.h"
 
-#if defined(AURORA_ENABLE_DEBUG) && defined(AURORA_ENABLE_TEST_HOOKS)
+#ifdef AURORA_ENABLE_DEBUG
 #define AURORA_SYSTEM_DRAG_TEST_BACKEND 1  // NOLINT(*-macro-usage)
 #endif
 

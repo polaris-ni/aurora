@@ -47,7 +47,7 @@
 // clang-format on
 #endif
 
-#if defined(AURORA_ENABLE_DEBUG) && defined(AURORA_ENABLE_TEST_HOOKS)
+#ifdef AURORA_ENABLE_DEBUG
 // NOLINTNEXTLINE(*-macro-usage)
 #define AURORA_OS_HOTKEY_TEST_BACKEND 1
 #endif

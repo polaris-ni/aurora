@@ -108,7 +108,6 @@ auto gradient_radial_scanline_scalar(std::uint8_t *row, int x0, int n, float cx,
                                      const std::uint8_t *c0, const std::uint8_t *c1, float stop0, float range) -> int;
 
 // ---- 显式 SIMD 实现（供 tests/unit/utest_simd_parity.cpp 逐位比对）----
-#ifdef AURORA_ENABLE_SIMD
 /// @brief 显式 SSE2 实现：逐通道伽马混合的标量黄金逐位镜像，4 像素一组，尾部回落标量。
 /// @param px 像素段首指针；每像素 4 字节，RGB 写回混合结果、A 写 255。
 /// @param sr 源 8 位 sRGB 红分量。
@@ -231,10 +230,8 @@ auto gradient_radial_scanline_sse2(std::uint8_t *row, int x0, int n, float cx, f
 /// @return SIMD 已填充的像素数（8 的整数倍，可为 0）；余下尾部由调用方以标量黄金补齐。
 auto gradient_radial_scanline_avx2(std::uint8_t *row, int x0, int n, float cx, float py, float inv_r,
                                    const std::uint8_t *c0, const std::uint8_t *c1, float stop0, float range) -> int;
-#endif
 
 // ---- 分发入口（生产路径调用）----
-#ifdef AURORA_ENABLE_SIMD
 /// @brief 逐通道 alpha 伽马混合分发入口（生产路径调用）：确保 gamma 表与 SIMD 档位已初始化后按 g_simd_level 择档。
 /// @param px 像素段首指针；每像素 4 字节，RGB 写回混合结果、A 写 255。
 /// @param sr 源 8 位 sRGB 红分量。
@@ -464,5 +461,4 @@ inline auto gradient_radial_fill(std::uint8_t *row, int x0, int n, float cx, flo
                                  const std::uint8_t *c0, const std::uint8_t *c1, float stop0, float range) -> void {
     gradient_radial_scanline_scalar(row, x0, n, cx, py, inv_r, c0, c1, stop0, range);
 }
-#endif
 }  // namespace aurora::detail

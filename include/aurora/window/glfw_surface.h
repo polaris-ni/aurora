@@ -184,7 +184,7 @@ class GlfwSurface : public Surface {
     /// @return 自构造以来的呈现帧数。
     [[nodiscard]] auto frame_count() const -> int override;
     /// @brief GPU 帧调度挂点：GPU 模式生效时返回 `GpuGlRhi`，否则 nullptr（软件路径/回退后）。
-    /// 未编译 `AURORA_ENABLE_GLFW_GPU_GL` 时恒为 nullptr。
+    /// GLFW 构建即含 GPU 通道；运行期初始化失败回退软件路径时为 nullptr。
     /// @return 帧 sink 裸指针，所有权归 Impl；软件路径恒 nullptr。
     [[nodiscard]] auto gpu_backend() -> rhi::RhiFrameSink * override;
     /// @brief 真实窗口截图：Windows 经 GLFW 原生 HWND 复用 PrintWindow 路径（含非客户区）；

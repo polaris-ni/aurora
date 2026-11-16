@@ -25,7 +25,9 @@
 // 本工具链的头文件缺少量已发布的 ABI 常量（协议位掩码、关闭通知载荷），在下方按官方值
 // 就地补齐——补齐的是声明不是实现，值取自 Windows SDK 头，不是猜测。
 
-#ifdef AURORA_ENABLE_NET_TLS_SCHANNEL
+#include "aurora/core/platform.h"  // NOLINT 门控平台宏来源：纯宏头，零 include
+
+#if defined(AURORA_ENABLE_NET_TLS_SYSTEM) && defined(AURORA_PLATFORM_WINDOWS)
 
 #include <array>
 #include <cstddef>
@@ -39,8 +41,6 @@
 #include <string_view>
 #include <utility>
 #include <vector>
-
-#include "aurora/core/platform.h"
 
 // clang-format off
 // SDK 可见性旋钮：MinGW 的 `sspi.h` 要求三选一地点明握手 API 的调用侧（本腿是用户态出站，故
@@ -1135,4 +1135,4 @@ auto make_tls_backend_schannel(const TlsContext &context, std::string_view serve
 
 }  // namespace aurora::net::detail
 
-#endif  // AURORA_ENABLE_NET_TLS_SCHANNEL
+#endif  // AURORA_ENABLE_NET_TLS_SYSTEM && AURORA_PLATFORM_WINDOWS

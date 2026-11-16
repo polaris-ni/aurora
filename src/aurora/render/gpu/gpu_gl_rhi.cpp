@@ -1,9 +1,9 @@
 #include "aurora/render/rhi/gpu_gl_rhi.h"
 
-// 本 TU 无条件编译（不裁切于 AURORA_ENABLE_GLFW_GPU_GL）：全部 GL 访问经 GLFn 函数表指针，
-// 不含任何 GL 原生头。公共头无条件声明 GpuGlRhi / load_gl，库必须恒提供符号——feature 宏
-// 只控制 GlfwSurface 是否接线 GPU 模式（见 glfw_surface.cpp / AuroraBackends.cmake），
-// 未开启时本类构造即 invalid（valid() = false），调用方走软件回退。
+// 本 TU 无条件编译（无开关）：全部 GL 访问经 GLFn 函数表指针，不含任何 GL 原生头。
+// 公共头无条件声明 GpuGlRhi / load_gl，库恒提供符号；GlfwSurface 的 GPU 模式随 GLFW
+// 后端一并接线（见 glfw_surface.cpp / AuroraBackends.cmake），GL 上下文不可用即
+// valid() = false，调用方走软件回退。
 
 #include <algorithm>
 #include <array>

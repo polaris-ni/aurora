@@ -94,10 +94,10 @@ enum class CloseRequestSource : std::uint8_t {
 // 窗口构建：选项 / 类型安全工厂 / Surface 种类（原 window/backend.h，已并入本模块）
 // -----------------------------------------------------------------------------
 class Window;  // 前向声明：下方 create_window 工厂返回 unique_ptr<Window>，Window 实体定义见下方
-// 每个内置 Surface 后端由一对 CMake 开关 + feature 宏控制，可在构建时整体剔除：
-// 关闭后对应 Surface 子类、工厂重载与重型平台头（<windows.h> / GLFW / OpenGL）被
-// 预处理器剔除，链接产物不再含该后端。宏由 `aurora` 目标以 PUBLIC 编译定义传播。
-//   AURORA_BACKEND_HEADLESS — 无头内存/PNG 后端（默认 ON）
+// 无头内存/PNG 后端随库恒编入（无开关）；其余内置 Surface 后端各由一对 CMake 开关 +
+// feature 宏控制，可在构建时整体剔除：关闭后对应 Surface 子类、工厂重载与重型平台头
+// （<windows.h> / GLFW / OpenGL）被预处理器剔除，链接产物不再含该后端。宏由 `aurora`
+// 目标以 PUBLIC 编译定义传播。
 //   AURORA_BACKEND_WIN32    — Win32/GDI 后端（Windows 默认 ON，否则 OFF）
 //   AURORA_BACKEND_GLFW     — GLFW/OpenGL 后端（由 AURORA_BACKEND_GLFW 开关控制）
 //   AURORA_BACKEND_X11      — X11/Xlib 后端（Linux 桌面，需 libX11；见 AURORA_BACKEND_X11）
@@ -236,8 +236,7 @@ struct GlfwOptions : WindowOptions {
     int gl_minor = 3;  ///< OpenGL 次版本。
     bool resizable = true;  ///< 窗口是否可缩放。
     /// @brief GPU 栅格模式：帧级 DisplayList 经 OpenGL 3.3 core 批渲染，消除每帧全屏像素上传
-    /// （需 `AURORA_ENABLE_GLFW_GPU_GL` 编译进库；窗口创建或后端初始化失败自动回退软件纹理路径，
-    /// 诊断日志说明原因）。
+    /// （GLFW 构建即含 GPU 通道；窗口创建或后端初始化失败自动回退软件纹理路径，诊断日志说明原因）。
     bool gpu = false;
 };
 #endif

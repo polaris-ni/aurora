@@ -13,9 +13,6 @@ auto feature_flags() -> FeatureFlags {
     FeatureFlags f;
 
     // ---- AURORA_BACKEND_*（后端）----
-#ifdef AURORA_BACKEND_HEADLESS
-    f.backend_headless = true;
-#endif
 #ifdef AURORA_BACKEND_WIN32
     f.backend_win32 = true;
 #endif
@@ -39,9 +36,6 @@ auto feature_flags() -> FeatureFlags {
 #endif
 
     // ---- AURORA_ENABLE_*（内部能力）----
-#ifdef AURORA_ENABLE_SIMD
-    f.simd = true;
-#endif
 #ifdef AURORA_ENABLE_PROFILING
     f.profiling = true;
 #endif
@@ -94,7 +88,6 @@ auto feature_flags() -> FeatureFlags {
 
 auto FeatureFlags::to_json() const -> Json {
     Json j = Json::object();
-    j.set("AURORA_BACKEND_HEADLESS", Json{backend_headless});
     j.set("AURORA_BACKEND_WIN32", Json{backend_win32});
     j.set("AURORA_BACKEND_D3D11", Json{backend_d3d11});
     j.set("AURORA_BACKEND_GLFW", Json{backend_glfw});
@@ -102,7 +95,6 @@ auto FeatureFlags::to_json() const -> Json {
     j.set("AURORA_BACKEND_WAYLAND", Json{backend_wayland});
     j.set("AURORA_BACKEND_MACOS", Json{backend_macos});
     j.set("AURORA_BACKEND_WASM", Json{backend_wasm});
-    j.set("AURORA_ENABLE_SIMD", Json{simd});
     j.set("AURORA_ENABLE_PROFILING", Json{profiling});
     j.set("AURORA_ENABLE_TRACING", Json{tracing});
     j.set("AURORA_ENABLE_DEBUG", Json{debug});

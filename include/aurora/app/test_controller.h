@@ -8,11 +8,8 @@
 // 交互复用 Inspector 的 simulate_* 合成事件（目标式语义），查找与断言走公共自描述
 // 通道（`Widget::serialize_props` + 树前序遍历）。
 //
-// 需要无头后端：`AURORA_BACKEND_HEADLESS`（默认 ON）关闭时本头不声明该类，
-// 消费者用 `#ifdef AURORA_BACKEND_HEADLESS` 分支处理（测试走 `AURORA_TEST_SKIP`）。
+// 无头后端随库恒编入，本头恒声明该类，消费者无需任何条件编译。
 // ============================================================================
-
-#ifdef AURORA_BACKEND_HEADLESS
 
 #include <memory>
 #include <string>
@@ -207,5 +204,3 @@ class TestController {
 };
 
 }  // namespace aurora
-
-#endif  // AURORA_BACKEND_HEADLESS

@@ -595,12 +595,11 @@ class Surface {
     OsColorSchemeHandler os_color_scheme_handler_;  // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
 };
 
-#ifdef AURORA_BACKEND_HEADLESS
 /// @brief 无头表面：在内存 `Painter` 帧缓冲上绘制，`present()` 时可写 PNG（specification/03-layout-render.md §8.4）。
 ///
 /// 用于无窗口系统的单元测试与无头校验；不依赖 GLFW/SDL/OpenGL。
 /// 窗口可见性策略（WindowVisibility）不在此落地：无 OS 窗口。
-/// 恒提供：无头后端随库编入，`AURORA_BACKEND_HEADLESS` 宏恒定义（`BUILD_OPTIONS.md` §6 固定注入）。
+/// 无头后端随库恒编入（无开关）。
 ///
 class HeadlessSurface : public Surface {
   public:
@@ -819,6 +818,5 @@ class HeadlessSurface : public Surface {
     bool always_on_top_ = false;  ///< 置顶记录值（`set_always_on_top` seam；初值 false = 未置顶）。
     std::vector<CursorShape> cursor_log_;  ///< 悬停光标下发序列（无头验收入口；见 set_cursor）。
 };
-#endif  // AURORA_BACKEND_HEADLESS
 
 }  // namespace aurora

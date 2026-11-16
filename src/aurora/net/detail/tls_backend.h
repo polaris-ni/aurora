@@ -21,12 +21,13 @@
 #include <string_view>
 #include <utility>
 
+#include "aurora/core/platform.h"  // NOLINT 门控平台宏来源：纯宏头，零 include
 #include "aurora/core/result.h"
 #include "aurora/net/tls_backend.h"
 
 namespace aurora::net::detail {
 
-#ifdef AURORA_ENABLE_NET_TLS_SCHANNEL
+#if defined(AURORA_ENABLE_NET_TLS_SYSTEM) && defined(AURORA_PLATFORM_WINDOWS)
 /// @brief Schannel 腿工厂（`tls_schannel.cpp` 定义）。
 /// @param context 安全口径。
 /// @param server_name SNI 与主机名校验的目标名。
@@ -35,7 +36,7 @@ auto make_tls_backend_schannel(const TlsContext &context, std::string_view serve
     -> Result<std::unique_ptr<TlsBackend>>;
 #endif
 
-#ifdef AURORA_ENABLE_NET_TLS_SECURE_TRANSPORT
+#if defined(AURORA_ENABLE_NET_TLS_SYSTEM) && defined(AURORA_PLATFORM_MACOS)
 /// @brief SecureTransport 腿工厂（`tls_securetransport.cpp` 定义）。
 /// @param context 安全口径。
 /// @param server_name SNI 与主机名校验的目标名。

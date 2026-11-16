@@ -98,10 +98,10 @@ auto install_builtins_locked(Registry &state) -> void {
     [[maybe_unused]] auto add = [&state](std::string_view id, int priority, TlsBackendCreator creator) {
         state.entries.push_back(Entry{.id = std::string{id}, .priority = priority, .create = std::move(creator)});
     };
-#ifdef AURORA_ENABLE_NET_TLS_SCHANNEL
+#if defined(AURORA_ENABLE_NET_TLS_SYSTEM) && defined(AURORA_PLATFORM_WINDOWS)
     add(AURORA_ID_SCHANNEL, AURORA_PRIORITY_SYSTEM, &detail::make_tls_backend_schannel);
 #endif
-#ifdef AURORA_ENABLE_NET_TLS_SECURE_TRANSPORT
+#if defined(AURORA_ENABLE_NET_TLS_SYSTEM) && defined(AURORA_PLATFORM_MACOS)
     add(AURORA_ID_SECURE_TRANSPORT, AURORA_PRIORITY_SYSTEM, &detail::make_tls_backend_securetransport);
 #endif
 #ifdef AURORA_ENABLE_NET_TLS_OPENSSL

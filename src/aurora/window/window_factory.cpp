@@ -97,14 +97,10 @@ static auto seed_os_accessibility_once() -> void {
 
 static auto make_window(std::unique_ptr<Surface> surf, const WindowOptions &o) -> std::unique_ptr<Window> {
     enable_dpi_awareness();
-#ifdef AURORA_BACKEND_HEADLESS
     // 无头 Surface 不播种：它是测试注入无障碍档位的接缝（见上）。
     if (dynamic_cast<const HeadlessSurface *>(surf.get()) == nullptr) {
         seed_os_accessibility_once();
     }
-#else
-    seed_os_accessibility_once();
-#endif
     auto w = std::make_unique<Window>(std::move(surf));
     w->set_title(o.title);
     return w;
@@ -123,12 +119,10 @@ auto create_window(std::unique_ptr<Surface> surface, const WindowOptions &opts) 
 
 // ---- Surface 专属工厂：每个重载只认识自己 Surface 的选项，无被忽略的字段 ----
 
-#ifdef AURORA_BACKEND_HEADLESS
 auto create_window(const HeadlessOptions &opts) -> Result<std::unique_ptr<Window>> {
     auto surf = std::make_unique<HeadlessSurface>(opts.png_path, opts.size);
     return make_window(std::move(surf), opts);
 }
-#endif
 
 #ifdef AURORA_BACKEND_WIN32
 auto create_window(const Win32Options &opts) -> Result<std::unique_ptr<Window>> {
@@ -392,15 +386,9 @@ auto create_native_window(const WindowOptions &opts) -> Result<std::unique_ptr<W
         return r;
     }
 #endif
-#ifdef AURORA_BACKEND_HEADLESS
     // 真实显示不可用（无 DISPLAY/WAYLAND_DISPLAY 的 CI/SSH 环境）：降级内存帧缓冲，demo/工具仍可跑通。
     AURORA_LOG_WARN("window", "create_native_window: no display available; falling back to HeadlessSurface.");
     return create_window(HeadlessOptions{opts});
-#else
-    return make_error(ErrorCode::PlatformUnavailable,
-                      "create_native_window: display unavailable and no Headless fallback.",
-                      "Run inside an X11/Wayland session.", "aurora/window/window.h");
-#endif
 #elif defined(AURORA_BACKEND_MACOS)
     return create_window(MacOSOptions{opts});
 #elif defined(AURORA_BACKEND_WASM)
@@ -409,14 +397,9 @@ auto create_native_window(const WindowOptions &opts) -> Result<std::unique_ptr<W
     return create_window(Win32Options{opts});
 #elif defined(AURORA_BACKEND_GLFW)
     return create_window(GlfwOptions{opts});
-#elif defined(AURORA_BACKEND_HEADLESS)
-    return create_window(HeadlessOptions{opts});
 #else
-    (void)opts;
-    return make_error(ErrorCode::PlatformUnavailable, "create_native_window: no built-in Surface backend compiled in.",
-                      "Inject a custom Surface via "
-                      "create_window(std::unique_ptr<Surface>, WindowOptions).",
-                      "aurora/window/window.h");
+    // 无头后端恒编入：无真实显示后端时回退内存帧缓冲，不需要条件编译。
+    return create_window(HeadlessOptions{opts});
 #endif
 }
 
@@ -436,11 +419,8 @@ auto auto_detect_surface() -> SurfaceKind {
     return SurfaceKind::Win32;
 #elif defined(AURORA_BACKEND_GLFW)
     return SurfaceKind::Glfw;
-#elif defined(AURORA_BACKEND_HEADLESS)
-    return SurfaceKind::Headless;
 #else
-    // 极端：所有内置 Surface 均被剪裁。枚举值仍合法（API 稳定），但 create_window 会返回
-    // Error；调用方应改用自定义 Surface 注入路径（Application(Scene,unique_ptr<Surface>) 等）。
+    // 无真实显示后端：无头后端恒编入，返回其枚举值（API 稳定）。
     return SurfaceKind::Headless;
 #endif
 }

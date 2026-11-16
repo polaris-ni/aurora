@@ -13,8 +13,6 @@
 
 #include "aurora/app/test_controller.h"
 
-#ifdef AURORA_BACKEND_HEADLESS
-
 #include <algorithm>
 #include <chrono>
 #include <memory>
@@ -411,5 +409,3 @@ auto TestController::expect_prop(const Node &n, std::string_view key, const Json
 }
 
 }  // namespace aurora
-
-#endif  // AURORA_BACKEND_HEADLESS

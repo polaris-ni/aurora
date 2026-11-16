@@ -552,7 +552,7 @@ auto cancel() -> void;
 auto pump_reads() -> void;
 
 /// @brief 安装进程内 inert 后端：此后 `begin` 不触碰平台、登记在途会话（终态经测试接缝驱动）。
-/// @return 注入是否生效（双宏 `AURORA_ENABLE_DEBUG && AURORA_ENABLE_TEST_HOOKS` 未齐备时为 false）。
+/// @return 注入是否生效（`AURORA_ENABLE_DEBUG` 未开启时为 false）。
 [[nodiscard]] auto install_test_backend() -> bool;
 
 /// @brief 复位 inert 后端（清会话、在途读取与扣留记录；未安装时为 no-op）。

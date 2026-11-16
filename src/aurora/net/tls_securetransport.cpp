@@ -47,7 +47,9 @@
 //     链接）。曾考虑的 `SecTransform` + `kSecDigestSHA2` 已被文档判死（"SecTransform is no longer
 //     supported"），故不用。
 
-#ifdef AURORA_ENABLE_NET_TLS_SECURE_TRANSPORT
+#include "aurora/core/platform.h"  // NOLINT 门控平台宏来源：纯宏头，零 include
+
+#if defined(AURORA_ENABLE_NET_TLS_SYSTEM) && defined(AURORA_PLATFORM_MACOS)
 
 #include <CommonCrypto/CommonDigest.h>
 #include <CoreFoundation/CoreFoundation.h>
@@ -1386,4 +1388,4 @@ auto make_tls_backend_securetransport(const TlsContext &context, std::string_vie
 
 #pragma GCC diagnostic pop
 
-#endif  // AURORA_ENABLE_NET_TLS_SECURE_TRANSPORT
+#endif  // AURORA_ENABLE_NET_TLS_SYSTEM && AURORA_PLATFORM_MACOS

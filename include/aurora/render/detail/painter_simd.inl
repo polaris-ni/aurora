@@ -238,8 +238,6 @@ inline auto gradient_radial_scanline_scalar(std::uint8_t *row, int x0, int n, fl
     return n;
 }
 
-#ifdef AURORA_ENABLE_SIMD
-
 #ifdef AURORA_SIMD_X86
 /// @brief 单像素伽马混合的 SSE2 实现（4 像素一组）：v = dst_lin*inv + src_lin*alpha，结果转回 sRGB，逐位镜像标量黄金。
 /// 标量参考：blend_srgb_over(dst, src, alpha) = linear_to_srgb(srgb_to_linear(src)*alpha + srgb_to_linear(dst)*inv)；
@@ -976,8 +974,6 @@ inline auto ensure_simd_init() noexcept -> void {
         done = true;
     }
 }
-
-#endif  // AURORA_ENABLE_SIMD
 
 }  // namespace aurora::detail
 // NOLINTEND(*-pro-bounds-*, *-pro-type-*, *-narrowing-*, *-isolate-declaration, *-use-auto)
