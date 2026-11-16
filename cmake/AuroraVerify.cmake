@@ -468,11 +468,9 @@ if (AURORA_BUILD_VERIFY_TOOLS)
 
     # ---- GLFW GPU 特性（跨平台真实窗口）：常驻流式纹理与 GPU 层缓存真机核对 ----
     # 自动段核对能力位/契约位/流式逐版本像素/层缓存跨帧持久性；--interactive 人工目视。
-    # 需 GPU 通道编译进库（AURORA_ENABLE_GLFW_GPU_GL）。
-    if (AURORA_ENABLE_GLFW_GPU_GL)
-        aurora_add_verify_probe(aurora_verify_glfw_gpu_features "${_aurora_verify_dir}/glfw_gpu_features_live_probe.cpp")
-        list(APPEND _aurora_verify_targets aurora_verify_glfw_gpu_features)
-    endif ()
+    # GPU 通道随 GLFW 后端恒编入，无独立开关。
+    aurora_add_verify_probe(aurora_verify_glfw_gpu_features "${_aurora_verify_dir}/glfw_gpu_features_live_probe.cpp")
+    list(APPEND _aurora_verify_targets aurora_verify_glfw_gpu_features)
     endif ()
 
     # ---- Win32 wgpu GPU 栅格（真实窗口 + 离屏直驱）：宿主装配 / 能力契约 / 流式逐版本像素 /
@@ -588,7 +586,7 @@ if (AURORA_BUILD_VERIFY_TOOLS)
     # Win32 子窗口几何与可见性闭环比对 / 改档后几何再下发 / 快照像素。仅用公共 API。
     # 运行期需 WebView2 Evergreen 运行时与可被 LoadLibrary 找到的 WebView2Loader.dll
     # （应用侧可再分发件，运行前放到 exe 同目录或加进 PATH），见探针头注。
-    if (WIN32 AND (AURORA_BACKEND_WIN32 OR AURORA_BACKEND_D3D11) AND AURORA_ENABLE_WEBVIEW_WEBVIEW2)
+    if (WIN32 AND (AURORA_BACKEND_WIN32 OR AURORA_BACKEND_D3D11) AND AURORA_ENABLE_WEBVIEW)
         aurora_add_verify_probe(aurora_verify_webview_webview2
                 "${_aurora_verify_dir}/webview2_webview_live_probe.cpp")
         list(APPEND _aurora_verify_targets aurora_verify_webview_webview2)
@@ -597,7 +595,7 @@ if (AURORA_BUILD_VERIFY_TOOLS)
     # ---- WASAPI 音频（Windows）：真实设备线程 / 格式协商 / 图时钟 / 出声路径真机核对 ----
     # 自动段核对激活/格式契约/时钟推进/缓冲源与推流通路/suspend-resume；--interactive 出声人工段
     # （扫频/双源混音/设备热切换）。需音频后端编译进库（AURORA_ENABLE_AUDIO=ON）。
-    if (WIN32 AND AURORA_ENABLE_AUDIO_WASAPI)
+    if (WIN32 AND AURORA_ENABLE_AUDIO)
         aurora_add_verify_probe(aurora_verify_wasapi_audio "${_aurora_verify_dir}/wasapi_audio_live_probe.cpp")
         # 守卫审计观察口直连：采集后端 `failed()` 是库内部契约（src/aurora/media/audio_wasapi.h），
         # 公共 API 不暴露，仅本探针直连验收其生命周期行为。
@@ -609,7 +607,7 @@ if (AURORA_BUILD_VERIFY_TOOLS)
     # 出声路径真机核对。段结构与 WASAPI 探针对齐（激活/格式契约/时钟/缓冲源与推流/
     # suspend-resume/采集观察口 + --interactive 出声人工段）。无 libasound 或无输出设备
     # 的机器（如未装音频栈的 WSL）自动段以退出码 2 报 ENV-UNAVAILABLE，属合法降级。
-    if (LINUX AND AURORA_ENABLE_AUDIO_ALSA)
+    if (LINUX AND AURORA_ENABLE_AUDIO)
         aurora_add_verify_probe(aurora_verify_alsa_audio "${_aurora_verify_dir}/alsa_audio_live_probe.cpp")
         # 采集后端 `failed()` 是库内部契约（src/aurora/media/audio_alsa.h），
         # 公共 API 不暴露，仅本探针直连验收其生命周期行为（同 WASAPI 探针口径）。
@@ -641,7 +639,7 @@ if (AURORA_BUILD_VERIFY_TOOLS)
     # 文件据此永不被 TCC 终止），真采集须在声明该键的 .app 壳内跑。无任何输出设备的机器
     # （如本仓开发用的 VMware Fusion 虚拟机，CoreAudio device_count==0）自动段以退出码 2
     # 报 ENV-UNAVAILABLE，属合法降级——与 ALSA 探针在无 ALSA 栈的 WSL 上同形态。
-    if (APPLE AND AURORA_ENABLE_AUDIO_COREAUDIO)
+    if (APPLE AND AURORA_ENABLE_AUDIO)
         aurora_add_verify_probe(aurora_verify_coreaudio_audio "${_aurora_verify_dir}/coreaudio_audio_live_probe.cpp")
         # 采集后端 `failed()` 与设备后端的重路由收尾都是库内部契约
         # （src/aurora/media/audio_coreaudio.h），公共 API 不暴露，仅本探针直连验收。
@@ -694,7 +692,7 @@ if (AURORA_BUILD_VERIFY_TOOLS)
         # 另以 AnalyserNode RMS 证明确有信号抵达 destination（无音频设备的 headless 唯一可测口径）。
         # 探针直连库内部头（`src/aurora/media/audio_webaudio.h` 的观察口不进公共 API，
         # 口径同 WASAPI/ALSA 探针），故需 src 包含目录。判据由 `wasm_audio_cdp_drive.mjs` 派发。
-        if (AURORA_ENABLE_AUDIO_WEBAUDIO)
+        if (AURORA_ENABLE_AUDIO)
             aurora_add_verify_probe(aurora_verify_wasm_audio "${_aurora_verify_dir}/wasm_audio_live_probe.cpp")
             set_target_properties(aurora_verify_wasm_audio PROPERTIES SUFFIX ".html")
             target_include_directories(aurora_verify_wasm_audio PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")

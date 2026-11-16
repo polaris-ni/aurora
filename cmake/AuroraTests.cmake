@@ -372,15 +372,14 @@ if (AURORA_BUILD_TESTS)
         if (TARGET aurora_inspector_server)
             target_link_libraries(${tgt} PRIVATE aurora_inspector_server)
         endif ()
-        if (AURORA_ENABLE_SIMD)
-            if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
-                target_compile_options(${tgt} PRIVATE -ffp-contract=off)
-            elseif (CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
-                target_compile_options(${tgt} PRIVATE /fp:precise)
-            endif ()
+        # SIMD 恒开：-ffp-contract=off 无条件注入，保证测试侧与库侧逐位一致的前提不随开关消失。
+        if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+            target_compile_options(${tgt} PRIVATE -ffp-contract=off)
+        elseif (CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
+            target_compile_options(${tgt} PRIVATE /fp:precise)
         endif ()
         # 压缩能力宏在 aurora 上为 PRIVATE（消费者不可见，见 AuroraCompression.cmake）；
-        # 测试 TU 与库 TU 必须同口径，故按选项向 runner 同步注入（对齐上方 SIMD 的处理）。
+        # 测试 TU 与库 TU 必须同口径，故按选项向 runner 同步注入。
         if (AURORA_ENABLE_COMPRESSION)
             target_compile_definitions(${tgt} PRIVATE AURORA_ENABLE_COMPRESSION)
         endif ()

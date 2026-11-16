@@ -63,15 +63,18 @@ option(AURORA_ENABLE_NET_TLS_MBEDTLS "Build the bundled mbedTLS TLS backend from
 # Linux / 其它 POSIX 腿**没有可驱动的系统 TLS 栈**：那里的缺省就是不开，运行期由注册表回答
 # `capabilities().tls == false`（除非开 `AURORA_ENABLE_NET_TLS_MBEDTLS`、给 OpenSSL provider 或注入自研后端），
 # 不存在退回明文的通路。
-set(_aurora_tls_system_macro "")
+# 系统栈引擎按平台决定（Schannel / SecureTransport），但注入的宏只有一枚
+# `AURORA_ENABLE_NET_TLS_SYSTEM`（与开关同名，SCOPE PRIVATE）——TU 门控再用规范化平台宏
+# `AURORA_PLATFORM_WINDOWS` / `AURORA_PLATFORM_MACOS` 分发到具体引擎实现。
+set(_aurora_tls_system_engine "")
 if (WIN32)
-    set(_aurora_tls_system_macro "AURORA_ENABLE_NET_TLS_SCHANNEL")
+    set(_aurora_tls_system_engine "Schannel")
 elseif (APPLE)
-    set(_aurora_tls_system_macro "AURORA_ENABLE_NET_TLS_SECURE_TRANSPORT")
+    set(_aurora_tls_system_engine "SecureTransport")
 endif ()
 
 if (AURORA_ENABLE_NET_TLS_SYSTEM)
-    if (NOT _aurora_tls_system_macro)
+    if (NOT _aurora_tls_system_engine)
         # 显式在不支持的平台上打开系统栈是拼错了平台，而不是「想要但没有」：静默无后端会把一次配置
         # 错误伪装成一次成功的构建。
         message(FATAL_ERROR
@@ -79,8 +82,8 @@ if (AURORA_ENABLE_NET_TLS_SYSTEM)
                 "(WIN32 or APPLE); on this platform use AURORA_NET_TLS_PROVIDERS=<static|shared>:<prefix> "
                 "instead, or turn the switch off.")
     endif ()
-    aurora_define_feature(${_aurora_tls_system_macro} SCOPE PRIVATE)
-    aurora_log("TLS backend: system stack (${_aurora_tls_system_macro})")
+    aurora_define_feature(AURORA_ENABLE_NET_TLS_SYSTEM SCOPE PRIVATE)
+    aurora_log("TLS backend: system stack (${_aurora_tls_system_engine})")
 else ()
     aurora_log("TLS backend: system stack disabled (AURORA_ENABLE_NET_TLS_SYSTEM=OFF)")
 endif ()
@@ -292,13 +295,13 @@ endif ()
 # 只由 `AURORA_ENABLE_NET_TLS_SYSTEM` 决定，与 provider 是否存在无关（这正是系统栈与 provider 能共存的构建面
 # 前提）。Schannel：secur32（握手与记录层）+ crypt32（证书链 / DN 文本 / SPKI 编码）+ bcrypt（SPKI 摘要）。
 # SecureTransport 与 CoreFoundation / Security 框架同理，挂在顶层而非后端块内（TLS 腿与渲染后端无关）。
-if (_aurora_tls_system_macro STREQUAL "AURORA_ENABLE_NET_TLS_SCHANNEL")
+if (WIN32)
     target_link_libraries(aurora PUBLIC secur32 crypt32 bcrypt)
-elseif (_aurora_tls_system_macro STREQUAL "AURORA_ENABLE_NET_TLS_SECURE_TRANSPORT")
+elseif (APPLE)
     target_link_libraries(aurora PUBLIC "-framework Security" "-framework CoreFoundation")
 endif ()
 
-unset(_aurora_tls_system_macro)
+unset(_aurora_tls_system_engine)
 unset(_aurora_tls_entries)
 unset(_aurora_tls_seen_kinds)
 unset(_aurora_tls_provider_targets)

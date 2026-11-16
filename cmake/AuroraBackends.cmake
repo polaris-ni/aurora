@@ -3,12 +3,11 @@
 # ------------------------------------------------------------
 # 每个内置 Surface 图形后端可经 AURORA_BACKEND_* 开关整体剔除：关闭后
 # 对应 Surface 子类、工厂重载与重型平台头（<windows.h> / GLFW / OpenGL）被预处理器
-# 剔除，链接产物不再含该后端。音频设备后端开关（AURORA_ENABLE_AUDIO / AURORA_ENABLE_AUDIO_WASAPI /
-# AURORA_ENABLE_AUDIO_ALSA / AURORA_ENABLE_AUDIO_COREAUDIO / AURORA_ENABLE_AUDIO_WEBAUDIO，
-# ENABLE 组）亦定义于本文件末段。自定义注入路径（自定义 Surface 经
-# Application(Scene,unique_ptr<Surface>)、自定义 AudioDeviceBackend 经 AudioContext 构造注入）
-# 始终可用，故「只用自定义 backend」可不编译任何内置后端。feature 宏由 aurora 目标以
-# PUBLIC 编译定义传播给所有消费者。
+# 剔除，链接产物不再含该后端。音频总开关 `AURORA_ENABLE_AUDIO` 定义于本文件末段，
+# 四个平台设备后端在开启时按平台推导注入（不再是独立 CMake 选项）。自定义注入路径
+# （自定义 Surface 经 Application(Scene,unique_ptr<Surface>)、自定义 AudioDeviceBackend
+# 经 AudioContext 构造注入）始终可用，故「只用自定义 backend」可不编译任何内置后端。
+# feature 宏由 aurora 目标以 PUBLIC 编译定义传播给所有消费者。
 # 全部开关/宏/环境变量统一列于 codespec/BUILD_OPTIONS.md（唯一权威来源）。
 # ============================================================
 
@@ -17,9 +16,8 @@
 
 # ---- Headless（无头内存/PNG 后端，恒编入，无开关） ----
 # 测试套件与像素读回回退路径以 HeadlessSurface 为基底（大量测试 TU 直接引用），
-# 关闭它不存在受支持的构建组合，故不再提供选项：宏恒定注入并随安装导出，
-# 消费端与库按同一 ODR 口径编译（固定注入详见 BUILD_OPTIONS.md §6）。
-aurora_define_feature(AURORA_BACKEND_HEADLESS EXPORT)
+# 关闭它不存在受支持的构建组合，故无开关、无 feature 宏：相关代码恒编入，
+# 消费端无从也无需判定该能力（固定注入详见 BUILD_OPTIONS.md §6）。
 
 # ---- Win32/GDI（Windows 默认 ON，否则 OFF） ----
 if (WIN32)
@@ -88,23 +86,11 @@ if (AURORA_BACKEND_GLFW)
         find_package(OpenGL REQUIRED)
         target_link_libraries(aurora PUBLIC glfw OpenGL::GL)
     endif ()
-    aurora_log("GLFW backend enabled (source build under third_party/glfw)")
-endif ()
-
-# ---- GLFW GPU GL（DisplayList 的 OpenGL 3.3 core GPU 栅格能力；默认 OFF；依赖 AURORA_BACKEND_GLFW） ----
-# 依赖 AURORA_BACKEND_GLFW：GL 上下文创建 / swapBuffers 呈现均由 GlfwSurface 承担，本能力
-# 只实现「DisplayList → GL 批渲染」（自写最小函数表 loader，无 GLAD/gl3w 三方依赖）。
-# 开启后 `GlfwSurface::Config` 提供 GPU 渲染模式；初始化失败（驱动过老/无 GL）运行期
-# 自动回退软件纹理上传路径，不抛异常。注意：此选项**不是**独立 `Surface` 后端（无
-# `SurfaceKind`），仅切换 GLFW 窗口的栅格实现，故名为 `AURORA_ENABLE_*` 而非 `AURORA_BACKEND_*`。
-option(AURORA_ENABLE_GLFW_GPU_GL "Enable GLFW GPU OpenGL 3.3 core DisplayList raster (requires AURORA_BACKEND_GLFW)" OFF)
-if (AURORA_ENABLE_GLFW_GPU_GL)
-    if (NOT AURORA_BACKEND_GLFW)
-        aurora_error("AURORA_ENABLE_GLFW_GPU_GL requires AURORA_BACKEND_GLFW=ON"
-                " (GL context creation and present are owned by the GLFW backend).")
-    endif ()
-    aurora_define_feature(AURORA_ENABLE_GLFW_GPU_GL EXPORT)
-    aurora_log("GLFW GPU GL raster enabled (OpenGL 3.3 core DisplayList raster)")
+    # GL 上下文创建 / swapBuffers 呈现由 GlfwSurface 承担；「DisplayList → GL 批渲染」
+    # （自写最小函数表 loader，无 GLAD/gl3w 三方依赖）随 GLFW 后端恒编入，无独立开关。
+    # 初始化失败（驱动过老/无 GL）运行期自动回退软件纹理上传路径，不抛异常；
+    # 运行期是否走 GPU 栅格由 `GlfwOptions::gpu` / `Surface::gpu_backend()` 表达。
+    aurora_log("GLFW backend enabled (source build under third_party/glfw, including GPU GL raster)")
 endif ()
 
 # ---- GPU WGPU（wgpu-native RHI 后端，跨平台 GPU 主力：Vulkan/D3D12/Metal/GL 自动选择；默认 OFF） ----
@@ -528,41 +514,24 @@ endif ()
 # media/audio.h 的 AudioContext 图 API 始终编译（对齐 RHI 先例：契约恒在，能力运行期查询）；
 # AURORA_ENABLE_AUDIO 决定是否编入内置音频设备后端。未启用或设备初始化失败 →
 # AudioContext 静默模式（图照常运转、样本消费后丢弃），对齐 GPU 通道回退语义。
+# 四个平台设备后端由 AURORA_ENABLE_AUDIO ^ 平台推导注入，不提供独立 CMake 旋钮：
+# 每台构建机至多一枚可为 ON，四枚 option 的自由度只剩「关掉本平台后端」这一档，
+# 而该档无独立产品语义（AudioContext 静默降级已是运行期缺失）。
 option(AURORA_ENABLE_AUDIO "Build built-in audio device backends (graph API always compiled; OFF = silent mode)" OFF)
 if (AURORA_ENABLE_AUDIO)
     aurora_define_feature(AURORA_ENABLE_AUDIO EXPORT)
     if (WIN32)
-        option(AURORA_ENABLE_AUDIO_WASAPI "Build WASAPI audio backend (Windows shared-mode, event-driven)" ON)
-    else ()
-        option(AURORA_ENABLE_AUDIO_WASAPI "Build WASAPI audio backend (Windows shared-mode, event-driven)" OFF)
-    endif ()
-    if (AURORA_ENABLE_AUDIO_WASAPI)
-        if (NOT WIN32)
-            aurora_error("AURORA_ENABLE_AUDIO_WASAPI is only supported on Windows;"
-                    " disable it or turn off AURORA_ENABLE_AUDIO on other platforms.")
-        endif ()
         aurora_define_feature(AURORA_ENABLE_AUDIO_WASAPI EXPORT)
         # ole32：COM 初始化（CoInitialize/CoCreateInstance，MMDevice + IAudioClient）。
         target_link_libraries(aurora PUBLIC ole32)
-        aurora_log("WASAPI audio backend enabled")
     endif ()
     # Linux 对位后端：ALSA（音频子系统对称设计——Windows WASAPI / Linux ALSA）。
     # 运行时绑定 dlopen("libasound.so.2")：无 <alsa> 头、无 dev 包、不链 libasound，
     # 构建机有无需 ALSA 开发环境即可编译（缺失仅运行期降级 start false → 静默模式）。
     # ${CMAKE_DL_LIBS}：glibc < 2.34 需显式 -ldl（2.34+ 并入 libc 后为空）。
     if (LINUX)
-        option(AURORA_ENABLE_AUDIO_ALSA "Build ALSA audio backend (Linux, runtime-bound libasound via dlopen)" ON)
-    else ()
-        option(AURORA_ENABLE_AUDIO_ALSA "Build ALSA audio backend (Linux, runtime-bound libasound via dlopen)" OFF)
-    endif ()
-    if (AURORA_ENABLE_AUDIO_ALSA)
-        if (NOT LINUX)
-            aurora_error("AURORA_ENABLE_AUDIO_ALSA is only supported on Linux;"
-                    " disable it or turn off AURORA_ENABLE_AUDIO on other platforms.")
-        endif ()
         aurora_define_feature(AURORA_ENABLE_AUDIO_ALSA EXPORT)
         target_link_libraries(aurora PUBLIC ${CMAKE_DL_LIBS})
-        aurora_log("ALSA audio backend enabled (runtime-bound libasound, zero build dependency)")
     endif ()
     # Apple 对位后端：CoreAudio / AudioQueue（第四足——Windows WASAPI / Linux ALSA /
     # macOS CoreAudio / 浏览器 Web Audio）。渲染端恒 48000/2 float32 交错客户端格式，
@@ -570,22 +539,10 @@ if (AURORA_ENABLE_AUDIO)
     # dlopen 逃逸不同因：ALSA 是为让无 dev 包的 Linux 构建机编译，AudioToolbox /
     # CoreAudio 属系统 SDK，恒在且无版本漂移问题，故直接 -framework 链接。
     if (APPLE)
-        option(AURORA_ENABLE_AUDIO_COREAUDIO
-                "Build CoreAudio audio backend (Apple, AudioQueue output + input capture)" ON)
-    else ()
-        option(AURORA_ENABLE_AUDIO_COREAUDIO
-                "Build CoreAudio audio backend (Apple, AudioQueue output + input capture)" OFF)
-    endif ()
-    if (AURORA_ENABLE_AUDIO_COREAUDIO)
-        if (NOT APPLE)
-            aurora_error("AURORA_ENABLE_AUDIO_COREAUDIO is only supported on Apple platforms;"
-                    " disable it or turn off AURORA_ENABLE_AUDIO on other platforms.")
-        endif ()
         aurora_define_feature(AURORA_ENABLE_AUDIO_COREAUDIO EXPORT)
         # AudioToolbox：AudioQueue 渲染/采集腿；CoreAudio：默认设备选择项与属性监听
         # （重路由通知源）。两枚均属系统框架，无第三方分发。
         target_link_libraries(aurora PUBLIC "-framework AudioToolbox" "-framework CoreAudio")
-        aurora_log("CoreAudio audio backend enabled (AudioQueue, default-device follow with reroute)")
     endif ()
     # 浏览器对位后端：Web Audio（与上三足同构——Windows WASAPI / Linux ALSA /
     # macOS CoreAudio / 浏览器 Web Audio）。
@@ -593,19 +550,17 @@ if (AURORA_ENABLE_AUDIO)
     # HEAPF32/HEAP32 视图按地址消费（详见 src/aurora/media/audio_webaudio.h）。
     # 无 -pthread 时 AudioContext 不存在（裸 Node），故 wasm 侧测试仍走静默降级。
     if (EMSCRIPTEN)
-        option(AURORA_ENABLE_AUDIO_WEBAUDIO
-                "Build Web Audio backend (browser AudioContext, main-thread push ring)" ON)
-    else ()
-        option(AURORA_ENABLE_AUDIO_WEBAUDIO
-                "Build Web Audio backend (browser AudioContext, main-thread push ring)" OFF)
-    endif ()
-    if (AURORA_ENABLE_AUDIO_WEBAUDIO)
-        if (NOT EMSCRIPTEN)
-            aurora_error("AURORA_ENABLE_AUDIO_WEBAUDIO is only supported on Emscripten;"
-                    " disable it or turn off AURORA_ENABLE_AUDIO on other platforms.")
-        endif ()
         aurora_define_feature(AURORA_ENABLE_AUDIO_WEBAUDIO EXPORT)
-        aurora_log("Web Audio backend enabled (AudioContext + main-thread push ring)")
+    endif ()
+    # 平台后端名取首个命中项，日志不列已被删掉的 option。
+    if (WIN32)
+        aurora_log("Audio backends: WASAPI")
+    elseif (LINUX)
+        aurora_log("Audio backends: ALSA")
+    elseif (APPLE)
+        aurora_log("Audio backends: CoreAudio")
+    elseif (EMSCRIPTEN)
+        aurora_log("Audio backends: Web Audio")
     endif ()
 endif ()
 
@@ -614,22 +569,13 @@ endif ()
 # 开关只决定平台原生实现是否编入。未开启 / 运行期探测不到引擎运行时 → WebView 控件
 # 降级为占位矩形，不构建失败、不运行崩溃。
 # 作用域取 PRIVATE 且不 EXPORT：公共头零宏引用（能力一律经 WebViewCapabilities 的运行时
-# 值或 debug::feature_flags() 查询），故消费端无需看见这三枚宏——与 AURORA_ENABLE_SIMD
-# 等纯内部宏同口径。
+# 值或 debug::feature_flags() 查询），故消费端无需看见这几枚平台引擎宏。
 option(AURORA_ENABLE_WEBVIEW "Build the WebView control (native web embedding; OFF = placeholder degradation)" OFF)
 if (AURORA_ENABLE_WEBVIEW)
     aurora_define_feature(AURORA_ENABLE_WEBVIEW SCOPE PRIVATE)
     # Windows 对位后端：WebView2（系统运行时，运行期动态加载，不静态链 WebView2Loader）。
+    # 由 AURORA_ENABLE_WEBVIEW ^ WIN32 推导注入，无独立 CMake 旋钮。
     if (WIN32)
-        option(AURORA_ENABLE_WEBVIEW_WEBVIEW2 "Build WebView2 backend (Windows, runtime-bound)" ON)
-    else ()
-        option(AURORA_ENABLE_WEBVIEW_WEBVIEW2 "Build WebView2 backend (Windows, runtime-bound)" OFF)
-    endif ()
-    if (AURORA_ENABLE_WEBVIEW_WEBVIEW2)
-        if (NOT WIN32)
-            aurora_error("AURORA_ENABLE_WEBVIEW_WEBVIEW2 is only supported on Windows;"
-                    " disable it or turn off AURORA_ENABLE_WEBVIEW on other platforms.")
-        endif ()
         aurora_define_feature(AURORA_ENABLE_WEBVIEW_WEBVIEW2 SCOPE PRIVATE)
         aurora_log("WebView2 backend enabled (runtime-bound, zero link dependency)")
     endif ()

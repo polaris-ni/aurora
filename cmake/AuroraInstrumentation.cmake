@@ -223,17 +223,9 @@ endif ()
 # 注：AURORA_ENABLE_DEBUG 现已作为 aurora 的 PUBLIC 编译定义导出，所有链接 aurora 的消费者
 # （test / demo / 宿主应用）都会自动获得与库完全一致的宏取值，故无需再为测试目标单独注入。
 
-# ---- AURORA_ENABLE_TEST_HOOKS：测试注入点（test-only） ------------------------------------
+# ---- 测试注入点：并入 AURORA_ENABLE_DEBUG，无独立开关 ------------------------------------
 # 仓库私有测试设施（进程内 memory 剪贴板后端等）经公共类暴露的最小注入面。设计对齐 DEBUG API：
-# 注入 API 在头文件始终声明（消费端调用始终可编译），实现体按
-# `AURORA_ENABLE_DEBUG && AURORA_ENABLE_TEST_HOOKS` 双宏裁切，任一关闭返回 false / no-op。
-# 默认 ON：钩子本身无副作用，真正的行为开关是 AURORA_ENABLE_DEBUG（Release 下 AUTO 自动关闭
-# → 注入点自动失效 → 依赖注入的测试运行时 AURORA_TEST_SKIP，不产生竞态也不产生编译错误）。
+# 注入 API 在头文件始终声明（消费端调用始终可编译），实现体按 `AURORA_ENABLE_DEBUG` 单宏裁切，
+# 关闭时返回 false / no-op。真正的行为开关一直是 DEBUG（Release 下 AUTO 自动关闭 → 注入点
+# 自动失效 → 依赖注入的测试运行时 AURORA_TEST_SKIP，不产生竞态也不产生编译错误）。
 # PUBLIC 导出同理 DEBUG：消费者（tests / demo）须与库同值，避免不同 TU 对注入点判定不一致。
-option(AURORA_ENABLE_TEST_HOOKS
-        "Expose library test-injection points (in-memory clipboard backend etc.); inert unless AURORA_ENABLE_DEBUG is also enabled"
-        ON)
-if (AURORA_ENABLE_TEST_HOOKS)
-    aurora_define_feature(AURORA_ENABLE_TEST_HOOKS)
-endif ()
-aurora_log("Test hooks (AURORA_ENABLE_TEST_HOOKS): ${AURORA_ENABLE_TEST_HOOKS} (active only when AURORA_ENABLE_DEBUG is on)")
