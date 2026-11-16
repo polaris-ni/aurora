@@ -326,7 +326,7 @@ opts.renderer = au::RendererPreference::GpuD3D11;  // 不可用时 create_window
 
 ### 13.1 GPU 栅格（GLFW 窗口，整条管线 GPU 化）
 
-上一节的 D3D11 偏置只加速「上屏」，绘制仍走软件 `Painter`。若要**栅格管线本身**走 GPU（帧级 DisplayList 经 OpenGL 3.3 core 批渲染进 MSAA 帧缓冲，跳过每帧全屏像素上传），用 GLFW 窗口的 GPU 模式（需 CMake `-DAURORA_BACKEND_GLFW=ON -DAURORA_ENABLE_GLFW_GPU_GL=ON`）：
+上一节的 D3D11 偏置只加速「上屏」，绘制仍走软件 `Painter`。若要**栅格管线本身**走 GPU（帧级 DisplayList 经 OpenGL 3.3 core 批渲染进 MSAA 帧缓冲，跳过每帧全屏像素上传），用 GLFW 窗口的 GPU 模式（需 CMake `-DAURORA_BACKEND_GLFW=ON`；GPU 通道随 GLFW 后端恒编入）：
 
 ```cpp
 au::GlfwOptions opts;
@@ -1007,7 +1007,7 @@ au::debug::FeatureFlags flags = au::debug::feature_flags();
 if (flags.backend_glfw) { /* GLFW 后端已编译进库 */ }
 
 au::Json j = au::debug::feature_flags_json();
-// {"AURORA_BACKEND_HEADLESS": true, "AURORA_ENABLE_SIMD": true, ...}  键 = 完整宏名
+// {"AURORA_BACKEND_WIN32": true, "AURORA_ENABLE_DEBUG": true, ...}  键 = 完整宏名
 ```
 
 全配置可用（不受 `AURORA_ENABLE_DEBUG` 门控）；结果反映链接进来的 aurora 静态库的编译期取值。禁止再散写 `#ifdef AURORA_*` 探测能力——宏镜像只在 `src/aurora/debug/feature_flags.cpp` 单点维护。
@@ -2176,7 +2176,7 @@ auto grab_hotkey(au::Application &app) -> void {
 - **平台矩阵**：Windows（`RegisterHotKey` + `WM_HOTKEY`）、X11（`xcb_grab_key`）支持；Wayland / GLFW / macOS 运行时降级——`enabled()==false`，`add()` 恒返回错误。
 - **失败一律机器可见**：主键无法映射到原生虚拟键、未指定主键、同一组合在本注册表内重复注册、被别的进程抢占，统一为 `ErrorCode::OsHotkeyRegisterFailed`（`detail` 给出成因）。判 `Result` 并给用户看得见的反馈，不要当静默 no-op 吞掉；`remove()` 对无效 / 非本表句柄返回 `false`（不抛、不报错）。
 - **句柄是值语义**：`OsHotkeyHandle`（`id == 0` 恒为无效句柄，有效 ID 自 1 起），与 `ShortcutRegistry::add()` 返回的 `int` 是不同类型，传错编译期即报错。
-- **测试**：`install_test_backend(bool)` 装进程内 inert 后端（不真的抢占系统热键），受 `AURORA_ENABLE_DEBUG && AURORA_ENABLE_TEST_HOOKS` 双宏裁切，Release 下自动失效。
+- **测试**：`install_test_backend(bool)` 装进程内 inert 后端（不真的抢占系统热键），受 `AURORA_ENABLE_DEBUG` 双宏裁切，Release 下自动失效。
 - 注册 / 注销 / 排空须在**建窗与跑消息泵的同一线程**；注册表析构会注销本表全部热键，退出前的 `clear()` 用于换一批组合重建。
 
 可编译样例见 `examples/demos/demo_os_hotkey.cpp`；契约见 [`specification/06-app-platform.md`](specification/06-app-platform.md) §8.6。

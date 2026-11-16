@@ -125,7 +125,7 @@ OS 输入探针另含一条 **opt-in 加强腿**：已授予辅助功能（Acces
 | 后端开关 | 取值 |
 |:---|:---|
 | `AURORA_BACKEND_WIN32` | ON |
-| `AURORA_BACKEND_HEADLESS` | 恒编入（无开关） |
+| 无头后端 | 恒编入（无开关，宏已删） |
 | `AURORA_BACKEND_GLFW` / `D3D11` / `GPU_GL` / `GPU_WGPU` | OFF |
 | `AURORA_BACKEND_X11` / `WAYLAND` / `MACOS` / `WASM` | OFF |
 

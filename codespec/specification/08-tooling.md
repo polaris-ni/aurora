@@ -685,7 +685,7 @@ gen_i18n --emit-builtin <out.hpp> <builtin.json>
 
 > 为什么不做「扫文档裸名自动判」：全量审计 21 个未注册名里只有 1 个是真幽灵，其余 20 个是命名示例、已随源退场的历史引用、提案里的待建名与 `check_color` 一类属性名，自动判误报率过高。生成器依赖型门禁（`check_api_schema_sync` 等）在 Emscripten 交叉构建下按 `AuroraTests.cmake` 的口径不注册，故**不进声明清单**，否则会把本来绿的交叉构建判红。
 
-配套实物 `tests/unit/utest_simd_parity.cpp` 直接包含 `painter_simd.inl` 拿同源内联定义，对五组「标量黄金 ↔ SSE2 ↔ AVX2」三元组以同一份确定性输入逐字节比对，扫描线两组按 SIMD 返回值裁剪向量段、再按生产分发形态用标量补齐尾部后比整行；`AURORA_ENABLE_SIMD=OFF` 或非 x86 档五例在**用例体内** `AURORA_TEST_SKIP`，声明不被 `#ifdef` 摘掉，`registry_integrity` 不漂移。
+配套实物 `tests/unit/utest_simd_parity.cpp` 直接包含 `painter_simd.inl` 拿同源内联定义，对五组「标量黄金 ↔ SSE2 ↔ AVX2」三元组以同一份确定性输入逐字节比对，扫描线两组按 SIMD 返回值裁剪向量段、再按生产分发形态用标量补齐尾部后比整行；非 x86 档五例在**用例体内** `AURORA_TEST_SKIP`（SIMD 已恒开，无关闭档），声明不被 `#ifdef` 摘掉，`registry_integrity` 不漂移。
 
 ### 7.5 真机验收探针（`tools/verify/`）
 探针证明的是**无头 CI 无法证明**的平台接线：单元测试只能断言到「平台中立层」（快照 / diff / 偏移映射 / 动作路由），而「平台回调是否真的到达、平台侧对象是否真的可查」只能建真实窗口、在真实桌面会话里验收。全部由 `cmake/AuroraVerify.cmake` 定义、`AURORA_BUILD_VERIFY_TOOLS` 门控、**不进 CTest**（会创建真实窗口 / 读取屏幕状态，非确定且干扰用户桌面）。
@@ -788,7 +788,7 @@ mip 链、区域效果 compute vs 片元两路——后者经 `set_compute_effec
 | 帧推进 | 帧序复用 `TestController` 已验证的既有序列（泵平台事件 → `Widget::tick` 手势计时 → `Animator::tick` → `Scheduler::tick` → `Window::present_root`）：内核自持 `Animator` / `Scheduler` 并经其 `set_current` 挂为进程内当前实例，使 mount 期注册的动画与定时任务可被逐帧推进。**不新增任何公共单帧 API**（`Application::step_frame()` 保持 `private`） |
 | 收敛与超时 | `pump_until_settled(max_frames)` 以「`Window::is_idle_frame()` 且无运行中动画」收敛；预算内未收敛返回 `RuntimeAsyncTimeout`，消息含已推进帧数、最后脏区状态、idle 帧状态与活跃动画数（可直接作为失败原因）。注意：**自驱动手势滑动**（`Scroll` 收位滑动等，不占 `Animator`，只吃 `scaled_frame_dt` 折算后的步长）不在此判据覆盖内，其收敛协议见下文交互流往返层 |
 | 像素读回 | `capture_frame(const Surface &)` = `Surface::data()` + `Surface::framebuffer_size()` 组合，返回帧缓冲**物理像素**的 RGBA 帧；**未新增 `Surface` 公共读回虚方法**。`data()` 为 `nullptr`（后端未覆写读回，或该后端的读回受 `AURORA_ENABLE_DEBUG` 门控且未生效）时返回 `GeneralNotSupported`，消息沿用 `save_snapshot` 既有的 "framebuffer capture unavailable"；不返回空帧、不伪造内容 |
-| 查询面 | `collect_preorder` / `find_by_key` / `find_by_type` / `find_by_text` / `read_prop` 全部建立在**公共自描述通道**上（`Node::id()` / `Widget::type_name()` / `Widget::serialize_props` / `Widget::child_nodes()`），**不依赖 `TestController`**——后者整头受 `AURORA_BACKEND_HEADLESS` 门控（无头后端恒编入，该宏恒真，但查询面不建立在它之上是设计纪律：查询能力的成立不系于任何一个后端宏） |
+| 查询面 | `collect_preorder` / `find_by_key` / `find_by_type` / `find_by_text` / `read_prop` 全部建立在**公共自描述通道**上（`Node::id()` / `Widget::type_name()` / `Widget::serialize_props` / `Widget::child_nodes()`），**不依赖 `TestController`**——后者依赖无头帧循环驱动（无头后端恒编入，但查询面不建立在它之上是设计纪律：查询能力的成立不系于任何一个后端宏） |
 | 语义快照 | `Session::semantic_snapshot()` 返回统一语义快照（`a11y::TreeSnapshot`：先序扁平 + `parent_id` + `by_id`，形状与 `widget/a11y_diff.h` 一致），`find_semantic_node()` 按角色（可选名称）先序取首个命中、`semantic_role_name()` 供报告可读名。快照与平台桥**同源**（同一 `build_accessibility_tree`，含 Name 回退链与 labelled_by 解析）——对快照成立的断言，平台桥投影也应成立；未建窗 / 未挂根返回 `GeneralInvalidArgument`，与 `read_pixels` 漏检口径一致 |
 | 输入注入 | `tap` / `drag` / `scroll` / `enter_text` 经 `Inspector::simulate_*` 走真实命中测试与冒泡派发（目标式语义），而非直接改控件状态；注入成功后登记「下一帧全量重绘」，模拟真实平台输入事件唤醒帧循环 |
 | 生命周期 | `Session` 以 RAII 兜底窗口生命周期：用例中途断言失败、抛出异常或提前 return 时析构即关闭窗口并回收宿主，不残留幽灵窗口；该保证不依赖用例显式调用清理函数，也不依赖测试框架的断言宏 |

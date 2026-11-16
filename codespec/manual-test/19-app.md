@@ -38,7 +38,7 @@
 关于各载体的观测量与已知现象：
 
 - `demo_app` 走 `au::App()` 流式路径，**不经** `run_demo` 启动器，故 stdout 与 stderr 均为空；这是它与其余载体的基线差异。
-- `demo_test_controller` 载体依赖无头后端（恒编入、无开关）；`AURORA_BACKEND_HEADLESS` 宏是 `#ifdef` 门控（恒真），不存在关闭分支构建。
+- `demo_test_controller` 载体依赖无头后端（恒编入、无开关）；无头后端恒编入（宏已删），不存在关闭分支构建。
 - `demo_system_tray` 的真实实现是 **Win32 专有**（`Shell_NotifyIcon` + 隐藏消息窗口）；非 Windows / Headless 下 `SystemTray` 全部方法为 no-op。
 - `demo_timers` 经 `run_demo` 只建窗口、**不建** `Application`，故没有 `Scheduler`，其定时器不触发；库的表现为「降级 + 明确诊断」。
 - `demo_hot_reload` 读写**当前工作目录**下的 `ui.json`，文件不存在时自动写入一份默认内容。

@@ -4,7 +4,7 @@
 |:---|:---|
 | 变更编号 | CHG-078 |
 | 提出日期 | 2026-11-16 |
-| 当前状态 | 已提议 |
+| 当前状态 | 实施中 |
 | 关联需求 | SPEC.PLATFORM.ZERO-IFDEF.001 |
 | 影响面 | 构建选项三档共十一项。A 档删宏（含 option 与导出宏）四枚：`AURORA_BACKEND_HEADLESS`（恒注入，纯死守卫清理）、`AURORA_ENABLE_GLFW_GPU_GL`（并入 `AURORA_BACKEND_GLFW`）、`AURORA_ENABLE_SIMD`（恒开，`-ffp-contract=off` 改无条件注入）、`AURORA_ENABLE_TEST_HOOKS`（并入 `AURORA_ENABLE_DEBUG`）；B 档删 option、宏降级为「父开关 ^ 平台」推导五枚：`AURORA_ENABLE_AUDIO_WASAPI` / `AURORA_ENABLE_AUDIO_ALSA` / `AURORA_ENABLE_AUDIO_COREAUDIO` / `AURORA_ENABLE_AUDIO_WEBAUDIO`、`AURORA_ENABLE_WEBVIEW_WEBVIEW2`（宏名、TU 门控与 `feature_flags` 镜像全保留，仅手工 `-D` 旋钮消失）；C 档删内部宏两枚：`AURORA_ENABLE_NET_TLS_SCHANNEL` / `AURORA_ENABLE_NET_TLS_SECURE_TRANSPORT` 并入 `AURORA_ENABLE_NET_TLS_SYSTEM ^ 平台宏`。公共头十二文件（`application.h` / `test_controller.h` / `surface.h` / `window.h` / `native_surfaces.h` / `glfw_surface.h` / `gpu_gl_rhi.h` / `painter_simd.h` / `painter_simd.inl` / `feature_flags.h` / `event.h` / `os_hotkey.h`）去门控与注释改写；实现十三文件（`window_factory.cpp` / `test_controller.cpp` / `notification.cpp` / `scroll_bench.cpp` / `feature_flags.cpp` / `glfw_surface.cpp` / `drag_payload.cpp` / `os_hotkey.cpp` / `system_drag_ingress.h` / TLS 四文件）；`FeatureFlags` 删 `backend_headless` / `simd` 两字段；测试与工具约四十文件去门控与文案改写；`codespec/BUILD_OPTIONS.md` / `codespec/ARCHITECTURE.md` / `codespec/GUIDELINE.md` / `codespec/CODING_STANDARDS.md` / specification 三篇 / `codespec/debug_api.toml` / `codespec/manual-test/10-window.md` / `codespec/manual-test/23-net.md` 文档回写；`.github/workflows/ci.yml` 矩阵同步；根目录 `CHANGELOG.md` 记破坏性变更。 |
 
@@ -170,7 +170,7 @@
 - [ ] CMake（A 档）：`cmake/AuroraBackends.cmake`（HEADLESS / GLFW GPU 两段）、`cmake/AuroraSimd.cmake`（option 删除 + `-ffp-contract=off` 无条件化）、`cmake/AuroraInstrumentation.cmake`（TEST_HOOKS）、`cmake/AuroraVerify.cmake`（GLFW GPU 探针条件）。
 - [ ] CMake（B / C 档）：`cmake/AuroraBackends.cmake` 音频四段 option 删除与推导注入、WebView2 option 删除与推导注入；`cmake/AuroraVerify.cmake` 日志文本；`cmake/AuroraNetTls.cmake` 系统栈改注入 `AURORA_ENABLE_NET_TLS_SYSTEM`。
 - [ ] 公共头去门控与注释：`application` / `test_controller` / `surface` / `window` / `native_surfaces` / `glfw_surface` / `gpu_gl_rhi` / `painter_simd.h` 与 `.inl` / `feature_flags` / `event` / `os_hotkey`。
-- [ ] 实现文件去门控与注释：`window_factory` / `test_controller` / `notification` / `scroll_bench` / `feature_flags.cpp` / `glfw_surface.cpp` / `drag_payload` / `os_hotkey` / `system_drag_ingress.h`；TLS 四文件（`tls_schannel` / `tls_securetransport` / `tls_backend` / `detail/tls_backend.h`）。
+- [ ] 实现文件去门控与注释：`window_factory` / `test_controller` / `notification` / `scroll_bench` / `feature_flags.cpp` / `glfw_surface.cpp` / `drag_payload` / `os_hotkey` / `system_drag_ingress.h`；TLS 四文件（`src/aurora/net/tls_schannel.cpp` / `src/aurora/net/tls_securetransport.cpp` / `src/aurora/net/tls_backend.cpp` / `src/aurora/net/detail/tls_backend.h`）。
 - [ ] 测试与工具：上列集成 / 单元 / 工具 / 示例文件去门控与文案改写；`utest_feature_flags` 删两行表项、计数注释改 21、删两条对应断言。
 - [ ] `ci.yml`：头注释 / 能力矩阵 / toggles / lint 主遍 / lint-polarity 同步。
 - [ ] 文档回写：`BUILD_OPTIONS` / `ARCHITECTURE` / `GUIDELINE` / `CODING_STANDARDS` / `03-layout-render` / `06-app-platform` / `08-tooling` / `debug_api.toml` / `manual-test/10-window` / `manual-test/23-net` / 根目录 `CHANGELOG`。

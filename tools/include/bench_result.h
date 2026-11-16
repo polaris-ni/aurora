@@ -104,6 +104,7 @@ enum class ResultStatus : std::uint8_t {
     return "wayland";
 #else
     return "headless";
+#endif
 }
 
 [[nodiscard]] inline auto build_type_id() -> std::string {

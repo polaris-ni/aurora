@@ -22,6 +22,22 @@ freeze: minor-versions-are-additive
 
 ## [Unreleased]
 
+### Breaking
+
+- **编译开关收敛：删除四枚导出宏与两个 `FeatureFlags` 字段**。`AURORA_BACKEND_HEADLESS` / `AURORA_ENABLE_GLFW_GPU_GL` 从安装导出清单移除，`AURORA_ENABLE_SIMD` / `AURORA_ENABLE_TEST_HOOKS` 不再以 PUBLIC 编译定义下发；`debug::FeatureFlags` 删 `backend_headless` 与 `simd` 两字段，`feature_flags().to_json()` 随之删 `AURORA_BACKEND_HEADLESS` / `AURORA_ENABLE_SIMD` 两键。无头后端与 SIMD 恒编入、能力查询不再需要；测试注入点改由 `AURORA_ENABLE_DEBUG` 单宏裁切（默认组合行为逐位不变）。
+- **音频/WebView 平台子开关不再读取手工 `-D`**：`AURORA_ENABLE_AUDIO_WASAPI` / `AURORA_ENABLE_AUDIO_ALSA` / `AURORA_ENABLE_AUDIO_COREAUDIO` / `AURORA_ENABLE_AUDIO_WEBAUDIO` / `AURORA_ENABLE_WEBVIEW_WEBVIEW2` 的 option 删除，宏由父开关 ^ 平台推导注入（宏名、TU 门控与 `feature_flags` 镜像字段名不变，默认构建导出面不变）；`AURORA_ENABLE_NET_TLS_SCHANNEL` / `AURORA_ENABLE_NET_TLS_SECURE_TRANSPORT` 两枚 PRIVATE 内部宏删除，改为 `AURORA_ENABLE_NET_TLS_SYSTEM ^ 平台宏` 门控。
+
+### Changed
+
+- 无头后端恒编入、`HeadlessSurface` 恒声明；GLFW 后端构建即含 GPU GL 通道（运行期初始化失败自动回退软件路径，`gpu_backend()` 语义不变）；`-ffp-contract=off` 与 MSVC `/fp:precise` 改为无条件注入，保证 SIMD/标量逐位一致的前提不随开关消失。系统 TLS 栈的 configure 日志括注由引擎宏名改为引擎名（Schannel / SecureTransport）。
+
+### Migration
+
+- 用 `-DAURORA_ENABLE_SIMD=OFF` / `-DAURORA_ENABLE_TEST_HOOKS=OFF` / `-DAURORA_ENABLE_GLFW_GPU_GL=ON` / `-DAURORA_ENABLE_AUDIO_*=ON|OFF` / `-DAURORA_ENABLE_WEBVIEW_WEBVIEW2=ON|OFF` 的构建脚本：这些缓存变量成为未使用项，删除即可（能力按父开关与平台推导，默认行为不变）。
+- 以 `#ifdef AURORA_BACKEND_HEADLESS` / `AURORA_ENABLE_GLFW_GPU_GL` 做条件编译的消费者：两能力恒真，直接移除守卫。
+- 读取 `feature_flags().backend_headless` / `.simd` 或 JSON 键 `AURORA_BACKEND_HEADLESS` / `AURORA_ENABLE_SIMD` 的工具：删除读取分支（前者恒真，后者运行期能力由 CPUID 分发承担）。
+- 需要「音频 ON 但无本平台设备后端」的构建：改为不编 `AURORA_ENABLE_AUDIO` 并注入自定义 `AudioDeviceBackend`；注意注入只能顶替行为，不能把设备后端 TU 从产物裁出。
+
 ### Added
 
 - **OS 无障碍偏好自动跟随**：`os_accessibility_settings()`（`window/platform.h`）读出系统的三枚开关（高对比 / 减弱动效 / 字号缩放），首个真实窗口建立时播种进进程级单例（进程内一次；无头 Surface 不播种，那是测试注入的接缝），此后 Win32 在 `WM_SETTINGCHANGE`（`ImmersiveColorSet` / `Accessibility`）与 macOS 在 `NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification` 上重读并写回，窗口每帧的差量比对（`Window::sync_accessibility_fold()`）随之整帧标脏——系统开关一翻，界面即跟随，不需要应用自己轮询。Linux 无对等广播，改由新入口 `Application::refresh_os_accessibility_settings()` 显式重读（幂等）。平台局限如实记：macOS 与 Linux 读不到系统级字号缩放（恒 1.0）。契约见 [`codespec/specification/06-app-platform.md`](codespec/specification/06-app-platform.md) §5 与 [`07-environment-modifier.md`](codespec/specification/07-environment-modifier.md) §5.1。

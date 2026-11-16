@@ -7578,7 +7578,7 @@
       "since": "1.0.0-alpha.1",
       "gated": "none",
       "signature": "feature_flags_json() -> Json",
-      "summary": "feature_flags().to_json(): JSON object keyed by full macro names (e.g. AURORA_BACKEND_HEADLESS) with boolean values",
+      "summary": "feature_flags().to_json(): JSON object keyed by full macro names (e.g. AURORA_BACKEND_WIN32) with boolean values",
       "header": "aurora/debug/feature_flags.h"
     }
   ]
