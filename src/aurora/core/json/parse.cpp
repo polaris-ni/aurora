@@ -56,7 +56,7 @@ class DomBuilder : public SaxHandler {
     }
 
     auto on_string(std::string_view decoded) -> bool override {
-        place(Value(std::string(decoded)));
+        place(Value(decoded));  // 值内部持有副本，回调返回后视图失效无碍
         return true;
     }
 

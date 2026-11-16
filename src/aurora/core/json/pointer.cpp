@@ -8,7 +8,6 @@
 #include <string>
 #include <string_view>
 #include <system_error>
-#include <vector>
 
 #include "aurora/core/json.h"
 
@@ -80,9 +79,14 @@ namespace {
     return token == "-" || parse_index(token, ignored);
 }
 
+/// @brief 段是否需要 `~` 反转义（无 `~` 的常态段可直接以视图查键，免一次堆分配）。
+[[nodiscard]] auto needs_unescape(std::string_view token) noexcept -> bool {
+    return token.find('~') != std::string_view::npos;
+}
+
 [[nodiscard]] auto step(const Value &value, std::string_view token) -> const Value * {
     if (value.is_object()) {
-        return value.find(unescape_token(token));
+        return needs_unescape(token) ? value.find(unescape_token(token)) : value.find(token);
     }
     if (value.is_array()) {
         std::size_t index = 0;
@@ -96,7 +100,7 @@ namespace {
 
 [[nodiscard]] auto step(Value &value, std::string_view token) -> Value * {
     if (value.is_object()) {
-        return value.find(unescape_token(token));
+        return needs_unescape(token) ? value.find(unescape_token(token)) : value.find(token);
     }
     if (value.is_array()) {
         std::size_t index = 0;
@@ -181,7 +185,10 @@ auto resolve_for_write(Value &root, std::string_view pointer) -> Result<Value *>
         }
 
         if (cur->is_object()) {
-            const std::string key = unescape_token(token);
+            // 无 `~` 的常态段直接以视图作键；含转义时才构造反转义副本（生命周期覆盖后续 find / set）。
+            const bool escaped = needs_unescape(token);
+            const std::string unescaped = escaped ? unescape_token(token) : std::string{};
+            const std::string_view key = escaped ? std::string_view{unescaped} : token;
             Value *slot = cur->find(key);
             if (slot == nullptr) {
                 cur->set(key, Value(nullptr));
@@ -238,25 +245,22 @@ auto erase_pointer(Value &root, std::string_view pointer) -> Result<bool> {
         return syntax_error(pointer);
     }
 
-    // 先收集全部段（原始文本），再走前 n-1 段定位父容器。
-    std::vector<std::string> tokens;
-    {
-        std::size_t pos = 0;
-        std::string_view token;
-        while (next_token(pointer, pos, token)) {
-            tokens.emplace_back(token);
-        }
-    }
-
+    // 单趟切段：`next_token` 的出口停在下一段的 `/` 或文末，故「切段后已到文末」即当前段为末段。
+    // 段文本以视图切出（不再先把全部段拷进 vector），末段留给删除分支。
     Value *parent = &root;
-    for (std::size_t i = 0; i + 1 < tokens.size(); ++i) {
-        parent = step(*parent, tokens[i]);
+    std::size_t pos = 0;
+    std::string_view token;
+    while (next_token(pointer, pos, token)) {
+        if (pos >= pointer.size()) {
+            break;  // token 即末段，父容器已定位
+        }
+        parent = step(*parent, token);
         if (parent == nullptr) {
             return false;  // 路径不存在：未命中，不是错误
         }
     }
 
-    const std::string_view last = tokens.back();
+    const std::string_view last = token;
     if (parent->is_object()) {
         return parent->erase(unescape_token(last));
     }

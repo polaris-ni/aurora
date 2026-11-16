@@ -87,7 +87,8 @@ Value::Value(const char *s) : data_(std::monostate{}) {
     }
 }
 
-Value::Value(std::string_view s) : data_(std::monostate{}) { data_.emplace<std::string>(std::string(s)); }
+// string_view → string 的另一条构造路径（此处原地构造，省一次临时对象移动）。
+Value::Value(std::string_view s) : data_(std::monostate{}) { data_.emplace<std::string>(s); }
 
 // variant::emplace 无 noexcept 规格（可能置 valueless），但替代项构造均无抛；检查器无法建模。
 // NOLINTNEXTLINE(bugprone-exception-escape)

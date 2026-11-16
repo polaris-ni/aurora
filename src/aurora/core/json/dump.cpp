@@ -63,48 +63,64 @@ auto write_u_escape(std::string &out, std::uint32_t cp) -> void {
     return {cp, len};
 }
 
+/// @brief 该字节是否需要单独处理（转义 / 控制字符 / ASCII 化）。
+[[nodiscard]] auto needs_escape(unsigned char c, bool ensure_ascii) noexcept -> bool {
+    return c == '"' || c == '\\' || c < 0x20U || (ensure_ascii && c >= 0x80U);
+}
+
 /// @brief 转义写入字符串字面量（含引号）。`/` 不转义（RFC 惯例）。
+/// @note 连续无需转义的字节按整段追加，避免逐字节 `push_back`；输出与逐字节写法逐字节一致。
 auto write_string(std::string_view s, std::string &out, bool ensure_ascii) -> void {
     out.push_back('"');
-    for (std::size_t i = 0; i < s.size(); ++i) {
+    std::size_t i = 0;
+    while (i < s.size()) {
         const auto c = static_cast<unsigned char>(s[i]);
+        if (!needs_escape(c, ensure_ascii)) {
+            const std::size_t run = i;
+            do {
+                ++i;
+            } while (i < s.size() && !needs_escape(static_cast<unsigned char>(s[i]), ensure_ascii));
+            out.append(s.substr(run, i - run));
+            continue;
+        }
         switch (c) {
             case '"':
                 out += "\\\"";
+                ++i;
                 continue;
             case '\\':
                 out += "\\\\";
+                ++i;
                 continue;
             case '\b':
                 out += "\\b";
+                ++i;
                 continue;
             case '\f':
                 out += "\\f";
+                ++i;
                 continue;
             case '\n':
                 out += "\\n";
+                ++i;
                 continue;
             case '\r':
                 out += "\\r";
+                ++i;
                 continue;
             case '\t':
                 out += "\\t";
+                ++i;
                 continue;
             default:
                 break;
         }
         if (c < 0x20U) {
             write_u_escape(out, c);
+            ++i;
             continue;
         }
-        if (c < 0x80U) {
-            out.push_back(static_cast<char>(c));
-            continue;
-        }
-        if (!ensure_ascii) {
-            out.push_back(static_cast<char>(c));
-            continue;
-        }
+        // 余下唯一情形：ensure_ascii 下的非 ASCII 字节，按码点转义（含代理对）。
         const auto [cp, len] = decode_utf8(s, i);
         if (cp > 0xFFFFU) {
             const std::uint32_t v = cp - 0x10000U;
@@ -113,7 +129,7 @@ auto write_string(std::string_view s, std::string &out, bool ensure_ascii) -> vo
         } else {
             write_u_escape(out, cp);
         }
-        i += len - 1;
+        i += len;
     }
     out.push_back('"');
 }

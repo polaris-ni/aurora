@@ -588,6 +588,11 @@ struct ParseOptions {
 | 空输入 / 仅空白 | 拒绝 |
 | 嵌套深度超限 | `json-depth-exceeded` |
 
+**字符串零拷贝**：无转义的字符串（常态）直接以输入文本的视图交出，不再逐字节搬进复用缓冲；遇到
+`\` 才把已扫描前缀整体搬入缓冲并走解码路径。两条路径对未闭合、控制字符与 UTF-8 序列的校验、以及
+交出内容逐字节一致（`tests/unit/utest_json.cpp` 的 `parses_unescaped_strings_without_rebuilding_them`
+锚定内容、键序与 dump 文本）。
+
 **数字分派（三判别 + 保真）**：整数字面量先试 `int64`、再试 `uint64`，两者皆溢出则存为
 `RawNumber`；小数字面量经 `std::from_chars` 解析为 `double`，若域外（如 `1e999`）或
 `std::to_chars` 最短往返与原文不一致（忽略符号、小数点、指数与前后零后比对）则同样存为
@@ -613,6 +618,7 @@ auto dump_into(const Value &v, std::string &out, DumpOptions opts = {}) -> Resul
   不宽容转 `null`；
 - 转义：`"` 与 `\` 必转，`< 0x20` 控制字符转 `\u00XX`，`/` 不转；`ensure_ascii` 时非 ASCII 转
   `\uXXXX`（BMP 之外经代理对）；
+- 字符串写入按「无需转义的连续字节」整段追加（非逐字节 `push_back`），输出与逐字节写法逐字节一致；
 - `dump_into` 复用调用方缓冲，供响应帧热路径避免每帧分配。
 
 ### 9.8 错误码
@@ -694,7 +700,8 @@ class SaxHandler {
   停止解析并返回**成功**——这是消费者的决定而非错误。DOM 路径的装配器恒返回 `true`，故 DOM 出口
   永不触发该分支。
 - **视图仅在回调期间有效**：`on_string` / `on_object_key` / `on_raw_number` 收到的 `string_view`
-  别名引擎内部的可复用缓冲，下一次回调即被覆写；需要留存必须自行拷贝。
+  在无转义时**别名输入文本**，含转义时别名引擎内部的可复用缓冲（下一次回调即被覆写）；两种情况都
+  只保证回调期间有效，需要留存必须自行拷贝。
 - **失败口径与 DOM 出口逐字一致**：非法文档的 `Error`（code / message）与 `parse` 完全相同，由
   `tests/unit/utest_json_sax.cpp` 对同一批非法输入逐字比对 message 守住。
 
@@ -716,6 +723,9 @@ class SaxHandler {
 | `find_pointer`（const / 非 const 重载） | 只读寻址。命中返回子值指针；未命中返回 `nullptr` |
 | `resolve_for_write` | 写路径寻址：**自动补齐缺失的中间容器**，返回可写槽位 |
 | `erase_pointer` | 删除末段所指成员；成功时 `bool` 表示**是否命中**（未命中不是错误） |
+
+段查找不做无谓拷贝：不含 `~` 的段（常态）直接以视图查键，含 `~` 时才构造反转义副本；`erase_pointer`
+单趟切段定位父容器，不预先收集全部段。
 
 **路径语法**：段以 `/` 分隔（`"/a/0/b"`）；**空串指向 `root` 自身**；段内 `~1` 还原为 `/`、`~0`
 还原为 `~`。**非空且不以 `/` 开头即语法非法**——不存在「相对路径」或省略前导斜杠的宽容形式。

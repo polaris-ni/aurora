@@ -305,10 +305,43 @@ class SaxCore {
         return handler_.on_array_end(count);
     }
 
-    /// @brief 扫描字符串字面量，转义解码进 `scratch_`，返回指向它的视图（回调期间有效）。
+    /// @brief 扫描字符串字面量，返回解码后的视图（回调期间有效）。
+    /// @note 无转义的字符串（常态）直接别名输入文本，免去逐字节拷进 `scratch_` 再交出视图；
+    ///       一旦遇到 `\` 才把已扫描前缀整体搬进 `scratch_` 走解码路径。两条路径的校验
+    ///       （控制字符、UTF-8 序列、未闭合）与返回内容逐字节一致。
     [[nodiscard]] auto scan_string() -> Result<std::string_view> {
         ++pos_;  // consume opening quote
+        const std::size_t start = pos_;
+        while (true) {
+            if (at_end()) {
+                return parse_error_at(in_, pos_, "unterminated string");
+            }
+            const auto c = static_cast<unsigned char>(in_[pos_]);
+            if (c == '"') {
+                ++pos_;
+                return in_.substr(start, pos_ - 1 - start);
+            }
+            if (c < 0x20U) {
+                return parse_error_at(in_, pos_, "unescaped control character in string");
+            }
+            if (c == '\\') {
+                break;  // 含转义：前缀已扫描完毕，转解码路径
+            }
+            if (c < 0x80U) {
+                ++pos_;
+                continue;
+            }
+            std::size_t len = 1;
+            if (opts_.validate_utf8) {
+                len = valid_utf8_len(pos_);
+                if (len == 0) {
+                    return parse_error_at(in_, pos_, "invalid UTF-8 sequence in string");
+                }
+            }
+            pos_ += len;
+        }
         scratch_.clear();
+        scratch_.append(in_.substr(start, pos_ - start));
         while (true) {
             if (at_end()) {
                 return parse_error_at(in_, pos_, "unterminated string");

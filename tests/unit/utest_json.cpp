@@ -194,6 +194,37 @@ AURORA_TEST_CASE(validates_utf8_in_strings_and_honours_the_option) {
     AURORA_TEST_CHECK_EQ(bytes->size(), 1U);  // NOLINT(bugprone-unchecked-optional-access) 宏已守卫 has_value
 }
 
+AURORA_TEST_CASE(parses_unescaped_strings_without_rebuilding_them) {
+    // 无转义字符串走输入视图路径：内容、键与 dump 文本都必须与逐字节解码老路逐字节一致。
+    const std::string text =
+        "{\"plain\":\"plain text\",\"multi\":\"\xC3\xA9\xE2\x82\xAC\",\"empty\":\"\",\"esc\":\"a\\tb\"}";
+    const auto doc = aj::parse(text);
+    AURORA_TEST_REQUIRE(doc.ok());
+    const aj::Value &root = doc.value();
+
+    const aj::Value *plain = root.find("plain");
+    AURORA_TEST_REQUIRE(plain != nullptr);
+    AURORA_TEST_CHECK_EQ(plain->as_or<std::string_view>(std::string_view{}), std::string_view{"plain text"});
+
+    const aj::Value *multi = root.find("multi");
+    AURORA_TEST_REQUIRE(multi != nullptr);
+    AURORA_TEST_CHECK_EQ(multi->as_or<std::string_view>(std::string_view{}), std::string_view{"\xC3\xA9\xE2\x82\xAC"});
+
+    const aj::Value *empty = root.find("empty");
+    AURORA_TEST_REQUIRE(empty != nullptr);
+    AURORA_TEST_CHECK_EQ(empty->size(), 0U);
+
+    // 混合串（含转义）走解码路径，结果与无转义串同口径。
+    const aj::Value *esc = root.find("esc");
+    AURORA_TEST_REQUIRE(esc != nullptr);
+    AURORA_TEST_CHECK_EQ(esc->as_or<std::string_view>(std::string_view{}), std::string_view{"a\tb"});
+
+    // dump 的整段拷贝路径原样输出：非 ASCII 原始字节不转义、转义序列保持既有形态。
+    const auto dumped = aj::dump(root);
+    AURORA_TEST_REQUIRE(dumped.ok());
+    AURORA_TEST_CHECK_EQ(dumped.value(), text);
+}
+
 AURORA_TEST_CASE(dispatches_numbers_across_int_uint_double_and_raw) {
     // 整数域边界：int64 上下界与溢出到 uint64 的一个单位。
     AURORA_TEST_CHECK_EQ(aj::parse("9223372036854775807").value().type(), aj::Type::Int);
@@ -853,6 +884,14 @@ AURORA_TEST_CASE(resolves_write_paths_and_creates_missing_layers) {
     AURORA_TEST_REQUIRE(writable != nullptr);
     *writable = aj::Value(70);
     AURORA_TEST_CHECK_EQ(aj::find_pointer(doc, "/list/0")->as_or<std::int64_t>(0), 70);
+
+    // 含 `~` 的段先反转义再落键（写路径与读路径同口径）。
+    auto escaped_slot = aj::resolve_for_write(doc, "/k~1x");
+    AURORA_TEST_REQUIRE(escaped_slot.ok());
+    *escaped_slot.value() = aj::Value(1);
+    const aj::Value *escaped = aj::find_pointer(doc, "/k~1x");
+    AURORA_TEST_REQUIRE(escaped != nullptr);
+    AURORA_TEST_CHECK_EQ(escaped->as_or<std::int64_t>(0), 1);
 }
 
 AURORA_TEST_CASE(rejects_invalid_write_paths) {
@@ -899,6 +938,8 @@ AURORA_TEST_CASE(erases_members_through_pointers) {
     // 未命中不算错误。
     AURORA_TEST_CHECK_FALSE(aj::erase_pointer(doc, "/nope").value());
     AURORA_TEST_CHECK_FALSE(aj::erase_pointer(doc, "/b/9").value());
+    // 中间段未命中同样只是未命中（父容器定位阶段返回 false）。
+    AURORA_TEST_CHECK_FALSE(aj::erase_pointer(doc, "/b/9/x").value());
 
     // 根不可删除：空 pointer 是错误。
     const auto on_root = aj::erase_pointer(doc, "");
