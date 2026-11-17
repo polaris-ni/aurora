@@ -508,20 +508,24 @@ auto is_container_type(const std::string &t) -> bool {
 /// `theme.primary` / `{8,8,8,8}`…）只在无原生值可依时以 `default_expr` 落盘。
 namespace {
 
-// 文件级缓存：与失效入口共用同一对象，二者均为单线程 UI 路径。
-// 提升出函数体的必要性——头文件内联的 `register_factory` 无法跨 TU 访问函数内 static。
-std::map<std::string, Json> g_component_schema_cache;
+// 缓存访问器：函数内 static 保持惰性构造（文件级对象会触发静态初始化检查），单线程 UI 路径。
+// 提升出函数体的必要性——头文件内联的 `register_factory` 无法跨 TU 访问其他函数体内的 static。
+auto component_schema_cache() -> std::map<std::string, Json> & {
+    // NOLINTNEXTLINE(bugprone-dynamic-static-initializers)
+    static std::map<std::string, Json> cache;
+    return cache;
+}
 
 }  // namespace
 
-auto invalidate_component_schema(const std::string &name) -> void { g_component_schema_cache.erase(name); }
+auto invalidate_component_schema(const std::string &name) -> void { component_schema_cache().erase(name); }
 
 auto component_schema(const std::string &name) -> Json {
     // 已注册类型的 schema 只由类型名决定（工厂表在注册后固定），而 search/list 会按类型
     // 反复取同一份；缓存后按值返回拷贝，调用方拿到的仍是独立对象，与逐次重建的输出一致。
     // 未注册类型不入缓存：其 schema 构建代价低，也避免任意调用名把缓存撑大。
     // 注册与缓存失效联动：register_factory 同名重注册时会失效本类型的缓存项。
-    auto &cache = g_component_schema_cache;
+    auto &cache = component_schema_cache();
     if (const auto it = cache.find(name); it != cache.end()) {
         return it->second;
     }

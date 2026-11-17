@@ -72,11 +72,27 @@ auto shrink_one(std::vector<T> &arr, const std::set<std::uint64_t> &live) -> voi
 
 Observer::Observer() : seq_(next_observer_seq().fetch_add(1)) { Engine::instance().register_observer(seq_); }
 
-Observer::~Observer() { Engine::instance().unregister_observer(seq_); }
+Observer::~Observer() {
+    try {
+        Engine::instance().unregister_observer(seq_);
+    }
+    // 析构不外抛：登记摘除或收缩的内存耗尽失败都不该把异常带出析构。
+    // NOLINTNEXTLINE(bugprone-empty-catch) 静默收摊是本体的设计意图，不是漏处理
+    catch (...) {
+    }
+}
 
 SourceNode::SourceNode() : id_(next_source_id().fetch_add(1)) { Engine::instance().register_source(id_); }
 
-SourceNode::~SourceNode() { Engine::instance().unregister_source(id_); }
+SourceNode::~SourceNode() {
+    try {
+        Engine::instance().unregister_source(id_);
+    }
+    // 析构不外抛：同 ~Observer，登记摘除失败只放弃本次收缩。
+    // NOLINTNEXTLINE(bugprone-empty-catch) 静默收摊是本体的设计意图，不是漏处理
+    catch (...) {
+    }
+}
 
 auto Engine::register_source(std::uint64_t id) -> void { live_sources_.insert(id); }
 
@@ -96,13 +112,18 @@ auto Engine::shrink_epoch_arrays() -> void {
     if (in_delivery_) {
         return;
     }
+    // 析构路径也会走到这里：缩容的临时分配可能抛 bad_alloc，而析构不得抛异常——
+    // 内存耗尽时放弃本次收缩，语义仍正确（数组只是未收缩，不影响去重）。
     // 容量阈值按存活量的倍数给，小图保留 4096 槽位避免频繁缩容抖动；
     // 上界取下节说明的「最高存活身份 + 1」，不承诺 O(存活数)。
-    if (seen_source_epoch_.size() > std::max<std::size_t>(4096U, live_sources_.size() * 4U)) {
-        shrink_one(seen_source_epoch_, live_sources_);
-    }
-    if (seen_observer_epoch_.size() > std::max<std::size_t>(4096U, live_observers_.size() * 4U)) {
-        shrink_one(seen_observer_epoch_, live_observers_);
+    try {
+        if (seen_source_epoch_.size() > std::max<std::size_t>(4096U, live_sources_.size() * 4U)) {
+            shrink_one(seen_source_epoch_, live_sources_);
+        }
+        if (seen_observer_epoch_.size() > std::max<std::size_t>(4096U, live_observers_.size() * 4U)) {
+            shrink_one(seen_observer_epoch_, live_observers_);
+        }
+    } catch (...) {  // NOLINT(bugprone-empty-catch) 内存耗尽时放弃收缩即可，去重语义不受影响
     }
 }
 
@@ -291,10 +312,13 @@ auto Engine::run_job(const std::function<void()> &fn, std::vector<std::uint64_t>
 }
 
 /// @brief 传播阶段守卫：覆盖 mark + deliver，期间禁止收缩去重戳数组。
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions): 局部 RAII 守卫，拷贝/移动禁用是有意设计
 struct DeliveryGuard {
-    bool &flag;
-    explicit DeliveryGuard(bool &f) : flag(f) { flag = true; }
-    ~DeliveryGuard() { flag = false; }
+    bool *flag;
+    explicit DeliveryGuard(bool &f) : flag(&f) { *flag = true; }
+    ~DeliveryGuard() { *flag = false; }
+    DeliveryGuard(const DeliveryGuard &) = delete;
+    auto operator=(const DeliveryGuard &) -> DeliveryGuard & = delete;
 };
 
 auto Engine::write_committed(SourceNode &src) -> void {

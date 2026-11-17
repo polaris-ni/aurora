@@ -278,10 +278,10 @@ AURORA_TEST_CASE(epoch_arrays_shrink_to_live_high_water) {
 #ifdef AURORA_ENABLE_DEBUG
     // 批量创建并逐次提交，把来源戳数组抬过收缩阈值；随后只保留最低 id 的存活节点，
     // 销毁全部高 id 节点（析构摊还触发收缩）。数组应收敛到存活上界，而非累计创建峰值。
-    constexpr int kBatch = 5000;
+    constexpr int batch_size = 5000;
     std::vector<std::shared_ptr<Source<int>>> sources;
-    sources.reserve(kBatch);
-    for (int i = 0; i < kBatch; ++i) {
+    sources.reserve(batch_size);
+    for (int i = 0; i < batch_size; ++i) {
         sources.push_back(make_source(i));
     }
     for (auto &source : sources) {
@@ -303,10 +303,10 @@ AURORA_TEST_CASE(epoch_arrays_shrink_to_live_high_water) {
 
 AURORA_TEST_CASE(epoch_arrays_empty_when_no_live_sources) {
 #ifdef AURORA_ENABLE_DEBUG
-    constexpr int kBatch = 5000;
+    constexpr int batch_size = 5000;
     std::vector<std::shared_ptr<Source<int>>> sources;
-    sources.reserve(kBatch);
-    for (int i = 0; i < kBatch; ++i) {
+    sources.reserve(batch_size);
+    for (int i = 0; i < batch_size; ++i) {
         sources.push_back(make_source(i));
     }
     for (auto &source : sources) {
