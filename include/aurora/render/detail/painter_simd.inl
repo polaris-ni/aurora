@@ -752,6 +752,323 @@ AURORA_AVX2_TARGET AURORA_NOINLINE inline auto gradient_radial_scanline_avx2(std
 #endif  // AURORA_SIMD_X86 (AVX2 implementations)
 #endif  // GNUC/Clang
 
+// ---------------- 缩放图像双线性采样（draw_image 缩放路径）----------------
+// 与 Painter::draw_image 缩放内层逐位一致的关键：权重顺序（itx*ity / tx*ity / itx*ty / tx*ty）、
+// 四邻域按 (((t0+t1)+t2)+t3) 左结合求和、每通道归一除法 v/pa（不做倒数乘）、cvtt 向零截断、
+// alpha 归一查同一张表。SIMD 仅并行这些运算，采样结果与标量黄金逐字节相同；
+// 最终合成（set_pixel 的裁剪/全局透明度/gamma 混合）仍由调用方逐像素执行。
+/// @brief 缩放图像双线性采样行的标量黄金参考（逐列镜像生产标量内层公式）。
+/// @param out 输出采样数组，容量至少 n。
+/// @param row0 源图第 iy 行首字节指针（RGBA8）。
+/// @param row1 源图第 iy+1 行首字节指针（RGBA8）。
+/// @param ci0 列映射的源列左下标数组（已钳制到图宽内）。
+/// @param ci1 列映射的源列右下标数组（已钳制到图宽内）。
+/// @param ctx 列映射的列内插值权重数组。
+/// @param n 采样列数。
+/// @param ity y 方向上侧权重（1 - ty）。
+/// @param ty y 方向下侧权重。
+/// @param alpha_norm 8 位 alpha 归一化浮点表（256 项）。
+inline auto image_bilinear_row_scalar(ImageSample *out, const std::uint8_t *row0, const std::uint8_t *row1,
+                                      const int *ci0, const int *ci1, const float *ctx, int n, float ity, float ty,
+                                      const float *alpha_norm) -> void {
+    for (int k = 0; k < n; ++k) {
+        const float tx = ctx[k];
+        const float itx = 1.0F - tx;
+        const std::uint8_t *p00 = row0 + (static_cast<std::size_t>(ci0[k]) * 4U);
+        const std::uint8_t *p10 = row0 + (static_cast<std::size_t>(ci1[k]) * 4U);
+        const std::uint8_t *p01 = row1 + (static_cast<std::size_t>(ci0[k]) * 4U);
+        const std::uint8_t *p11 = row1 + (static_cast<std::size_t>(ci1[k]) * 4U);
+        const float a00 = alpha_norm[p00[3]];
+        const float a10 = alpha_norm[p10[3]];
+        const float a01 = alpha_norm[p01[3]];
+        const float a11 = alpha_norm[p11[3]];
+        const float w00 = itx * ity;
+        const float w10 = tx * ity;
+        const float w01 = itx * ty;
+        const float w11 = tx * ty;
+        const float pa = (a00 * w00) + (a10 * w10) + (a01 * w01) + (a11 * w11);
+        ImageSample &s = out[k];
+        s.pa = pa;
+        if (!(pa > 1e-6F)) {
+            // 全透明：生产路径不查色、不除法，只把目标 alpha 抬到 255（RGB 保持不变）。
+            s.rgba[0] = 0;
+            s.rgba[1] = 0;
+            s.rgba[2] = 0;
+            s.rgba[3] = 0;
+            continue;
+        }
+        for (int c = 0; c < 3; ++c) {
+            const float v =
+                ((p00[c] * a00) * w00) + ((p10[c] * a10) * w10) + ((p01[c] * a01) * w01) + ((p11[c] * a11) * w11);
+            s.rgba[c] = static_cast<std::uint8_t>(v / pa);
+        }
+        s.rgba[3] = pa >= 1.0F ? 0xFF : static_cast<std::uint8_t>(pa * 255.0F);
+    }
+}
+
+#ifdef AURORA_SIMD_X86
+/// @brief 缩放图像双线性采样行的 SSE2 实现（4 列一组）：逐位镜像标量黄金的运算序列。
+/// 每通道的四邻域加权按 (((t0+t1)+t2)+t3) 左结合、除以 pa 用 _mm_div_ps（不做倒数乘），
+/// 截断用 cvtt；全透明列（pa <= 1e-6F）的四个通道字节置 0，与标量黄金一致。
+/// @param out 输出采样数组，容量至少 n。
+/// @param row0 源图第 iy 行首字节指针（RGBA8）。
+/// @param row1 源图第 iy+1 行首字节指针（RGBA8）。
+/// @param ci0 列映射的源列左下标数组（已钳制到图宽内）。
+/// @param ci1 列映射的源列右下标数组（已钳制到图宽内）。
+/// @param ctx 列映射的列内插值权重数组。
+/// @param n 采样列数。
+/// @param ity y 方向上侧权重（1 - ty）。
+/// @param ty y 方向下侧权重。
+/// @param alpha_norm 8 位 alpha 归一化浮点表（256 项）。
+/// @return SSE2 已填充的列数（4 的整数倍，可为 0）；不足一组的尾部由调用方以标量黄金补齐。
+inline AURORA_SSE41_TARGET AURORA_NOINLINE auto image_bilinear_row_sse2(ImageSample *out, const std::uint8_t *row0,
+                                                                        const std::uint8_t *row1, const int *ci0,
+                                                                        const int *ci1, const float *ctx, int n,
+                                                                        float ity, float ty, const float *alpha_norm)
+    -> int {
+    const __m128 vity = _mm_set1_ps(ity);
+    const __m128 vty = _mm_set1_ps(ty);
+    const __m128 vone = _mm_set1_ps(1.0F);
+    const __m128 veps = _mm_set1_ps(1e-6F);
+    const __m128 v255 = _mm_set1_ps(255.0F);
+    const __m128i v255i = _mm_set1_epi32(255);
+
+    int i = 0;
+    for (; i + 4 <= n; i += 4) {
+        const int c0[4] = {ci0[i], ci0[i + 1], ci0[i + 2], ci0[i + 3]};
+        const int c1[4] = {ci1[i], ci1[i + 1], ci1[i + 2], ci1[i + 3]};
+        const __m128 vtx = _mm_setr_ps(ctx[i], ctx[i + 1], ctx[i + 2], ctx[i + 3]);
+        const __m128 vitx = _mm_sub_ps(vone, vtx);
+        const __m128 w00 = _mm_mul_ps(vitx, vity);
+        const __m128 w10 = _mm_mul_ps(vtx, vity);
+        const __m128 w01 = _mm_mul_ps(vitx, vty);
+        const __m128 w11 = _mm_mul_ps(vtx, vty);
+        const std::uint8_t *p00[4] = {
+            row0 + (static_cast<std::size_t>(c0[0]) * 4U), row0 + (static_cast<std::size_t>(c0[1]) * 4U),
+            row0 + (static_cast<std::size_t>(c0[2]) * 4U), row0 + (static_cast<std::size_t>(c0[3]) * 4U)};
+        const std::uint8_t *p10[4] = {
+            row0 + (static_cast<std::size_t>(c1[0]) * 4U), row0 + (static_cast<std::size_t>(c1[1]) * 4U),
+            row0 + (static_cast<std::size_t>(c1[2]) * 4U), row0 + (static_cast<std::size_t>(c1[3]) * 4U)};
+        const std::uint8_t *p01[4] = {
+            row1 + (static_cast<std::size_t>(c0[0]) * 4U), row1 + (static_cast<std::size_t>(c0[1]) * 4U),
+            row1 + (static_cast<std::size_t>(c0[2]) * 4U), row1 + (static_cast<std::size_t>(c0[3]) * 4U)};
+        const std::uint8_t *p11[4] = {
+            row1 + (static_cast<std::size_t>(c1[0]) * 4U), row1 + (static_cast<std::size_t>(c1[1]) * 4U),
+            row1 + (static_cast<std::size_t>(c1[2]) * 4U), row1 + (static_cast<std::size_t>(c1[3]) * 4U)};
+        const __m128 a00 =
+            _mm_setr_ps(alpha_norm[p00[0][3]], alpha_norm[p00[1][3]], alpha_norm[p00[2][3]], alpha_norm[p00[3][3]]);
+        const __m128 a10 =
+            _mm_setr_ps(alpha_norm[p10[0][3]], alpha_norm[p10[1][3]], alpha_norm[p10[2][3]], alpha_norm[p10[3][3]]);
+        const __m128 a01 =
+            _mm_setr_ps(alpha_norm[p01[0][3]], alpha_norm[p01[1][3]], alpha_norm[p01[2][3]], alpha_norm[p01[3][3]]);
+        const __m128 a11 =
+            _mm_setr_ps(alpha_norm[p11[0][3]], alpha_norm[p11[1][3]], alpha_norm[p11[2][3]], alpha_norm[p11[3][3]]);
+        const __m128 pa =
+            _mm_add_ps(_mm_add_ps(_mm_add_ps(_mm_mul_ps(a00, w00), _mm_mul_ps(a10, w10)), _mm_mul_ps(a01, w01)),
+                       _mm_mul_ps(a11, w11));
+        const __m128i keep = _mm_castps_si128(_mm_cmpgt_ps(pa, veps));
+        // 分母在保留下限处截断：只影响已被 keep 掩掉的透明列，避免 0 除触发浮点异常。
+        const __m128 vden = _mm_max_ps(pa, veps);
+        for (int c = 0; c < 3; ++c) {
+            const __m128 c00 = _mm_setr_ps(static_cast<float>(p00[0][c]), static_cast<float>(p00[1][c]),
+                                           static_cast<float>(p00[2][c]), static_cast<float>(p00[3][c]));
+            const __m128 c10 = _mm_setr_ps(static_cast<float>(p10[0][c]), static_cast<float>(p10[1][c]),
+                                           static_cast<float>(p10[2][c]), static_cast<float>(p10[3][c]));
+            const __m128 c01 = _mm_setr_ps(static_cast<float>(p01[0][c]), static_cast<float>(p01[1][c]),
+                                           static_cast<float>(p01[2][c]), static_cast<float>(p01[3][c]));
+            const __m128 c11 = _mm_setr_ps(static_cast<float>(p11[0][c]), static_cast<float>(p11[1][c]),
+                                           static_cast<float>(p11[2][c]), static_cast<float>(p11[3][c]));
+            const __m128 v = _mm_add_ps(
+                _mm_add_ps(_mm_add_ps(_mm_mul_ps(_mm_mul_ps(c00, a00), w00), _mm_mul_ps(_mm_mul_ps(c10, a10), w10)),
+                           _mm_mul_ps(_mm_mul_ps(c01, a01), w01)),
+                _mm_mul_ps(_mm_mul_ps(c11, a11), w11));
+            __m128i iv = _mm_cvttps_epi32(_mm_div_ps(v, vden));
+            iv = _mm_and_si128(iv, keep);
+            alignas(16) int tmp[4];
+            _mm_storeu_si128(reinterpret_cast<__m128i *>(tmp), iv);
+            for (int k = 0; k < 4; ++k) {
+                out[i + k].rgba[c] = static_cast<std::uint8_t>(tmp[k]);
+            }
+        }
+        __m128i at = _mm_cvttps_epi32(_mm_mul_ps(pa, v255));
+        const __m128i ge = _mm_castps_si128(_mm_cmpge_ps(pa, vone));
+        __m128i av = _mm_or_si128(_mm_and_si128(ge, v255i), _mm_andnot_si128(ge, at));
+        av = _mm_and_si128(av, keep);
+        alignas(16) int atmp[4];
+        _mm_storeu_si128(reinterpret_cast<__m128i *>(atmp), av);
+        alignas(16) float ptmp[4];
+        _mm_storeu_ps(ptmp, pa);
+        for (int k = 0; k < 4; ++k) {
+            out[i + k].rgba[3] = static_cast<std::uint8_t>(atmp[k]);
+            out[i + k].pa = ptmp[k];
+        }
+    }
+    return i;
+}
+#endif  // AURORA_SIMD_X86 (image bilinear SSE2)
+
+#if defined(AURORA_COMPILER_GCC) || defined(AURORA_COMPILER_CLANG) || defined(AURORA_COMPILER_MSVC) || \
+    defined(AURORA_COMPILER_CLANG_CL)
+#ifdef AURORA_SIMD_X86
+/// @brief 缩放图像双线性采样行的 AVX2 实现（8 列一组）：与 SSE2 版同构，逐位镜像标量黄金。
+/// @param out 输出采样数组，容量至少 n。
+/// @param row0 源图第 iy 行首字节指针（RGBA8）。
+/// @param row1 源图第 iy+1 行首字节指针（RGBA8）。
+/// @param ci0 列映射的源列左下标数组（已钳制到图宽内）。
+/// @param ci1 列映射的源列右下标数组（已钳制到图宽内）。
+/// @param ctx 列映射的列内插值权重数组。
+/// @param n 采样列数。
+/// @param ity y 方向上侧权重（1 - ty）。
+/// @param ty y 方向下侧权重。
+/// @param alpha_norm 8 位 alpha 归一化浮点表（256 项）。
+/// @return AVX2 已填充的列数（8 的整数倍，可为 0）；不足一组的尾部由调用方以标量黄金补齐。
+AURORA_AVX2_TARGET AURORA_NOINLINE inline auto image_bilinear_row_avx2(ImageSample *out, const std::uint8_t *row0,
+                                                                       const std::uint8_t *row1, const int *ci0,
+                                                                       const int *ci1, const float *ctx, int n,
+                                                                       float ity, float ty, const float *alpha_norm)
+    -> int {
+    const __m256 vity = _mm256_set1_ps(ity);
+    const __m256 vty = _mm256_set1_ps(ty);
+    const __m256 vone = _mm256_set1_ps(1.0F);
+    const __m256 veps = _mm256_set1_ps(1e-6F);
+    const __m256 v255 = _mm256_set1_ps(255.0F);
+    const __m256i v255i = _mm256_set1_epi32(255);
+
+    int i = 0;
+    for (; i + 8 <= n; i += 8) {
+        const int c0[8] = {ci0[i], ci0[i + 1], ci0[i + 2], ci0[i + 3], ci0[i + 4], ci0[i + 5], ci0[i + 6], ci0[i + 7]};
+        const int c1[8] = {ci1[i], ci1[i + 1], ci1[i + 2], ci1[i + 3], ci1[i + 4], ci1[i + 5], ci1[i + 6], ci1[i + 7]};
+        const __m256 vtx =
+            _mm256_setr_ps(ctx[i], ctx[i + 1], ctx[i + 2], ctx[i + 3], ctx[i + 4], ctx[i + 5], ctx[i + 6], ctx[i + 7]);
+        const __m256 vitx = _mm256_sub_ps(vone, vtx);
+        const __m256 w00 = _mm256_mul_ps(vitx, vity);
+        const __m256 w10 = _mm256_mul_ps(vtx, vity);
+        const __m256 w01 = _mm256_mul_ps(vitx, vty);
+        const __m256 w11 = _mm256_mul_ps(vtx, vty);
+        const std::uint8_t *p00[8] = {
+            row0 + (static_cast<std::size_t>(c0[0]) * 4U), row0 + (static_cast<std::size_t>(c0[1]) * 4U),
+            row0 + (static_cast<std::size_t>(c0[2]) * 4U), row0 + (static_cast<std::size_t>(c0[3]) * 4U),
+            row0 + (static_cast<std::size_t>(c0[4]) * 4U), row0 + (static_cast<std::size_t>(c0[5]) * 4U),
+            row0 + (static_cast<std::size_t>(c0[6]) * 4U), row0 + (static_cast<std::size_t>(c0[7]) * 4U)};
+        const std::uint8_t *p10[8] = {
+            row0 + (static_cast<std::size_t>(c1[0]) * 4U), row0 + (static_cast<std::size_t>(c1[1]) * 4U),
+            row0 + (static_cast<std::size_t>(c1[2]) * 4U), row0 + (static_cast<std::size_t>(c1[3]) * 4U),
+            row0 + (static_cast<std::size_t>(c1[4]) * 4U), row0 + (static_cast<std::size_t>(c1[5]) * 4U),
+            row0 + (static_cast<std::size_t>(c1[6]) * 4U), row0 + (static_cast<std::size_t>(c1[7]) * 4U)};
+        const std::uint8_t *p01[8] = {
+            row1 + (static_cast<std::size_t>(c0[0]) * 4U), row1 + (static_cast<std::size_t>(c0[1]) * 4U),
+            row1 + (static_cast<std::size_t>(c0[2]) * 4U), row1 + (static_cast<std::size_t>(c0[3]) * 4U),
+            row1 + (static_cast<std::size_t>(c0[4]) * 4U), row1 + (static_cast<std::size_t>(c0[5]) * 4U),
+            row1 + (static_cast<std::size_t>(c0[6]) * 4U), row1 + (static_cast<std::size_t>(c0[7]) * 4U)};
+        const std::uint8_t *p11[8] = {
+            row1 + (static_cast<std::size_t>(c1[0]) * 4U), row1 + (static_cast<std::size_t>(c1[1]) * 4U),
+            row1 + (static_cast<std::size_t>(c1[2]) * 4U), row1 + (static_cast<std::size_t>(c1[3]) * 4U),
+            row1 + (static_cast<std::size_t>(c1[4]) * 4U), row1 + (static_cast<std::size_t>(c1[5]) * 4U),
+            row1 + (static_cast<std::size_t>(c1[6]) * 4U), row1 + (static_cast<std::size_t>(c1[7]) * 4U)};
+        const __m256 a00 =
+            _mm256_setr_ps(alpha_norm[p00[0][3]], alpha_norm[p00[1][3]], alpha_norm[p00[2][3]], alpha_norm[p00[3][3]],
+                           alpha_norm[p00[4][3]], alpha_norm[p00[5][3]], alpha_norm[p00[6][3]], alpha_norm[p00[7][3]]);
+        const __m256 a10 =
+            _mm256_setr_ps(alpha_norm[p10[0][3]], alpha_norm[p10[1][3]], alpha_norm[p10[2][3]], alpha_norm[p10[3][3]],
+                           alpha_norm[p10[4][3]], alpha_norm[p10[5][3]], alpha_norm[p10[6][3]], alpha_norm[p10[7][3]]);
+        const __m256 a01 =
+            _mm256_setr_ps(alpha_norm[p01[0][3]], alpha_norm[p01[1][3]], alpha_norm[p01[2][3]], alpha_norm[p01[3][3]],
+                           alpha_norm[p01[4][3]], alpha_norm[p01[5][3]], alpha_norm[p01[6][3]], alpha_norm[p01[7][3]]);
+        const __m256 a11 =
+            _mm256_setr_ps(alpha_norm[p11[0][3]], alpha_norm[p11[1][3]], alpha_norm[p11[2][3]], alpha_norm[p11[3][3]],
+                           alpha_norm[p11[4][3]], alpha_norm[p11[5][3]], alpha_norm[p11[6][3]], alpha_norm[p11[7][3]]);
+        const __m256 pa = _mm256_add_ps(
+            _mm256_add_ps(_mm256_add_ps(_mm256_mul_ps(a00, w00), _mm256_mul_ps(a10, w10)), _mm256_mul_ps(a01, w01)),
+            _mm256_mul_ps(a11, w11));
+        const __m256i keep = _mm256_castps_si256(_mm256_cmp_ps(pa, veps, _CMP_GT_OQ));
+        const __m256 vden = _mm256_max_ps(pa, veps);
+        for (int c = 0; c < 3; ++c) {
+            const __m256 c00 = _mm256_setr_ps(static_cast<float>(p00[0][c]), static_cast<float>(p00[1][c]),
+                                              static_cast<float>(p00[2][c]), static_cast<float>(p00[3][c]),
+                                              static_cast<float>(p00[4][c]), static_cast<float>(p00[5][c]),
+                                              static_cast<float>(p00[6][c]), static_cast<float>(p00[7][c]));
+            const __m256 c10 = _mm256_setr_ps(static_cast<float>(p10[0][c]), static_cast<float>(p10[1][c]),
+                                              static_cast<float>(p10[2][c]), static_cast<float>(p10[3][c]),
+                                              static_cast<float>(p10[4][c]), static_cast<float>(p10[5][c]),
+                                              static_cast<float>(p10[6][c]), static_cast<float>(p10[7][c]));
+            const __m256 c01 = _mm256_setr_ps(static_cast<float>(p01[0][c]), static_cast<float>(p01[1][c]),
+                                              static_cast<float>(p01[2][c]), static_cast<float>(p01[3][c]),
+                                              static_cast<float>(p01[4][c]), static_cast<float>(p01[5][c]),
+                                              static_cast<float>(p01[6][c]), static_cast<float>(p01[7][c]));
+            const __m256 c11 = _mm256_setr_ps(static_cast<float>(p11[0][c]), static_cast<float>(p11[1][c]),
+                                              static_cast<float>(p11[2][c]), static_cast<float>(p11[3][c]),
+                                              static_cast<float>(p11[4][c]), static_cast<float>(p11[5][c]),
+                                              static_cast<float>(p11[6][c]), static_cast<float>(p11[7][c]));
+            const __m256 v = _mm256_add_ps(_mm256_add_ps(_mm256_add_ps(_mm256_mul_ps(_mm256_mul_ps(c00, a00), w00),
+                                                                       _mm256_mul_ps(_mm256_mul_ps(c10, a10), w10)),
+                                                         _mm256_mul_ps(_mm256_mul_ps(c01, a01), w01)),
+                                           _mm256_mul_ps(_mm256_mul_ps(c11, a11), w11));
+            __m256i iv = _mm256_cvttps_epi32(_mm256_div_ps(v, vden));
+            iv = _mm256_and_si256(iv, keep);
+            alignas(32) int tmp[8];
+            _mm256_storeu_si256(reinterpret_cast<__m256i *>(tmp), iv);
+            for (int k = 0; k < 8; ++k) {
+                out[i + k].rgba[c] = static_cast<std::uint8_t>(tmp[k]);
+            }
+        }
+        __m256i at = _mm256_cvttps_epi32(_mm256_mul_ps(pa, v255));
+        const __m256i ge = _mm256_castps_si256(_mm256_cmp_ps(pa, vone, _CMP_GE_OQ));
+        __m256i av = _mm256_or_si256(_mm256_and_si256(ge, v255i), _mm256_andnot_si256(ge, at));
+        av = _mm256_and_si256(av, keep);
+        alignas(32) int atmp[8];
+        _mm256_storeu_si256(reinterpret_cast<__m256i *>(atmp), av);
+        alignas(32) float ptmp[8];
+        _mm256_storeu_ps(ptmp, pa);
+        for (int k = 0; k < 8; ++k) {
+            out[i + k].rgba[3] = static_cast<std::uint8_t>(atmp[k]);
+            out[i + k].pa = ptmp[k];
+        }
+    }
+    return i;
+}
+#endif  // AURORA_SIMD_X86 (image bilinear AVX2)
+#endif  // GNUC/Clang
+
+/// @brief 缩放图像双线性采样行的分发入口：列数 < 8 时整行走标量黄金，其余按 g_simd_level 择档，
+/// SIMD 返回的整数倍前缀之外由标量黄金补齐（与标量黄金逐字节一致）。
+/// @param out 输出采样数组，容量至少 n。
+/// @param row0 源图第 iy 行首字节指针（RGBA8）。
+/// @param row1 源图第 iy+1 行首字节指针（RGBA8）。
+/// @param ci0 列映射的源列左下标数组。
+/// @param ci1 列映射的源列右下标数组。
+/// @param ctx 列映射的列内插值权重数组。
+/// @param n 采样列数。
+/// @param ity y 方向上侧权重（1 - ty）。
+/// @param ty y 方向下侧权重。
+/// @param alpha_norm 8 位 alpha 归一化浮点表（256 项）。
+inline auto image_bilinear_row(ImageSample *out, const std::uint8_t *row0, const std::uint8_t *row1, const int *ci0,
+                               const int *ci1, const float *ctx, int n, float ity, float ty, const float *alpha_norm)
+    -> void {
+    if (n <= 0) {
+        return;  // 0 尺寸退化：不触碰任何指针
+    }
+    ensure_simd_init();
+    int done = 0;
+#ifdef AURORA_SIMD_X86
+    if (n >= 8) {
+        switch (g_simd_level) {
+            case SimdLevel::AVX2:
+                done = image_bilinear_row_avx2(out, row0, row1, ci0, ci1, ctx, n, ity, ty, alpha_norm);
+                break;
+            case SimdLevel::SSE2:
+                done = image_bilinear_row_sse2(out, row0, row1, ci0, ci1, ctx, n, ity, ty, alpha_norm);
+                break;
+            default:
+                break;
+        }
+    }
+#endif
+    if (done < n) {
+        image_bilinear_row_scalar(out + done, row0, row1, ci0 + done, ci1 + done, ctx + done, n - done, ity, ty,
+                                  alpha_norm);
+    }
+}
+
 // ---------------- 整数 box blur SIMD 双实现（blur_region 栅格原语）----------------
 // 分离式两遍整数 box blur，逐位一致镜像 blur_region_scalar。
 // 关键事实：窗口计数 n = 2r+1 恒定（k 循环恒跑 2r+1 次，clamp 仅改变采样源、不改计数）；

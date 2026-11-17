@@ -44,6 +44,8 @@ using aurora::detail::blur_region;
 using aurora::detail::g_gamma_tables;
 using aurora::detail::gradient_linear_fill;
 using aurora::detail::gradient_radial_fill;
+using aurora::detail::image_bilinear_row;
+using aurora::detail::ImageSample;
 using aurora::detail::init_gamma_tables;
 using aurora::detail::linear_to_srgb;
 
@@ -94,6 +96,9 @@ struct AlphaNormLut {
     }
 };
 constexpr AlphaNormLut AURORA_ALPHA_NORM{};
+
+/// @brief 缩放图像 SIMD 采样分块列数：把采样缓冲固定在栈上（每列 8 字节），整行按块连续处理。
+constexpr int AURORA_IMAGE_ROW_CHUNK = 256;
 
 }  // namespace
 
@@ -1167,20 +1172,27 @@ auto Painter::draw_image(const Image &img, const Rect &dest) -> void {
     }
     // 缩放路径：x 方向的「源列下标 + 插值权重」只与列有关，逐列预计算一次供所有行复用，
     // 省掉每行的 floor/乘法/除法；源行指针按行取一次（原实现每像素做 4 次 y 方向钳制）。
+    // 列映射按列分解为三张并列表，SIMD 内核可连续读取，无需按列做结构体拆包。
     const int cols = dx1 - dx0;
     const int img_w_max = img.width - 1;
     const int img_h_max = img.height - 1;
-    image_columns_.resize(static_cast<std::size_t>(cols));
+    image_i0_.resize(static_cast<std::size_t>(cols));
+    image_i1_.resize(static_cast<std::size_t>(cols));
+    image_tx_.resize(static_cast<std::size_t>(cols));
     for (int k = 0; k < cols; ++k) {
         const float fx = ((static_cast<float>(dx0 + k) + 0.5F - pd.origin.x) * sx) - 0.5F;
         const int ix = static_cast<int>(std::floor(fx));
-        ImageColumn &col = image_columns_[static_cast<std::size_t>(k)];
-        col.tx = fx - static_cast<float>(ix);
-        col.i0 = std::clamp(ix, 0, img_w_max);
-        col.i1 = std::clamp(ix + 1, 0, img_w_max);
+        const std::size_t col = static_cast<std::size_t>(k);
+        image_tx_[col] = fx - static_cast<float>(ix);
+        image_i0_[col] = std::clamp(ix, 0, img_w_max);
+        image_i1_[col] = std::clamp(ix + 1, 0, img_w_max);
     }
     // 无圆角裁剪时，dx0..dx1 已收缩进矩形裁剪交集，set_pixel 的裁剪判定恒成立。
     const bool flat_clip = !has_rounded_clip_;
+    // 采样（双线性插值 + alpha 归一）走 SIMD 内核批量计算，合成仍逐像素调 set_pixel：
+    // 后者携带裁剪/全局透明度/gamma 混合语义，且逐像素只读写自身目标像素，故批量前后结果逐字节不变。
+    const float *alpha_norm = AURORA_ALPHA_NORM.v.data();
+    alignas(16) ImageSample samples[AURORA_IMAGE_ROW_CHUNK];
     for (int y = dy0; y < dy1; ++y) {
         const float fy = ((static_cast<float>(y) + 0.5F - pd.origin.y) * sy) - 0.5F;
         const int iy = static_cast<int>(std::floor(fy));
@@ -1191,42 +1203,25 @@ auto Painter::draw_image(const Image &img, const Rect &dest) -> void {
         std::uint8_t *dst_row =
             pixels_.data() +
             (((static_cast<std::size_t>(y) * static_cast<std::size_t>(width_)) + static_cast<std::size_t>(dx0)) * 4U);
-        for (int k = 0; k < cols; ++k) {
-            const ImageColumn &col = image_columns_[static_cast<std::size_t>(k)];
-            const float tx = col.tx;
-            const float itx = 1.0F - tx;
-            const std::uint8_t *p00 = row0 + (static_cast<std::size_t>(col.i0) * 4U);
-            const std::uint8_t *p10 = row0 + (static_cast<std::size_t>(col.i1) * 4U);
-            const std::uint8_t *p01 = row1 + (static_cast<std::size_t>(col.i0) * 4U);
-            const std::uint8_t *p11 = row1 + (static_cast<std::size_t>(col.i1) * 4U);
-            const float a00 = AURORA_ALPHA_NORM.v[p00[3]];
-            const float a10 = AURORA_ALPHA_NORM.v[p10[3]];
-            const float a01 = AURORA_ALPHA_NORM.v[p01[3]];
-            const float a11 = AURORA_ALPHA_NORM.v[p11[3]];
-            const float w00 = itx * ity;
-            const float w10 = tx * ity;
-            const float w01 = itx * ty;
-            const float w11 = tx * ty;
-            const float pa = (a00 * w00) + (a10 * w10) + (a01 * w01) + (a11 * w11);
-            if (!(pa > 1e-6F)) {
-                // 全透明：set_pixel 对 a==0 只把目标 alpha 抬到 255（RGB 经 gamma 往返恒等）。
-                if (flat_clip) {
-                    dst_row[(static_cast<std::size_t>(k) * 4U) + 3U] = 255;
-                } else {
-                    set_pixel(dx0 + k, y, Color{0, 0, 0, 0});
+        for (int k = 0; k < cols;) {
+            const int chunk = std::min(AURORA_IMAGE_ROW_CHUNK, cols - k);
+            image_bilinear_row(samples, row0, row1, image_i0_.data() + k, image_i1_.data() + k, image_tx_.data() + k,
+                               chunk, ity, ty, alpha_norm);
+            for (int j = 0; j < chunk; ++j) {
+                const ImageSample &s = samples[j];
+                const int px = k + j;
+                if (!(s.pa > 1e-6F)) {
+                    // 全透明：set_pixel 对 a==0 只把目标 alpha 抬到 255（RGB 经 gamma 往返恒等）。
+                    if (flat_clip) {
+                        dst_row[(static_cast<std::size_t>(px) * 4U) + 3U] = 255;
+                    } else {
+                        set_pixel(dx0 + px, y, Color{0, 0, 0, 0});
+                    }
+                    continue;
                 }
-                continue;
+                set_pixel(dx0 + px, y, Color{s.rgba[0], s.rgba[1], s.rgba[2], s.rgba[3]});
             }
-            const auto ch = [&](int c) -> std::uint8_t {
-                const float v =
-                    ((p00[c] * a00) * w00) + ((p10[c] * a10) * w10) + ((p01[c] * a01) * w01) + ((p11[c] * a11) * w11);
-                return static_cast<std::uint8_t>(v / pa);
-            };
-            const std::uint8_t r = ch(0);
-            const std::uint8_t g = ch(1);
-            const std::uint8_t b = ch(2);
-            const std::uint8_t a = pa >= 1.0F ? 0xFF : static_cast<std::uint8_t>(pa * 255.0F);
-            set_pixel(dx0 + k, y, Color{r, g, b, a});
+            k += chunk;
         }
     }
 }
@@ -2311,48 +2306,80 @@ auto Painter::draw_shadow(const Rect &shape, float offset_x, float offset_y, flo
 
     detail::PaintTimer guard{&g_pt.shadow};
     // 内部矩形的物理像素边界取与 fill_rect 一致的 ceil/floor（含右/下边界），
-    // 使边缘环恰好从 fill 之外开始，不重不漏。
-    const int si0 = static_cast<int>(std::ceil(spr.origin.x));
+    // 使边缘环恰好从 fill 之外开始，不重不漏。横向边界以 floor(L)+1 / floor(R)+1 表示，
+    // 与旧实现的 `fx < L` / `fx > R` 严格对应（内部段即两者之间的整数列）。
     const int sj0 = static_cast<int>(std::ceil(spr.origin.y));
-    const int si1 = static_cast<int>(std::floor(spr.origin.x + spr.size.width));
     const int sj1 = static_cast<int>(std::floor(spr.origin.y + spr.size.height));
+
+    // 边缘环按行解析羽化带：衰减因子只在 dist < blur_px 时非零，而扩展区比羽化带宽一倍，
+    // 旧实现对整片逐像素 sqrt，其中一半输入的 alpha 截断为 0、不写入任何像素。这里先按行
+    // 求出半宽 w = sqrt(blur² − dy²)，把横向迭代收进 [L−w, R+w]；带内逐像素算术（dx / dy /
+    // sqrt / 截断 / blend_pixel）与原实现逐字相同，仅去掉恒零像素的迭代。
+    // 左带取 x ≤ floor(L)、右带取 x ≥ floor(R)+1，与旧实现的 `fx < L` / `fx > R` 严格对应；
+    // 矩形上下的行没有内部段（dx 恒为 0），左右带与其间的中段连成一段处理。
+    const float spr_l = spr.origin.x;
+    const float spr_r = spr.origin.x + spr.size.width;
+    const float spr_t = spr.origin.y;
+    const float spr_b = spr.origin.y + spr.size.height;
+    const float blur2 = blur_px * blur_px;
+    const int l_end = static_cast<int>(std::floor(spr_l)) + 1;  // 左带右界（不含）
+    const int r_begin = static_cast<int>(std::floor(spr_r)) + 1;  // 右带左界（含）
+
+    const auto paint_column = [&](int x, int y, float dx, float dy) -> void {
+        const float dist = std::sqrt((dx * dx) + (dy * dy));
+        float alpha_factor = 1.0F;
+        if (dist > 0.0F) {
+            alpha_factor = std::max(0.0F, 1.0F - (dist * inv_blur));
+        }
+        if (alpha_factor > 0.0F) {
+            Color c = color;
+            c.a = static_cast<std::uint8_t>(color.a * alpha_factor);
+            if (c.a > 0) {
+                blend_pixel(x, y, c);
+            }
+        }
+    };
 
     for (int y = y0; y < y1; ++y) {
         const auto fy = static_cast<float>(y);
         const bool y_in = (y >= sj0 && y <= sj1);
-        for (int x = x0; x < x1; ++x) {
-            // 内部已由 fill_rect 填充，跳过（避免对每像素重复 sqrt + 混合）
-            if (y_in && x >= si0 && x <= si1) {
-                continue;
+        float dy = 0.0F;
+        if (fy < spr_t) {
+            dy = spr_t - fy;
+        } else if (fy > spr_b) {
+            dy = fy - spr_b;
+        }
+        // dy 恒定：dy ≥ blur 时本行 alpha 恒为 0（c.a 截断为 0），整行跳过。
+        const float rem = blur2 - (dy * dy);
+        if (rem <= 0.0F) {
+            continue;
+        }
+        const float half = std::sqrt(rem) + 1.0F;  // +1 像素余量，边界像素不被误跳
+        if (y_in) {
+            // 内部段已由 fill_rect 覆盖，只扫左右两带（两带天然不重叠：l_end ≤ r_begin）。
+            const int la = std::max(x0, static_cast<int>(std::ceil(spr_l - half)));
+            const int lb = std::min(x1, l_end);
+            for (int x = la; x < lb; ++x) {
+                paint_column(x, y, spr_l - static_cast<float>(x), dy);
             }
-            // 计算到阴影矩形边缘的距离（内部为负，外部为正）
-            const auto fx = static_cast<float>(x);
-            float dx = 0.0F;
-            float dy = 0.0F;
-            if (fx < spr.origin.x) {
-                dx = spr.origin.x - fx;
-            } else if (fx > spr.origin.x + spr.size.width) {
-                dx = fx - (spr.origin.x + spr.size.width);
+            const int ra = std::max(x0, r_begin);
+            const int rb = std::min(x1, static_cast<int>(std::floor(spr_r + half)) + 1);
+            for (int x = ra; x < rb; ++x) {
+                paint_column(x, y, static_cast<float>(x) - spr_r, dy);
             }
-            if (fy < spr.origin.y) {
-                dy = spr.origin.y - fy;
-            } else if (fy > spr.origin.y + spr.size.height) {
-                dy = fy - (spr.origin.y + spr.size.height);
-            }
-
-            const float dist = std::sqrt((dx * dx) + (dy * dy));
-            // 衰减因子：内部=1，外部按距离线性衰减到0
-            float alpha_factor = 1.0F;
-            if (dist > 0.0F) {
-                alpha_factor = std::max(0.0F, 1.0F - (dist * inv_blur));
-            }
-
-            if (alpha_factor > 0.0F) {
-                Color c = color;
-                c.a = static_cast<std::uint8_t>(color.a * alpha_factor);
-                if (c.a > 0) {
-                    blend_pixel(x, y, c);
+        } else {
+            // 矩形上下的行：左带、中段（dx=0）、右带连成一段，dx 按旧分支口径取。
+            const int xa = std::max(x0, static_cast<int>(std::ceil(spr_l - half)));
+            const int xb = std::min(x1, static_cast<int>(std::floor(spr_r + half)) + 1);
+            for (int x = xa; x < xb; ++x) {
+                const auto fx = static_cast<float>(x);
+                float dx = 0.0F;
+                if (fx < spr_l) {
+                    dx = spr_l - fx;
+                } else if (fx > spr_r) {
+                    dx = fx - spr_r;
                 }
+                paint_column(x, y, dx, dy);
             }
         }
     }

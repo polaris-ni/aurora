@@ -3,7 +3,8 @@
 /// 测试说明: 覆盖 FontEngine 度量契约（空串零宽、长度/字号单调、行高为正）、caret_x 与 hit_test_char 的
 /// 码点索引与往返一致性、TextLayoutOpts 字距/词距对宽度的影响、AA 策略读写与光栅状态世代自增、
 /// draw_text 实际落笔、基线上沿度量（measure_ascent）与实绘落墨带自洽、shaping 缓存统计与清空，
-/// 以及 UTF-8 串的码点安全性与等宽整格度量（monospace_cell）的取整口径
+/// 字形命中直通缓存的像素一致性（重复字符）与世代失效重建，以及 UTF-8 串的码点安全性与等宽整格
+/// 度量（monospace_cell）的取整口径
 
 #include <algorithm>
 #include <array>
@@ -56,6 +57,21 @@ namespace {
         }
     }
     return count;
+}
+
+/// @brief 两张同尺寸画布的 RGBA8 缓冲是否逐字节相同。
+[[nodiscard]] auto pixels_equal(const Painter &a, const Painter &b) -> bool {
+    if (a.width() != b.width() || a.height() != b.height()) {
+        return false;
+    }
+    const std::uint8_t *pa = a.data();
+    const std::uint8_t *pb = b.data();
+    if (pa == nullptr || pb == nullptr) {
+        return false;
+    }
+    const auto bytes = static_cast<std::size_t>(a.width()) * static_cast<std::size_t>(a.height()) * 4U;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic): 按字节数比较整块像素缓冲
+    return std::equal(pa, pa + bytes, pb);
 }
 }  // namespace
 
@@ -278,6 +294,54 @@ AURORA_TEST_CASE(draw_text_of_empty_string_is_noop) {
     p.begin(32, 16);
     render::FontEngine::draw_text(p, rect_at(0.0F, 0.0F, 32.0F, 16.0F), "", Font{}, Color::black());
     AURORA_TEST_CHECK_EQ(count_opaque(p), 0);
+}
+
+AURORA_TEST_CASE(glyph_probe_cache_repeated_glyphs_are_pixel_identical) {
+    // 同一段含重复字符的文本连续绘制两次：第二次全程走命中直通缓存（不同字形数 5 项，
+    // 远小于缓存容量，图集不再插入 → 不再失效），像素必须与第一次逐字节一致。
+    // 字号取 23pt（=31px）以避开同二进制其他用例已预热的图集条目，提高首绘真走插入路径的概率。
+    const Font font{.size_pt = 23.0F};
+    const std::string text = "AaA aa ssb";
+    const Rect rect = rect_at(0.0F, 0.0F, 180.0F, 40.0F);
+
+    Painter first;
+    first.begin(180, 40);
+    render::FontEngine::draw_text(first, rect, text, font, Color::black());
+
+    Painter second;
+    second.begin(180, 40);
+    render::FontEngine::draw_text(second, rect, text, font, Color::black());
+
+    AURORA_TEST_CHECK_GT(count_opaque(first), 0);
+    AURORA_TEST_CHECK_TRUE(pixels_equal(first, second));
+}
+
+AURORA_TEST_CASE(glyph_probe_cache_recovers_after_glyph_churn) {
+    // 先让首字符进入直通缓存，再用多于缓存容量（12 项）的不同字形重绘：
+    // 每个新字形都会插入图集并推进世代号，使此前保存的记录句柄整体作废。
+    // 之后重绘首字符必须仍与初绘逐字节一致（覆盖缓存失效/重建路径）。
+    // 斜体参与字形键，且其他用例只用 14pt 画斜体，故 23pt 斜体字形必然走插入路径。
+    const Font font{.size_pt = 23.0F};
+    const render::TextLayoutOpts opts{.italic = true};
+    const Rect probe_rect = rect_at(0.0F, 0.0F, 48.0F, 40.0F);
+    const std::string probe = "W";
+
+    Painter first;
+    first.begin(48, 40);
+    render::FontEngine::draw_text(first, probe_rect, probe, font, Color::black(), opts);
+    AURORA_TEST_CHECK_GT(count_opaque(first), 0);
+
+    Painter churn_dump;
+    churn_dump.begin(420, 40);
+    render::FontEngine::draw_text(churn_dump, rect_at(0.0F, 0.0F, 420.0F, 40.0F),
+                                  "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ", font,
+                                  Color::black(), opts);
+    AURORA_TEST_CHECK_GT(count_opaque(churn_dump), 0);
+
+    Painter again;
+    again.begin(48, 40);
+    render::FontEngine::draw_text(again, probe_rect, probe, font, Color::black(), opts);
+    AURORA_TEST_CHECK_TRUE(pixels_equal(first, again));
 }
 
 AURORA_TEST_CASE(shape_cache_accumulates_hits) {

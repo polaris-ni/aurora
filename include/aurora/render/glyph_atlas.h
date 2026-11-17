@@ -6,6 +6,11 @@
 
 namespace aurora::render {
 
+namespace detail {
+/// @brief 仅库内使用的图集通道：供命中直通缓存在不复查哈希表的前提下读取/提升内部记录。
+struct GlyphAtlasAccess;
+}  // namespace detail
+
 /// @brief CPU 字形图集（GPU-ready 缓存）。
 ///
 /// 按 (face_id, glyph_index, px, mode) 缓存 FreeType 解码后的覆盖度位图，避免逐帧重复
@@ -51,6 +56,8 @@ class GlyphAtlas {
     auto clear() -> void;
 
   private:
+    friend struct detail::GlyphAtlasAccess;
+
     /// @brief 缓存记录：条目本体 + 最近使用序号。
     ///
     /// 命中只回写序号（一次哈希内的标量写），不再做链表 erase/push_front；
@@ -64,6 +71,16 @@ class GlyphAtlas {
         std::uint64_t last_used = 0;  ///< 最近使用序号（越大越新）
     };
 
+    /// @brief 标记记录为最近使用（使用序号的唯一写入点，`find` 与直通缓存命中共用）。
+    /// @param record 目标记录。
+    /// @return 该记录的条目指针。
+    auto touch(Record &record) -> const Entry *;
+
+    /// @brief 按 key 查记录；命中则标记最近使用。`find` 与内部直通通道共用的唯一查找入口。
+    /// @param key 字形缓存键。
+    /// @return 命中记录指针；未命中返回 nullptr。
+    [[nodiscard]] auto find_record(std::uint64_t key) -> Record *;
+
     /// @brief 淘汰当前最久未用的一条（仅在插入后超出容量时调用）。
     auto evict_oldest() -> void;
 
@@ -72,6 +89,38 @@ class GlyphAtlas {
     /// @brief 最近一次命中/插入的条目指针缓存：未命中→插入→再查找的常见序列免二次哈希。
     Record *last_hit_ = nullptr;
     std::uint64_t last_hit_key_ = 0;
+    /// @brief 插入/清空世代号：每次 `insert` / `clear` 自增。
+    ///
+    /// 缓存方持有的记录句柄只在「同一世代内」可信：任意插入都可能淘汰旧记录使句柄悬垂，
+    /// 而淘汰在容量未溢出时不发生、无法由条目数区分。故以世代整体作废，判定成本仅一次比较。
+    std::uint64_t generation_ = 0;
 };
+
+namespace detail {
+
+/// @brief 仅库内使用的图集通道（字形命中直通缓存专用，不属于公共 API 面）。
+struct GlyphAtlasAccess {
+    /// @brief 与 `GlyphAtlas::find` 语义完全一致（含 LRU 使用序号提升），额外给出内部记录句柄。
+    /// @param atlas 目标图集。
+    /// @param key 字形缓存键。
+    /// @param record 命中时写入内部记录句柄（不透明，仅可回传给 `touch`）；未命中不改写。
+    /// @return 命中条目指针；未命中返回 nullptr。
+    [[nodiscard]] static auto lookup(GlyphAtlas &atlas, std::uint64_t key, void *&record) -> const GlyphAtlas::Entry *;
+
+    /// @brief 复现 `find` 对内部记录的使用序号更新（缓存命中必须调用，否则淘汰顺序偏离基线）。
+    /// @param atlas 目标图集（提供使用序号计数器）。
+    /// @param record `lookup` 给出且世代未变的内部记录句柄。
+    /// @return 该记录的条目指针。
+    [[nodiscard]] static auto touch(GlyphAtlas &atlas, void *record) -> const GlyphAtlas::Entry * {
+        return atlas.touch(*static_cast<GlyphAtlas::Record *>(record));
+    }
+
+    /// @brief 读取插入/清空世代号：与缓存方记录的世代不一致时，此前保存的句柄一律作废。
+    /// @param atlas 目标图集。
+    /// @return 当前世代号。
+    [[nodiscard]] static auto generation(const GlyphAtlas &atlas) -> std::uint64_t { return atlas.generation_; }
+};
+
+}  // namespace detail
 
 }  // namespace aurora::render

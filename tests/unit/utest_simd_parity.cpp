@@ -1,18 +1,24 @@
 /// 测试类型: unit
 /// 目标单元: include/aurora/render/detail/painter_simd.h
-/// 测试说明: 光栅内核「标量黄金 ↔ SSE2 ↔ AVX2」五组三元组的逐字节一致性。混合两组覆盖非 4/8 倍数的
+/// 测试说明: 光栅内核「标量黄金 ↔ SSE2 ↔ AVX2」六组三元组的逐字节一致性。混合两组覆盖非 4/8 倍数的
 ///           长度与多组参数（尾部回落标量恰是被向量化绕开的高发区），box blur 覆盖非对齐区域宽高与
 ///           两遍分离的窗口计数，渐变扫描线两组按各自返回值裁剪向量段、再按生产分发形态用标量补齐尾部
-///           后比对整行。每组以同一份确定性伪随机输入分别喂三条路径，断言输出缓冲逐字节相等，并回报首个
-///           差异的字节下标与两侧取值——恒等断言不算判据，能定位差异才算。
+///           后比对整行，缩放图像双线性采样组覆盖 1..17 全部列宽（含奇数列的向量尾部落差）、放大/缩小
+///           任意比例、全不透明与半透明源行与 0 尺寸退化。每组以同一份确定性伪随机输入分别喂三条路径，
+///           断言输出缓冲逐字节相等，并回报首个差异的字节下标与两侧取值——恒等断言不算判据，能定位
+///           差异才算。
 ///           ⚠️ 平台分支一律写在**用例体内**：非 x86 架构时 SIMD 函数根本不存在，
 ///           同名用例按既有纪律以 `AURORA_TEST_SKIP` 退让，声明本身不被 `#ifdef` 摘掉，
 ///           以免 `registry_integrity` 在另一种构建里单边失踪。含 `painter_simd.inl` 是为拿到与
 ///           `painter.cpp` 同源的内联定义，不复刻一份实现去比对复刻件。
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
+#include <iterator>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -246,6 +252,166 @@ auto check_radial_gradient() -> void {
     }
 }
 
+/// @brief 缩放图像双线性采样的一组并列列映射数组：源列左下标 / 右下标 / 列内插值权重。
+struct ColumnArrays {
+    std::vector<int> i0;  ///< 已钳制的源列左下标
+    std::vector<int> i1;  ///< 已钳制的源列右下标
+    std::vector<float> tx;  ///< 列内插值权重
+};
+
+/// @brief 造 8 位 alpha → [0,1] 归一化表：与生产 AURORA_ALPHA_NORM 是同一除法的常量折叠。
+auto alpha_norm_table() -> std::array<float, 256> {
+    std::array<float, 256> table{};
+    for (std::size_t i = 0; i < table.size(); ++i) {
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index): 定长表按循环下标逐项填值
+        table[i] = static_cast<float>(i) / 255.0F;
+    }
+    return table;
+}
+
+/// @brief 按「源列 / 目标列」比例构造三张并列列映射数组：形状与 draw_image 缩放路径的预计算一致。
+/// @param n 目标列数。
+/// @param src_w 源图宽度（>= 1）。
+/// @param ratio 每个目标列前进的源列数（> 1 缩小，< 1 放大）。
+auto make_columns(int n, int src_w, float ratio) -> ColumnArrays {
+    const auto count = static_cast<std::size_t>(n);
+    ColumnArrays map;
+    map.i0.resize(count);
+    map.i1.resize(count);
+    map.tx.resize(count);
+    for (int k = 0; k < n; ++k) {
+        const float fx = ((static_cast<float>(k) + 0.5F) * ratio) - 0.5F;
+        const int ix = static_cast<int>(std::floor(fx));
+        const auto col = static_cast<std::size_t>(k);
+        map.tx[col] = fx - static_cast<float>(ix);
+        map.i0[col] = std::clamp(ix, 0, src_w - 1);
+        map.i1[col] = std::clamp(ix + 1, 0, src_w - 1);
+    }
+    return map;
+}
+
+/// @brief 造一行源像素：全不透明时 alpha 置 255，否则保留伪随机 alpha 并挖掉一部分以触发全透明分支。
+auto make_image_row(int src_w, std::uint32_t seed, bool opaque) -> Bytes {
+    Bytes row = patterned(src_w, seed);
+    for (int i = 0; i < src_w; ++i) {
+        const std::size_t a = (static_cast<std::size_t>(i) * AURORA_BYTES_PER_PIXEL) + 3U;
+        if (opaque) {
+            row[a] = 255;
+        } else if ((i % 5) == 0) {
+            row[a] = 0;
+        }
+    }
+    return row;
+}
+
+/// @brief 把采样数组压成逐像素 RGBA 字节，复用逐字节比对。
+auto pack_samples(const std::vector<aurora::detail::ImageSample> &samples, int n) -> Bytes {
+    Bytes out(static_cast<std::size_t>(n) * AURORA_BYTES_PER_PIXEL);
+    for (int k = 0; k < n; ++k) {
+        // 逐采样拷 4 字节通道：用 memcpy 避免对 C 数组做非常量下标访问。
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic): 按像素步长偏移输出缓冲
+        std::memcpy(out.data() + static_cast<std::ptrdiff_t>(k * AURORA_BYTES_PER_PIXEL),
+                    samples[static_cast<std::size_t>(k)].rgba, AURORA_BYTES_PER_PIXEL);
+    }
+    return out;
+}
+
+/// @brief 缩放图像双线性采样的标量黄金整行。
+auto run_image_scalar(const ColumnArrays &map, const Bytes &row0, const Bytes &row1, int n, float ity, float ty,
+                      const std::array<float, 256> &lut) -> Bytes {
+    std::vector<aurora::detail::ImageSample> samples(static_cast<std::size_t>(n));
+    aurora::detail::image_bilinear_row_scalar(samples.data(), row0.data(), row1.data(), map.i0.data(), map.i1.data(),
+                                              map.tx.data(), n, ity, ty, lut.data());
+    return pack_samples(samples, n);
+}
+
+/// @brief 缩放图像双线性采样的 SSE2 段 + 标量尾部（生产分发形态）。
+auto run_image_sse2(const ColumnArrays &map, const Bytes &row0, const Bytes &row1, int n, float ity, float ty,
+                    const std::array<float, 256> &lut) -> Bytes {
+    std::vector<aurora::detail::ImageSample> samples(static_cast<std::size_t>(n));
+    const int done = aurora::detail::image_bilinear_row_sse2(samples.data(), row0.data(), row1.data(), map.i0.data(),
+                                                             map.i1.data(), map.tx.data(), n, ity, ty, lut.data());
+    AURORA_TEST_CHECK_EQ(done % AURORA_SSE2_LANES, 0);
+    AURORA_TEST_CHECK_MSG(done >= 0 && done <= n, "image bilinear sse2 filled count out of range");
+    if (done < n) {
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic): 尾部按已填列数偏移到剩余区间
+        aurora::detail::image_bilinear_row_scalar(samples.data() + done, row0.data(), row1.data(),
+                                                  std::next(map.i0.data(), done), std::next(map.i1.data(), done),
+                                                  std::next(map.tx.data(), done), n - done, ity, ty, lut.data());
+    }
+    return pack_samples(samples, n);
+}
+
+/// @brief 缩放图像双线性采样的 AVX2 段 + 标量尾部（生产分发形态）。
+auto run_image_avx2(const ColumnArrays &map, const Bytes &row0, const Bytes &row1, int n, float ity, float ty,
+                    const std::array<float, 256> &lut) -> Bytes {
+    std::vector<aurora::detail::ImageSample> samples(static_cast<std::size_t>(n));
+    const int done = aurora::detail::image_bilinear_row_avx2(samples.data(), row0.data(), row1.data(), map.i0.data(),
+                                                             map.i1.data(), map.tx.data(), n, ity, ty, lut.data());
+    AURORA_TEST_CHECK_EQ(done % AURORA_AVX2_LANES, 0);
+    AURORA_TEST_CHECK_MSG(done >= 0 && done <= n, "image bilinear avx2 filled count out of range");
+    if (done < n) {
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic): 尾部按已填列数偏移到剩余区间
+        aurora::detail::image_bilinear_row_scalar(samples.data() + done, row0.data(), row1.data(),
+                                                  std::next(map.i0.data(), done), std::next(map.i1.data(), done),
+                                                  std::next(map.tx.data(), done), n - done, ity, ty, lut.data());
+    }
+    return pack_samples(samples, n);
+}
+
+/// @brief 缩放图像双线性采样的分发入口（列宽 < 8 时整行回落标量）。
+auto run_image_dispatch(const ColumnArrays &map, const Bytes &row0, const Bytes &row1, int n, float ity, float ty,
+                        const std::array<float, 256> &lut) -> Bytes {
+    std::vector<aurora::detail::ImageSample> samples(static_cast<std::size_t>(n));
+    aurora::detail::image_bilinear_row(samples.data(), row0.data(), row1.data(), map.i0.data(), map.i1.data(),
+                                       map.tx.data(), n, ity, ty, lut.data());
+    return pack_samples(samples, n);
+}
+
+/// @brief 缩放图像双线性采样组：1..17 全部列宽（含奇数列的向量尾部落差）× 放大/缩小任意比例 ×
+/// 全不透明/半透明源行 × 三档 y 权重，另加 0 尺寸退化。
+auto check_image_bilinear() -> void {
+    const auto lut = alpha_norm_table();
+    const std::array<int, 5> src_widths{1, 3, 5, 16, 33};
+    const std::array<float, 3> ty_values{0.0F, 0.375F, 0.8125F};
+    const std::array<bool, 2> opacities{true, false};
+    for (int n = 1; n <= 17; ++n) {
+        for (const int src_w : src_widths) {
+            const float ratio = static_cast<float>(src_w) / static_cast<float>(n);
+            const auto map = make_columns(n, src_w, ratio);
+            for (const bool opaque : opacities) {
+                const auto row0 = make_image_row(src_w, 0x1234U + static_cast<std::uint32_t>((n * 31) + src_w), opaque);
+                const auto row1 = make_image_row(src_w, 0x9E37U + static_cast<std::uint32_t>((n * 17) + src_w), opaque);
+                for (const float ty : ty_values) {
+                    const float ity = 1.0F - ty;
+                    const std::string label = "image n=" + std::to_string(n) + " src=" + std::to_string(src_w) +
+                                              (opaque ? " opaque" : " alpha") + " ty=" + std::to_string(ty);
+                    const Bytes golden = run_image_scalar(map, row0, row1, n, ity, ty, lut);
+                    expect_identical(label + " sse2", golden, run_image_sse2(map, row0, row1, n, ity, ty, lut));
+                    expect_identical(label + " avx2", golden, run_image_avx2(map, row0, row1, n, ity, ty, lut));
+                    expect_identical(label + " dispatch", golden, run_image_dispatch(map, row0, row1, n, ity, ty, lut));
+                }
+            }
+        }
+    }
+
+    // 0 尺寸退化：所有入口都不得触碰指针，返回列数与输出长度均为 0。
+    const ColumnArrays no_cols;
+    const Bytes no_row;
+    std::vector<aurora::detail::ImageSample> no_samples;
+    AURORA_TEST_CHECK_EQ(
+        aurora::detail::image_bilinear_row_sse2(no_samples.data(), no_row.data(), no_row.data(), no_cols.i0.data(),
+                                                no_cols.i1.data(), no_cols.tx.data(), 0, 1.0F, 0.0F, lut.data()),
+        0);
+    AURORA_TEST_CHECK_EQ(
+        aurora::detail::image_bilinear_row_avx2(no_samples.data(), no_row.data(), no_row.data(), no_cols.i0.data(),
+                                                no_cols.i1.data(), no_cols.tx.data(), 0, 1.0F, 0.0F, lut.data()),
+        0);
+    aurora::detail::image_bilinear_row(no_samples.data(), no_row.data(), no_row.data(), no_cols.i0.data(),
+                                       no_cols.i1.data(), no_cols.tx.data(), 0, 1.0F, 0.0F, lut.data());
+    AURORA_TEST_CHECK_EQ(run_image_scalar(no_cols, no_row, no_row, 0, 1.0F, 0.0F, lut).size(), std::size_t{0});
+}
+
 #endif
 
 }  // namespace
@@ -286,6 +452,14 @@ AURORA_TEST_CASE(linear_gradient_scanline_is_bitwise_identical_across_kernels) {
 AURORA_TEST_CASE(radial_gradient_scanline_is_bitwise_identical_across_kernels) {
 #ifdef AURORA_SIMD_X86
     check_radial_gradient();
+#else
+    AURORA_TEST_SKIP(AURORA_NO_SIMD_REASON);
+#endif
+}
+
+AURORA_TEST_CASE(image_bilinear_row_is_bitwise_identical_across_kernels) {
+#ifdef AURORA_SIMD_X86
+    check_image_bilinear();
 #else
     AURORA_TEST_SKIP(AURORA_NO_SIMD_REASON);
 #endif

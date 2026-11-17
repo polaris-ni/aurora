@@ -3,6 +3,7 @@
 #include <chrono>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "aurora/app/perf_overlay.h"
@@ -257,6 +258,12 @@ class WindowHost {
         return (window_ != nullptr && window_->hit_root_ready()) ? window_->hit_root().widget() : scene_.root();
     }
 
+    /// @brief 冲刷帧内合并的指针移动：把合并槽中的最新样本按常规移动派发一次。
+    ///
+    /// 调用时机只有两类——① 任何非移动事件派发之前（保证按下/抬起/滚轮/焦点/字符输入与移动的
+    /// 相对顺序不变）；② 帧尾（`pump_events` 结束，保证一帧至多投递一次移动）。
+    auto flush_pending_move() -> void;
+
     WindowId id_;
     std::string scroll_scope_;  ///< `ScrollStorage` 作用域键（本窗口 id 的字符串形式，构造时定稿）
     WindowRole role_;
@@ -273,6 +280,7 @@ class WindowHost {
     FocusManager focus_;
     EventDispatcher mouse_;  ///< 鼠标指针捕获表（实例级，防止跨窗口捕获串味）。
     TouchDispatcher touch_;  ///< 多点触控指针捕获表（实例级）。
+    std::optional<MouseEvent> pending_move_;  ///< 帧内合并槽：待派发的最新指针移动样本（空 = 无）。
     FrameStats stats_;  ///< 宿主自有帧统计实例（切换后启用）。
     FrameStats *active_stats_ = &FrameStats::instance();  ///< 当前生效的统计实例（见 `own_frame_stats`）。
     std::function<bool(Event &)> key_pre_;  ///< 键盘前置拦截（应用级快捷键）。

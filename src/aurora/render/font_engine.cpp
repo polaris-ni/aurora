@@ -3,6 +3,7 @@
 #include <ft2build.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstring>
@@ -47,6 +48,71 @@ namespace {
     return g;
 }
 auto bump_raster_generation() -> void { ++raster_gen_counter(); }
+
+// ---------- 字形命中直通缓存 ----------
+// 逐字形发射时，同一段文本里的重复字符（空格、常见字母）会反复对同一个键查图集；图集
+// `find` 命中仍要付一次哈希查找。这里用固定容量数组记住最近查过的键与图集内部记录句柄，
+// 键比较命中即直接取条目——不复查哈希表，也不在每次调用时分配内存。
+//
+// 失效：图集每次 `insert` / `clear` 都自增世代号，插入可能淘汰既有记录让句柄悬垂；世代号
+// 不一致时把缓存整体作废。判定成本只是一次整数比较，且不需要知道图集当前条目数。
+struct GlyphProbe {
+    std::uint64_t key = 0;  ///< 字形缓存键（`make_key` 复合键，已含 face / px / glyph / AA 模式等）
+    void *record = nullptr;  ///< 图集内部记录句柄（不透明，只经 `detail::GlyphAtlasAccess` 使用）
+};
+
+constexpr std::size_t AURORA_GLYPH_PROBE_CAPACITY = 12;
+
+struct GlyphProbeCache {
+    std::uint64_t generation = 0;  ///< 当前内容对应的图集世代
+    std::size_t count = 0;  ///< 有效项数；[0, count) 按最近使用从新到旧排列
+    std::array<GlyphProbe, AURORA_GLYPH_PROBE_CAPACITY> items{};
+};
+
+[[nodiscard]] auto glyph_probe_cache() -> GlyphProbeCache & {
+    static GlyphProbeCache c;
+    return c;
+}
+
+// 世代同步：图集插入/清空后旧句柄可能悬垂，整体作废（保守但正确）。
+auto glyph_probe_sync() -> void {
+    auto &cache = glyph_probe_cache();
+    const std::uint64_t generation = detail::GlyphAtlasAccess::generation(atlas());
+    if (generation != cache.generation) {
+        cache.generation = generation;
+        cache.count = 0;
+    }
+}
+
+// 命中返回条目并复现 `find` 的 LRU 提升，未命中返回 nullptr。
+[[nodiscard]] auto glyph_probe_lookup(std::uint64_t key) -> const GlyphAtlas::Entry * {
+    glyph_probe_sync();
+    auto &cache = glyph_probe_cache();
+    const auto end = cache.items.begin() + static_cast<std::ptrdiff_t>(cache.count);
+    const auto it =
+        std::find_if(cache.items.begin(), end, [key](const GlyphProbe &probe) -> bool { return probe.key == key; });
+    if (it == end) {
+        return nullptr;
+    }
+    // 最近优先：命中项移到队首，后续同键查找落在一次比较上。
+    const GlyphProbe hit = *it;
+    std::rotate(cache.items.begin(), it, it + 1);
+    // 必须复现 `find` 的使用序号更新，否则淘汰顺序偏离基线（像素不受影响，但缓存命中性会变）。
+    return detail::GlyphAtlasAccess::touch(atlas(), hit.record);
+}
+
+// 记录一次成功的图集查找（未命中→插入→再查找的收尾同样适用）。
+auto glyph_probe_store(std::uint64_t key, void *record) -> void {
+    glyph_probe_sync();  // 刚发生的插入会推进世代，此处整体作废旧项
+    auto &cache = glyph_probe_cache();
+    // 满时丢弃最久未用的队尾，否则整体后移一格腾出队首。
+    const std::size_t keep = cache.count == cache.items.size() ? cache.count - 1 : cache.count;
+    std::move_backward(cache.items.begin(), cache.items.begin() + static_cast<std::ptrdiff_t>(keep),
+                       cache.items.begin() + static_cast<std::ptrdiff_t>(keep + 1));
+    cache.items.front() = GlyphProbe{.key = key, .record = record};
+    cache.count = keep + 1;
+}
+
 class ShapeCache;  // 前向声明：定义在下方，函数体随后置。
 [[nodiscard]] auto shape_cache() -> ShapeCache &;
 
@@ -847,7 +913,12 @@ auto emit_glyphs_with_context(const EmitContext &ctx, const std::string &text, c
             const std::uint64_t key = make_key(static_cast<std::uint32_t>(sg.face->id),
                                                static_cast<std::uint32_t>(sg.gi), static_cast<std::uint32_t>(ctx.px),
                                                mode == GlyphAtlas::Mode::Lcd, opts.italic, ctx.synthetic_bold);
-            const GlyphAtlas::Entry *e = atlas().find(key);
+            // 直通缓存优先：键比较命中即跳过图集哈希查找（命中时仍按 `find` 语义提升 LRU）。
+            void *record = nullptr;
+            const GlyphAtlas::Entry *e = glyph_probe_lookup(key);
+            if (e == nullptr) {
+                e = detail::GlyphAtlasAccess::lookup(atlas(), key, record);
+            }
             AURORA_PROFILE_COUNT(glyphs_rendered, 1);
             AURORA_PROFILE_COUNT(glyph_cache_hits, e != nullptr ? 1 : 0);
             AURORA_PROFILE_COUNT(glyph_cache_misses, e == nullptr ? 1 : 0);
@@ -890,7 +961,10 @@ auto emit_glyphs_with_context(const EmitContext &ctx, const std::string &text, c
                                 ne.buf.begin() + static_cast<std::ptrdiff_t>(dst_off));
                 }
                 atlas().insert(key, std::move(ne));
-                e = atlas().find(key);
+                e = detail::GlyphAtlasAccess::lookup(atlas(), key, record);
+            }
+            if (record != nullptr) {
+                glyph_probe_store(key, record);
             }
 
             // hb placement 偏移（x_off/y_off）已实现连字/复杂脚本的字形微位移。

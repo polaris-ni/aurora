@@ -12,7 +12,8 @@
 /// 系统拖放段另覆盖：修饰键→proposed 的翻译只有 proposed_action_for 一个入口（派发器与
 /// 控件不做第二处翻译，proposed 派发前后一字不差）、Over 态驱动自动滚边意图而
 /// Leave / Drop 态收车（Enter 不带意图、意图严格早于同态落放派发、空白区不派发）、
-/// 意图沿 layout_parent() 上溯交给最近可滚动祖先而链上无可滚动者返回 false
+/// 意图沿 layout_parent() 上溯交给最近可滚动祖先而链上无可滚动者返回 false；
+/// 指针移动的帧内合并（一帧多次移动只保留最新样本、帧尾派发一次，终态与逐事件一致）。
 
 #include <algorithm>
 #include <cstdint>
@@ -23,6 +24,7 @@
 #include <utility>
 #include <vector>
 
+#include "aurora/event/detail/pointer_move_coalescer.h"
 #include "aurora/event/dispatcher.h"
 #include "aurora/event/keycode.h"
 #include "aurora/layout/layout_engine.h"
@@ -1825,6 +1827,57 @@ AURORA_TEST_CASE(cursor_resolution_keeps_widget_alive_across_hook) {
     AURORA_TEST_CHECK_FALSE(probe.destroyed_during_callback);
     AURORA_TEST_REQUIRE_EQ(static_cast<int>(emitted.size()), 1);
     AURORA_TEST_CHECK(emitted.back() == CursorShape::IBeam);
+}
+
+AURORA_TEST_CASE(pointer_moves_coalesce_to_the_latest_sample_per_frame) {
+    // 一帧内三次移动只保留最新样本，帧尾冲刷一次；终态与「只处理最后一个样本」逐项一致。
+    auto coalesced = make_tree();
+    EventDispatcher coalesced_dispatcher;
+    std::optional<MouseEvent> slot;
+    auto stage = [&slot](float x, float y) {
+        MouseEvent m;
+        m.position = Point{.x = x, .y = y};
+        m.action = MouseAction::Move;
+        AURORA_TEST_CHECK_TRUE(detail::stage_pointer_move(m, slot));
+        AURORA_TEST_REQUIRE(slot.has_value());
+        AURORA_TEST_CHECK_NEAR(slot->position.x, x, 1e-4F);  // 槽内始终是最新样本（不插值）
+        AURORA_TEST_CHECK_NEAR(slot->position.y, y, 1e-4F);
+    };
+    stage(60.0F, 20.0F);  // box2
+    stage(70.0F, 20.0F);  // box2
+    stage(20.0F, 20.0F);  // box1 —— 本帧最终位置
+
+    const auto flushed = detail::take_pointer_move(slot);
+    AURORA_TEST_REQUIRE(flushed.has_value());
+    AURORA_TEST_CHECK_FALSE(slot.has_value());  // 冲刷后槽位清空：本帧不会再派发移动
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): 上一行 AURORA_TEST_REQUIRE 已断言有值
+    MouseEvent move = flushed.value();
+    AURORA_TEST_CHECK_TRUE(coalesced_dispatcher.dispatch_mouse(*coalesced.row, move));
+
+    // 对照组：只把最终样本逐事件派发一次，作为「合并后终态」的等价基准。
+    auto baseline = make_tree();
+    EventDispatcher baseline_dispatcher;
+    MouseEvent last;
+    last.position = Point{.x = 20.0F, .y = 20.0F};
+    last.action = MouseAction::Move;
+    baseline_dispatcher.dispatch_mouse(*baseline.row, last);
+
+    AURORA_TEST_CHECK_EQ(coalesced.box1->move_count, 1);  // 中间两次样本被合并丢弃
+    AURORA_TEST_CHECK_EQ(coalesced.box2->move_count, 0);
+    AURORA_TEST_CHECK_EQ(coalesced.box1->hover_changes, 1);
+    AURORA_TEST_CHECK_EQ(coalesced.box2->hover_changes, 0);
+    AURORA_TEST_CHECK_EQ(coalesced.box1->move_count, baseline.box1->move_count);
+    AURORA_TEST_CHECK_EQ(coalesced.box1->hovered(), baseline.box1->hovered());
+    AURORA_TEST_CHECK_EQ(coalesced.box2->hovered(), baseline.box2->hovered());
+    AURORA_TEST_CHECK_NEAR(coalesced.box1->last_local.x, baseline.box1->last_local.x, 1e-4F);  // 坐标终态一致
+    AURORA_TEST_CHECK_NEAR(coalesced.box1->last_local.y, baseline.box1->last_local.y, 1e-4F);
+
+    // 非移动事件不进入合并槽：调用方照常立即派发（按下/抬起等不会被延后）。
+    MouseEvent press;
+    press.position = Point{.x = 20.0F, .y = 20.0F};
+    press.action = MouseAction::Press;
+    AURORA_TEST_CHECK_FALSE(detail::stage_pointer_move(press, slot));
+    AURORA_TEST_CHECK_FALSE(slot.has_value());
 }
 
 }  // namespace aurora::test_cases::utest_dispatcher

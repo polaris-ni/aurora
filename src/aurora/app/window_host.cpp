@@ -4,6 +4,7 @@
 
 #include "aurora/app/display.h"
 #include "aurora/app/scroll_storage.h"
+#include "aurora/event/detail/pointer_move_coalescer.h"
 #include "aurora/perf/frame_monitor.h"
 #include "aurora/window/frame_pacing.h"
 #include "aurora/window/platform.h"
@@ -215,14 +216,16 @@ auto WindowHost::on_window_mode(WindowMode m) -> void {
 // =============================================================================
 
 auto WindowHost::pump_events() -> void {
-    if (window_ == nullptr) {
-        return;
+    if (window_ != nullptr) {
+        window_->pump_events();
+        // 引擎事件循环的非阻塞推进：WebView 引擎（Linux = GLib 主上下文）在此消化一轮。
+        // 与 AT-SPI 桥的帧首 pump 同构——阻塞等待已由 Surface::wait_events 并入引擎 fd，
+        // 此处只负责「就绪后 / 自然醒后」的非阻塞分发（未装 Linux 引擎时为空操作）。
+        native_view_host_.pump_engine_events();
     }
-    window_->pump_events();
-    // 引擎事件循环的非阻塞推进：WebView 引擎（Linux = GLib 主上下文）在此消化一轮。
-    // 与 AT-SPI 桥的帧首 pump 同构——阻塞等待已由 Surface::wait_events 并入引擎 fd，
-    // 此处只负责「就绪后 / 自然醒后」的非阻塞分发（未装 Linux 引擎时为空操作）。
-    native_view_host_.pump_engine_events();
+    // 帧尾冲刷：本帧到达的多次指针移动已合并为「最新位置」一项，此处投递且仅投递一次。
+    // 放在后端 pump 之后，保证移动的悬停/光标结果在本帧渲染前已生效。
+    flush_pending_move();
 }
 
 auto WindowHost::tick() -> void { scene_.root().tick(std::chrono::steady_clock::now()); }
@@ -311,7 +314,26 @@ auto WindowHost::cancel_close() -> void {
 // 事件派发
 // =============================================================================
 
+auto WindowHost::flush_pending_move() -> void {
+    const std::optional<MouseEvent> pending = detail::take_pointer_move(pending_move_);
+    if (!pending.has_value()) {
+        return;
+    }
+    // 样本按普通移动派发一次：命中/派发口径与后端直送完全一致，只是位置取本帧最后一个样本。
+    MouseEvent move = *pending;
+    FocusManager *const prev_fm = current_focus_manager();
+    set_current_focus_manager(&focus_);
+    mouse_.dispatch_mouse(hit_root(), move, &focus_);
+    set_current_focus_manager(prev_fm);
+}
+
 auto WindowHost::dispatch(Event &e) -> void {
+    // 帧内合并：移动只进合并槽（覆盖旧样本），等非移动事件或帧尾再派发一次。
+    // 任何非移动事件（按下/抬起/滚轮/离开/焦点/字符输入）先冲刷待投递移动，保证相对顺序不变。
+    if (detail::stage_pointer_move(e, pending_move_)) {
+        return;
+    }
+    flush_pending_move();
     // 派发上下文：快捷键动作与控件回调内同样可取到**本窗口**的焦点管理器（弹层开合、模态
     // 焦点陷阱依赖它）；子派发路径会自行保存/复原该槽位，嵌套安全。
     FocusManager *const prev_fm = current_focus_manager();
@@ -347,6 +369,8 @@ auto WindowHost::dispatch(Event &e) -> void {
 }
 
 auto WindowHost::dispatch_pointer(float x, float y, MouseAction action) -> void {
+    // 程序化入口保持同步语义：先冲刷帧内合并的移动，再直接派发本次动作（不合并）。
+    flush_pending_move();
     MouseEvent e;
     e.position = Point{.x = x, .y = y};
     e.action = action;
@@ -365,11 +389,17 @@ auto WindowHost::dispatch_key(KeyEvent e) -> bool {
 auto WindowHost::dispatch_text(TextInputEvent e) -> bool { return EventDispatcher::dispatch(scene_.root(), e, focus_); }
 
 auto WindowHost::dispatch_touch(const TouchEvent &e) -> void {
+    // 触控是位置类事件：先冲刷待投递的指针移动，保持与后端事件流的相对顺序一致。
+    flush_pending_move();
     // 派发器需要非 const 事件（命中链按 pointer id 缓存、is_handled_ 回写），此处构造可变副本。
     TouchEvent copy = e;
     touch_.dispatch(hit_root(), copy, &focus_);
 }
 
-auto WindowHost::dispatch_system_drop(SystemDropEvent &e) -> void { EventDispatcher::dispatch(hit_root(), e); }
+auto WindowHost::dispatch_system_drop(SystemDropEvent &e) -> void {
+    // 拖放同属位置类事件：先冲刷待投递的指针移动。
+    flush_pending_move();
+    EventDispatcher::dispatch(hit_root(), e);
+}
 
 }  // namespace aurora

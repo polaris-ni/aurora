@@ -476,14 +476,11 @@ class Painter {
     int height_ = 0;  ///< 物理缓冲高（dp × scale 取整）
     float scale_ = 1.0F;  ///< device pixel ratio（dp → 物理像素）
     std::vector<std::uint8_t> pixels_;  ///< RGBA8 帧缓冲（宽 × 高 × 4 字节）
-    /// @brief `draw_image` 缩放路径的单列映射（源列下标 + 插值权重）。
-    struct ImageColumn {
-        int i0 = 0;  ///< 源列左下标（已钳制到图宽内）
-        int i1 = 0;  ///< 源列右下标（已钳制到图宽内）
-        float tx = 0.0F;  ///< 列内插值权重
-    };
-    /// @brief 缩放路径的列映射暂存：按容量复用，避免每次调用分配三张临时表。
-    std::vector<ImageColumn> image_columns_;
+    /// @brief `draw_image` 缩放路径的列映射暂存（按列分解为三个并列数组，供 SIMD 内核连续读取）；
+    /// 按容量复用，避免每次调用分配临时表。
+    std::vector<int> image_i0_;  ///< 源列左下标（已钳制到图宽内）
+    std::vector<int> image_i1_;  ///< 源列右下标（已钳制到图宽内）
+    std::vector<float> image_tx_;  ///< 列内插值权重
     std::vector<ClipRegion> clip_stack_;  ///< 裁剪栈（矩形 + 圆角，滚动/圆角容器用）
     bool has_rounded_clip_ = false;  ///< 裁剪栈中是否存在圆角裁剪（blend_pixel 快速路径判定）
     int clip_x0_ = 0;  ///< 裁剪交集左界（含；物理像素，push/pop 时重算）

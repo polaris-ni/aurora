@@ -231,6 +231,78 @@ auto gradient_radial_scanline_sse2(std::uint8_t *row, int x0, int n, float cx, f
 auto gradient_radial_scanline_avx2(std::uint8_t *row, int x0, int n, float cx, float py, float inv_r,
                                    const std::uint8_t *c0, const std::uint8_t *c1, float stop0, float range) -> int;
 
+// ---- 缩放图像双线性采样内核（draw_image 缩放路径）----
+/// @brief 缩放图像双线性采样的单像素结果：RGBA 四字节 + 四邻域 alpha 加权和。
+/// 调用方据 pa 复现生产路径的全透明分支（`pa > 1e-6F` 之外不写颜色，只处理目标 alpha）。
+struct ImageSample {
+    std::uint8_t rgba[4] = {0, 0, 0, 0};  ///< R/G/B/A 四通道字节；全透明采样时四字节均为 0
+    float pa = 0.0F;  ///< 四邻域 alpha 加权和（未钳位）；恒等于生产路径标量内层的 pa
+};
+
+/// @brief 缩放图像双线性采样行的标量黄金参考：逐列镜像 Painter::draw_image 缩放路径的单像素公式。
+/// 浮点运算序列刻意与 SSE2/AVX2 版本 1:1 对应（-ffp-contract=off，无 FMA）：权重乘积、四邻域加权求和、
+/// 按 pa 归一除法与截断顺序均与生产标量路径一致。
+/// @param out 输出采样数组，容量至少 n。
+/// @param row0 源图第 iy 行首字节指针（RGBA8，相邻像素步长 4 字节）。
+/// @param row1 源图第 iy+1 行首字节指针（RGBA8，相邻像素步长 4 字节）。
+/// @param ci0 列映射的源列左下标数组（已钳制到图宽内）。
+/// @param ci1 列映射的源列右下标数组（已钳制到图宽内）。
+/// @param ctx 列映射的列内插值权重数组。
+/// @param n 采样列数。
+/// @param ity y 方向上侧权重（1 - ty）。
+/// @param ty y 方向下侧权重。
+/// @param alpha_norm 8 位 alpha → [0,1] 的归一化浮点表（256 项），与生产路径查表逐位相同。
+auto image_bilinear_row_scalar(ImageSample *out, const std::uint8_t *row0, const std::uint8_t *row1, const int *ci0,
+                               const int *ci1, const float *ctx, int n, float ity, float ty, const float *alpha_norm)
+    -> void;
+
+/// @brief 显式 SSE2 实现：4 列一组，浮点运算序列与标量黄金逐位一致，不足一组的尾部回落标量黄金。
+/// @param out 输出采样数组，容量至少 n。
+/// @param row0 源图第 iy 行首字节指针（RGBA8）。
+/// @param row1 源图第 iy+1 行首字节指针（RGBA8）。
+/// @param ci0 列映射的源列左下标数组。
+/// @param ci1 列映射的源列右下标数组。
+/// @param ctx 列映射的列内插值权重数组。
+/// @param n 采样列数。
+/// @param ity y 方向上侧权重（1 - ty）。
+/// @param ty y 方向下侧权重。
+/// @param alpha_norm 8 位 alpha 归一化浮点表（256 项）。
+/// @return SSE2 已填充的列数（4 的整数倍，可为 0）；余下尾部由调用方以标量黄金补齐。
+auto image_bilinear_row_sse2(ImageSample *out, const std::uint8_t *row0, const std::uint8_t *row1, const int *ci0,
+                             const int *ci1, const float *ctx, int n, float ity, float ty, const float *alpha_norm)
+    -> int;
+
+/// @brief 显式 AVX2 实现：8 列一组，浮点运算序列与标量黄金逐位一致，不足一组的尾部回落标量黄金。
+/// @param out 输出采样数组，容量至少 n。
+/// @param row0 源图第 iy 行首字节指针（RGBA8）。
+/// @param row1 源图第 iy+1 行首字节指针（RGBA8）。
+/// @param ci0 列映射的源列左下标数组。
+/// @param ci1 列映射的源列右下标数组。
+/// @param ctx 列映射的列内插值权重数组。
+/// @param n 采样列数。
+/// @param ity y 方向上侧权重（1 - ty）。
+/// @param ty y 方向下侧权重。
+/// @param alpha_norm 8 位 alpha 归一化浮点表（256 项）。
+/// @return AVX2 已填充的列数（8 的整数倍，可为 0）；余下尾部由调用方以标量黄金补齐。
+auto image_bilinear_row_avx2(ImageSample *out, const std::uint8_t *row0, const std::uint8_t *row1, const int *ci0,
+                             const int *ci1, const float *ctx, int n, float ity, float ty, const float *alpha_norm)
+    -> int;
+
+/// @brief 缩放图像双线性采样行的分发入口（生产路径调用）：确保 SIMD 档位初始化后按 g_simd_level 择档；
+/// 列数 < 8 时整行走标量黄金（向量宽度不足一组，分发不启用 SIMD）。
+/// @param out 输出采样数组，容量至少 n。
+/// @param row0 源图第 iy 行首字节指针（RGBA8）。
+/// @param row1 源图第 iy+1 行首字节指针（RGBA8）。
+/// @param ci0 列映射的源列左下标数组。
+/// @param ci1 列映射的源列右下标数组。
+/// @param ctx 列映射的列内插值权重数组。
+/// @param n 采样列数。
+/// @param ity y 方向上侧权重（1 - ty）。
+/// @param ty y 方向下侧权重。
+/// @param alpha_norm 8 位 alpha 归一化浮点表（256 项）。
+auto image_bilinear_row(ImageSample *out, const std::uint8_t *row0, const std::uint8_t *row1, const int *ci0,
+                        const int *ci1, const float *ctx, int n, float ity, float ty, const float *alpha_norm) -> void;
+
 // ---- 分发入口（生产路径调用）----
 /// @brief 逐通道 alpha 伽马混合分发入口（生产路径调用）：确保 gamma 表与 SIMD 档位已初始化后按 g_simd_level 择档。
 /// @param px 像素段首指针；每像素 4 字节，RGB 写回混合结果、A 写 255。

@@ -426,7 +426,7 @@ au::Column{}
 | `draw_text_runs(span<const render::TextRun>)` | 批量绘制同属性文本片段（详见 §8.2 的「批量入口」）；空数组即无操作 |
 | `draw_text_runs(span<const render::TextRun>, const TextLayoutOpts &)` | 同上，**整批共用一份排版 opts**（字距/词距/斜体/方向/回退链/固定格档位）；抗锯齿取进程级 `text_aa_mode()` |
 | `draw_text_runs(span<const render::TextRun>, TextAAMode, const TextLayoutOpts &)` | 同上，**显式覆盖抗锯齿策略** + 整批共用排版 opts |
-| `draw_image(const Image&, const Rect&)` | 绘制图像（双线性采样） |
+| `draw_image(const Image&, const Rect&)` | 绘制图像（双线性采样；缩放路径按行列取样，逐行采样经 `render/detail/painter_simd.h` 的 `image_bilinear_row` 标量 / SSE2 / AVX2 三实现按运行时档位分发，标量为黄金参考，三者逐位一致） |
 
 **混合与效果**
 
@@ -541,7 +541,7 @@ au::Column{}
 
 **档位粒度是「整批一档」**（`TextLayoutOpts` 逐批共用，`TextRun` 不带 per-run 覆盖）：一行内 ASCII 占 1 格、汉字占 2 格的混排**无法用单一固定档表达**，消费方须按格宽断 run 分批调用 `draw_text_runs`（这与 `opts 整批共用、不提供 per-run opts` 的既有约定一致）。`monospace_cell` 刻意传空 opts 度量：链只影响缺字时回退到哪一族、不参与格宽决定；档位更不能参与（否则档位依赖格宽、格宽又依赖档位，形成自我循环）。
 
-**批量入口（`Painter::draw_text_runs` / `FontEngine::draw_text_runs`）**：一段文本按样式切成多个片段是终端与表格的常态，逐片段调 `draw_text` 会让每次调用重做与文本内容无关的派生量（字体候选面解析含堆键构造、像素尺寸换算、两次 `FT_Set_Pixel_Sizes` 取行高与 ascender）。批量入口把这些派生量外提成一份发射上下文，**只在相邻片段 `Font` 不同时重建**，落笔算式与逐片段调用逐位相同（`utest_painter.cpp` 以两画布全像素差分 == 0 钉住）。收益上限即「每次调用的派生量 × 片段数」：实测一屏规模（24 行 × 12 同属性短片段 = 288 片段）在 9 组「逻辑尺寸 × scale」下两轮各为 −8.5%…+8%、中位约 −1%，落在环境抖动之内——该场景的成本主体是字形 blit 与图集查找，不是派生量，故 `bench_render` 的 `grid_text_per_span_calls` / `grid_text_batched_spans` 两行**只作观测项、不进 `tools/check/perf_gates.json`**（无稳定阈值可锁）。片段风格越碎（同屏片段数越多、每片段越短）收益越接近线性；本入口的正当性首先是「逐片段调用与整批调用输出一致」而非提速幅度。片段类型 `render::TextRun{text, box, font, color}` 与 `draw_text` 的单次入参一一对应，区域原点单位为**逻辑 dp**、只读 `origin`；`FontEngine::draw_text_runs` 因此与同类其余「收物理像素」的入口**刻意不同**（内部按 `p.scale()` 折算）——预缩放需复制整段数组并连带复制每片段的 `Font::family`，每帧数千次堆分配恰好抵消收益。抗锯齿取进程级 `text_aa_mode()`、排版选项取默认值。**录制态逐片段各落一条 `DrawText` 命令**，故 RHI 回放后端无需认识新命令类型，批量化收益只落在直绘路径（终端/表格每帧重画整屏正是该路径）。
+**批量入口（`Painter::draw_text_runs` / `FontEngine::draw_text_runs`）**：一段文本按样式切成多个片段是终端与表格的常态，逐片段调 `draw_text` 会让每次调用重做与文本内容无关的派生量（字体候选面解析含堆键构造、像素尺寸换算、两次 `FT_Set_Pixel_Sizes` 取行高与 ascender）。批量入口把这些派生量外提成一份发射上下文，**只在相邻片段 `Font` 不同时重建**，落笔算式与逐片段调用逐位相同（`utest_painter.cpp` 以两画布全像素差分 == 0 钉住）。收益上限即「每次调用的派生量 × 片段数」：实测一屏规模（24 行 × 12 同属性短片段 = 288 片段）在 9 组「逻辑尺寸 × scale」下两轮各为 −8.5%…+8%、中位约 −1%，落在环境抖动之内——该场景的成本主体是字形 blit 与图集查找，不是派生量，故 `bench_render` 的 `grid_text_per_span_calls` / `grid_text_batched_spans` 两行**只作观测项、不进 `tools/check/perf_gates.json`**（无稳定阈值可锁）。片段风格越碎（同屏片段数越多、每片段越短）收益越接近线性；本入口的正当性首先是「逐片段调用与整批调用输出一致」而非提速幅度。片段类型 `render::TextRun{text, box, font, color}` 与 `draw_text` 的单次入参一一对应，区域原点单位为**逻辑 dp**、只读 `origin`；`FontEngine::draw_text_runs` 因此与同类其余「收物理像素」的入口**刻意不同**（内部按 `p.scale()` 折算）——预缩放需复制整段数组并连带复制每片段的 `Font::family`，每帧数千次堆分配恰好抵消收益。抗锯齿取进程级 `text_aa_mode()`、排版选项取默认值。**录制态逐片段各落一条 `DrawText` 命令**，回放端由 `DisplayList::replay` 把相邻同属性命令合并后调用本入口（见 §8.6），故 RHI 回放后端无需认识新命令类型。
 
 **带排版选项的批量入口**：`draw_text_runs` 另有两个重载，与 `draw_text` 的 opts / aa_mode 梯度一一对应：
 
@@ -770,8 +770,10 @@ class RhiBackend {
 
 | 重载 | 语义 |
 |:---|:---|
-| `replay(rhi::RhiBackend&)` | **唯一实现**：遍历 `cmds_`，把池下标解析为 `CmdData`（负下标 → `nullptr`）后逐条 `submit` |
-| `replay(Painter&)` | 兼容薄壳：构造临时 `rhi::SoftwareRhi{p}` 后转发到上式（调用点无需改动） |
+| `replay(rhi::RhiBackend&)` | 通用逐条实现：遍历 `cmds_`，把池下标解析为 `CmdData`（负下标 → `nullptr`）后逐条 `submit` |
+| `replay(Painter&)` | 兼容薄壳：构造临时 `rhi::SoftwareRhi{p}`，逐条 `submit` 除文本外的命令并对相邻同属性文本做合批（见下） |
+
+**回放合并相邻文本命令**：兼容壳 `replay(Painter&)` 在遍历命令时把**属性完全相同**（字体、颜色、抗锯齿、字距 / 词距 / 斜体 / 方向 / 固定格档位、回退链）的连续 `DrawText` 收进定长 16 条的栈上批次，满批或遇到任何其它命令 / 层捕获区间即以一次 `Painter::draw_text_runs` 提交（仅一条文本时仍逐条交 `SoftwareRhi`）。合并只改「一次还是多次调用」，落笔原点、逐条 `box` 与发射上下文重建条件不变，故像素逐位不变；`replay(rhi::RhiBackend&)` 仍是逐条 `submit` 的通用路径，GPU 后端的命令流不受影响。
 
 **首个后端 `SoftwareRhi`**（`render/rhi/software_rhi.h`）把 23 类 `CmdKind`（含图表原语 `Polyline` / `Sector` 与 GPU 层命令三件套，见 §8.1）逐条转发回 `Painter` 的对应原语，参数逐字段与抽取前的 `replay` 一致，故 **DC 像素输出逐位不变**（重构红线，由 `utest_rhi` 的 `SoftwareRhi` 与直接绘制逐字节比对锁定）。未绑定 `Painter` 时 `submit` 为 no-op（便于测试构造空后端）；GPU 后端 `GpuGlRhi`（§8.7）实现同一接口，成为**平级第二消费者**——新增后端不改动录制侧与 `DisplayList`。
 
