@@ -4,7 +4,8 @@
 /// flex 权重瓜分剩余空间、gap 插入与分配扣除、MainAxisSize::Max 下的主轴对齐
 /// （Center/End/SpaceBetween/SpaceAround/SpaceEvenly）、交叉轴对齐（Start/Center/End/Stretch/Baseline
 /// 含无基线子项的合成基线、全无基线退化为 End、Column 回退 Start、RTL 正交性、父约束夹取）
-/// 与子项约束的供给性质打标（非加权子项主轴 loose、flex 槽位不 loose、嵌套容器交叉轴继承）
+/// 与子项约束的供给性质打标（非加权子项主轴 loose、flex 槽位不 loose、嵌套容器交叉轴继承）、
+/// 中间量缓冲复用的等价性（重复布局逐位稳定、测量内嵌套布局不污染外层缓冲）
 
 #include <optional>
 #include <vector>
@@ -465,6 +466,24 @@ auto record_item(float w, float h, float weight, RecordCtx &ctx) -> FlexItem {
     return FlexItem::make(weight, &ctx, &record_measure);
 }
 
+/// 测量上下文：测量时自身再跑一次嵌套 flex 布局（模拟容器 widget 测量其子容器）。
+struct NestedCtx : aurora::LayoutCtxBase {
+    float w = 0.0F;
+    float h = 0.0F;
+    FixedCtx inner0{};
+    FixedCtx inner1{};
+    FixedCtx inner2{};
+};
+
+auto nested_measure(void *ctx, const Constraints &c) -> Size {
+    auto *self = static_cast<NestedCtx *>(ctx);
+    // 内层布局的子项数与外层不同，足以暴露「共享同一份中间量缓冲」时的越界写与残留值。
+    (void)FlexLayouter::layout(Flex{}, c,
+                               {fixed_item2(11.0F, 7.0F, self->inner0), fixed_item2(13.0F, 9.0F, self->inner1),
+                                fixed_item2(17.0F, 5.0F, self->inner2)});
+    return c.constrain(Size{.width = self->w, .height = self->h});
+}
+
 }  // namespace
 
 AURORA_TEST_CASE(non_flex_children_get_loose_main_axis_supply) {
@@ -493,6 +512,79 @@ AURORA_TEST_CASE(loose_supply_propagates_across_nested_flex_axes) {
 
     AURORA_TEST_CHECK_TRUE(kid.seen.loose_width);  // Row 自己的主轴（宽）= 剩余空间
     AURORA_TEST_CHECK_TRUE(kid.seen.loose_height);  // 交叉轴继承父级 loose
+}
+
+AURORA_TEST_CASE(repeated_layout_is_bitwise_stable_across_interleaved_calls) {
+    // 中间量缓冲跨调用复用：同一配置连排两次，结果须逐位相同；中间插入一次规模不同的布局，
+    // 验证上一轮残留的 sizes / baselines 不会漏进下一轮（复用缓冲必须先整体重置）。
+    FixedCtx a;
+    FixedCtx b;
+    FixedCtx c;
+    Flex cfg;
+    cfg.gap = 4.0F;
+    const auto run = [&] {
+        return FlexLayouter::layout(
+            cfg, parent_constraints(),
+            {fixed_item2(30.0F, 10.0F, a), fixed_item2(50.0F, 12.0F, b), fixed_item2(20.0F, 8.0F, c)});
+    };
+
+    const auto first = run();
+    FixedCtx other;
+    Flex column;
+    column.direction = FlexDirection::Column;
+    column.gap = 9.0F;
+    (void)FlexLayouter::layout(column, parent_constraints(), {fixed_item2(9.0F, 9.0F, other)});
+    const auto second = run();
+
+    AURORA_TEST_REQUIRE_EQ(second.children.size(), first.children.size());
+    AURORA_TEST_CHECK_EQ(second.size.width, first.size.width);
+    AURORA_TEST_CHECK_EQ(second.size.height, first.size.height);
+    for (std::size_t i = 0; i < first.children.size(); ++i) {
+        AURORA_TEST_CHECK_EQ(second.children[i].origin.x, first.children[i].origin.x);
+        AURORA_TEST_CHECK_EQ(second.children[i].origin.y, first.children[i].origin.y);
+        AURORA_TEST_CHECK_EQ(second.children[i].size.width, first.children[i].size.width);
+        AURORA_TEST_CHECK_EQ(second.children[i].size.height, first.children[i].size.height);
+    }
+}
+
+AURORA_TEST_CASE(nested_layout_inside_measure_does_not_corrupt_outer_scratch) {
+    // 子项测量会递归进入嵌套容器的布局：内层布局若与外层共用同一份中间量缓冲，
+    // 外层的 sizes / baselines 会被内层覆写。此处以外层结果与「不触发内层布局的固定尺寸
+    // 等价输入」逐位比对来钉住该不变量。
+    NestedCtx n0;
+    NestedCtx n1;
+    n0.w = 30.0F;
+    n0.h = 10.0F;
+    n1.w = 20.0F;
+    n1.h = 14.0F;
+    const auto outer_items = [&] {
+        std::vector<FlexItem> items;
+        items.push_back(FlexItem::make(0.0F, &n0, &nested_measure));
+        items.push_back(FlexItem::make(0.0F, &n1, &nested_measure));
+        return items;
+    }();
+
+    FixedCtx tail;
+    FixedCtx ref0;
+    FixedCtx ref1;
+    FixedCtx ref_tail;
+    Flex cfg;
+    cfg.gap = 2.0F;
+    const auto nested = FlexLayouter::layout(cfg, parent_constraints(),
+                                             {outer_items[0], outer_items[1], fixed_item2(40.0F, 10.0F, tail)});
+    const auto reference = FlexLayouter::layout(
+        cfg, parent_constraints(),
+        {fixed_item2(30.0F, 10.0F, ref0), fixed_item2(20.0F, 14.0F, ref1), fixed_item2(40.0F, 10.0F, ref_tail)});
+
+    AURORA_TEST_REQUIRE_EQ(nested.children.size(), reference.children.size());
+    for (std::size_t i = 0; i < reference.children.size(); ++i) {
+        AURORA_TEST_CHECK_EQ(nested.children[i].origin.x, reference.children[i].origin.x);
+        AURORA_TEST_CHECK_EQ(nested.children[i].origin.y, reference.children[i].origin.y);
+        AURORA_TEST_CHECK_EQ(nested.children[i].size.width, reference.children[i].size.width);
+        AURORA_TEST_CHECK_EQ(nested.children[i].size.height, reference.children[i].size.height);
+    }
+    AURORA_TEST_CHECK_EQ(nested.size.width, reference.size.width);
+    AURORA_TEST_CHECK_EQ(nested.size.height, reference.size.height);
 }
 
 }  // namespace aurora::test_cases::utest_flex_layouter

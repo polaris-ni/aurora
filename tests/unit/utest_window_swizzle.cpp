@@ -1,10 +1,14 @@
 /// 测试类型: unit
-/// 目标单元: src/aurora/window/swizzle.h（swizzle_rgba_premul_to_bgra）
+/// 目标单元: src/aurora/window/swizzle.h（swizzle_rgba_premul_to_bgra / swizzle_rgba_to_bgra /
+///            swizzle_bgra_to_rgba 与其标量参考、AVX2 内核）
 /// 测试说明: 覆盖 Wayland ARGB8888 上屏专用的「RGBA 直色 → BGRA 预乘 alpha」转换——
 /// alpha=0（阴影外缘）RGB 归零、alpha=255（内容区）与旧 XRGB 直转逐值恒等、半透明按
-/// c*a/255 预乘且字节序为小端 B,G,R,A。纯内存转换，无平台依赖。
+/// c*a/255 预乘且字节序为小端 B,G,R,A；另覆盖三处转换的「标量参考 / AVX2 内核 / 分发入口」
+/// 三路逐字节一致（含整组边界与不足一组的尾部）。纯内存转换，无平台依赖。
 
+#include <cstddef>
 #include <cstdint>
+#include <vector>
 
 #include "aurora/window/swizzle.h"  // 内部头：测试 TU 以 src/ 为附加包含根
 #include "framework/aurora_test.h"
@@ -37,6 +41,31 @@ struct BgraPixel {
 [[nodiscard]] auto premul(std::uint32_t c, std::uint32_t a) -> std::uint8_t {
     return static_cast<std::uint8_t>(((c * a) + 0xFFU) >> 8);
 }
+
+/// @brief 确定性伪随机像素填充（xorshift32），覆盖全 32 位字组合（含各档 alpha）。
+void fill_random(std::vector<std::uint32_t> &buf, std::uint32_t seed) {
+    std::uint32_t state = seed | 1U;
+    for (std::uint32_t &word : buf) {
+        state ^= state << 13U;
+        state ^= state >> 17U;
+        state ^= state << 5U;
+        word = state;
+    }
+}
+
+/// @brief 逐字比对两段等长像素，返回差异字数。
+auto count_word_diffs(const std::vector<std::uint32_t> &lhs, const std::vector<std::uint32_t> &rhs) -> std::size_t {
+    std::size_t diffs = 0;
+    for (std::size_t i = 0; i < lhs.size(); ++i) {
+        if (lhs[i] != rhs[i]) {
+            ++diffs;
+        }
+    }
+    return diffs;
+}
+
+/// @brief 覆盖整组边界与不足一组的尾部：1/7 为纯尾部，8 为恰好一组，9 与 1031 为「整组 + 尾部」。
+constexpr std::size_t AURORA_SWIZZLE_PARITY_LENGTHS[] = {1, 7, 8, 9, 1031};
 
 }  // namespace
 
@@ -83,6 +112,49 @@ AURORA_TEST_CASE(semi_transparent_pixel_is_premultiplied) {
     AURORA_TEST_CHECK(px.r <= px.a);
     AURORA_TEST_CHECK(px.g <= px.a);
     AURORA_TEST_CHECK(px.b <= px.a);
+}
+
+AURORA_TEST_CASE(avx2_kernels_match_scalar_byte_for_byte) {
+    // 显式 AVX2 内核与标量参考逐字节一致：覆盖整组边界与尾部，预乘的整数乘/截断口径相同。
+#ifdef AURORA_SWIZZLE_AVX2
+    if (!aurora::detail::swizzle_avx2_available()) {
+        AURORA_TEST_SKIP("host cpu has no avx2");
+    }
+    for (const std::size_t n : AURORA_SWIZZLE_PARITY_LENGTHS) {
+        std::vector<std::uint32_t> src(n);
+        std::vector<std::uint32_t> swap_ref(n);
+        std::vector<std::uint32_t> swap_avx(n);
+        std::vector<std::uint32_t> prem_ref(n);
+        std::vector<std::uint32_t> prem_avx(n);
+        fill_random(src, (static_cast<std::uint32_t>(n) * 2654435761U) + 7U);
+        swizzle_rgba_to_bgra_scalar(src.data(), swap_ref.data(), n);
+        aurora::detail::swap_rb_avx2(src.data(), swap_avx.data(), n);
+        AURORA_TEST_CHECK_EQ(count_word_diffs(swap_ref, swap_avx), 0U);
+        swizzle_rgba_premul_to_bgra_scalar(src.data(), prem_ref.data(), n);
+        aurora::detail::premul_bgra_avx2(src.data(), prem_avx.data(), n);
+        AURORA_TEST_CHECK_EQ(count_word_diffs(prem_ref, prem_avx), 0U);
+    }
+#else
+    AURORA_TEST_SKIP("avx2 kernel is not compiled on this target");
+#endif
+}
+
+AURORA_TEST_CASE(dispatch_entries_match_scalar_reference) {
+    // 分发入口在任意运行环境下都必须与标量参考同结果：AVX2 可用时走内核，否则走参考。
+    for (const std::size_t n : AURORA_SWIZZLE_PARITY_LENGTHS) {
+        std::vector<std::uint32_t> src(n);
+        std::vector<std::uint32_t> ref(n);
+        std::vector<std::uint32_t> got(n);
+        fill_random(src, (static_cast<std::uint32_t>(n) * 40503U) + 11U);
+        swizzle_rgba_to_bgra_scalar(src.data(), ref.data(), n);
+        swizzle_rgba_to_bgra(src.data(), got.data(), n);
+        AURORA_TEST_CHECK_EQ(count_word_diffs(ref, got), 0U);
+        swizzle_bgra_to_rgba(src.data(), got.data(), n);
+        AURORA_TEST_CHECK_EQ(count_word_diffs(ref, got), 0U);
+        swizzle_rgba_premul_to_bgra_scalar(src.data(), ref.data(), n);
+        swizzle_rgba_premul_to_bgra(src.data(), got.data(), n);
+        AURORA_TEST_CHECK_EQ(count_word_diffs(ref, got), 0U);
+    }
 }
 
 }  // namespace aurora::test_cases::utest_window_swizzle

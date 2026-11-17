@@ -281,7 +281,7 @@ drain_posted → pump_all_once → on_frame_ → 关闭闸门询问步 poll_clos
 | 后端 | 上屏方式 | 开关 |
 |:---|:---|:---|
 | `HeadlessSurface` | 内存帧缓冲，可同步导出 PNG | 恒编入，无开关（宏已删） |
-| `Win32Surface` | 常驻 BGRA DIB section + `BitBlt`（RGBA→BGRA CPU swizzle），支持 `set_present_dirty` 增量上屏 | `AURORA_BACKEND_WIN32`（Windows 默认 ON） |
+| `Win32Surface` | 常驻 BGRA DIB section + `BitBlt`（RGBA→BGRA CPU swizzle，运行时 AVX2 分发、逐字节与标量参考等价），支持 `set_present_dirty` 增量上屏 | `AURORA_BACKEND_WIN32`（Windows 默认 ON） |
 | `D3D11Surface` | 复用 `Win32Host` 宿主，把 `Painter` RGBA8 帧缓冲作为动态纹理，脏矩形经 `UpdateSubresource` 增量上传，全屏三角形 + 像素着色器线性采样呈现（`Present(1,0)`） | `AURORA_BACKEND_D3D11`（默认 OFF） |
 | `WgpuWin32Surface` | 复用 `Win32Host` 宿主，帧级 DisplayList 交 `WgpuRhi` 在 GPU 端光栅化并 `wgpuSurfacePresent` 直渲上屏；GPU 失败永久回退 GDI `SetDIBitsToDevice` 上传路径 | `AURORA_BACKEND_GPU_WGPU` ∧ `AURORA_BACKEND_WIN32`（默认 OFF） |
 | `GlfwSurface` | OpenGL 3.3 兼容剖面（绘制采用 1.1 立即模式），pimpl 隔离；GPU 渲染模式随 GLFW 后端恒编入、可请求（`GlfwOptions::gpu`），上下文与 swapBuffers 仍由本后端承担 | `AURORA_BACKEND_GLFW` |

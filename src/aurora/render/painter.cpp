@@ -1097,8 +1097,14 @@ auto Painter::draw_text_runs(std::span<const render::TextRun> runs, render::Text
         // 命令类型，批量化的收益只落在直绘路径——那正是终端/表格每帧重画整屏的走法。
         // 整批共用 opts / aa_mode：回放端据 DrawCmd 的 aa_mode / text_ls / text_ws / text_italic 重建，
         // 因此与逐个 draw_text(..., aa_mode, opts) 录出的命令序列逐位一致。
+        //
+        // 片段文本先落到一份线程局部的临时串再入池：池化本身就复制一次，若用
+        // `std::string{run.text}` 构造临时串，每片段会多付一次堆分配（整屏数百段即数百次）。
+        // 复用缓冲把额外分配降为摊销零，池内内容与逐段构造完全一致。
+        thread_local std::string run_text;
         for (const auto &run : runs) {
-            record_text_cmd(run.box, std::string{run.text}, run.font, run.color, aa_mode, opts);
+            run_text.assign(run.text);
+            record_text_cmd(run.box, run_text, run.font, run.color, aa_mode, opts);
         }
         return;
     }

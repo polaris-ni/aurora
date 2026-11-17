@@ -5,6 +5,7 @@
 /// blend_pixel、draw_image 缩放、线性渐变方向、
 /// draw_line 覆盖、shift_pixels 垂直搬移、to_image 导出与 get_pixel 越界兜底、draw_text_runs 与逐个
 /// draw_text 的逐位一致及空批无操作、带 opts/aa_mode 的批量入口与逐个 draw_text(..., aa_mode, opts) 逐位一致、
+/// 录制态 draw_text_runs 与逐个 draw_text 的命令条数及回放像素一致、
 /// 圆角填充的行级全覆写快路径与逐像素 coverage 在胶囊/普通圆角（含非整数锚点）上逐位一致、
 /// 不透明整帧基底的清零跳过（与零基底逐字节一致，及半透明底色 / 未铺满 / 尺寸变化 / scale 变化 /
 /// 录制态五类必清零反例）
@@ -520,6 +521,46 @@ AURORA_TEST_CASE(draw_text_runs_with_aa_mode_and_opts_matches_individual_calls) 
         single.draw_text(run.box, std::string{run.text}, run.font, run.color, aa, opts);
     }
     AURORA_TEST_REQUIRE_EQ(count_diff_pixels(batch, single), 0);
+}
+
+AURORA_TEST_CASE(draw_text_runs_recording_matches_individual_draw_text_commands) {
+    // 录制态：批量入口逐片段落 DrawText，命令条数与回放像素都须与逐个 draw_text 一致
+    // （片段文本经复用缓冲入池不得丢失或多出内容）。
+    const Font f{.family = "sans-serif", .size_pt = 14.0F, .weight = 400};
+    const auto runs = {
+        render::TextRun{.text = "first", .box = rect_at(4.0F, 4.0F, 90.0F, 20.0F), .font = f, .color = Color::red()},
+        render::TextRun{
+            .text = "second", .box = rect_at(4.0F, 28.0F, 90.0F, 20.0F), .font = f, .color = Color::blue()}};
+    const render::TextLayoutOpts opts{};
+
+    Painter batch_recorder;
+    batch_recorder.begin(120, 56);
+    DisplayList batch_list;
+    batch_recorder.record(batch_list);
+    batch_recorder.draw_text_runs(std::span<const render::TextRun>{runs}, render::TextAAMode::Supersample, opts);
+    batch_recorder.stop();
+
+    Painter single_recorder;
+    single_recorder.begin(120, 56);
+    DisplayList single_list;
+    single_recorder.record(single_list);
+    for (const auto &run : runs) {
+        single_recorder.draw_text(run.box, std::string{run.text}, run.font, run.color, render::TextAAMode::Supersample,
+                                  opts);
+    }
+    single_recorder.stop();
+
+    AURORA_TEST_CHECK_EQ(batch_list.cmd_count(), single_list.cmd_count());
+    AURORA_TEST_CHECK_EQ(batch_list.cmd_count(), runs.size());
+
+    Painter batch_canvas;
+    batch_canvas.begin(120, 56);
+    batch_list.replay(batch_canvas);
+
+    Painter single_canvas;
+    single_canvas.begin(120, 56);
+    single_list.replay(single_canvas);
+    AURORA_TEST_REQUIRE_EQ(count_diff_pixels(batch_canvas, single_canvas), 0);
 }
 
 AURORA_TEST_CASE(draw_text_runs_italic_changes_pixels_but_keeps_layout) {

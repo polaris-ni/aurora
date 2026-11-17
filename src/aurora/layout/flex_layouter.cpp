@@ -1,6 +1,7 @@
 #include "aurora/layout/flex_layouter.h"
 
 #include <algorithm>
+#include <deque>
 
 namespace aurora {
 
@@ -8,6 +9,52 @@ namespace aurora {
 // 使各趟 pass（测量 / 主轴分配 / 交叉轴对齐 / 定位后处理）成为独立、可读、可单测的成员函数。
 // 全部算术与原单体函数逐位一致（无重排、无近似），golden 像素基线不变。
 namespace {
+
+/// @brief 布局中间量缓冲：`sizes` / `baselines` 两项按嵌套深度分层复用。
+/// `layout` 是静态入口且可重入（子项测量会递归进入嵌套容器的布局），共享一份缓冲会被
+/// 内层调用覆写，故按深度各占一层；同层串行复用，容量跨调用保留。
+/// `rects` 不入池——它的所有权随 `FlexLayout::children` 移交调用方，无法回收。
+struct LayoutScratch {
+    std::vector<Size> sizes;
+    std::vector<std::optional<float>> baselines;
+};
+
+/// @brief 线程局部的缓冲层栈（函数内 `thread_local`，非命名空间级可变全局）。
+/// 用 `std::deque` 而非 `std::vector`：`push_back` 不使既有元素的引用失效，
+/// 外层租约持有的 `sizes` / `baselines` 引用在嵌套布局追加新层后依然有效。
+auto scratch_stack() -> std::deque<LayoutScratch> & {
+    thread_local std::deque<LayoutScratch> stack;
+    return stack;
+}
+
+/// @brief 缓冲层租约：构造时按当前深度取层并重置为 `n` 项空值，析构时归还。
+/// @note Thread: main-thread only（层栈线程局部；布局本身即单线程 UI 路径）
+class ScratchLease {
+  public:
+    /// @brief 取用当前深度的缓冲层，并把两项工作态重置为 `n` 个空值。
+    /// @param n 子项数（与工作态向量等长）。
+    explicit ScratchLease(std::size_t n) : stack_(scratch_stack()), depth_(stack_.size()) {
+        LayoutScratch &layer = stack_.emplace_back();
+        layer.sizes.assign(n, Size{});
+        layer.baselines.assign(n, std::nullopt);
+    }
+    // 析构只做 noexcept 的 `pop_back`：层栈的惰性构造已挪到构造函数（那里允许抛分配失败）。
+    ~ScratchLease() { stack_.pop_back(); }
+
+    ScratchLease(const ScratchLease &) = delete;
+    auto operator=(const ScratchLease &) -> ScratchLease & = delete;
+    ScratchLease(ScratchLease &&) = delete;
+    auto operator=(ScratchLease &&) -> ScratchLease & = delete;
+
+    /// @brief 本租约的缓冲层（引用在租约存活期内稳定）。
+    /// @return 该深度层的缓冲引用。
+    [[nodiscard]] auto scratch() const -> LayoutScratch & { return stack_[depth_]; }
+
+  private:
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members) 借用线程局部层栈，租约存活期内稳定
+    std::deque<LayoutScratch> &stack_;
+    std::size_t depth_;  ///< 本层在层栈中的下标（析构时归还到该深度）
+};
 
 struct FlexLayoutContext {
     Flex config;
@@ -28,8 +75,11 @@ struct FlexLayoutContext {
     float gap;
 
     // ---- 工作态（逐趟累积）----
-    std::vector<Size> sizes;
-    std::vector<std::optional<float>> baselines;  ///< 各项「布局盒顶 → 基线」距离（仅 Baseline 模式填充）
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members) 借用租约缓冲，布局调用期内存活
+    std::vector<Size> &sizes;
+    // 各项「布局盒顶 → 基线」距离（仅 Baseline 模式填充）
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members) 同上
+    std::vector<std::optional<float>> &baselines;
     float used_main = 0.0F;
     float max_cross = 0.0F;
     float total_flex = 0.0F;
@@ -43,14 +93,14 @@ struct FlexLayoutContext {
     float leading = 0.0F;
     float between = 0.0F;
 
-    FlexLayoutContext(const Flex &cfg, const Constraints &p, const std::vector<FlexItem> &it)
+    FlexLayoutContext(const Flex &cfg, const Constraints &p, const std::vector<FlexItem> &it, LayoutScratch &scratch)
         : config(cfg), parent(p), items(it),
           horizontal(cfg.direction == FlexDirection::Row || cfg.direction == FlexDirection::RowReverse),
           reverse(cfg.direction == FlexDirection::RowReverse || cfg.direction == FlexDirection::ColumnReverse),
           main_axis(horizontal ? 0 : 1), inf(Size::infinity().width), main_finite(p_max_main() != inf),
           parent_max_main(p_max_main()), parent_min_main(p_min_main()), parent_max_cross(p_max_cross()),
-          parent_min_cross(p_min_cross()), gap(cfg.gap > 0.0F ? cfg.gap : 0.0F), sizes(it.size(), Size{}),
-          baselines(it.size(), std::nullopt) {}
+          parent_min_cross(p_min_cross()), gap(cfg.gap > 0.0F ? cfg.gap : 0.0F), sizes(scratch.sizes),
+          baselines(scratch.baselines) {}
 
     // ---- 轴访问器（与主轴/交叉轴选择绑定）----
     [[nodiscard]] auto get_main(const Size &s) const -> float { return main_axis == 0 ? s.width : s.height; }
@@ -324,7 +374,10 @@ struct FlexLayoutContext {
 
 auto FlexLayouter::layout(const Flex &config, const Constraints &parent, const std::vector<FlexItem> &items)
     -> FlexLayout {
-    FlexLayoutContext ctx(config, parent, items);
+    // 中间量缓冲按嵌套深度复用（测量 pass 会递归进入嵌套容器的布局，故不能共享一份）。
+    // 租约先于上下文构造：上下文只借用该层缓冲，生命周期由租约覆盖整个布局调用。
+    const ScratchLease lease(items.size());
+    FlexLayoutContext ctx(config, parent, items, lease.scratch());
 
     // 测量 pass：非 flex + flex 瓜分 + 固定间距计入容器主轴占用。
     ctx.measure_pass();
@@ -336,8 +389,8 @@ auto FlexLayouter::layout(const Flex &config, const Constraints &parent, const s
     // 主轴对齐 pass：leading / between。
     ctx.main_axis_align_pass();
     // 定位后处理 pass：逐子项定位 + 反向镜像。
-    // `rects` 的所有权随即移交给 `result.children`，不能充当可复用缓冲；`sizes` / `baselines`
-    // 由每次新建的上下文持有，而 `layout` 是静态入口、没有成员可挂池化缓冲，故不复用。
+    // `rects` 的所有权随即移交给 `result.children`，不能充当可复用缓冲，故每次新建；
+    // `sizes` / `baselines` 则来自 `layout` 入口取的租约缓冲（见 `ScratchLease`）。
     std::vector<Rect> rects;
     ctx.place_children_pass(rects);
 
