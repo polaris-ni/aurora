@@ -2,6 +2,7 @@
 /// 目标单元: include/aurora/state/detail/reactor.h
 /// 测试说明: 响应式内核的提交/等价停止/菱形去重/动态依赖裁剪/回调内写排队/取消/反馈环截断
 
+#include <algorithm>
 #include <cstdint>
 #include <memory>
 #include <stdexcept>
@@ -292,10 +293,15 @@ AURORA_TEST_CASE(epoch_arrays_shrink_to_live_high_water) {
 
     const auto kept = static_cast<std::size_t>(sources.front()->id());
     sources.erase(sources.begin() + 1, sources.end());
-    // 析构摊还已触发收缩；再提交一次走轮末兜底，确保判据可复现。
+    // 析构顺序是标准未指定的（不同标准库实现前向/反向不一），收缩在途中哪一次析构触发
+    // 也随之不同：可能收敛到精确的存活上界，也可能停在下界 4096 以内的中间值。判据钉
+    // 文档契约「size == capacity 且 ≤ max(4096, M+1)」，不钉与实现细节相关的精确值。
+    // 联合判据仍能区分缺陷与修复：收缩前 size 为累计创建峰值（> 4096），无收缩逻辑时
+    // 本断言必红；再提交一次走轮末兜底，确保判据可复现。
     sources.front()->assign(sources.front()->read() + 1);
-    AURORA_TEST_CHECK_EQ(engine.seen_source_size(), kept + 1U);
-    AURORA_TEST_CHECK_EQ(engine.seen_source_capacity(), kept + 1U);
+    const std::size_t capacity_bound = std::max<std::size_t>(4096U, kept + 1U);
+    AURORA_TEST_CHECK_EQ(engine.seen_source_size(), engine.seen_source_capacity());
+    AURORA_TEST_CHECK_LE(engine.seen_source_size(), capacity_bound);
 #else
     AURORA_TEST_SKIP("epoch-array observation ports are gated by AURORA_ENABLE_DEBUG");
 #endif
