@@ -44,6 +44,7 @@ freeze: minor-versions-are-additive
 
 ### Changed
 
+- **正确性风险收敛**：响应式引擎的两张纪元戳表按存活高水位收缩（构造登记存活身份、析构摊还检查 + 轮末兜底，容量上界为最高存活身份 + 1，不再随累计创建数无界增长）；`Painter` 全局透明度的整数化统一为 `aurora::detail::quantize_global_alpha` 唯一口径（此前 `set_pixel` 截断与梯度路径四舍五入最多差 1，`global_alpha_ == 1.0` 时行为逐位不变）；`WidgetRegistry::register_factory` 同名重注册时失效该类型的 schema 缓存项（反射面不再返回陈旧属性表）；`Engine` 在 `AURORA_ENABLE_DEBUG` 门控下新增四枚只读观测方法（两张纪元戳表的 size / capacity）。契约见 [`codespec/specification/02-state.md`](codespec/specification/02-state.md)、[`codespec/specification/03-layout-render.md`](codespec/specification/03-layout-render.md) 与 [`codespec/specification/04-widget.md`](codespec/specification/04-widget.md)。
 - 无头后端恒编入、`HeadlessSurface` 恒声明；GLFW 后端构建即含 GPU GL 通道（运行期初始化失败自动回退软件路径，`gpu_backend()` 语义不变）；`-ffp-contract=off` 与 MSVC `/fp:precise` 改为无条件注入，保证 SIMD/标量逐位一致的前提不随开关消失。系统 TLS 栈的 configure 日志括注由引擎宏名改为引擎名（Schannel / SecureTransport）。
 - **渲染热路径去冗余开销，输出逐位不变**：gamma 表就绪检查从 `set_pixel` / `blend_subpixel` 的每像素自查提升到各绘制原语入口（整帧起点统一就绪一次）；半透明矩形快速路径改走 SIMD 批量混合；目标尺寸与源尺寸相同、锚点为整数且源全不透明的贴图走整行直拷，跳过长宽均为 1:1 的双线性采样。
 - **状态内核与事件派发减少每帧分配与重复上溯**：`State::set` 在响应式入口外改为原地提交（不再构造捕获共享指针与值的闭包）；提交去重由每轮清空并逐边插入的两个哈希集改为纪元戳向量；拖拽捕获期间的每个鼠标移动事件不再深拷贝整条命中链，悬停/命中链的收集也不再逐层新建 `vector`。布局脏标记改为沿布局父链一次上溯（原实现逐层回程各发一次发帧请求，深度 d 的树为 O(d²)）。

@@ -4,9 +4,9 @@
 |:---|:---|
 | 变更编号 | CHG-080 |
 | 提出日期 | 2026-11-16 |
-| 当前状态 | 已提议 |
+| 当前状态 | 实施中 |
 | 关联需求 | 无 |
-| 影响面 | 状态引擎 `src/aurora/state/reactor.cpp` 与 `include/aurora/state/detail/reactor.h`（存活登记 + 析构水位收缩 + DEBUG 观测方法）；渲染 `src/aurora/render/painter.cpp` 与 `include/aurora/render/detail/gamma_lut.h`（透明度整数化助手 + 五处替换）；序列化 `include/aurora/widget/serialization.h` 的 `register_factory`（调用失效入口）与 `src/aurora/widget/serialization.cpp`（缓存提升为文件级 + 失效定义）；字形缓存 `src/aurora/render/glyph_atlas.cpp` 判非缺陷不改码，仅以行为契约用例钉住；测试 `tests/unit/utest_reactor.cpp` / `utest_painter.cpp` / `utest_serialization.cpp` / `utest_glyph_atlas.cpp` 各增用例；文档 `codespec/specification/02-state.md` / `03-layout-render.md` / `04-widget.md` / `06-app-platform.md` 回写。 |
+| 影响面 | 状态引擎 `src/aurora/state/reactor.cpp` 与 `include/aurora/state/detail/reactor.h`（存活登记 + 析构水位收缩 + DEBUG 观测方法）；渲染 `src/aurora/render/painter.cpp` 与 `include/aurora/render/detail/gamma_lut.h`（透明度整数化助手 + 五处替换）；序列化 `include/aurora/widget/serialization.h` 的 `register_factory`（调用失效入口）与 `src/aurora/widget/serialization.cpp`（缓存提升为文件级 + 失效定义）；字形缓存 `src/aurora/render/glyph_atlas.cpp` 判非缺陷不改码，仅以行为契约用例钉住；测试 `tests/unit/utest_reactor.cpp` / `utest_painter.cpp` / `utest_serialization.cpp` / `utest_glyph_atlas.cpp` 各增用例；文档 `codespec/specification/02-state.md` / `03-layout-render.md` / `04-widget.md` 回写（观测口登记并入 02-state，该文档无状态引擎章节故不再列 06-app-platform）。 |
 
 ## 动机
 
@@ -32,9 +32,9 @@
 
 - `Engine` 增加存活登记：`SourceNode` / `Observer` 构造时把自身 id / seq 插入 Engine 持有的 `std::set<std::uint64_t>`（单线程 UI 前提下无锁），析构时摘除。**构造路径由此新增对 Engine 单例的依赖**：原先只用函数内静态原子计数器（`reactor.cpp:28-41`），现在要访问 Engine 的集合；`Engine::instance()` 是 `new Engine()` 的进程级常驻单例，静态销毁期仍可达，语义与既有提交路径同源（原稿「与 run_direct 同源」措辞不准，已更正为「由 `Engine::instance()` 惰性构造」）。
 - 收缩触发点（两处，缺一不可）：
-  - 析构水位：`SourceNode` / `Observer` 析构时递减存活计数；为免每次析构付 O(n) 缩容代价，按**每 256 次析构摊还**检查一次，且仅当当前不在交付阶段（`in_delivery_` 为 false，防止容器在 `mark` 遍历中被修改）时执行。此路径覆盖「只创建/销毁、从不写提交」的长会话。
+  - 析构水位：`SourceNode` / `Observer` 析构时摘除存活身份并检查收缩；检查是 O(1) 判等，无节流必要（设想的摊还 stride 会让存活尾巴错过最后一次检查，实施时已放弃），且仅当当前不在交付阶段（`in_delivery_` 为 false，防止容器在 `mark` 遍历中被修改）时执行。此路径覆盖「只创建/销毁、从不写提交」的长会话。
   - 轮末兜底：`deliver()` 末尾再检查一次（此时无在途 mark），覆盖析构发生在交付内而被守卫跳过的情形。
-- 收缩动作与正确性论证：设 `M` = 当前存活集合的最大 id / seq（空集取 0）。当 `arr.size() > max(4096, 4 × live_count)` 时 `resize(M + 1)` 并 `shrink_to_fit`。安全性：id 严格递增不复用 ⇒ 未来构造的新节点 id 必 > M，`resize` 会扩容；≤ M 的已死节点不会再出现在 `mark` 的遍历源（活跃边与 `pending_` 只持有活对象）；因此不会漏掉有效去重戳。epoch 回绕全量清零处（`reactor.cpp:251-254`）复用同一收缩检查。
+- 收缩动作与正确性论证：设 `M` = 当前存活集合的最大 id / seq（空集取 0）。当 `arr.size() > max(4096, 4 × live_count)` 时截断到 `M + 1` 并以「拷贝 + swap」强制缩容（`shrink_to_fit` 是非绑定请求，实现可不缩容，而判据要求 size == capacity 必须确定性成立）。安全性：id 严格递增不复用 ⇒ 未来构造的新节点 id 必 > M，`resize` 会扩容；≤ M 的已死节点不会再出现在 `mark` 的遍历源（活跃边与 `pending_` 只持有活对象）；因此不会漏掉有效去重戳。epoch 回绕全量清零处（`reactor.cpp:251-254`）复用同一收缩检查。
 - **容量边界（必须随判据一起读）**：收缩保证 `capacity ≤ max(4096, M + 1)`，**不保证** `capacity ≤ 4 × live_count`——稀疏存活（例如仅剩一个高 id 的长期节点）时二者相差很大。这是「不复用 id + 稠密数组下标」两条既有契约的固有代价，不是泄漏；判据据此写，不另造不可达目标。
 - DEBUG 观测方法：`AURORA_ENABLE_DEBUG` 门控下在 `Engine` 暴露 `seen_source_size()` / `seen_source_capacity()` / `seen_observer_size()` / `seen_observer_capacity()` 四个只读查询，**声明与定义同受门控**（非 DEBUG 构建下声明不存在，消费者不可调用，也不产生符号）；按「测试注入」登记制度记入规格。新增方法按 `CODING_STANDARDS.md` §13 写全 `@brief` / `@return`。
 - **备选与不推荐理由**（供裁决）：① `unordered_map<id, epoch>` 替换数组——保契约、天然有界，但 `mark` 热路径每观察者一次哈希查找，与本文件「稀疏下标换热路径零哈希」的既证取舍相抵，需基准证明无回退；② id/seq 复用 free list——直接违反 `reactor.h:150`「进程内唯一且不复用」与 `:110`「构造顺序」两条契约，且 `RunRecord` 跨轮持有 seq，复用有因果序污染风险，否决；③ 存活节点重编号到紧凑槽位（需额外 id→槽位映射）——可做到 O(存活数) 容量，但把零哈希热路径换成一次映射查找，超出本批范围，否决。
@@ -70,7 +70,7 @@
 ## 不变量与边界
 
 - 「id 进程内唯一且不复用」「观察者按构造序交付」两条契约逐字保留；本批不触碰 id 分配策略。
-- `mark` 热路径保持纯数组 O(1)；存活登记在构造/析构（低成本树操作），收缩按析构次数摊还并受 `in_delivery_` 守卫。
+- `mark` 热路径保持纯数组 O(1)；存活登记与收缩检查在构造/析构（低成本树操作 + O(1) 判等），受 `in_delivery_` 守卫。
 - 容量上界按「最高存活 id」定义，不承诺 O(存活数)；稀疏存活的容量残留是既有契约代价，已在动机与判据中明示。
 - 默认渲染（`global_alpha_ == 1.0`）逐位不变；`utest_simd_parity` 逐位一致门禁不受影响。
 - schema 缓存单线程前提不变，不引入锁；失效只挂在注册这一冷路径上。
@@ -79,7 +79,7 @@
 
 ## 验收判据
 
-1. 长会话模拟（**含纯创建/销毁、零写提交的段落**）：批量创建并销毁大量 `State`/派生节点（量级 ≥ 10 万累计），经 DEBUG 观测口断言：① 轮末与析构摊还检查后 `size == capacity ≤ max(4096, M + 1)`（M 为存活集合最高 id / seq）；② 存活集合清空后两数组 `size == 0`；③ 容量不随累计创建数单调增长（对比「10 万累计 / 存活 1」与「20 万累计 / 存活 1」两档，容量均收敛到各自 M+1 而非累计峰值）。
+1. 长会话模拟（**含纯创建/销毁、零写提交的段落**）：批量创建并销毁大量 `State`/派生节点（量级 ≥ 10 万累计），经 DEBUG 观测口断言：① 轮末兜底与析构检查后 `size == capacity ≤ max(4096, M + 1)`（M 为存活集合最高 id / seq）；② 存活集合清空后两数组 `size == 0`；③ 容量不随累计创建数单调增长（对比「10 万累计 / 存活 1」与「20 万累计 / 存活 1」两档，容量均收敛到各自 M+1 而非累计峰值）。
 2. 透明度助手网格用例：直接对 `aurora::detail` 的助手扫 `(a, ga)` 网格（含 a=0/255、ga=0/0.5/1、非整数乘积边界）断言输出等于 `clamp(lround(a×ga), 0, 255)`；五处调用点均由该助手实现（代码核对）；既有 painter 全部用例与 `ga == 1` 像素 golden 逐位不变。**不设「两条绘制路径输出同值」这类不可直接比较的判据。**
 3. schema 失效用例：注册 → 取 schema → 同名重注册 → 再取 schema，断言取到新 schema；既有序列化往返用例全绿。
 4. 字形缓存行为契约用例：覆盖「淘汰对象恰为最近命中条目」与「`clear()` 后复用 key」两序列，断言已淘汰 key `find` 为空、存活 key 内容正确、重新 `insert(v2)` 后 `find` 返回 v2；`utest_glyph_atlas` 既有用例全绿。**本条不是悬垂修复的证据。**
@@ -88,7 +88,7 @@
 
 ## 实施步骤
 
-- [ ] 状态引擎：存活登记 + 析构水位收缩 + 轮末兜底 + DEBUG 观测方法（含测试注入表登记）；`utest_reactor.cpp` 增长会话收敛用例（含零提交段落）。
+- [ ] 状态引擎：存活登记 + 析构水位收缩 + 轮末兜底 + DEBUG 观测方法（登记并入状态域文档）；`utest_reactor.cpp` 增长会话收敛用例（含零提交段落）。
 - [ ] 渲染口径：`gamma_lut.h` 助手 + 五处替换 + 注释同步；`utest_painter.cpp` 增助手网格用例。
 - [ ] schema 失效：缓存提升为文件级匿名对象 + 头文件外部链接声明 + `register_factory` 调用 + 注释改写；`utest_serialization.cpp` 增重注册用例。
 - [ ] 字形缓存行为契约钉：`utest_glyph_atlas.cpp` 增用例。
@@ -96,9 +96,8 @@
 
 ## 回写落点
 
-- `codespec/specification/02-state.md`：纪元数组容量策略（有界化语义、以最高存活 id 为界的收缩判据、契约保留声明）。
+- `codespec/specification/02-state.md`：纪元数组容量策略（有界化语义、以最高存活 id 为界的收缩判据、契约保留声明）与 DEBUG 观测口登记（状态域文档为 `02-state.md`，原拟登记到 `06-app-platform.md` 的条目并入此处——该文档无状态引擎章节）。
 - `codespec/specification/03-layout-render.md`：全局透明度整数化口径统一与助手归属；GlyphAtlas「不悬垂」代码事实与行为契约用例的定位（不作为证明）。
 - `codespec/specification/04-widget.md`：schema 缓存失效联动与单线程前提。
-- `codespec/specification/06-app-platform.md`：测试注入表新增 DEBUG 门控的纪元数组容量观测方法。
 
 根目录 CHANGELOG.md（不属 codespec 树，故不列为回写落点，随批必做）：Changed 条目记 schema 缓存失效语义与观测口新增。

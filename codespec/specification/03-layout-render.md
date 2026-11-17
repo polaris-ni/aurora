@@ -479,7 +479,7 @@ au::Column{}
 >
 > **自驱动动画与缓存**：在 `on_paint` 内自行 `mark_needs_paint()` 推进动画的控件，必须覆写 `can_cache_display_list()` 返回 `false`，否则开启显示列表缓存后动画会被冻结。
 
-**不变量**：`Painter::fill_rect` 必须乘 `global_alpha_`；`set_alpha(double)` 须在 `on_paint` 结束前复位为 `1.0`。
+**不变量**：`Painter::fill_rect` 必须乘 `global_alpha_`；`set_alpha(double)` 须在 `on_paint` 结束前复位为 `1.0`。全局透明度的整数化走 `aurora::detail::quantize_global_alpha`（`render/detail/gamma_lut.h`）**唯一口径**（四舍五入 + 夹取）：`set_pixel` 与梯度批量路径共用同一助手，`global_alpha_ == 1.0` 时两路径逐位一致；此前「`set_pixel` 截断 vs 梯度 `lround`」的口径差已收敛，禁止再引入第二处整数化点。裁剪覆盖度（`coverage × alpha`）是空间抗锯齿语义，不属于本口径。
 
 ### 8.2 FontEngine
 
@@ -520,6 +520,8 @@ au::Column{}
 **抗锯齿**：`enum class TextAAMode { Supersample, ClearType }` 加进程级 `set_text_aa_mode(mode)` / `text_aa_mode()`，默认 `Supersample`。`Supersample` 用 `FT_RENDER_MODE_NORMAL` 输出 A8 灰度覆盖度，与背景无关；`ClearType` 用 `FT_RENDER_MODE_LCD` 输出 3× 水平 RGB 子像素覆盖度，经 `Painter::blend_subpixel` 逐通道合成，**仅当文本不透明时启用**，半透明或字体不可用时自动回退 `Supersample`。
 
 **光栅状态世代**：`FontEngine::raster_generation()` 返回全局计数。三个字体注入接口（`set_default_font` / `register_font` / `register_font_from_memory`，换用不同字面同样改变字形光栅结果）**无条件**自增它；`set_text_aa_mode` 仅在写入值真正变化时自增（同值写入短路返回）。控件的 Display List 与离屏层缓存在录制/生成那一刻固化了 AA 模式与字面，而 `Widget::mark_needs_paint()` 只沿父链向上传播失效、不触及后代缓存——故控件必须把本世代纳入缓存命中条件（`Widget::paint` 已内置），否则切换后后代仍回放旧光栅，表现为「切换瞬间无变化、过一会儿才随无关失效零星生效」。字形图集键已含 AA 模式与 `px`，世代失效只触发重录、不产生脏条目。
+
+**字形图集（`GlyphAtlas`）的缓存条目指针不悬垂**：`last_hit_` 是最近一次命中/插入条目的裸指针缓存（命中免二次哈希），其安全依据是 `unordered_map` 元素指针在 rehash 下稳定 + 仅有的两条擦除路径（`clear()` 与容量淘汰）都在擦除该条目时同步置空缓存指针；容量淘汰是冷路径上的 O(n) 线性扫描（既证取舍，命中路径保持一次标量写）。行为契约由 `utest_glyph_atlas` 的「淘汰恰命中最近命中条目」「clear 后复用 key」两用例锁定（已淘汰 key 的 `find` 必须返回空、重新插入必须返回新内容）。
 
 **排版选项（`TextLayoutOpts`）**：`measure_width` / `caret_x` / `hit_test_char` / `draw_text` 均提供接受 `TextLayoutOpts` 的重载，携带 `letter_spacing`（相邻字形间间距，整串共 `n-1` 次）、`word_spacing`（词间距，仅空格后追加）、`italic`（经 FreeType `FT_Set_Transform` 仿斜）、`direction`（书写方向）、`font_fallback_chain`（按族缺字回退链）、`fixed_cell_advance_px`（固定格推进档位）。统一 opts 保证度量、光标、命中、绘制四者完全一致。**六个字段全部进 `DrawCmd` 参与录制**（见下「录制—回放」段），且全部进 shaping 缓存键的哈希与相等比较——漏掉任一字段都会让开了该档的文本命中没开的缓存条目，字距/选面静默错乱。
 

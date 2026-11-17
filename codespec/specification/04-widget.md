@@ -77,6 +77,8 @@ struct PropDescriptor {
 
 **批量发现**：`serialization::component_schema(name) -> Json`（`widget/serialization.h`，属 `aurora::serialization`）与 `list_all_schemas() -> std::vector<Json>`（`serialization.h`，属 `aurora` 命名空间）。`aurora::Inspector` 门面（`inspector/inspector_api.h`）另提供静态 `Inspector::component_schema(std::string_view)`（`inspector_api.h`）。
 
+**schema 缓存与注册失效联动**：`component_schema` 按类型名缓存构建结果（限 UI 线程，非线程安全），`WidgetRegistry::register_factory` 同名重注册时会失效该类型的缓存项——重注册后再取必为新工厂实例的属性面，杜绝反射面返回陈旧 schema。新类型注册不污染既有键；未注册类型不入缓存。
+
 `descriptor_to_json(...)` 把描述符序列化为 JSON（两个重载），供 `component_schema` 与 `gen_api` 消费。
 
 ```cpp
