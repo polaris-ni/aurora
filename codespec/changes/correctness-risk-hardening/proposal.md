@@ -6,7 +6,7 @@
 | 提出日期 | 2026-11-16 |
 | 当前状态 | 实施中 |
 | 关联需求 | 无 |
-| 影响面 | 状态引擎 `src/aurora/state/reactor.cpp` 与 `include/aurora/state/detail/reactor.h`（存活登记 + 析构水位收缩 + DEBUG 观测方法）；渲染 `src/aurora/render/painter.cpp` 与 `include/aurora/render/detail/gamma_lut.h`（透明度整数化助手 + 五处替换）；序列化 `include/aurora/widget/serialization.h` 的 `register_factory`（调用失效入口）与 `src/aurora/widget/serialization.cpp`（缓存提升为文件级 + 失效定义）；字形缓存 `src/aurora/render/glyph_atlas.cpp` 判非缺陷不改码，仅以行为契约用例钉住；测试 `tests/unit/utest_reactor.cpp` / `utest_painter.cpp` / `utest_serialization.cpp` / `utest_glyph_atlas.cpp` 各增用例；文档 `codespec/specification/02-state.md` / `03-layout-render.md` / `04-widget.md` 回写（观测口登记并入 02-state，该文档无状态引擎章节故不再列 06-app-platform）。 |
+| 影响面 | 状态引擎 `src/aurora/state/reactor.cpp` 与 `include/aurora/state/detail/reactor.h`（存活登记 + 析构水位收缩 + DEBUG 观测方法）；渲染 `src/aurora/render/painter.cpp` 与 `include/aurora/render/detail/gamma_lut.h`（透明度整数化助手 + 五处替换）；序列化 `include/aurora/widget/serialization.h` 的 `register_factory`（调用失效入口）与 `src/aurora/widget/serialization.cpp`（缓存提升为文件级 + 失效定义）；字形缓存 `src/aurora/render/glyph_atlas.cpp` 判非缺陷不改码，仅以行为契约用例钉住；测试 `tests/unit/utest_reactor.cpp` / `utest_painter.cpp` / `utest_serialization.cpp` / `utest_glyph_atlas.cpp` 各增用例；文档 `codespec/specification/02-state.md` / `03-layout-render.md` / `04-widget.md` 回写（观测口登记并入状态域文档，六号平台篇无状态引擎章节故不列）。 |
 
 ## 动机
 
@@ -96,7 +96,7 @@
 
 ## 回写落点
 
-- `codespec/specification/02-state.md`：纪元数组容量策略（有界化语义、以最高存活 id 为界的收缩判据、契约保留声明）与 DEBUG 观测口登记（状态域文档为 `02-state.md`，原拟登记到 `06-app-platform.md` 的条目并入此处——该文档无状态引擎章节）。
+- `codespec/specification/02-state.md`：纪元数组容量策略（有界化语义、以最高存活 id 为界的收缩判据、契约保留声明）与 DEBUG 观测口登记（原拟登记到六号平台篇的条目并入此处——该文档无状态引擎章节）。
 - `codespec/specification/03-layout-render.md`：全局透明度整数化口径统一与助手归属；GlyphAtlas「不悬垂」代码事实与行为契约用例的定位（不作为证明）。
 - `codespec/specification/04-widget.md`：schema 缓存失效联动与单线程前提。
 
