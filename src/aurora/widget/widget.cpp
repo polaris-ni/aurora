@@ -875,8 +875,12 @@ auto Widget::hit_test_chain(const Point &local, const Rect &bounds, const BuildC
                 break;
             }
         }
-        // 原地前插而非新建 result 再整链拷贝：命中链每层都会经过本函数，旧写法在
-        // 深度 k 的链上产生 k 次 vector 分配 + O(k²) 元素拷贝（每次鼠标移动都走一遍）。
+        // 原地前插而非新建 result 再整链拷贝：省掉了逐层 vector 分配与整链拷贝。
+        // 残余成本并未归零：每层前插把已收集的 k 个元素整体后移一位，深度 k 累计 O(k²) 次移动；
+        // 且 `size == capacity` 时仍按几何级数扩容，每次命中有约 ⌈log₂k⌉ 次分配。
+        // 进一步降本要改收集方向（尾插 + 最外层 reverse，需一枚递归深度）或改
+        // `on_hit_test_chain` 为出参收集（公共签名 + 全部覆写）；链深 5–15 时两者差值在亚微秒级，
+        // 低于测量噪声，故保留现状。
         if (!self_in_chain) {
             // 记入链的 origin 必须是**内容盒**原点（self_box.origin），与绘制同源：
             // 派发器按 `global - it.origin` 本地化坐标，用布局盒原点会让 `local_position`

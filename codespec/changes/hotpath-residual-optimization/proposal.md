@@ -82,10 +82,14 @@
 - `Json` 对象键索引：`Object` 是公共可写别名，旁挂索引与「经别名改键」脱钩，改别名本身是公共 API 变更。
 - `ShapeCache` 键改持有调用方 `string_view`：入参生命周期不覆盖条目（跨帧存活至多 4096 条），悬垂键不可复现。
 - 悬停链改共享快照：需改 `EventDispatcher::update_hover` 公共签名；现形态在稳态下已无每次调用的堆分配。
+- 命中链收集改尾插 + 最外层 reverse：现状每层 `insert(begin())` 的残余成本是深度 k 累计 O(k²) 次元素移动，加上 `size == capacity` 时的几何扩容（每次命中约 ⌈log₂k⌉ 次分配）；换成尾插 + 最外层统一 reverse 可把移动降为 O(k)，彻底零分配则须把 `on_hit_test_chain` 改成出参收集（公共签名 + 全部覆写）。链深 5–15 时两种形态的单次差值在亚微秒级、低于测量噪声，故保留现状，准确量级写进 `Widget::hit_test_chain` 的注释。
 
 移出本案，需独立提案（与本案判据不相容）：
 
-- alpha 取整统一：会改 golden 基线（上限 1 LSB），与本案「逐位 0 差异、禁止放宽容差」直接冲突；须先统计差异像素数与分布再立项。
 - `fill_sector` 羽化带按行解析、圆角过渡列小批量、`draw_shadow` 边缘环按行分解：几何重写无法由现有用例自证逐位一致；现有批量核心区已覆盖主要成本。
 - 分配计数钩子：需在测试二进制内替换全局 `operator new`，会同时改写其余用例的分配观测，属测试基建变更，另行安排。
 - 实测基准（`paint` 分项 / p99 / worst）：本机无稳定读数，按「只接受实测改善」不写基线，`perf_gates.json` 未收紧。
+
+已在他处落地，不再列为本案待办：
+
+- alpha 取整统一：`aurora::detail::quantize_global_alpha` 已是 8 位 alpha 乘全局透明度的唯一口径（`set_pixel` 与线性 / 径向渐变的分段批量路径），`global_alpha == 1` 时逐位不变，由 `utest_painter` 的 `quantize_global_alpha_grid` 守护；golden 场景不使用 `global_alpha < 1`，基线无需重录。
