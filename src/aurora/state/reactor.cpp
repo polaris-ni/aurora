@@ -311,7 +311,7 @@ auto Engine::run_job(const std::function<void()> &fn, std::vector<std::uint64_t>
     active_chain_ = std::move(saved);
 }
 
-/// @brief 传播阶段守卫：覆盖 mark + deliver，期间禁止收缩去重戳数组。
+// 传播阶段守卫：覆盖 mark + deliver，期间禁止收缩去重戳数组。
 // NOLINTNEXTLINE(cppcoreguidelines-special-member-functions): 局部 RAII 守卫，拷贝/移动禁用是有意设计
 struct DeliveryGuard {
     bool *flag;
