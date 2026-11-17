@@ -9,8 +9,8 @@ namespace aurora::detail {
 
 /// @brief 布局中间量缓冲的观测快照（只读，供测试断言复用行为）。
 struct FlexScratchStats {
-    std::size_t layers = 0;              ///< 当前线程常驻的缓冲层数
-    std::size_t sizes_capacity = 0;      ///< 指定层 `sizes` 的容量（层不存在时为 0）
+    std::size_t layers = 0;  ///< 当前线程常驻的缓冲层数
+    std::size_t sizes_capacity = 0;  ///< 指定层 `sizes` 的容量（层不存在时为 0）
     std::size_t baselines_capacity = 0;  ///< 指定层 `baselines` 的容量（层不存在时为 0）
 };
 
