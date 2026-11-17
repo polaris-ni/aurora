@@ -61,6 +61,7 @@ freeze: minor-versions-are-additive
 - **`DisplayList` 回放合并相邻文本命令**：属性（字体 / 颜色 / 抗锯齿 / 字距词距斜体方向固定格 / 回退链）相同的连续 `DrawText` 按 16 条一批交给 `Painter::draw_text_runs`，省去逐条字体面解析与行高度量；遇任何非文本命令与层捕获区间即断开，单条文本仍走原逐条路径，像素逐位不变。契约见 [`codespec/specification/03-layout-render.md`](codespec/specification/03-layout-render.md) §8.6。
 - **缩放贴图的逐行双线性采样改为显式 SIMD 内核**：`draw_image` 缩放路径把逐列预计算的三张表改为并列数组（SoA），按 256 列分块调用 `image_bilinear_row`——标量内核逐字镜像原单像素公式并作为黄金参考，SSE2 / AVX2 内核按运行时 CPUID 分发（非 x86 回落标量）；`draw_image` 其余分支与输出逐位不变。契约见 [`codespec/specification/03-layout-render.md`](codespec/specification/03-layout-render.md) §8.1。
 - **字形图集增加定长直通缓存**：`FontEngine` 在每次绘制调用内用 12 项直接映射缓存字形条目，命中跳过图集哈希查找（LRU 提升仍经 `touch` 回写使用序号）；图集的 `insert` / `clear` 会推进内部世代号，缓存据此整体失效，不当条目不会跨图集变更复用。像素与缓存顺序逐位不变。
+- **不透明整帧基底跳过缓冲清零**：`D3D11Surface` / `WgpuWin32Surface` 的 `begin_frame` 在 `Painter::begin` 之后立即以不透明底色铺满整块缓冲，故同尺寸帧跳过这次整缓冲清零（2560×1440 约省 14.7 MB/帧的冗余写入）；缓冲尺寸变化、首次分配、`set_scale` 变更后的首帧、显示列表录制态与半透明/未铺满基底一律回落清零，像素逐位不变。契约见 [`codespec/specification/03-layout-render.md`](codespec/specification/03-layout-render.md) §8.1。
 
 ### Fixed
 

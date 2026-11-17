@@ -21,6 +21,7 @@
 #include <cstdint>
 
 #include "aurora/core/log.h"
+#include "aurora/render/detail/frame_base.h"
 #include "aurora/window/swizzle.h"
 #include "aurora/window/win32_capture.h"
 #include "aurora/window/win32_cursor.h"
@@ -103,7 +104,9 @@ auto WgpuWin32Surface::begin_frame(int width, int height) -> Result<bool> {
     // GPU 模式下 Window 已先行 p.record(frame_dl)：底色 fill_rect 落入帧 DL（Glfw GPU 模式同构），
     // 软件回退模式下同一批调用直接光栅化进缓冲。
     painter_.set_scale(s);
-    painter_.begin(width, height);
+    // 本帧紧接着以 `clear_color()` 铺满整块缓冲，故同尺寸帧可跳过 `begin` 的整缓冲清零；
+    // 录制态（GPU 帧）下底色只入命令流不落像素，钩子会自动回到全零基底。
+    detail::begin_frame(painter_, width, height, detail::FrameBase{.color = clear_color()});
     painter_.fill_rect(Rect{.origin = Point{.x = 0.0F, .y = 0.0F},
                             .size = Size{.width = static_cast<float>(width), .height = static_cast<float>(height)}},
                        clear_color());

@@ -8,6 +8,7 @@
 
 #include "aurora/core/math.h"
 #include "aurora/perf/counters.h"
+#include "aurora/render/detail/frame_base.h"
 #include "aurora/render/detail/gamma_lut.h"
 #include "aurora/render/detail/paint_timing.h"
 #include "aurora/render/detail/painter_simd.h"
@@ -247,17 +248,24 @@ auto Painter::rebuild_clip_bounds() -> void {
     }
 }
 
-auto Painter::begin(int width, int height) -> void {
+auto Painter::begin(int width, int height) -> void { begin_with_base(width, height, false); }
+
+auto Painter::begin_with_base(int width, int height, bool skip_clear) -> void {
     // 逻辑 dp 尺寸 → 物理像素缓冲（高 DPI 清晰、1:1 贴窗口）。
-    width_ = static_cast<int>(std::lround(width * scale_));
-    height_ = static_cast<int>(std::lround(height * scale_));
-    if (width_ <= 0) {
-        width_ = 1;
+    const int new_width = std::max(1, static_cast<int>(std::lround(width * scale_)));
+    const int new_height = std::max(1, static_cast<int>(std::lround(height * scale_)));
+    const std::size_t bytes = static_cast<size_t>(new_width) * static_cast<size_t>(new_height) * 4U;
+    // 跳过清零的充分条件：缓冲尺寸与 scale 均未变（旧像素就是上帧同尺寸同 scale 的画面）、
+    // 且容量吻合。调用方须保证紧接着以不透明底色铺满整块缓冲，否则会看到上帧残留。
+    // 尺寸变化 / 首次分配（begin_scale_ == 0）/ set_scale 之后的首帧一律回到全零基底。
+    const bool reusable =
+        skip_clear && new_width == width_ && new_height == height_ && begin_scale_ == scale_ && pixels_.size() == bytes;
+    width_ = new_width;
+    height_ = new_height;
+    begin_scale_ = scale_;
+    if (!reusable) {
+        pixels_.assign(bytes, 0);
     }
-    if (height_ <= 0) {
-        height_ = 1;
-    }
-    pixels_.assign(static_cast<size_t>(width_) * static_cast<size_t>(height_) * 4U, 0);
     // 新帧裁剪栈归零兜底：push/pop 由调用方配对，但若某处失衡（历史上曾因
     // push_clip_rounded 双压泄漏造成整窗白屏），不得跨帧扩散。
     clip_stack_.clear();
@@ -267,6 +275,12 @@ auto Painter::begin(int width, int height) -> void {
     // 查 ready 标志，省掉每像素一次 acquire 语义的原子读 + 分支。
     init_gamma_tables();
 }
+
+namespace detail {
+auto FrameBaseAccess::begin(Painter &painter, int width, int height, bool skip_clear) -> void {
+    painter.begin_with_base(width, height, skip_clear);
+}
+}  // namespace detail
 
 auto Painter::width() const -> int { return width_; }
 

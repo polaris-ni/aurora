@@ -11,6 +11,7 @@
 #include <utility>
 
 #include "aurora/core/log.h"
+#include "aurora/render/detail/frame_base.h"
 #include "aurora/window/win32_capture.h"
 #include "aurora/window/win32_cursor.h"
 
@@ -355,7 +356,8 @@ auto D3D11Surface::begin_frame(int width, int height) -> Result<bool> {
     // Painter 按 scale 将逻辑 dp 坐标映射到物理像素：begin 传入逻辑尺寸，
     // Painter 内部 ×scale_ 分配物理缓冲；故设置 scale 后传逻辑 w/h（与 Win32Surface 同源）。
     painter_.set_scale(s);
-    painter_.begin(width, height);
+    // 本帧紧接着以不透明底色铺满整块缓冲，故同尺寸帧可跳过 `begin` 的整缓冲清零。
+    detail::begin_frame(painter_, width, height, detail::FrameBase{.color = Color{245, 245, 245, 255}});
     // 用不透明背景色填充 painter 缓冲区（与 present() 的 ClearRenderTargetView 颜色一致）。
     // Painter 的 set_pixel 在混合后将 alpha 强制写 255，若缓冲区初始为透明黑(0,0,0,0)，
     // 文字抗锯齿边缘会与黑色混合导致发暗/黑边。预填不透明背景使抗锯齿与正确底色混合。

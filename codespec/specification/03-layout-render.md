@@ -404,10 +404,16 @@ au::Column{}
 
 | 方法 | 说明 |
 |:---|:---|
-| `begin(width, height)` | 开始一帧 |
+| `begin(width, height)` | 开始一帧：默认把整块物理缓冲重置为全零基底 |
 | `width()` / `height()` / `data()` | 缓冲尺寸与像素数据 |
 | `get_pixel(x, y)` | 读像素 |
 | `set_alpha(double)` / `global_alpha()` | 全局透明度 |
+
+**帧基底契约**：全零基底是默认语义，脏区重绘依赖它。后端在 `begin` 之后**立即**以不透明底色
+（alpha = 255）铺满整块缓冲时，可经内部通道跳过这次整缓冲清零——被跳过的写入随后会被底色逐字节覆盖，
+故不改变任何可见像素，也不引入「未覆盖区域保留上帧像素」的新语义。以下情况一律回落清零：缓冲尺寸变化、
+首次分配、`set_scale` 变更后的首帧、显示列表录制态（此时底色只入命令流、不落像素），以及底色半透明
+或未铺满整块缓冲。该通道不改变公共 API，也不对调用方暴露新参数。
 
 **几何与文本原语**
 
@@ -573,7 +579,7 @@ au::Column{}
 
 | 方法 | 说明 |
 |:---|:---|
-| `begin_frame(int width, int height) -> Result<bool>` | 纯虚；按设备像素宽高分配 / 重置一帧画布 |
+| `begin_frame(int width, int height) -> Result<bool>` | 纯虚；按设备像素宽高分配 / 重置一帧画布。实现者若在分配后立即以不透明底色铺满整块缓冲，可经内部通道跳过整缓冲清零（见 §8.1「帧基底契约」）；脏区补绘路径不经过本方法，仍用 `clear_rect` + 裁剪保留上帧基线 |
 | `painter() -> Painter&` / `present() -> Result<bool>` | 取当前帧绘制器 / 呈现当前帧（刷新到窗口或落盘） |
 | `set_event_handler(EventHandler)` | 后端只「采集原生事件并翻译为 `aurora::Event` 上抛」；事件派发集中到 `Application` 经 `EventDispatcher` + `FocusManager` |
 | `scale_factor()` | 默认 `1.0`；`Win32Surface` / `D3D11Surface` 返回 `dpi/96`，启用 Per-Monitor DPI 感知，按物理像素创建窗口与帧缓冲，事件坐标除以 scale 还原为 dp |

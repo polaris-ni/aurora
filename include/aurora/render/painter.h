@@ -39,6 +39,10 @@ struct TextRun {
 
 class DisplayList;  // 前向声明（完整定义见 display_list.h）；录制/回放接口
 
+namespace detail {
+struct FrameBaseAccess;  // 前向声明（定义于 src/aurora/render/detail/frame_base.h）：帧基底内部通道
+}  // namespace detail
+
 /// @brief 软件栅格绘制器：在 RGBA8 像素缓冲上绘制矩形/文本/图像。
 ///
 /// 纯软件实现，无 GPU 依赖（ARCHITECTURE.md §8.1）。后端可插拔（Surface 抽象）：
@@ -410,6 +414,15 @@ class Painter {
     auto draw_layer(std::uint64_t key, const Matrix2D &matrix, float src_scale) const -> void;
 
   private:
+    friend struct detail::FrameBaseAccess;  ///< 帧基底内部通道（引擎/窗口后端专用，不属于公共 API 面）
+
+    /// @brief `begin` 的实现：按需跳过整缓冲清零。
+    /// @param width 画布宽（逻辑 dp）。
+    /// @param height 画布高（逻辑 dp）。
+    /// @param skip_clear true 时在「尺寸未变、scale 未变、缓冲容量吻合」的前提下保留既有像素，
+    ///        由调用方保证本帧紧接着以不透明底色铺满整块缓冲；其余情况一律回到全零基底。
+    auto begin_with_base(int width, int height, bool skip_clear) -> void;
+
     struct ClipRegion {
         Rect rect;  ///< 裁剪矩形（物理像素）
         bool rounded = false;  ///< 是否圆角裁剪（叠加 SDF 覆盖度）
@@ -475,6 +488,7 @@ class Painter {
     int width_ = 0;  ///< 物理缓冲宽（begin 时按 dp × scale 取整）
     int height_ = 0;  ///< 物理缓冲高（dp × scale 取整）
     float scale_ = 1.0F;  ///< device pixel ratio（dp → 物理像素）
+    float begin_scale_ = 0.0F;  ///< 最近一次 `begin` 时的 scale（0 = 尚未分配，首帧必清零）
     std::vector<std::uint8_t> pixels_;  ///< RGBA8 帧缓冲（宽 × 高 × 4 字节）
     /// @brief `draw_image` 缩放路径的列映射暂存（按列分解为三个并列数组，供 SIMD 内核连续读取）；
     /// 按容量复用，避免每次调用分配临时表。

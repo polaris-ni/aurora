@@ -5,14 +5,21 @@
 /// blend_pixel、draw_image 缩放、线性渐变方向、
 /// draw_line 覆盖、shift_pixels 垂直搬移、to_image 导出与 get_pixel 越界兜底、draw_text_runs 与逐个
 /// draw_text 的逐位一致及空批无操作、带 opts/aa_mode 的批量入口与逐个 draw_text(..., aa_mode, opts) 逐位一致、
-/// 圆角填充的行级全覆写快路径与逐像素 coverage 在胶囊/普通圆角（含非整数锚点）上逐位一致
+/// 圆角填充的行级全覆写快路径与逐像素 coverage 在胶囊/普通圆角（含非整数锚点）上逐位一致、
+/// 不透明整帧基底的清零跳过（与零基底逐字节一致，及半透明底色 / 未铺满 / 尺寸变化 / scale 变化 /
+/// 录制态五类必清零反例）
 
+#include <algorithm>
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
 #include <span>
 #include <string>
 
 #include "aurora/core/image.h"
+#include "aurora/render/detail/frame_base.h"
 #include "aurora/render/detail/gamma_lut.h"
+#include "aurora/render/display_list.h"
 #include "aurora/render/font_engine.h"
 #include "aurora/render/painter.h"
 #include "framework/aurora_test.h"
@@ -43,6 +50,33 @@ namespace {
 
 /// @brief 某像素是否为蓝调（B 明显高于 R/G）。
 [[nodiscard]] auto color_is_bluish(const Color &c) -> bool { return c.b > 128 && c.r < 64 && c.g < 64; }
+
+/// @brief 画布缓冲是否仍为未经绘制的全零基底（跳过清零的失效判据）。
+[[nodiscard]] auto is_all_zero(const Painter &p) -> bool {
+    for (int y = 0; y < p.height(); ++y) {
+        for (int x = 0; x < p.width(); ++x) {
+            if (p.get_pixel(x, y) != Color{0, 0, 0, 0}) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+/// @brief 两画布的 RGBA8 缓冲是否逐字节相同。
+[[nodiscard]] auto buffers_equal(const Painter &a, const Painter &b) -> bool {
+    if (a.width() != b.width() || a.height() != b.height()) {
+        return false;
+    }
+    const std::uint8_t *pa = a.data();
+    const std::uint8_t *pb = b.data();
+    if (pa == nullptr || pb == nullptr) {
+        return false;
+    }
+    const auto bytes = static_cast<std::size_t>(a.width()) * static_cast<std::size_t>(a.height()) * 4U;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic): 整块像素缓冲按字节比较
+    return std::equal(pa, pa + bytes, pb);
+}
 
 /// @brief 两画布逐像素不同的格数（文本批量入口用它自证与逐个绘制等价）。
 [[nodiscard]] auto count_diff_pixels(const Painter &a, const Painter &b) -> int {
@@ -539,6 +573,79 @@ AURORA_TEST_CASE(quantize_global_alpha_grid) {
                 static_cast<int>(aurora::detail::quantize_global_alpha(static_cast<std::uint8_t>(a), ga)), expected);
         }
     }
+}
+
+AURORA_TEST_CASE(frame_base_skip_clear_matches_zeroed_base_for_opaque_full_frame) {
+    // 不透明底色铺满整块缓冲时，跳过 begin 的整缓冲清零必须与「清零后同样铺满」逐字节一致：
+    // 上帧残留的像素全部被底色覆盖，不得有任何字节漏网。
+    const Color base{245, 245, 247, 255};
+    Painter skipped;
+    skipped.begin(16, 16);
+    skipped.fill_rect(rect_at(0.0F, 0.0F, 16.0F, 16.0F), Color::red());  // 制造上帧残留
+    aurora::detail::begin_frame(skipped, 16, 16, aurora::detail::FrameBase{.color = base});
+    skipped.fill_rect(rect_at(0.0F, 0.0F, 16.0F, 16.0F), base);
+
+    Painter zeroed;
+    zeroed.begin(16, 16);
+    zeroed.fill_rect(rect_at(0.0F, 0.0F, 16.0F, 16.0F), base);
+
+    AURORA_TEST_REQUIRE_TRUE(buffers_equal(skipped, zeroed));
+}
+
+AURORA_TEST_CASE(frame_base_skip_clear_refuses_translucent_base) {
+    // 半透明底色不能保证覆盖残留像素：必须回到全零基底（放宽 alpha 判据则该例转红）。
+    Painter p;
+    p.begin(8, 8);
+    p.fill_rect(rect_at(0.0F, 0.0F, 8.0F, 8.0F), Color::red());
+    aurora::detail::begin_frame(p, 8, 8, aurora::detail::FrameBase{.color = Color{245, 245, 247, 128}});
+    AURORA_TEST_CHECK_TRUE(is_all_zero(p));
+}
+
+AURORA_TEST_CASE(frame_base_skip_clear_refuses_partial_coverage) {
+    // 底色不铺满整块缓冲（异形/半覆盖外形）时必须清零，否则边角会看到上帧残留。
+    Painter p;
+    p.begin(8, 8);
+    p.fill_rect(rect_at(0.0F, 0.0F, 8.0F, 8.0F), Color::red());
+    aurora::detail::begin_frame(
+        p, 8, 8, aurora::detail::FrameBase{.color = Color{245, 245, 247, 255}, .covers_whole_buffer = false});
+    AURORA_TEST_CHECK_TRUE(is_all_zero(p));
+}
+
+AURORA_TEST_CASE(frame_base_skip_clear_forces_clear_on_size_change) {
+    // 尺寸变化后旧缓冲的像素布局不再对应：必须清零，断言无旧尺寸残留。
+    Painter p;
+    p.begin(16, 16);
+    p.fill_rect(rect_at(0.0F, 0.0F, 16.0F, 16.0F), Color::red());
+    aurora::detail::begin_frame(p, 8, 8, aurora::detail::FrameBase{.color = Color{245, 245, 247, 255}});
+    AURORA_TEST_REQUIRE_EQ(p.width(), 8);
+    AURORA_TEST_REQUIRE_EQ(p.height(), 8);
+    AURORA_TEST_CHECK_TRUE(is_all_zero(p));
+}
+
+AURORA_TEST_CASE(frame_base_skip_clear_forces_clear_after_scale_change) {
+    // scale 变化但物理尺寸恰好不变（8×8 @1 → 4×4 @2）：残留像素属于另一种像素密度，必须清零。
+    Painter p;
+    p.begin(8, 8);
+    p.fill_rect(rect_at(0.0F, 0.0F, 8.0F, 8.0F), Color::red());
+    p.set_scale(2.0F);
+    aurora::detail::begin_frame(p, 4, 4, aurora::detail::FrameBase{.color = Color{245, 245, 247, 255}});
+    AURORA_TEST_REQUIRE_EQ(p.width(), 8);
+    AURORA_TEST_REQUIRE_EQ(p.height(), 8);
+    AURORA_TEST_CHECK_TRUE(is_all_zero(p));
+}
+
+AURORA_TEST_CASE(frame_base_skip_clear_refuses_recording_state) {
+    // 录制态下 fill_rect 只入命令流、不落像素：保留旧缓冲会让 data() 暴露上帧画面，必须清零。
+    Painter p;
+    p.begin(8, 8);
+    p.fill_rect(rect_at(0.0F, 0.0F, 8.0F, 8.0F), Color::red());
+
+    DisplayList dl;
+    p.record(dl);
+    aurora::detail::begin_frame(p, 8, 8, aurora::detail::FrameBase{.color = Color{245, 245, 247, 255}});
+    p.stop();
+
+    AURORA_TEST_CHECK_TRUE(is_all_zero(p));
 }
 
 }  // namespace aurora::test_cases::utest_painter
