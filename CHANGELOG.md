@@ -55,7 +55,7 @@ freeze: minor-versions-are-additive
 - **裁剪判界与绘制入口的每次调用开销再降一档**：`Painter` 在裁剪栈变更时重算各层矩形交集并缓存为整数包围盒，`set_pixel` / `blend_subpixel` 以一次整数比较替代逐像素裁剪栈遍历（存在圆角层时只对交集内像素算 SDF 覆盖度）；线性渐变把「末标早于 1」的停止点补成覆盖 `[0,1]` 后复用分段路径，尾部平台区亦走批量写入；`Widget::layout` 的修饰链测量改为逐层只捕获外层闭包引用与层号，构造 `std::function` 不再逐层堆分配；`MainQueue` 的世代号与打烊标记改为锁内落值并以原子发布，`current_epoch()` / `is_closing()` 免锁读取。输出逐位不变。
 - **序列化差量与窗口盒查询的重复工作再降一档**：`diff_objects` 复用同一块路径缓冲（不再逐键拼 `path + "/" + key` 临时串）、对共同键先判子树相等再拼路径，且键查找只做一次（原 `contains` + `at` 是两次线性扫描）；`Widget::window_bounds` 的兄弟定位加「下标 + 地址比对」可校验缓存（失配才线性扫描并回写），稳态上溯从 O(树深 × 兄弟数) 降为 O(树深)。输出逐位不变。
 - **JSON 编解码去掉无转义字符串的重复拷贝**：解析时无转义的字符串（常态）直接别名输入文本，遇 `\` 才把已扫描前缀搬入复用缓冲走解码路径（两条路径的校验口径与交出内容逐字节一致）；`dump` 的字符串写入按「无需转义的连续字节」整段追加，不再逐字节 `push_back`；JSON Pointer 的无 `~` 段直接以视图查键（免一次堆分配），`erase_pointer` 单趟切段定位父容器（不再预先收集全部段副本）。解析结果与输出文本逐字节不变。契约见 [`codespec/specification/01-core.md`](codespec/specification/01-core.md) §9.6 / §9.7 / §9.10 / §9.11。
-- **文本 shaping 命中路径去掉整行文本与整份字形的拷贝**：shape 缓存的查找改用只借用行视图与排版选项的透明探针（不再为构造缓存键拷贝整行），命中直接返回条目内字形数组的视图、未命中入库后同样返回该视图（旧实现键与返回值各拷贝一次）；行切分与 run 切片改为 `string_view`（旧实现逐字符 `push_back` 建串、每个 run 一次堆分配）。绘制、度量、光标、命中四条路径的输出逐位不变。契约见 [`codespec/specification/03-layout-render.md`](codespec/specification/03-layout-render.md) §8.2。
+- **文本 shaping 命中路径去掉整行文本与整份字形的拷贝**：shape 缓存的查找改用只借用行视图与排版选项的透明探针（不再为构造缓存键拷贝整行），命中直接返回条目内字形数组的视图、未命中入库后同样返回该视图（旧实现键与返回值各拷贝一次）；行切分与 run 切片改为 `string_view`（旧实现逐字符 `push_back` 建串、每个 run 一次堆分配），行集合改为逐行回调（单行文本不再为行列表分配 `std::vector`）。绘制、度量、光标、命中四条路径的输出逐位不变。契约见 [`codespec/specification/03-layout-render.md`](codespec/specification/03-layout-render.md) §8.2。
 
 ### Fixed
 

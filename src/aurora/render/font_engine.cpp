@@ -548,20 +548,19 @@ class ShapeCache {
     return out;
 }
 
-// 按 '\n' 切分为行（'\n' 为单字节 0x0A，绝不出现在多字节序列内）。
-// 行以视图返回、指向调用方文本：旧实现逐字符 push_back 进 std::string 再整串拷入 vector，
-// 单行文本也要两次分配、长行还要反复扩容——绘制/度量/光标/命中四条路径每次调用都付。
-[[nodiscard]] auto split_lines(std::string_view text) -> std::vector<std::string_view> {
-    std::vector<std::string_view> lines;
+// 逐行回调：按 '\n' 切分并把每行（视图）交给 fn；空文本回调一次空行（与旧返回值语义一致）。
+// 旧实现每次调用都建一个 vector（单行文本也付一次堆分配），而单行是绘制/度量/光标/命中的常态。
+// 按值收下回调：行回调会被调用多次，转发引用在这里只会误导（不转发、不移动）。
+template <typename Fn>
+auto for_each_line(std::string_view text, Fn fn) -> void {
     std::size_t start = 0;
     for (std::size_t i = 0; i < text.size(); ++i) {
         if (text[i] == '\n') {
-            lines.push_back(text.substr(start, i - start));
+            fn(text.substr(start, i - start));
             start = i + 1;
         }
     }
-    lines.push_back(text.substr(start));  // 与旧实现一致：空文本也给出一行空行
-    return lines;
+    fn(text.substr(start));  // 与旧实现一致：空文本也给出一行空行
 }
 
 // 单个字形的水平推进量（px）：默认取 HarfBuzz 给出的该 face 自身 advance；
@@ -600,36 +599,44 @@ class ShapeCache {
 [[nodiscard]] auto prefix_advance_px(const std::string &text, std::size_t char_index,
                                      const std::vector<FontFace *> &faces, int px, const TextLayoutOpts &opts,
                                      float spacing_scale) -> float {
-    const auto lines = split_lines(text);
     std::size_t acc = 0;
-    for (const auto &line : lines) {
+    bool found = false;
+    float result = 0.0F;
+    std::string_view last_line;
+    for_each_line(text, [&](std::string_view line) {
+        if (found) {
+            return;
+        }
+        last_line = line;
         const std::size_t lcount = cp_count(line);
         if (char_index <= acc + lcount) {
             const std::size_t local = char_index - acc;
             const auto sl = shape_line(line, faces, px, opts);
             // RTL：逻辑下标 ↔ 视觉位置镜像。逻辑首字符在右缘：逻辑 caret i（前 i 个
             // 字符的左边界）= 右起第 i 个视觉字形处 = 视觉前缀 (n - i) 的推进。
-            if (opts.direction == TextDirection::RTL) {
-                const std::size_t n = sl.size();
-                return line_prefix(sl, opts, spacing_scale, n - std::min(local, n));
-            }
-            return line_prefix(sl, opts, spacing_scale, local);
+            result = opts.direction == TextDirection::RTL
+                         ? line_prefix(sl, opts, spacing_scale, sl.size() - std::min(local, sl.size()))
+                         : line_prefix(sl, opts, spacing_scale, local);
+            found = true;
+            return;
         }
         acc += lcount + 1;  // +1 计 '\n'
+    });
+    if (found) {
+        return result;
     }
-    const auto sl = shape_line(lines.back(), faces, px, opts);
+    const auto sl = shape_line(last_line, faces, px, opts);
     return line_prefix(sl, opts, spacing_scale, sl.size());
 }
 
 // 整串宽度（px 像素，多行取最宽行）：与 prefix_advance_px 同源的整串版。
 [[nodiscard]] auto max_line_width_px(const std::string &text, const std::vector<FontFace *> &faces, int px,
                                      const TextLayoutOpts &opts, float spacing_scale) -> float {
-    const auto lines = split_lines(text);
     float max_w = 0.0F;
-    for (const auto &line : lines) {
+    for_each_line(text, [&](std::string_view line) {
         const auto sl = shape_line(line, faces, px, opts);
         max_w = std::max(max_w, line_prefix(sl, opts, spacing_scale, sl.size()));
-    }
+    });
     return max_w;
 }
 
@@ -658,11 +665,15 @@ class ShapeCache {
         // 左缘之外：LTR=逻辑开头；RTL=逻辑末尾（视觉最左=逻辑最后）。
         return rtl ? (inclusive ? total - 1U : total) : 0;
     }
-    const auto lines = split_lines(text);
     float w = 0.0F;
     float prev_boundary = 0.0F;
     std::size_t line_char_offset = 0;  // 当前行首在全局文本中的字符下标（含前导 '\n'）
-    for (const auto &line_str : lines) {
+    std::size_t hit = 0;
+    bool found = false;
+    for_each_line(text, [&](std::string_view line_str) {
+        if (found) {
+            return;
+        }
         const auto sl = shape_line(line_str, faces, px, opts);
         const std::size_t m = sl.size();
         w = 0.0F;  // 每行 pen 推进归零（与 draw_text_impl 每行重置 pen_x 一致）
@@ -679,18 +690,25 @@ class ShapeCache {
             if (inclusive) {
                 if (x <= boundary) {
                     // 视觉字形 j = 逻辑 m-1-j（RTL）；LTR 直接 j。
-                    return line_char_offset + (rtl ? (m - 1U - j) : j);
+                    hit = line_char_offset + (rtl ? (m - 1U - j) : j);
+                    found = true;
+                    return;
                 }
             } else {
                 const float mid = (prev_boundary + boundary) * 0.5F;
                 if (x < mid) {
                     // 视觉前缀 j 的 caret 位置 = 逻辑 caret (m - j)（RTL）；LTR 直接 j。
-                    return line_char_offset + (rtl ? (m - j) : j);
+                    hit = line_char_offset + (rtl ? (m - j) : j);
+                    found = true;
+                    return;
                 }
                 prev_boundary = boundary;
             }
         }
         line_char_offset += cp_count(line_str) + 1;  // +1 计 '\n'
+    });
+    if (found) {
+        return hit;
     }
     // 行尾右侧：LTR=逻辑末尾（caret total / 含入末字符）；RTL=逻辑开头（caret 0 / 含入首字符）。
     if (rtl) {
@@ -808,14 +826,13 @@ auto emit_glyphs_with_context(const EmitContext &ctx, const std::string &text, c
 
     // 与度量/绘制逐位同源：整段按行切分，逐行调用 shape_line（hb_shape）得到字形序列，
     // 再按 shaped run 推进 pen 并合成为像素——度量（measure/caret）与命中测试复用同一逻辑。
-    const auto lines = split_lines(text);
     // origin_y 为行盒顶（历史 GDI TA_TOP 语义），FreeType 以基线定位字形：
     // 首行基线 = 顶 + ascender，否则整体上移一个 ascent（顶部控件文字被裁出窗外）。
     // 将行首 snap 到整数物理像素：hinted 字形 advance 为整像素，从整数坐标开始绘制
     // 可避免高 DPI/非整数列宽造成的半像素模糊（如 125% DPI 下 GridView 列宽为半整数
     // 时，1、3 列清晰而 2、4 列发虚）。
     float pen_y = std::floor(origin_y + ctx.ascent + 0.5F);
-    for (const auto &line_str : lines) {
+    for_each_line(text, [&](std::string_view line_str) {
         const auto sl = shape_line(line_str, *ctx.faces, ctx.px, opts);
         float pen_x = std::floor(origin_x + 0.5F);  // 每行 pen 推进归零并 snap 到整数像素
         for (std::size_t j = 0; j < sl.size(); ++j) {
@@ -906,7 +923,7 @@ auto emit_glyphs_with_context(const EmitContext &ctx, const std::string &text, c
         }
         pen_y += ctx.line_h;
         pen_y = std::floor(pen_y + 0.5F);  // 下一行同样 snap 到整数像素
-    }
+    });
 }
 
 // 单次绘制的便捷封装：现派生上下文再发射。批量入口（draw_text_runs）走 make_emit_context +
