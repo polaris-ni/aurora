@@ -1417,8 +1417,8 @@ auto Painter::set_pixel(int x, int y, Color c) -> void {
     if (x < clip_x0_ || y < clip_y0_ || x > clip_x1_ || y > clip_y1_) {
         return;
     }
-    // 应用全局透明度（转场淡入淡出）。
-    c.a = static_cast<std::uint8_t>(std::max(0.0, std::min(255.0, static_cast<double>(c.a) * global_alpha_)));
+    // 应用全局透明度（转场淡入淡出）：与梯度批量路径共用 quantize_global_alpha 唯一口径。
+    c.a = detail::quantize_global_alpha(c.a, global_alpha_);
     const std::size_t i =
         ((static_cast<std::size_t>(y) * static_cast<std::size_t>(width_)) + static_cast<std::size_t>(x)) * 4U;
     // 快速路径：无圆角裁剪时 coverage 恒为 1（交集缓存已保证在全部矩形裁剪内），
@@ -2018,8 +2018,8 @@ auto Painter::draw_linear_gradient(const Rect &area, Point start, Point end, con
                 if (xb <= xa) {
                     return;
                 }
-                const int ca = static_cast<int>(std::lround(static_cast<double>(col.a) * ga));
-                const int ca_c = ca > 255 ? 255 : ca;
+                const int ca = detail::quantize_global_alpha(col.a, static_cast<double>(ga));
+                const int ca_c = ca;
                 const int cnt = xb - xa;
                 std::uint8_t *p = row + (static_cast<std::size_t>(xa - x0) * 4U);
                 if (ca_c >= 255) {
@@ -2041,9 +2041,9 @@ auto Painter::draw_linear_gradient(const Rect &area, Point start, Point end, con
                     const Color c = sample_gradient(colors, stops, t);
                     t += t_step;
                     std::uint8_t *p = row + (static_cast<std::size_t>(x - x0) * 4U);
-                    // 与 set_pixel 一致：先按全局透明度折算 alpha，再判不透明快路径 / gamma 混合。
-                    const int ca = static_cast<int>(std::lround(static_cast<double>(c.a) * ga));
-                    const int ca_c = ca > 255 ? 255 : ca;
+                    // 与 set_pixel 一致：同一助手折算 alpha，再判不透明快路径 / gamma 混合。
+                    const int ca = detail::quantize_global_alpha(c.a, static_cast<double>(ga));
+                    const int ca_c = ca;
                     if (ca_c >= 255) {
                         p[0] = c.r;
                         p[1] = c.g;
@@ -2095,7 +2095,7 @@ auto Painter::draw_linear_gradient(const Rect &area, Point start, Point end, con
                         break;
                     }
                     std::uint8_t *p = row + (static_cast<std::size_t>(x - x0) * 4U);
-                    const int ca_c = std::min(255, static_cast<int>(std::lround(static_cast<double>(c.a) * ga)));
+                    const int ca_c = detail::quantize_global_alpha(c.a, static_cast<double>(ga));
                     if (ca_c >= 255) {
                         p[0] = c.r;
                         p[1] = c.g;
@@ -2235,8 +2235,8 @@ auto Painter::draw_radial_gradient(const Rect &area, Point center, float radius,
                 float t = std::max(0.0F, std::min(1.0F, dist * inv_r));
                 const Color c = sample_gradient(colors, stops, t);
                 std::uint8_t *p = row + (static_cast<std::size_t>(x - x0) * 4U);
-                const int ca = static_cast<int>(std::lround(static_cast<double>(c.a) * ga));
-                const int ca_c = ca > 255 ? 255 : ca;
+                const int ca = detail::quantize_global_alpha(c.a, static_cast<double>(ga));
+                const int ca_c = ca;
                 if (ca_c >= 255) {
                     p[0] = c.r;
                     p[1] = c.g;

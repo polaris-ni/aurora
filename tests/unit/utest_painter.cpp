@@ -12,6 +12,7 @@
 #include <string>
 
 #include "aurora/core/image.h"
+#include "aurora/render/detail/gamma_lut.h"
 #include "aurora/render/font_engine.h"
 #include "aurora/render/painter.h"
 #include "framework/aurora_test.h"
@@ -523,6 +524,20 @@ AURORA_TEST_CASE(draw_text_runs_letter_spacing_matches_single_fragment) {
         single.draw_text(runs.begin()->box, std::string{runs.begin()->text}, f, Color::black(), opts);
 
         AURORA_TEST_REQUIRE_EQ(count_diff_pixels(batch, single), 0);
+    }
+}
+
+AURORA_TEST_CASE(quantize_global_alpha_grid) {
+    // 助手是全局透明度整数化的唯一口径：网格覆盖端点、半透明与非整数乘积边界。
+    const double alphas[] = {0.0, 0.25, 0.5, 1.0 / 3.0, 1.0};
+    const int inputs[] = {0, 1, 2, 127, 128, 254, 255};
+    for (const int a : inputs) {
+        for (const double ga : alphas) {
+            const auto rounded = static_cast<int>(std::lround(static_cast<double>(a) * ga));
+            const int expected = rounded < 0 ? 0 : (rounded > 255 ? 255 : rounded);
+            AURORA_TEST_CHECK_EQ(
+                static_cast<int>(aurora::detail::quantize_global_alpha(static_cast<std::uint8_t>(a), ga)), expected);
+        }
     }
 }
 

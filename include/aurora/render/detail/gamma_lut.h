@@ -82,4 +82,20 @@ inline auto blend_srgb_over(std::uint8_t dst, std::uint8_t src, float alpha) -> 
     return linear_to_srgb((srgb_to_linear(src) * alpha) + (srgb_to_linear(dst) * inv));
 }
 
+/// @brief 全局透明度作用后的 alpha 整数化（标量黄金与梯度批量路径共用唯一口径）。
+/// @param a 源 alpha（8 位）。
+/// @param ga 全局透明度（0..1；调用侧把单精度提升为 double 后传入）。
+/// @return 四舍五入并夹取到 0..255 的 8 位 alpha。
+inline auto quantize_global_alpha(std::uint8_t a, double ga) -> std::uint8_t {
+    const auto scaled = static_cast<double>(a) * ga;
+    const auto rounded = static_cast<int>(std::lround(scaled));
+    if (rounded <= 0) {
+        return 0;
+    }
+    if (rounded >= 255) {
+        return 255;
+    }
+    return static_cast<std::uint8_t>(rounded);
+}
+
 }  // namespace aurora::detail
