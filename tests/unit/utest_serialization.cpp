@@ -12,6 +12,7 @@
 #include "aurora/layout/layout_engine.h"
 #include "aurora/widget/bar_chart.h"
 #include "aurora/widget/bottom_nav_bar.h"
+#include "aurora/widget/chip.h"
 #include "aurora/widget/grid_view.h"
 #include "aurora/widget/lazy_list.h"
 #include "aurora/widget/serialization.h"
@@ -176,6 +177,29 @@ AURORA_TEST_CASE(textinput_rebuilds_declared_props_from_json) {
     // 占位符无公开 getter，以重建实例再序列化出的属性面为判据（与 /api/tree 同源）。
     AURORA_TEST_CHECK_EQ(require_field<std::string>(*require_child(to_json(*rebuilt.value()), "props"), "placeholder"),
                          "Type here first, then edit ui.json");
+}
+
+AURORA_TEST_CASE(same_name_reregister_invalidates_schema_cache) {
+    // 同名重注册必须失效该类型的 schema 缓存项：重注册后取到的属性表反映新工厂构造的实例。
+    // 探针类型名不与真实 widget 冲突，注册残留对其他用例无影响。
+    auto &registry = aurora::serialization::WidgetRegistry::instance();
+    const std::string probe = "SchemaProbe";
+    registry.register_factory(
+        probe, [](const Json &) -> Result<std::shared_ptr<Widget>> {
+            return std::static_pointer_cast<Widget>(std::make_shared<Chip>());
+        });
+    const Json before = aurora::serialization::component_schema(probe);
+
+    registry.register_factory(
+        probe, [](const Json &) -> Result<std::shared_ptr<Widget>> {
+            return std::static_pointer_cast<Widget>(std::make_shared<Skeleton>());
+        });
+    const Json after = aurora::serialization::component_schema(probe);
+
+    // Chip 与 Skeleton 的默认属性面不同：补丁非空即证明缓存已随重注册失效并重建。
+    AURORA_TEST_CHECK_FALSE(aurora::serialization::diff(before, after).empty());
+    // 再取一次走缓存：与重建结果一致（失效后缓存重新建立且内容稳定）。
+    AURORA_TEST_CHECK_TRUE(aurora::serialization::diff(after, aurora::serialization::component_schema(probe)).empty());
 }
 
 }  // namespace aurora::test_cases::utest_serialization

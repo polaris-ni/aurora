@@ -109,4 +109,46 @@ AURORA_TEST_CASE(find_promotes_entry_and_shifts_eviction_order) {
     AURORA_TEST_CHECK_NULL(atlas.find(1));
 }
 
+AURORA_TEST_CASE(evicting_last_hit_entry_keeps_find_consistent) {
+    // 行为契约用例（非悬垂证据——裁决依据是映射元素指针稳定性与两条擦除路径的代码事实）：
+    // 把最近命中条目推成最久未用并触发淘汰后，对已淘汰 key 的 find 必须返回空；
+    // 重新 insert 不同内容后，find 必须返回新内容。若命中缓存条目在淘汰后未失效，
+    // find 会走快路径返回旧内容，本用例的载荷断言即红。
+    render::GlyphAtlas atlas;
+    const std::uint64_t capacity = render::GlyphAtlas::AURORA_MAX_ENTRIES;
+    for (std::uint64_t key = 0; key < capacity; ++key) {
+        atlas.insert(key, make_entry(render::GlyphAtlas::Mode::Gray, 1, 1));
+    }
+    AURORA_TEST_CHECK_NOT_NULL(atlas.find(0));  // key 0 成为最近命中条目
+
+    // 连续插入到 key 0 成为最久未用：1..capacity-1 逐个被挤掉，下一次插入淘汰 key 0 本身。
+    for (std::uint64_t key = capacity; key < capacity * 2; ++key) {
+        atlas.insert(key, make_entry(render::GlyphAtlas::Mode::Gray, 1, 1));
+    }
+    AURORA_TEST_CHECK_NULL(atlas.find(0));
+
+    const auto renewed = make_entry(render::GlyphAtlas::Mode::Gray, 9, 9);
+    atlas.insert(0, renewed);
+    const auto *found = atlas.find(0);
+    AURORA_TEST_REQUIRE_NOT_NULL(found);
+    AURORA_TEST_CHECK_EQ(found->width, 9);
+    AURORA_TEST_CHECK_EQ(found->rows, 9);
+}
+
+AURORA_TEST_CASE(clear_then_reuse_key_returns_new_payload) {
+    render::GlyphAtlas atlas;
+    atlas.insert(42, make_entry(render::GlyphAtlas::Mode::Gray, 3, 3));
+    AURORA_TEST_CHECK_NOT_NULL(atlas.find(42));  // 命中缓存条目指向 key 42
+
+    atlas.clear();
+    AURORA_TEST_CHECK_NULL(atlas.find(42));  // 清空后同一 key 不应经旧缓存返回
+
+    const auto renewed = make_entry(render::GlyphAtlas::Mode::Lcd, 4, 2);
+    atlas.insert(42, renewed);
+    const auto *found = atlas.find(42);
+    AURORA_TEST_REQUIRE_NOT_NULL(found);
+    AURORA_TEST_CHECK_EQ(found->width, 4);
+    AURORA_TEST_CHECK_EQ(found->rows, 2);
+}
+
 }  // namespace aurora::test_cases::utest_glyph_atlas

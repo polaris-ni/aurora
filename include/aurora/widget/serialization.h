@@ -41,6 +41,10 @@ struct JsonPatchOp {
 /// @brief widget 工厂：从 props JSON 构造对应类型的空属性 widget。
 using WidgetFactory = std::function<Result<std::shared_ptr<Widget>>(const Json &props)>;
 
+/// @brief 失效指定组件类型的 schema 缓存项（同名重注册时由 `register_factory` 调用）。
+/// @param name 组件类型名。
+auto invalidate_component_schema(const std::string &name) -> void;
+
 /// @brief 类型名 → 工厂 的注册表（工具链据此把 JSON 反序列化为真实 widget）。
 class WidgetRegistry {
   public:
@@ -56,9 +60,14 @@ class WidgetRegistry {
     }
 
     /// @brief 注册一个 widget 工厂（同名重复注册以最后一次为准）。
+    ///
+    /// 同名重注册会失效该类型的 schema 缓存项，避免反射面返回陈旧属性表。
     /// @param type widget 类型名（JSON `type` 字段的取值）。
     /// @param fn 工厂函数：从 props JSON 构造空属性 widget。
-    auto register_factory(const std::string &type, WidgetFactory fn) -> void { factories_[type] = std::move(fn); }
+    auto register_factory(const std::string &type, WidgetFactory fn) -> void {
+        factories_[type] = std::move(fn);
+        invalidate_component_schema(type);
+    }
 
     /// @brief 按类型名经已注册工厂构造 widget（未注册类型返回 Error）。
     /// @param type widget 类型名。
