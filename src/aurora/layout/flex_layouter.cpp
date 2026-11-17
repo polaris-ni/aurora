@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <deque>
 
+#include "aurora/layout/detail/flex_scratch_probe.h"
+
 namespace aurora {
 
 // 布局工作态：把一个 FlexLayouter::layout 调用的中间量集中起来，
@@ -19,27 +21,42 @@ struct LayoutScratch {
     std::vector<std::optional<float>> baselines;
 };
 
-/// @brief 线程局部的缓冲层栈（函数内 `thread_local`，非命名空间级可变全局）。
-/// 用 `std::deque` 而非 `std::vector`：`push_back` 不使既有元素的引用失效，
+/// @brief 线程局部的缓冲层池与占用游标（函数内 `thread_local`，非命名空间级可变全局）。
+/// 层对象常驻不销毁：只有嵌套深度创新高时才追加一层，之后同深度的每次布局都命中同一层对象，
+/// `assign` 在既有容量足够时不分配 ⇒ `sizes` / `baselines` 的容量真正跨调用保留。
+/// （若析构时 `pop_back` 弹出元素，层内 vector 随之析构、容量释放，复用只剩块内存，等于没复用。）
+/// 用 `std::deque` 而非 `std::vector`：追加新层不使既有元素的引用失效，
 /// 外层租约持有的 `sizes` / `baselines` 引用在嵌套布局追加新层后依然有效。
-auto scratch_stack() -> std::deque<LayoutScratch> & {
-    thread_local std::deque<LayoutScratch> stack;
-    return stack;
+struct ScratchPool {
+    std::deque<LayoutScratch> layers;  ///< 按嵌套深度排列的常驻层
+    std::size_t depth = 0;  ///< 当前占用层数，同时也是下一份租约的层下标
+};
+
+/// @brief 当前线程的缓冲层池。
+auto scratch_pool() -> ScratchPool & {
+    thread_local ScratchPool pool;
+    return pool;
 }
 
-/// @brief 缓冲层租约：构造时按当前深度取层并重置为 `n` 项空值，析构时归还。
-/// @note Thread: main-thread only（层栈线程局部；布局本身即单线程 UI 路径）
+/// @brief 缓冲层租约：构造时占用当前深度的层并重置为 `n` 项空值，析构时只归还占用。
+/// @note Thread: main-thread only（层池线程局部；布局本身即单线程 UI 路径）
 class ScratchLease {
   public:
-    /// @brief 取用当前深度的缓冲层，并把两项工作态重置为 `n` 个空值。
+    /// @brief 占用当前深度的缓冲层，并把两项工作态重置为 `n` 个空值。
     /// @param n 子项数（与工作态向量等长）。
-    explicit ScratchLease(std::size_t n) : stack_(scratch_stack()), depth_(stack_.size()) {
-        LayoutScratch &layer = stack_.emplace_back();
+    explicit ScratchLease(std::size_t n) : pool_(scratch_pool()), slot_(pool_.depth) {
+        if (slot_ == pool_.layers.size()) {
+            pool_.layers.emplace_back();  // 仅嵌套深度创新高时构造，此后该层一直复用
+        }
+        LayoutScratch &layer = pool_.layers[slot_];
+        // 两项重置走 assign：既有容量 >= n 时一行都不分配，复用收益正落在这里。
         layer.sizes.assign(n, Size{});
         layer.baselines.assign(n, std::nullopt);
+        // 两项都重置成功后才推进游标：assign 抛分配异常时深度不漂移，下一次仍命中同一层。
+        ++pool_.depth;
     }
-    // 析构只做 noexcept 的 `pop_back`：层栈的惰性构造已挪到构造函数（那里允许抛分配失败）。
-    ~ScratchLease() { stack_.pop_back(); }
+    // 析构只回退游标（noexcept）：层对象与层内容量保持原样，供同深度的下一次布局复用。
+    ~ScratchLease() { --pool_.depth; }
 
     ScratchLease(const ScratchLease &) = delete;
     auto operator=(const ScratchLease &) -> ScratchLease & = delete;
@@ -48,12 +65,12 @@ class ScratchLease {
 
     /// @brief 本租约的缓冲层（引用在租约存活期内稳定）。
     /// @return 该深度层的缓冲引用。
-    [[nodiscard]] auto scratch() const -> LayoutScratch & { return stack_[depth_]; }
+    [[nodiscard]] auto scratch() const -> LayoutScratch & { return pool_.layers[slot_]; }
 
   private:
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members) 借用线程局部层栈，租约存活期内稳定
-    std::deque<LayoutScratch> &stack_;
-    std::size_t depth_;  ///< 本层在层栈中的下标（析构时归还到该深度）
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members) 借用线程局部层池，租约存活期内稳定
+    ScratchPool &pool_;
+    std::size_t slot_;  ///< 本租约占用的层下标（析构时只回退游标）
 };
 
 struct FlexLayoutContext {
@@ -411,5 +428,20 @@ auto FlexLayouter::layout(const Flex &config, const Constraints &parent, const s
     }
     return result;
 }
+
+namespace detail {
+
+auto flex_scratch_stats(std::size_t slot) -> FlexScratchStats {
+    const ScratchPool &pool = scratch_pool();
+    FlexScratchStats stats;
+    stats.layers = pool.layers.size();
+    if (slot < pool.layers.size()) {
+        stats.sizes_capacity = pool.layers[slot].sizes.capacity();
+        stats.baselines_capacity = pool.layers[slot].baselines.capacity();
+    }
+    return stats;
+}
+
+}  // namespace detail
 
 }  // namespace aurora

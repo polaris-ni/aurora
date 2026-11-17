@@ -5,11 +5,13 @@
 /// （Center/End/SpaceBetween/SpaceAround/SpaceEvenly）、交叉轴对齐（Start/Center/End/Stretch/Baseline
 /// 含无基线子项的合成基线、全无基线退化为 End、Column 回退 Start、RTL 正交性、父约束夹取）
 /// 与子项约束的供给性质打标（非加权子项主轴 loose、flex 槽位不 loose、嵌套容器交叉轴继承）、
-/// 中间量缓冲复用的等价性（重复布局逐位稳定、测量内嵌套布局不污染外层缓冲）
+/// 中间量缓冲复用的等价性与收益（重复布局逐位稳定、测量内嵌套布局不污染外层缓冲、
+/// 层容量跨调用保留）
 
 #include <optional>
 #include <vector>
 
+#include "aurora/layout/detail/flex_scratch_probe.h"  // 内部头：测试 TU 以 src/ 为附加包含根
 #include "aurora/layout/flex_layouter.h"
 #include "framework/aurora_test.h"
 
@@ -545,6 +547,38 @@ AURORA_TEST_CASE(repeated_layout_is_bitwise_stable_across_interleaved_calls) {
         AURORA_TEST_CHECK_EQ(second.children[i].size.width, first.children[i].size.width);
         AURORA_TEST_CHECK_EQ(second.children[i].size.height, first.children[i].size.height);
     }
+}
+
+AURORA_TEST_CASE(scratch_layer_capacity_is_reused_across_layout_calls) {
+    // 「分层复用」的成立判据是容量跨调用保留，而不是块内存复用：层对象必须常驻（析构只回退游标），
+    // 同规模再排一次时层数与两项容量都不变；规模变小也只是改 size，不缩容。
+    FixedCtx a;
+    FixedCtx b;
+    FixedCtx c;
+    const Flex cfg;
+    const auto run_three = [&] {
+        return FlexLayouter::layout(
+            cfg, parent_constraints(),
+            {fixed_item2(30.0F, 10.0F, a), fixed_item2(50.0F, 12.0F, b), fixed_item2(20.0F, 8.0F, c)});
+    };
+
+    (void)run_three();
+    const auto warm = aurora::detail::flex_scratch_stats(0);
+    AURORA_TEST_CHECK_TRUE(warm.layers >= 1U);
+    AURORA_TEST_CHECK_TRUE(warm.sizes_capacity >= 3U);
+    AURORA_TEST_CHECK_TRUE(warm.baselines_capacity >= 3U);
+
+    (void)run_three();
+    const auto again = aurora::detail::flex_scratch_stats(0);
+    AURORA_TEST_CHECK_EQ(again.layers, warm.layers);
+    AURORA_TEST_CHECK_EQ(again.sizes_capacity, warm.sizes_capacity);
+    AURORA_TEST_CHECK_EQ(again.baselines_capacity, warm.baselines_capacity);
+
+    FixedCtx tiny;
+    (void)FlexLayouter::layout(cfg, parent_constraints(), {fixed_item2(10.0F, 10.0F, tiny)});
+    const auto smaller = aurora::detail::flex_scratch_stats(0);
+    AURORA_TEST_CHECK_EQ(smaller.sizes_capacity, warm.sizes_capacity);
+    AURORA_TEST_CHECK_EQ(smaller.baselines_capacity, warm.baselines_capacity);
 }
 
 AURORA_TEST_CASE(nested_layout_inside_measure_does_not_corrupt_outer_scratch) {
