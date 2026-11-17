@@ -274,4 +274,51 @@ AURORA_TEST_CASE(reactor_destroyed_terminal_unlinks) {
     AURORA_TEST_CHECK_EQ(src->value(), 1);
 }
 
+AURORA_TEST_CASE(epoch_arrays_shrink_to_live_high_water) {
+#ifdef AURORA_ENABLE_DEBUG
+    // 批量创建并逐次提交，把来源戳数组抬过收缩阈值；随后只保留最低 id 的存活节点，
+    // 销毁全部高 id 节点（析构摊还触发收缩）。数组应收敛到存活上界，而非累计创建峰值。
+    constexpr int kBatch = 5000;
+    std::vector<std::shared_ptr<Source<int>>> sources;
+    sources.reserve(kBatch);
+    for (int i = 0; i < kBatch; ++i) {
+        sources.push_back(make_source(i));
+    }
+    for (auto &source : sources) {
+        source->assign(source->read() + 1);
+    }
+    auto &engine = aurora::detail::Engine::instance();
+    AURORA_TEST_CHECK_GT(static_cast<int>(engine.seen_source_size()), 4096);
+
+    const auto kept = static_cast<std::size_t>(sources.front()->id());
+    sources.erase(sources.begin() + 1, sources.end());
+    // 析构摊还已触发收缩；再提交一次走轮末兜底，确保判据可复现。
+    sources.front()->assign(sources.front()->read() + 1);
+    AURORA_TEST_CHECK_EQ(engine.seen_source_size(), kept + 1U);
+    AURORA_TEST_CHECK_EQ(engine.seen_source_capacity(), kept + 1U);
+#else
+    AURORA_TEST_SKIP("epoch-array observation ports are gated by AURORA_ENABLE_DEBUG");
+#endif
+}
+
+AURORA_TEST_CASE(epoch_arrays_empty_when_no_live_sources) {
+#ifdef AURORA_ENABLE_DEBUG
+    constexpr int kBatch = 5000;
+    std::vector<std::shared_ptr<Source<int>>> sources;
+    sources.reserve(kBatch);
+    for (int i = 0; i < kBatch; ++i) {
+        sources.push_back(make_source(i));
+    }
+    for (auto &source : sources) {
+        source->assign(source->read() + 1);
+    }
+    auto &engine = aurora::detail::Engine::instance();
+    sources.clear();  // 全部销毁：存活集为空，最后一次析构的检查即收缩到 0
+    AURORA_TEST_CHECK_EQ(engine.seen_source_size(), 0U);
+    AURORA_TEST_CHECK_EQ(engine.seen_source_capacity(), 0U);
+#else
+    AURORA_TEST_SKIP("epoch-array observation ports are gated by AURORA_ENABLE_DEBUG");
+#endif
+}
+
 }  // namespace aurora::test_cases::utest_reactor

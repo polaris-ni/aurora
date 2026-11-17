@@ -53,11 +53,58 @@ SuspendCollection::SuspendCollection() noexcept : previous_(collector_slot()) { 
 
 SuspendCollection::~SuspendCollection() { collector_slot() = previous_; }
 
-Observer::Observer() : seq_(next_observer_seq().fetch_add(1)) {}
+/// @brief 数组收缩的统一动作：目标为空时彻底清空，否则截到最高存活身份 + 1。
+///
+/// 用「拷贝 + swap」而非 `resize` + `shrink_to_fit`：后者是非绑定请求（实现可不缩容），
+/// 而判据要求 size == capacity，必须确定性收缩。
+/// @tparam T 数组元素类型。
+/// @param arr 待收缩数组。
+/// @param live 存活身份集合。
+template <typename T>
+auto shrink_one(std::vector<T> &arr, const std::set<std::uint64_t> &live) -> void {
+    const std::size_t target = live.empty() ? 0U : static_cast<std::size_t>(*live.rbegin()) + 1U;
+    if (arr.size() <= target) {
+        return;
+    }
+    std::vector<T> compact(arr.begin(), arr.begin() + static_cast<std::ptrdiff_t>(target));
+    arr.swap(compact);
+}
 
-SourceNode::SourceNode() : id_(next_source_id().fetch_add(1)) {}
+Observer::Observer() : seq_(next_observer_seq().fetch_add(1)) { Engine::instance().register_observer(seq_); }
 
-SourceNode::~SourceNode() = default;
+Observer::~Observer() { Engine::instance().unregister_observer(seq_); }
+
+SourceNode::SourceNode() : id_(next_source_id().fetch_add(1)) { Engine::instance().register_source(id_); }
+
+SourceNode::~SourceNode() { Engine::instance().unregister_source(id_); }
+
+auto Engine::register_source(std::uint64_t id) -> void { live_sources_.insert(id); }
+
+auto Engine::unregister_source(std::uint64_t id) -> void {
+    live_sources_.erase(id);
+    shrink_epoch_arrays();  // 检查本身 O(1)，条件不满足即返回；无需摊还节流
+}
+
+auto Engine::register_observer(std::uint64_t seq) -> void { live_observers_.insert(seq); }
+
+auto Engine::unregister_observer(std::uint64_t seq) -> void {
+    live_observers_.erase(seq);
+    shrink_epoch_arrays();
+}
+
+auto Engine::shrink_epoch_arrays() -> void {
+    if (in_delivery_) {
+        return;
+    }
+    // 容量阈值按存活量的倍数给，小图保留 4096 槽位避免频繁缩容抖动；
+    // 上界取下节说明的「最高存活身份 + 1」，不承诺 O(存活数)。
+    if (seen_source_epoch_.size() > std::max<std::size_t>(4096U, live_sources_.size() * 4U)) {
+        shrink_one(seen_source_epoch_, live_sources_);
+    }
+    if (seen_observer_epoch_.size() > std::max<std::size_t>(4096U, live_observers_.size() * 4U)) {
+        shrink_one(seen_observer_epoch_, live_observers_);
+    }
+}
 
 auto SourceNode::add_observer(Observer &observer) -> void {
     // 线性去重：单个来源的观察者数通常是个位数，且登记只在依赖集合变化时发生；
@@ -243,18 +290,29 @@ auto Engine::run_job(const std::function<void()> &fn, std::vector<std::uint64_t>
     active_chain_ = std::move(saved);
 }
 
+/// @brief 传播阶段守卫：覆盖 mark + deliver，期间禁止收缩去重戳数组。
+struct DeliveryGuard {
+    bool &flag;
+    explicit DeliveryGuard(bool &f) : flag(f) { flag = true; }
+    ~DeliveryGuard() { flag = false; }
+};
+
 auto Engine::write_committed(SourceNode &src) -> void {
     src.bump();
     pending_.clear();
-    // 纪元戳代替两个哈希集：每次提交不再逐边 insert/clear（后者会为每个元素分配与回收
-    // 结点），只需一次自增；回绕时清零全部戳位以保证不误判。
-    if (++epoch_ == 0) {
-        std::fill(seen_source_epoch_.begin(), seen_source_epoch_.end(), 0);
-        std::fill(seen_observer_epoch_.begin(), seen_observer_epoch_.end(), 0);
-        epoch_ = 1;
+    {
+        DeliveryGuard guard{in_delivery_};
+        // 纪元戳代替两个哈希集：每次提交不再逐边 insert/clear（后者会为每个元素分配与回收
+        // 结点），只需一次自增；回绕时清零全部戳位以保证不误判。
+        if (++epoch_ == 0) {
+            std::fill(seen_source_epoch_.begin(), seen_source_epoch_.end(), 0);
+            std::fill(seen_observer_epoch_.begin(), seen_observer_epoch_.end(), 0);
+            epoch_ = 1;
+        }
+        mark(src, epoch_);
+        deliver();
     }
-    mark(src, epoch_);
-    deliver();
+    shrink_epoch_arrays();  // 守卫已解除：轮末兜底，此刻无在途遍历
 }
 
 auto Engine::mark(SourceNode &src, std::uint32_t epoch) -> void {

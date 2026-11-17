@@ -8,6 +8,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <type_traits>
 #include <unordered_map>
@@ -97,10 +98,10 @@ class SuspendCollection {
 /// 只承担「被标脏」与「按轮交付」两件事；标脏期间不执行任何用户代码。
 class Observer {
   public:
-    /// @brief 构造并分配全局登记序号（决定同轮交付顺序）。
+    /// @brief 构造并分配全局登记序号（决定同轮交付顺序），并向引擎登记存活序号。
     Observer();
-    /// @brief 虚析构（default）：具体节点自行负责从依赖来源退订。
-    virtual ~Observer() = default;
+    /// @brief 虚析构：从引擎存活集合摘除序号；具体节点自行负责从依赖来源退订。
+    virtual ~Observer();
     Observer(const Observer &) = delete;
     auto operator=(const Observer &) -> Observer & = delete;
     Observer(Observer &&) = delete;
@@ -260,7 +261,40 @@ class Engine {
     /// @return 已进入入口（含排空后续轮）时为 true。
     [[nodiscard]] auto in_entry() const noexcept -> bool { return depth_ > 0; }
 
+#ifdef AURORA_ENABLE_DEBUG
+    /// @brief 来源去重戳数组的当前长度（诊断用）。
+    /// @return 数组元素个数。
+    [[nodiscard]] auto seen_source_size() const noexcept -> std::size_t { return seen_source_epoch_.size(); }
+    /// @brief 来源去重戳数组的当前容量（诊断用）。
+    /// @return 数组已分配容量。
+    [[nodiscard]] auto seen_source_capacity() const noexcept -> std::size_t { return seen_source_epoch_.capacity(); }
+    /// @brief 观察者去重戳数组的当前长度（诊断用）。
+    /// @return 数组元素个数。
+    [[nodiscard]] auto seen_observer_size() const noexcept -> std::size_t { return seen_observer_epoch_.size(); }
+    /// @brief 观察者去重戳数组的当前容量（诊断用）。
+    /// @return 数组已分配容量。
+    [[nodiscard]] auto seen_observer_capacity() const noexcept -> std::size_t {
+        return seen_observer_epoch_.capacity();
+    }
+#endif
+
   private:
+    friend class SourceNode;
+    friend class Observer;
+    /// @brief 登记一个存活来源身份（构造期调用）。
+    /// @param id 来源节点身份。
+    auto register_source(std::uint64_t id) -> void;
+    /// @brief 摘除一个存活来源身份并摊还触发收缩（析构期调用）。
+    /// @param id 来源节点身份。
+    auto unregister_source(std::uint64_t id) -> void;
+    /// @brief 登记一个存活观察者序号（构造期调用）。
+    /// @param seq 观察者登记序号。
+    auto register_observer(std::uint64_t seq) -> void;
+    /// @brief 摘除一个存活观察者序号并摊还触发收缩（析构期调用）。
+    /// @param seq 观察者登记序号。
+    auto unregister_observer(std::uint64_t seq) -> void;
+    /// @brief 若容量相对存活量过大则收缩两枚去重戳数组。
+    auto shrink_epoch_arrays() -> void;
     /// @brief 一次待执行写入：闭包与其因果链（由触发它的终端贡献）。
     ///
     /// 因果链按值拷贝：排队写入只在「回调内再写」时才发生（少数路径），而交付阶段每个
@@ -304,6 +338,11 @@ class Engine {
     /// @brief 当前轮纪元（自 1 起；回绕时整体清零）。
     std::uint32_t epoch_ = 0;
     std::uint32_t depth_ = 0;
+    /// @brief 存活身份集合：构造登记、析构摘除，收缩目标取各自最大存活 id + 1。
+    std::set<std::uint64_t> live_sources_;
+    std::set<std::uint64_t> live_observers_;
+    /// @brief 交付/标脏阶段标志：为 true 时禁止收缩（遍历中数组不得改尺寸）。
+    bool in_delivery_ = false;
 };
 
 /// @brief 值来源：状态句柄共享的存储与提交入口。
