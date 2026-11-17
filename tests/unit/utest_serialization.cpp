@@ -184,16 +184,14 @@ AURORA_TEST_CASE(same_name_reregister_invalidates_schema_cache) {
     // 探针类型名不与真实 widget 冲突，注册残留对其他用例无影响。
     auto &registry = aurora::serialization::WidgetRegistry::instance();
     const std::string probe = "SchemaProbe";
-    registry.register_factory(
-        probe, [](const Json &) -> Result<std::shared_ptr<Widget>> {
-            return std::static_pointer_cast<Widget>(std::make_shared<Chip>());
-        });
+    registry.register_factory(probe, [](const Json &) -> Result<std::shared_ptr<Widget>> {
+        return std::static_pointer_cast<Widget>(std::make_shared<Chip>());
+    });
     const Json before = aurora::serialization::component_schema(probe);
 
-    registry.register_factory(
-        probe, [](const Json &) -> Result<std::shared_ptr<Widget>> {
-            return std::static_pointer_cast<Widget>(std::make_shared<Skeleton>());
-        });
+    registry.register_factory(probe, [](const Json &) -> Result<std::shared_ptr<Widget>> {
+        return std::static_pointer_cast<Widget>(std::make_shared<Skeleton>());
+    });
     const Json after = aurora::serialization::component_schema(probe);
 
     // Chip 与 Skeleton 的默认属性面不同：补丁非空即证明缓存已随重注册失效并重建。
