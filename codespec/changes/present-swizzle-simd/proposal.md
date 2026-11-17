@@ -51,6 +51,7 @@
 
 ## 实施记录
 
-- `swizzle.h`：三处标量实现改名 `*_scalar` 并补全注释；新增 `detail::swap_rb_avx2` / `detail::premul_bgra_avx2`（`target("avx2")`，尾部回落标量）与 `detail::swizzle_avx2_available`（`__builtin_cpu_supports("avx2")` 一次性缓存）；三个对外名字改分发入口，`count < 8` 直接走标量参考。
+- `swizzle.h`：三处标量实现改名 `*_scalar` 并补全注释；新增 `detail::swap_rb_avx2` / `detail::premul_bgra_avx2`（`target("avx2")`，尾部回落标量）与 `detail::swizzle_avx2_available`（一次性缓存）；三个对外名字改分发入口，`count < 8` 直接走标量参考。
+- 运行时探测按工具链分流（与 `painter_simd.inl` 的 `detect_simd_level` 同一口径）：GCC / 非 clang-cl 的 Clang 用 `__builtin_cpu_supports("avx2")`；clang-cl 改用 CPUID leaf 7 EBX bit5 + OSXSAVE / XCR0 校验——该 ABI 下内建会引用 `__cpu_model`，而 MSVC 链接运行时不提供该符号（`lld-link: undefined symbol: __cpu_model`，由 windows-llvm 构建暴露）。
 - 实测（GCC 16.1.0，`-O3`，2560×1440，300 次均值）：R/B 交换 1.23 → 0.91 ms；预乘 2.86 → 1.19 ms。两路输出与标量参考逐字节相同。
 - 用例：`utest_window_swizzle` 新增标量 / AVX2 / 分发三路逐字节比对（长度 1、7、8、9、1031），并保留原有三例。

@@ -14,11 +14,14 @@
 #define AURORA_SWIZZLE_SIMD_X86
 #endif
 
-/// @brief AVX2 内核可用性：需 x86 + GCC/Clang 的逐函数 target 属性。MSVC 无此属性，
-/// 保持编译器自动向量化的基线循环（同一语义，仅档位不同）。
+/// @brief AVX2 内核可用性：需 x86 + GCC/Clang 的逐函数 target 属性（clang-cl 同样支持；
+/// cl.exe 不支持该属性，其构建恒走编译器自动向量化的基线循环）。
 #if defined(AURORA_SWIZZLE_SIMD_X86) && (defined(__GNUC__) || defined(__clang__))
 #define AURORA_SWIZZLE_AVX2
 #include <immintrin.h>
+#if defined(AURORA_COMPILER_CLANG_CL) || defined(AURORA_COMPILER_MSVC)
+#include <intrin.h>  // MSVC ABI 下的 __cpuid / __cpuidex / _xgetbv（运行时探测用）
+#endif
 #endif
 
 #ifdef AURORA_SWIZZLE_AVX2
@@ -89,11 +92,32 @@ namespace detail {
 //   是 SSE/AVX 内置函数的固有签名形态，无第二写法（与 painter_simd.inl 同一豁免口径）。
 // NOLINTBEGIN(cppcoreguidelines-pro-type-reinterpret-cast)
 
-/// @brief 运行时探测 AVX2 可用性（`__builtin_cpu_supports` 内含 OS XSAVE 状态检查），首次调用后缓存。
+/// @brief 运行时探测 AVX2 可用性，首次调用后缓存。
+/// 与 `painter_simd.inl` 的 `detect_simd_level` 同一口径：GCC / 非 clang-cl 的 Clang 走
+/// `__builtin_cpu_supports`（由 libgcc / compiler-rt 提供）；clang-cl 走 CPUID——内建在该 ABI 下
+/// 会引用 `__cpu_model`，而它不由链接运行时提供（`lld-link: undefined symbol: __cpu_model`）。
 /// @return CPU 与 OS 均支持 AVX2 时为 true；否则 false（调用方回落标量参考）。
 inline auto swizzle_avx2_available() noexcept -> bool {
+#if defined(AURORA_COMPILER_CLANG_CL) || defined(AURORA_COMPILER_MSVC)
+    static const bool AVX2_AVAILABLE = [] {
+        int regs[4] = {};
+        __cpuid(regs, 0);
+        if (regs[0] < 7) {
+            return false;  // 无 CPUID 叶子 7，不可能有 AVX2 位
+        }
+        __cpuidex(regs, 7, 0);
+        const bool has_avx2 = (regs[1] & (1 << 5)) != 0;
+        int leaf1[4] = {};
+        __cpuid(leaf1, 1);
+        // OSXSAVE（leaf 1 ECX bit27）+ XCR0 低两位（XMM/YMM 由 OS 保存）齐备才可安全用 _mm256_*。
+        const bool osxsave = (leaf1[2] & (1 << 27)) != 0;
+        return has_avx2 && osxsave && (_xgetbv(_XCR_XFEATURE_ENABLED_MASK) & 0x6ULL) == 0x6ULL;
+    }();
+    return AVX2_AVAILABLE;
+#else
     static const bool AVX2_AVAILABLE = __builtin_cpu_supports("avx2");
     return AVX2_AVAILABLE;
+#endif
 }
 
 /// @brief 8 像素一组的 R/B 交换内核（`pshufb` 字节置换，等价于标量的位交换），尾部回落标量参考。
