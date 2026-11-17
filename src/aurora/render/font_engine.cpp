@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstring>
+#include <iterator>
 #include <list>
 #include <optional>
 #include <span>
@@ -88,7 +89,10 @@ auto glyph_probe_sync() -> void {
 [[nodiscard]] auto glyph_probe_lookup(std::uint64_t key) -> const GlyphAtlas::Entry * {
     glyph_probe_sync();
     auto &cache = glyph_probe_cache();
-    const auto end = cache.items.begin() + static_cast<std::ptrdiff_t>(cache.count);
+    // 迭代器在 MSVC STL 下不是裸指针，`auto *const` 形态不可移植（实测编译失败）⇒ 保持 `auto`。
+    // NOLINTNEXTLINE(readability-qualified-auto)
+    const auto end = std::next(cache.items.begin(), static_cast<std::ptrdiff_t>(cache.count));
+    // NOLINTNEXTLINE(readability-qualified-auto)
     const auto it =
         std::find_if(cache.items.begin(), end, [key](const GlyphProbe &probe) -> bool { return probe.key == key; });
     if (it == end) {
@@ -96,7 +100,7 @@ auto glyph_probe_sync() -> void {
     }
     // 最近优先：命中项移到队首，后续同键查找落在一次比较上。
     const GlyphProbe hit = *it;
-    std::rotate(cache.items.begin(), it, it + 1);
+    std::rotate(cache.items.begin(), it, std::next(it));
     // 必须复现 `find` 的使用序号更新，否则淘汰顺序偏离基线（像素不受影响，但缓存命中性会变）。
     return detail::GlyphAtlasAccess::touch(atlas(), hit.record);
 }
@@ -107,8 +111,8 @@ auto glyph_probe_store(std::uint64_t key, void *record) -> void {
     auto &cache = glyph_probe_cache();
     // 满时丢弃最久未用的队尾，否则整体后移一格腾出队首。
     const std::size_t keep = cache.count == cache.items.size() ? cache.count - 1 : cache.count;
-    std::move_backward(cache.items.begin(), cache.items.begin() + static_cast<std::ptrdiff_t>(keep),
-                       cache.items.begin() + static_cast<std::ptrdiff_t>(keep + 1));
+    std::move_backward(cache.items.begin(), std::next(cache.items.begin(), static_cast<std::ptrdiff_t>(keep)),
+                       std::next(cache.items.begin(), static_cast<std::ptrdiff_t>(keep + 1)));
     cache.items.front() = GlyphProbe{.key = key, .record = record};
     cache.count = keep + 1;
 }
