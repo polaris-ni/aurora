@@ -535,6 +535,9 @@ auto Painter::draw_line(Point a, Point b, float width, Color c) -> void {
     const float r_core = hw - 0.5F;
     const bool batch_ok = !has_rounded_clip_ && global_alpha_ == 1.0 && r_core >= 0.05F;
     const float r_core_sq = batch_ok ? (r_core * 0.99F) * (r_core * 0.99F) : -1.0F;
+    // 羽化带外沿的平方上界：dist > hw+0.5 时 cov 必为 0。先以平方比较剔除这些像素，
+    // 仅真正跨界的像素才求 sqrt；平方判据用 (hw+0.5)² 的 1% 余量，与 saturate 口径不交叉。
+    const float feather_outer_sq = (hw + 0.5F) * (hw + 0.5F) * 1.01F;
     for (int y = y0; y < y1; ++y) {
         int run_start = -1;
         for (int x = x0; x < x1; ++x) {
@@ -554,6 +557,12 @@ auto Painter::draw_line(Point a, Point b, float width, Color c) -> void {
             if (run_start >= 0) {
                 fill_opaque_row(pixels_.data(), width_, y, run_start, x, c);
                 run_start = -1;
+            }
+            // 羽化外沿：dist > hw+0.5 时 cov 必为 0，原路径也要 sqrt 后才 continue。
+            // 这里的阈值略大于真正的 (hw+0.5)²（1% 余量），只会把「本就写不进」的像素
+            // 提前剔除，不会越过 cov>0 的边界；带内仍逐字走原 sqrt / lround。
+            if (dist_sq > feather_outer_sq) {
+                continue;
             }
             const float dist = std::sqrt(dist_sq);
             const float cov = aurora::saturate(hw + 0.5F - dist);  // 1px 羽化
@@ -640,6 +649,8 @@ auto Painter::stroke_polyline(const std::vector<Point> &pts, float width, Color 
     const float r_core = hw - 0.5F;
     const bool batch_ok = !has_rounded_clip_ && global_alpha_ == 1.0 && r_core >= 0.05F;
     const float r_core_sq = batch_ok ? (r_core * 0.99F) * (r_core * 0.99F) : -1.0F;
+    // 与 draw_line 同口径：折线包围盒的空像素先以平方判据剔除，仅跨界像素求 sqrt。
+    const float feather_outer_sq = (hw + 0.5F) * (hw + 0.5F) * 1.01F;
     for (int y = y0; y < y1; ++y) {
         const float py = static_cast<float>(y) + 0.5F;
         int run_start = -1;
@@ -667,6 +678,11 @@ auto Painter::stroke_polyline(const std::vector<Point> &pts, float width, Color 
             if (run_start >= 0) {
                 fill_opaque_row(pixels_.data(), width_, y, run_start, x, c);
                 run_start = -1;
+            }
+            // 羽化外沿的平方判据：min_dist_sq 超过 (hw+0.5)² 后 cov 必为 0，
+            // 原路径也要 sqrt 后才 continue；提前剔除，带内仍走原 sqrt / lround。
+            if (min_dist_sq > feather_outer_sq) {
+                continue;
             }
             const float cov = aurora::saturate(hw + 0.5F - std::sqrt(min_dist_sq));  // 1px 羽化
             if (cov <= 0.0F) {
@@ -1877,6 +1893,45 @@ auto sample_gradient(const std::vector<Color> &colors, const std::vector<float> 
     }
     return colors.back();
 }
+
+/// 单调区间的分段采样：t 沿 x 单向推进时，色标区间索引只前进不回退，省去逐像素
+/// sample_gradient 的线性搜索。与 sample_gradient 共用同一插值表达式与量化口径；
+/// 仅当 stops 已规范化（非降、覆盖 [0,1]、colors/stops 等长）时调用，其余形态走回退。
+struct GradientSpan {
+    const std::vector<Color> *colors;
+    const std::vector<float> *stops;
+    std::size_t seg;
+    bool increasing;
+
+    auto sample(float t) -> Color {
+        if (colors->size() == 1 || t <= 0.0F) {
+            return colors->front();
+        }
+        if (t >= 1.0F) {
+            return colors->back();
+        }
+        const std::size_t n = stops->size();
+        if (increasing) {
+            while (seg + 2U < n && t > (*stops)[seg + 1U]) {
+                ++seg;
+            }
+        } else {
+            while (seg > 0U && t <= (*stops)[seg]) {
+                --seg;
+            }
+        }
+        const float range = (*stops)[seg + 1U] - (*stops)[seg];
+        const float frac = (range > 0.0F) ? (t - (*stops)[seg]) / range : 0.0F;
+        const Color &a = (*colors)[seg];
+        const Color &b = (*colors)[seg + 1U];
+        return Color{
+            static_cast<std::uint8_t>(a.r + ((b.r - a.r) * frac)),
+            static_cast<std::uint8_t>(a.g + ((b.g - a.g) * frac)),
+            static_cast<std::uint8_t>(a.b + ((b.b - a.b) * frac)),
+            static_cast<std::uint8_t>(a.a + ((b.a - a.a) * frac)),
+        };
+    }
+};
 }  // namespace
 
 auto Painter::draw_linear_gradient(const Rect &area, Point start, Point end, const std::vector<Color> &colors,
@@ -2218,6 +2273,40 @@ auto Painter::draw_radial_gradient(const Rect &area, Point center, float radius,
     const int grad_rounded_count =
         grad_rounded_heap.empty() ? grad_rounded_n : static_cast<int>(grad_rounded_heap.size());
     const auto ga = static_cast<float>(global_alpha_);  // 与 set_pixel 一致的全局透明度
+
+    // 多色标分段：仅当色标已规范化（等长、非降、首标 ≤0、末标 <1 时补尾平台）时，
+    // 行内全覆写区按 t 的单调段推进色标索引，省去逐像素 sample_gradient 的线性搜索。
+    // 补出的尾段两端同色，插值结果与 sample_gradient 的 t>末标回退 colors.back() 逐位一致。
+    // 其余形态（乱序、长度不符等）保持原逐像素采样，不改像素。
+    std::vector<Color> normalized_colors;
+    std::vector<float> normalized_stops;
+    if (colors.size() == stops.size() && stops.size() >= 2 && stops.front() <= 0.0F &&
+        std::is_sorted(stops.begin(), stops.end())) {
+        normalized_colors = colors;
+        normalized_stops = stops;
+        if (normalized_stops.back() < 1.0F) {
+            normalized_colors.push_back(colors.back());
+            normalized_stops.push_back(1.0F);
+        }
+    }
+    const bool radial_segmented =
+        !normalized_stops.empty() && normalized_stops.front() <= 0.0F && normalized_stops.back() >= 1.0F;
+
+    // 行内全覆写区的像素写入：分段与回退两路共用，量化与混合口径逐字一致。
+    const auto write_opaque_pixel = [&](std::uint8_t *row_ptr, int x_base, int x, const Color &c) -> void {
+        std::uint8_t *p = row_ptr + (static_cast<std::size_t>(x - x_base) * 4U);
+        const int ca_c = detail::quantize_global_alpha(c.a, static_cast<double>(ga));
+        if (ca_c >= 255) {
+            p[0] = c.r;
+            p[1] = c.g;
+            p[2] = c.b;
+            p[3] = 255;
+        } else if (ca_c <= 0) {
+        } else {
+            const float a = static_cast<float>(ca_c) / 255.0F;
+            blend_srgb_over_region(p, c.r, c.g, c.b, a, a, a, 1);
+        }
+    };
     for (int y = y0; y < y1; ++y) {
         std::uint8_t *row =
             pixels_.data() +
@@ -2244,23 +2333,33 @@ auto Painter::draw_radial_gradient(const Rect &area, Point center, float radius,
         // 行内全覆写区
         if (safe_x0 < safe_x1) {
             const float py = static_cast<float>(y) - cy;
-            for (int x = safe_x0; x < safe_x1; ++x) {
-                const float px = static_cast<float>(x) - cx;
-                const float dist = std::sqrt((px * px) + (py * py));
-                float t = std::max(0.0F, std::min(1.0F, dist * inv_r));
-                const Color c = sample_gradient(colors, stops, t);
-                std::uint8_t *p = row + (static_cast<std::size_t>(x - x0) * 4U);
-                const int ca = detail::quantize_global_alpha(c.a, static_cast<double>(ga));
-                const int ca_c = ca;
-                if (ca_c >= 255) {
-                    p[0] = c.r;
-                    p[1] = c.g;
-                    p[2] = c.b;
-                    p[3] = 255;
-                } else if (ca_c <= 0) {
-                } else {
-                    const float a = static_cast<float>(ca_c) / 255.0F;
-                    blend_srgb_over_region(p, c.r, c.g, c.b, a, a, a, 1);
+            if (radial_segmented) {
+                // t = dist/r 在 x 方向呈 V 形：cx 左侧随 x 递减、右侧递增。按 cx 拆两段，
+                // 各自单向推进色标索引；sqrt 几何与量化口径与回退路径逐字一致。
+                const std::size_t n = normalized_stops.size();
+                const int left_end = std::min(safe_x1, std::max(safe_x0, static_cast<int>(std::floor(cx))));
+                GradientSpan left{
+                    .colors = &normalized_colors, .stops = &normalized_stops, .seg = n - 2U, .increasing = false};
+                for (int x = safe_x0; x < left_end; ++x) {
+                    const float px = static_cast<float>(x) - cx;
+                    const float dist = std::sqrt((px * px) + (py * py));
+                    const float t = std::max(0.0F, std::min(1.0F, dist * inv_r));
+                    write_opaque_pixel(row, x0, x, left.sample(t));
+                }
+                GradientSpan right{
+                    .colors = &normalized_colors, .stops = &normalized_stops, .seg = 0U, .increasing = true};
+                for (int x = left_end; x < safe_x1; ++x) {
+                    const float px = static_cast<float>(x) - cx;
+                    const float dist = std::sqrt((px * px) + (py * py));
+                    const float t = std::max(0.0F, std::min(1.0F, dist * inv_r));
+                    write_opaque_pixel(row, x0, x, right.sample(t));
+                }
+            } else {
+                for (int x = safe_x0; x < safe_x1; ++x) {
+                    const float px = static_cast<float>(x) - cx;
+                    const float dist = std::sqrt((px * px) + (py * py));
+                    const float t = std::max(0.0F, std::min(1.0F, dist * inv_r));
+                    write_opaque_pixel(row, x0, x, sample_gradient(colors, stops, t));
                 }
             }
         }

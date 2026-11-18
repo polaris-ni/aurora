@@ -449,6 +449,8 @@ au::Column{}
 | `blend_region(Rect, BlendMode, Color, float)` | 区域混合模式 |
 | `mask_region(Rect, ShaderMaskKind, float)` | 遮罩 |
 
+**羽化带与渐变的取整口径**：`draw_line` / `stroke_polyline` 的包围盒空像素以 `dist² > (hw+0.5)²`（含小幅余量）提前剔除，等价于原「`cov<=0` 后 `continue`」——被剔除的像素本就不写入；带内仍逐像素求距离、`saturate(hw+0.5−dist)` 与 `lround` 量化，圆帽 / 连接语义不变。`draw_radial_gradient` 的多色标行内全覆写区在色标已规范化（等长、非降、首标 ≤0）时按 `t = dist/r` 沿 x 的 V 形拆两段单调推进色标索引，免掉逐像素 `sample_gradient` 的线性搜索；`dist` 的 `sqrt`、插值表达式与 alpha 量化逐字不变，末标 <1 时补同色尾平台（与 `t>` 末标回退尾色逐位一致）。乱序 / 长度不符等形态一律回落原逐像素采样。两处均受 §8.1 的逐位对照与变异自证约束。
+
 **合成与像素搬运**
 
 | 方法 | 说明 |

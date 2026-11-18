@@ -134,6 +134,17 @@ auto main() -> int {
                    aurora::bench::time_ms([&]() -> void { p.fill_rect(full, aurora::Color{255, 200, 0, 128}); }, warmup,
                                           fast_iters));
 
+            // 2b) wide slanted strokes (feather-band outer: squared bound skips zero-cover pixels).
+            report("stroke_wide_slanted", size_label, s, dw, dh,
+                   aurora::bench::time_ms(
+                       [&]() -> void {
+                           p.draw_line(aurora::Point{.x = 0.0F, .y = 0.0F}, aurora::Point{.x = w, .y = h}, 24.0F,
+                                       aurora::Color{200, 40, 40, 255});
+                           p.draw_line(aurora::Point{.x = 0.0F, .y = h}, aurora::Point{.x = w, .y = 0.0F}, 24.0F,
+                                       aurora::Color{40, 40, 200, 255});
+                       },
+                       warmup, fast_iters));
+
             // 3) full-screen linear gradient.
             const std::vector gcolors = {aurora::Color{250, 250, 255, 255}, aurora::Color{30, 30, 60, 255}};
             const std::vector gstops = {0.0F, 1.0F};
@@ -145,12 +156,25 @@ auto main() -> int {
                        },
                        warmup, fast_iters));
 
-            // 4) full-screen radial gradient.
+            // 4) full-screen radial gradient (two stops: SIMD fast path).
             report("radial_gradient_full", size_label, s, dw, dh,
                    aurora::bench::time_ms(
                        [&]() -> void {
                            p.draw_radial_gradient(full, aurora::Point{.x = w * 0.5F, .y = h * 0.5F}, w * 0.5F, gcolors,
                                                   gstops);
+                       },
+                       warmup, fast_iters));
+
+            // 4b) multi-stop radial gradient (non-SIMD path: segmented stop advance).
+            const std::vector mcolors = {aurora::Color{20, 30, 50, 255}, aurora::Color{70, 120, 180, 255},
+                                         aurora::Color{210, 200, 160, 255}, aurora::Color{240, 80, 40, 255},
+                                         aurora::Color{255, 255, 255, 255}};
+            const std::vector mstops = {0.0F, 0.2F, 0.5F, 0.8F, 1.0F};
+            report("radial_gradient_multistop", size_label, s, dw, dh,
+                   aurora::bench::time_ms(
+                       [&]() -> void {
+                           p.draw_radial_gradient(full, aurora::Point{.x = w * 0.5F, .y = h * 0.5F}, w * 0.5F, mcolors,
+                                                  mstops);
                        },
                        warmup, fast_iters));
 

@@ -91,6 +91,41 @@ namespace {
     }
     return diff;
 }
+
+/// @brief 测试端独立的径向渐变采样：与库内 sample_gradient 同口径的线性插值，
+///        作为分段单调推进路径的正交参考（不使用库的采样函数）。
+[[nodiscard]] auto reference_gradient_sample(const std::vector<Color> &colors, const std::vector<float> &stops, float t)
+    -> Color {
+    if (colors.empty()) {
+        return Color{};
+    }
+    if (colors.size() == 1 || t <= 0.0F) {
+        return colors.front();
+    }
+    if (t >= 1.0F) {
+        return colors.back();
+    }
+    const std::size_t n = std::min(colors.size(), stops.size());
+    for (std::size_t i = 0; i + 1 < n; ++i) {
+        if (t >= stops[i] && t <= stops[i + 1]) {
+            const float range = stops[i + 1] - stops[i];
+            const float frac = (range > 0.0F) ? (t - stops[i]) / range : 0.0F;
+            const Color &a = colors[i];
+            const Color &b = colors[i + 1];
+            const auto ar = static_cast<float>(a.r);
+            const auto ag = static_cast<float>(a.g);
+            const auto ab = static_cast<float>(a.b);
+            const auto aa = static_cast<float>(a.a);
+            return Color{
+                static_cast<std::uint8_t>(ar + ((static_cast<float>(b.r) - ar) * frac)),
+                static_cast<std::uint8_t>(ag + ((static_cast<float>(b.g) - ag) * frac)),
+                static_cast<std::uint8_t>(ab + ((static_cast<float>(b.b) - ab) * frac)),
+                static_cast<std::uint8_t>(aa + ((static_cast<float>(b.a) - aa) * frac)),
+            };
+        }
+    }
+    return colors.back();
+}
 }  // namespace
 
 AURORA_TEST_CASE(begin_allocates_zeroed_canvas) {
@@ -386,6 +421,65 @@ AURORA_TEST_CASE(linear_gradient_interpolates_along_axis) {
 
     // 沿轴单调变亮：起点暗于终点。
     AURORA_TEST_CHECK_LT(p.get_pixel(0, 0).r, p.get_pixel(7, 0).r);
+}
+
+// 多色标径向渐变的行内全覆写区改走单调分段推进后，必须与逐像素 sample_gradient 正交基准
+// 逐位一致。半径跨多段色标、圆心非整数锚点（触发 V 形左右两段），分段索引双向推进都要覆盖。
+AURORA_TEST_CASE(radial_gradient_segmented_matches_per_pixel_reference) {
+    struct Scene {
+        Point center;
+        float radius;
+        std::vector<Color> colors;
+        std::vector<float> stops;
+    };
+    const Scene scenes[] = {
+        {
+            .center = Point{.x = 24.0F, .y = 23.0F},
+            .radius = 30.0F,
+            .colors = {Color{20, 40, 60, 255}, Color{90, 130, 170, 255}, Color{220, 200, 180, 255},
+                       Color{240, 30, 20, 255}},
+            .stops = {0.0F, 0.25F, 0.6F, 1.0F},
+        },
+        {
+            .center = Point{.x = 12.5F, .y = 18.25F},
+            .radius = 26.0F,
+            .colors = {Color{10, 10, 10, 255}, Color{60, 90, 120, 255}, Color{200, 210, 220, 255}},
+            .stops = {0.0F, 0.4F, 0.85F},  // 末标 < 1：触发补尾平台，仍是分段路径
+        },
+    };
+    const Rect canvas = rect_at(0.0F, 0.0F, 48.0F, 48.0F);
+    for (const Scene &s : scenes) {
+        Painter subject;
+        subject.begin(48, 48);
+        subject.draw_radial_gradient(canvas, s.center, s.radius, s.colors, s.stops);
+
+        // 正交基准：逐像素用测试端独立采样填充一张 Image，再经 1:1 直拷（全不透明、
+        // 整数锚点、global_alpha=1、无圆角裁剪时逐字节写入）铺到参考画布。采样表达式与
+        // 库内 sample_gradient 同口径，但不走单调推进，也不调用库的任何采样入口。
+        Image ref_img;
+        ref_img.width = 48;
+        ref_img.height = 48;
+        ref_img.pixels.resize(static_cast<std::size_t>(48) * 48U * 4U);
+        const float inv_r = 1.0F / s.radius;
+        for (int y = 0; y < 48; ++y) {
+            for (int x = 0; x < 48; ++x) {
+                const float px = static_cast<float>(x) - s.center.x;
+                const float py = static_cast<float>(y) - s.center.y;
+                const float dist = std::sqrt((px * px) + (py * py));
+                const float t = std::max(0.0F, std::min(1.0F, dist * inv_r));
+                const Color c = reference_gradient_sample(s.colors, s.stops, t);
+                const std::size_t i = ((static_cast<std::size_t>(y) * 48U) + static_cast<std::size_t>(x)) * 4U;
+                ref_img.pixels[i + 0U] = c.r;
+                ref_img.pixels[i + 1U] = c.g;
+                ref_img.pixels[i + 2U] = c.b;
+                ref_img.pixels[i + 3U] = c.a;
+            }
+        }
+        Painter reference;
+        reference.begin(48, 48);
+        reference.draw_image(ref_img, canvas);
+        AURORA_TEST_CHECK_EQ(count_diff_pixels(subject, reference), 0);
+    }
 }
 
 AURORA_TEST_CASE(draw_line_covers_diagonal) {
