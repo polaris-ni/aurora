@@ -654,7 +654,9 @@ auto Widget::render_into(Painter &dst, const Rect &local, const BuildContext &ct
                       Rect{.origin = t, .size = tf.content_size}, ctx);
 
         const Matrix2D abs = Matrix2D::from_translate(local.origin.x, local.origin.y).compose(mtx);
-        dst.composite(sub, abs);
+        // sub 是本次合成新建、用完即弃的离屏缓冲，且此处可能正处于祖先 DL 录制中：
+        // 走移动版 composite，录制态直接接管其像素入池，省掉 to_image() 的整帧拷贝。
+        dst.composite(std::move(sub), abs);
     }
 
     dst.set_alpha(saved_alpha);

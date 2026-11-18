@@ -208,6 +208,45 @@ auto main() -> int {
             report("composite_rot_scale", size_label, s, dw, dh,
                    aurora::bench::time_ms([&]() -> void { p.composite(off, m); }, warmup, slow_iters));
 
+            // 7b) 录制态离屏合成：临时源走移动版入池 vs 常量版 to_image() 整帧快照。
+            // 只测「录制命令 + 图像入池」，不回放，隔离拷贝开销；源取画布同尺寸以放大
+            // 整帧 memcpy 信号（256x256 的小源会被固定开销淹没）。每次新建临时源模拟
+            // 非恒等 Transform 的 Painter sub。
+            aurora::DisplayList snap_dl;
+            const int sub_lw = static_cast<int>(static_cast<float>(dw) / s);
+            const int sub_lh = static_cast<int>(static_cast<float>(dh) / s);
+            const aurora::Point sub_center{.x = static_cast<float>(dw) * 0.5F / s,
+                                           .y = static_cast<float>(dh) * 0.5F / s};
+            const aurora::Matrix2D snap_m = aurora::Matrix2D::from_rotate_about(30.0F, sub_center);
+            const auto make_sub = [&]() -> aurora::Painter {
+                aurora::Painter sub;
+                sub.set_scale(s);
+                sub.begin(sub_lw, sub_lh);
+                sub.fill_rect(aurora::Rect{.origin = aurora::Point{.x = 0, .y = 0},
+                                           .size = aurora::Size{.width = static_cast<float>(sub_lw),
+                                                                .height = static_cast<float>(sub_lh)}},
+                              aurora::Color{200, 80, 40, 255});
+                return sub;
+            };
+            report("composite_record_move", size_label, s, dw, dh,
+                   aurora::bench::time_ms(
+                       [&]() -> void {
+                           p.record(snap_dl);
+                           aurora::Painter sub = make_sub();
+                           p.composite(std::move(sub), snap_m);
+                           p.stop();
+                       },
+                       warmup, slow_iters));
+            report("composite_record_copy", size_label, s, dw, dh,
+                   aurora::bench::time_ms(
+                       [&]() -> void {
+                           p.record(snap_dl);
+                           aurora::Painter sub = make_sub();
+                           p.composite(sub, snap_m);
+                           p.stop();
+                       },
+                       warmup, slow_iters));
+
             // 8) rounded clip + full-screen fill (SDF coverage anti-aliased clip path).
             report("rounded_clip_fill", size_label, s, dw, dh,
                    aurora::bench::time_ms(

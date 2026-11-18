@@ -147,6 +147,53 @@ AURORA_TEST_CASE(add_image_move_preserves_pixels) {
     AURORA_TEST_CHECK_EQ(static_cast<int>(painter.get_pixel(1, 0).b), 60);
 }
 
+AURORA_TEST_CASE(record_composite_rvalue_matches_lvalue_and_drains_source) {
+    // 移动版 composite(Painter&&) 在录制态直接接管源像素入池，省掉 to_image() 的整帧拷贝；
+    // 回放像素必须与常量引用版逐位一致，且源缓冲被掏空（仅可析构 / 重新 begin）。
+    const Matrix2D matrix = Matrix2D::from_rotate_about(30.0F, Point{.x = 8.0F, .y = 8.0F});
+    const auto make_source = []() -> Painter {
+        Painter src;
+        src.begin(16, 16);
+        src.fill_rect(rect_at(2.0F, 3.0F, 10.0F, 8.0F), Color::red());
+        src.fill_rect(rect_at(5.0F, 6.0F, 4.0F, 4.0F), Color{40, 180, 90, 200});
+        return src;
+    };
+
+    DisplayList copy_list;
+    Painter copy_dst;
+    copy_dst.begin(16, 16);
+    copy_dst.record(copy_list);
+    {
+        Painter src = make_source();
+        copy_dst.composite(src, matrix);  // 常量引用版：to_image() 拷贝快照
+    }
+    copy_dst.stop();
+
+    DisplayList move_list;
+    Painter move_dst;
+    move_dst.begin(16, 16);
+    move_dst.record(move_list);
+    Painter moved_src = make_source();
+    move_dst.composite(std::move(moved_src), matrix);  // 移动版：接管缓冲
+    move_dst.stop();
+    // 源缓冲被移走：尺寸保留，像素清空；重新 begin 后恢复可用。
+    // 这里刻意读取 moved-from 对象的状态来验证接管语义，不是误用。
+    AURORA_TEST_CHECK_EQ(moved_src.width(), 16);  // NOLINT(bugprone-use-after-move)
+    AURORA_TEST_CHECK_TRUE(moved_src.to_image().pixels.empty());  // NOLINT(bugprone-use-after-move)
+    moved_src.begin(4, 4);  // NOLINT(bugprone-use-after-move)
+    AURORA_TEST_CHECK_EQ(static_cast<int>(moved_src.to_image().pixels.size()), 4 * 4 * 4);
+
+    Painter copy_out;
+    copy_out.begin(16, 16);
+    copy_list.replay(copy_out);
+    Painter move_out;
+    move_out.begin(16, 16);
+    move_list.replay(move_out);
+    AURORA_TEST_CHECK_EQ(count_diff_pixels(copy_out, move_out), 0);
+    // 非全透明：确认合成确实写入了像素，避免两条空列表互相"一致"的假绿。
+    AURORA_TEST_CHECK_EQ(static_cast<int>(move_list.cmd_count()), 1);
+}
+
 AURORA_TEST_CASE(push_cmd_tracks_count_and_breaks_emptiness) {
     DisplayList list;
     DrawCmd cmd;

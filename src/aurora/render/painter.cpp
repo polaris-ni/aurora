@@ -1699,6 +1699,30 @@ auto Painter::composite(const Painter &src, const Matrix2D &matrix) -> void {
     composite_pixels(src.pixels_.data(), src.width(), src.height(), src.scale_, matrix);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved): 只接管成员 pixels_
+auto Painter::composite(Painter &&src, const Matrix2D &matrix) -> void {
+    if (is_recording()) {
+        DrawCmd cmd;
+        cmd.kind = CmdKind::Composite;
+        cmd.matrix_idx = recording_stack_.back()->add_matrix(matrix);
+        cmd.composite_scale = src.scale_;
+        // 先按源尺寸/缩放构造快照，再把像素缓冲整体移动入池：与 to_image() 的临时产物
+        // 同语义，但省掉一次整帧拷贝。src 在合成后不再使用，掏空其缓冲是安全的。
+        Image img;
+        img.width = src.width_;
+        img.height = src.height_;
+        // 只接管像素缓冲（整对象 move 会连矩阵/裁剪栈一起搬，既无必要也会提前掏空 src）。
+        img.pixels = std::move(src.pixels_);
+        cmd.image_idx = recording_stack_.back()->add_image(std::move(img));
+        recording_stack_.back()->push_cmd(cmd);
+        return;
+    }
+    if (width_ <= 0 || height_ <= 0 || src.width() <= 0 || src.height() <= 0) {
+        return;
+    }
+    composite_pixels(src.pixels_.data(), src.width(), src.height(), src.scale_, matrix);
+}
+
 auto Painter::composite(const Image &src, const Matrix2D &matrix, float src_scale) -> void {
     // 录制态：缓存 DL（含 cache_layer 位图 / 像素缓存）回放进祖先录制时，必须把该合成
     // 重新录为 Composite 命令而非就地执行——否则祖先 DL 不含本合成，回放时子树像素缺失

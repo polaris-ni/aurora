@@ -329,6 +329,15 @@ class Painter {
     /// @param src 源 Painter（已 begin，逻辑尺寸 = 其 begin 尺寸，物理 = *scale_）。
     /// @param matrix 逻辑 dp 空间仿射矩阵（含平移/旋转/缩放，建议绕内容中心构造）。
     auto composite(const Painter &src, const Matrix2D &matrix) -> void;
+    /// @brief 把已渲染的离屏子树按矩阵合成回来，并在录制态接管源的像素缓冲。
+    ///
+    /// 与 `composite(const Painter &, ...)` 像素语义一致，差别仅在录制态：`src` 的帧缓冲
+    /// 被直接移动进显示列表的图像池，省掉一次整帧拷贝。适用于「离屏子树是本次合成的临时
+    /// 产物、合成后不再使用」的调用点（非恒等 Transform 的 `Painter sub`）。Direct 态与
+    /// 常量引用版完全相同，不消耗 `src`。
+    /// @param src 源 Painter（合成后其像素缓冲被移走，仅可析构或重新 `begin`）。
+    /// @param matrix 逻辑 dp 空间仿射矩阵（含平移/旋转/缩放，建议绕内容中心构造）。
+    auto composite(Painter &&src, const Matrix2D &matrix) -> void;
     /// @brief 把离屏位图（Image）按矩阵合成到当前画布（回放 Composite 命令用，含源缩放）。
     /// @param src 源位图（RGBA8）。
     /// @param matrix 逻辑 dp 空间仿射矩阵。
