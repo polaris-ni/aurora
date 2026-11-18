@@ -112,6 +112,7 @@ class ReadOnlyState {
             std::invoke(callback, value);
         });
         source->add_observer(*record);
+        record->note_preregistered(*source);
         Subscription subscription([record, source]() { record->cancel(); });
         record->run_first();
         return subscription;
@@ -202,6 +203,7 @@ class StateSink {
                 notify();
             });
             source->add_observer(*record);
+            record->note_preregistered(*source);
             subscriptions.emplace_back([record, source]() { record->cancel(); });
             record->run_first();
         }

@@ -327,4 +327,63 @@ AURORA_TEST_CASE(epoch_arrays_empty_when_no_live_sources) {
 #endif
 }
 
+AURORA_TEST_CASE(reactor_preregistered_source_registers_once) {
+    // 固定来源订阅的形态：先手动挂接，再首跑读取同一来源。
+    // 依赖替换必须跳过重复登记，否则来源的观察者表里会出现同一条记录两次。
+    auto src = make_source(5);
+    int runs = 0;
+    auto rec = std::make_shared<RunRecord>([&] {
+        ++runs;
+        (void)src->read();
+    });
+    src->add_observer(*rec);
+    rec->note_preregistered(*src);
+    rec->run_first();
+    AURORA_TEST_CHECK_EQ(runs, 1);
+#ifdef AURORA_ENABLE_DEBUG
+    AURORA_TEST_CHECK_EQ(src->observer_count(), std::size_t{1});
+#endif
+
+    src->assign(6);
+    AURORA_TEST_CHECK_EQ(runs, 2);  // 重复登记会让一次提交触发两轮交付
+
+    rec->cancel();
+#ifdef AURORA_ENABLE_DEBUG
+    AURORA_TEST_CHECK_EQ(src->observer_count(), std::size_t{0});
+#endif
+}
+
+AURORA_TEST_CASE(reactor_preregistered_source_unread_is_unlinked) {
+    // 回调没有读取其固定来源：依赖替换须摘掉预登记的观察者，后续提交不再触达该记录。
+    auto src = make_source(1);
+    int runs = 0;
+    auto rec = std::make_shared<RunRecord>([&] { ++runs; });
+    src->add_observer(*rec);
+    rec->note_preregistered(*src);
+    rec->run_first();
+    AURORA_TEST_CHECK_EQ(runs, 1);
+#ifdef AURORA_ENABLE_DEBUG
+    AURORA_TEST_CHECK_EQ(src->observer_count(), std::size_t{0});
+#endif
+
+    src->assign(2);
+    AURORA_TEST_CHECK_EQ(runs, 1);
+}
+
+AURORA_TEST_CASE(reactor_cancel_before_first_run_unlinks_preregistered) {
+#ifdef AURORA_ENABLE_DEBUG
+    // 首跑前取消：预登记的观察者尚未进入依赖边，取消须单独摘除，不留残留登记。
+    auto src = make_source(1);
+    auto rec = std::make_shared<RunRecord>([] {});
+    src->add_observer(*rec);
+    rec->note_preregistered(*src);
+    AURORA_TEST_CHECK_EQ(src->observer_count(), std::size_t{1});
+
+    rec->cancel();
+    AURORA_TEST_CHECK_EQ(src->observer_count(), std::size_t{0});
+#else
+    AURORA_TEST_SKIP("observer-count port is gated by AURORA_ENABLE_DEBUG");
+#endif
+}
+
 }  // namespace aurora::test_cases::utest_reactor

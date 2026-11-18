@@ -89,6 +89,8 @@ Aurora 是一个 C++20 跨平台 GUI 库，以**声明式 + 响应式**为核心
 | 基础层 | `core/` | `types.h` `result.h`（`Result<T>` / `Error`） `log.h` `diagnostics.h` `color.h` `dimension.h` `image.h` `font.h` `strict_mode.h` `event_stream.h` `accessibility.h` `a11y_types.h` `a11y_provider.h` `a11y_text.h` `json.h`（JSON 值容器，见 `specification/01-core.md` §9） `headers.h`（大小写不敏感 HTTP 头集合，见 `specification/01-core.md` §10） `url.h`（URL 值类型与查询参数，见 `specification/01-core.md` §11） `compression.h`（压缩解压编解码器与注册表：字符串格式 ID + 可替换实现，见 `specification/01-core.md` §12） |
 | 响应式核心 | `state/` | `state.h` `read_only_state.h`（`State<T>` / `ReadOnlyState<T>` / `StateSink`） `computed.h` `effect.h` `subscription.h` `async.h` `coroutine.h` `state_graph.h` `undo_stack.h` `resource.h`（三态异步绑定与公开快照 `Resource<T>` / `StreamResource<T>` / `ResourceSnapshot<T>` / `StreamSnapshot<T>`，见 `specification/02-state.md` §5.4）；内核节点与传播引擎在 `state/detail/` |
 
+**观察者登记**：来源的观察者表由登记侧保证唯一——固定来源订阅先挂接以避免首跑排队窗口丢通知，首跑读依赖时跳过重复项；取消与「首跑未读到预登记来源」都会摘除已挂接项。内核登记入口只做一次追加，不做防御性线性扫描，唯一性由 Debug 断言复核。契约见 [`specification/02-state.md`](specification/02-state.md) §3.4 与附录 A.3。
+
 ### 4.2 布局与渲染
 
 | 模块 | 路径 | 主要头文件 |
@@ -371,6 +373,7 @@ drain_posted → pump_all_once → on_frame_ → 关闭闸门询问步 poll_clos
 - **树 → YAML**：`serialization::to_yaml(const Widget&)` / `to_yaml(const Json&)`，内部经 `yaml.h` 的递归下降发射器把 JSON 转为 YAML（仅输出方向，无 `from_yaml`）。
 - **树 ⇄ 源码**：`serialization::to_code` 反向生成等效构造代码。
 - **API 描述**：`gen_api_tools` 输出 `aurora_api.json`（全部 widget 类型、属性键、核心枚举），供 LSP / 文档生成 / 设计工具消费。
+- **Schema 只读视图**：schema 缓存持有 `std::shared_ptr<const Json>`，命中查询只做一次引用计数递增；`describe_component_view` / `list_all_schema_views` 供只读消费端（prompt 构建、代码生成、校验）使用，`describe_component` / `list_all_schemas` 的按值契约保持不变。重注册或失效只影响之后的查询，已取得的视图继续指向当时的快照。
 - **不可重建控件**：`Repeater` / `Canvas` 的工厂返回「not-restorable」错误；含它们的树 `from_json` 应作预期提示而非硬失败。
 
 ---
@@ -447,7 +450,7 @@ Aurora 内置轻量级运行时性能检测体系，提供帧级指标采集、�
 
 ### 10.7 基准读数契约与持续看护
 
-六个基准工具统一落盘结构化结果文件（契约在 `tools/include/bench_result.h`），保留原标准输出；结果按测试环境规格、构建口径、后端与场景分桶，跨桶读数不得互相比较。采样不可信、后端不可用或场景跳过时仍落盘带原因码的结果并判数据缺失，不把跳过当绿灯。阈值登记册 `tools/check/perf_gates.json` 与入库基线仓库 `tools/check/perf_baselines.json` 是两类数据：前者记 G-1 至 G-14 的阈值且读取方不动，后者记跨提交趋势读数且只允许显式写入动作更新。
+七个基准工具统一落盘结构化结果文件（契约在 `tools/include/bench_result.h`），保留原标准输出；结果按测试环境规格、构建口径、后端与场景分桶，跨桶读数不得互相比较。采样不可信、后端不可用或场景跳过时仍落盘带原因码的结果并判数据缺失，不把跳过当绿灯。阈值登记册 `tools/check/perf_gates.json` 与入库基线仓库 `tools/check/perf_baselines.json` 是两类数据：前者记 G-1 至 G-14 的阈值且读取方不动，后者记跨提交趋势读数且只允许显式写入动作更新。
 
 判定分两层：计数类与确定性指标继续由既有单元测试硬红守护；时间类由 `tools/check/bench_compare.py` 以同机同次双构建交错对照判定——每臂不少于九次有效重复、显式种子决定交错顺序、两臂同码对照标定噪声预算、双样本秩检验并对并行指标族做多重比较校正。入库基线只作趋势，同次对照才作回归判定，任一侧缺失即判数据缺失，不回退静态阈值。编排落在独立工作流 `.github/workflows/nightly-bench.yml`，由 `tools/check/bench_nightly.py` 在同一运行器内构建父提交与当前提交两套产物并产出报告与作业摘要；时间类超阈值只告警，不改动 `ci.yml` 全量矩阵的通过失败语义。权威口径见 `specification/08-tooling.md`（工具规格章节）。
 

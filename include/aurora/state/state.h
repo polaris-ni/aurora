@@ -117,6 +117,7 @@ class State {
             std::invoke(callback, value);
         });
         source->add_observer(*record);
+        record->note_preregistered(*source);
         Subscription subscription([record, source]() { record->cancel(); });
         record->run_first();
         return subscription;

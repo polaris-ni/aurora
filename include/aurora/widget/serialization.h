@@ -116,6 +116,11 @@ auto apply_patch(Json &target, const std::vector<JsonPatchOp> &patch) -> void;
 /// @return schema JSON 对象。
 [[nodiscard]] auto component_schema(const std::string &name) -> Json;
 
+/// @brief 生成单个组件 schema 的只读视图（与缓存共享同一份 JSON，命中时不复制）。
+/// @param name 组件类型名。
+/// @return 共享只读视图；未知类型返回空对象视图。
+[[nodiscard]] auto component_schema_view(const std::string &name) -> std::shared_ptr<const Json>;
+
 /// @brief 把 widget 树序列化为 YAML 文本（仅输出，无 from_yaml 逆过程）。
 ///
 /// 先经 `to_json(w)` 取结构快照，再委托 yaml.h 的 `to_yaml(Json)` 落文本。
@@ -134,6 +139,15 @@ auto apply_patch(Json &target, const std::vector<JsonPatchOp> &patch) -> void;
 /// @return 组件 schema JSON。
 [[nodiscard]] auto describe_component(const std::string &name) -> Json;
 
+/// @brief 返回单个组件 schema 的只读视图（与缓存共享同一份 JSON，不做深拷贝）。
+///
+/// 只读调用方（prompt 构建、代码生成、校验）应优先用它；需要独立对象或向外交付 `Json` 值的
+/// 边界仍用 `describe_component`。视图可在任意时长持有：重注册或失效只影响之后的查询，
+/// 已取得的视图继续指向当时的快照。
+/// @param name 组件类型名。
+/// @return 共享只读视图；未知类型返回空对象视图。
+[[nodiscard]] auto describe_component_view(const std::string &name) -> std::shared_ptr<const Json>;
+
 /// @brief 按名称子串（大小写不敏感）搜索组件，返回匹配组件的 schema 列表。
 /// @param query 名称子串。
 /// @return 匹配组件的 schema 列表。
@@ -142,5 +156,9 @@ auto apply_patch(Json &target, const std::vector<JsonPatchOp> &patch) -> void;
 /// @brief 返回所有已注册组件的完整 schema（含 describe 元数据）。
 /// @return 全量 schema 列表。
 [[nodiscard]] auto list_all_schemas() -> std::vector<Json>;
+
+/// @brief 返回所有已注册组件 schema 的只读视图（与 `list_all_schemas` 同序，不复制）。
+/// @return 共享只读视图列表。
+[[nodiscard]] auto list_all_schema_views() -> std::vector<std::shared_ptr<const Json>>;
 
 }  // namespace aurora

@@ -178,6 +178,14 @@ class SourceNode : public std::enable_shared_from_this<SourceNode> {
     /// @param observer 观察者。
     auto remove_observer(Observer &observer) noexcept -> void;
 
+#ifdef AURORA_ENABLE_DEBUG
+    /// @brief 调试观测口：直接观察者表的条目数。
+    ///
+    /// 供测试判定「登记唯一」与「取消后不留残留」；Release 构建下整体裁切，不占公共面。
+    /// @return 当前登记的观察者数量。
+    [[nodiscard]] auto observer_count() const noexcept -> std::size_t { return observers_.size(); }
+#endif
+
   protected:
     /// @brief 构造并分配稳定身份。
     SourceNode();
@@ -445,6 +453,13 @@ class RunRecord final : public Observer, public DepsCollector, public std::enabl
     /// @param version 读取时版本。
     auto add(SourceNode &src, std::uint64_t version) -> void override;
 
+    /// @brief 标记「首跑前已手动挂接」的来源。
+    ///
+    /// 固定来源订阅在首跑排队前先挂上观察者，保证这段窗口内的提交不丢通知；首跑读取同一来源时
+    /// 依赖替换据此跳过重复登记。普通 effect 不设标记（恒为 `nullptr`）。
+    /// @param src 已在来源侧挂上本观察者的来源。
+    auto note_preregistered(SourceNode &src) noexcept -> void { preregistered_ = &src; }
+
     /// @brief 终端共享句柄。
     /// @return 指向自身的共享指针。
     [[nodiscard]] auto as_terminal() -> std::shared_ptr<RunRecord> override;
@@ -479,6 +494,8 @@ class RunRecord final : public Observer, public DepsCollector, public std::enabl
     std::unordered_map<const SourceNode *, std::size_t> next_index_;
     /// @brief 上一轮依赖来源的身份索引，供替换依赖时判「本轮读集合是否仍含旧来源」。
     std::unordered_set<const SourceNode *> prev_index_;
+    /// @brief 首跑前已手动挂接的来源；`nullptr` 表示无（普通 effect 恒为空）。
+    SourceNode *preregistered_ = nullptr;
     bool pending_ = false;
     bool cancelled_ = false;
     bool running_ = false;

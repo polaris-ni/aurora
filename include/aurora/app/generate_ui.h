@@ -117,7 +117,8 @@ inline constexpr std::array<std::string_view, 3> AURORA_UI_TEXT_PROP_CANDIDATES 
         // 该类型若有文案类属性，填入类型名作为占位文案（与旧行为一致：Button→"Button"）。
         // 存在性判据走单一权威 props 表的键集（三个候选键均不在「仅描述符收录」集合内，
         // 与「serialize_props 写出的键」口径等价）。
-        const Json schema = aurora::describe_component(type);
+        const auto schema_view = aurora::describe_component_view(type);
+        const Json &schema = *schema_view;
         if (const auto *props_ptr = schema.at("props"); props_ptr != nullptr && props_ptr->is_array()) {
             for (const std::string_view key : AURORA_UI_TEXT_PROP_CANDIDATES) {
                 bool present = false;

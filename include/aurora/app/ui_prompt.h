@@ -56,7 +56,8 @@ struct UiPromptOptions {
         if (std::ranges::find(registered_types, type) == registered_types.end()) {
             continue;
         }
-        const Json schema = aurora::describe_component(type);
+        const auto schema_view = aurora::describe_component_view(type);
+        const Json &schema = *schema_view;
 
         out += "## " + type + "\n";
         std::string tags;
@@ -292,7 +293,8 @@ namespace detail {
     }
 
     if (out.contains("type") && out.at("type")->is_string()) {
-        const Json schema = aurora::describe_component(out.at("type")->as_or<std::string>(""));
+        const auto schema_view = aurora::describe_component_view(out.at("type")->as_or<std::string>(""));
+        const Json &schema = *schema_view;
 
         // 2) 补齐**必填**属性。值取自单一 props 表的 default（serialize_props 实测序列化结果），
         //    类型保真度最高；只补带 default 的条目——default_expr 显示串形态不是可写值。

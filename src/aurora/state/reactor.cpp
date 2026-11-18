@@ -9,6 +9,7 @@
 #include <utility>
 #include <vector>
 
+#include "aurora/core/aurora_assert.h"
 #include "aurora/core/log.h"
 
 namespace aurora::detail {
@@ -128,13 +129,11 @@ auto Engine::shrink_epoch_arrays() -> void {
 }
 
 auto SourceNode::add_observer(Observer &observer) -> void {
-    // 线性去重：单个来源的观察者数通常是个位数，且登记只在依赖集合变化时发生；
-    // 为 O(1) 去重再维护一张哈希索引，会给每个来源常驻一份桶数组与分配，收益为负。
-    for (const auto *existing : observers_) {
-        if (existing == &observer) {
-            return;
-        }
-    }
+    // 唯一性由登记侧保证：固定来源订阅在首跑前手动挂接一次，依赖替换对同一来源不再重复登记
+    // （见 `RunRecord::replace_deps`）；派生节点的依赖替换两侧也按身份去重。故 Release 下这里
+    // 只做一次 push_back，不做逐条扫描；断言只在 Debug 下复核契约，发现违约即中止。
+    AURORA_ASSERT(std::find(observers_.begin(), observers_.end(), &observer) == observers_.end(),
+                  "observer registered twice on the same source");
     observers_.push_back(&observer);
 }
 
@@ -171,6 +170,11 @@ auto RunRecord::cancel() noexcept -> void {
     }
     cancelled_ = true;
     pending_ = false;
+    // 首跑前手动挂接的观察者尚未进入 deps_，须单独摘除，否则取消后它仍留在来源的观察者表里。
+    if (preregistered_ != nullptr) {
+        preregistered_->remove_observer(*this);
+        preregistered_ = nullptr;
+    }
     for (const auto &dep : deps_) {
         if (dep.node) {
             dep.node->remove_observer(*this);
@@ -197,10 +201,17 @@ auto RunRecord::replace_deps() -> void {
         }
     }
     for (const auto &dep : next_) {
-        if (!prev_index_.contains(dep.node.get())) {
-            dep.node->add_observer(*this);
+        // 首跑前已手动挂接的来源（固定来源订阅）这里不再重复登记；其余按「旧有新无」补挂。
+        if (dep.node.get() == preregistered_ || prev_index_.contains(dep.node.get())) {
+            continue;
         }
+        dep.node->add_observer(*this);
     }
+    // 预登记来源没被首跑读到（回调没有读取其固定来源）：摘除，避免观察者残留。
+    if (preregistered_ != nullptr && !next_index_.contains(preregistered_)) {
+        preregistered_->remove_observer(*this);
+    }
+    preregistered_ = nullptr;
     deps_ = std::move(next_);
     next_.clear();
     next_index_.clear();

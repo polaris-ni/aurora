@@ -64,7 +64,7 @@
 
 ### 2.2 API
 
-本表函数除 `list_all_schemas` 外均位于 `aurora::serialization` 命名空间（**不是** `aurora`）。`list_all_schemas` 声明在 `serialization` 块之外，属 `aurora` 命名空间（`serialization.h`，与 `list_all_components` / `describe_component` / `search_components` 同区），调用写作 `au::list_all_schemas()`。
+本表函数除 `list_all_schemas` / `describe_component_view` / `list_all_schema_views` 外均位于 `aurora::serialization` 命名空间（**不是** `aurora`）。这三个声明在 `serialization` 块之外，属 `aurora` 命名空间（`serialization.h`，与 `list_all_components` / `describe_component` / `search_components` 同区），调用写作 `au::list_all_schemas()`。
 
 | 函数 | 签名 | 位置 |
 |:---|:---|:---|
@@ -75,7 +75,12 @@
 | `apply_patch` | `auto apply_patch(Json &target, const std::vector<JsonPatchOp> &patch) -> void` | `serialization.h` |
 | `to_yaml` | `[[nodiscard]] auto to_yaml(const Widget &w) -> std::string` | `serialization.h` |
 | `component_schema` | `[[nodiscard]] auto component_schema(const std::string &name) -> Json` | `serialization.h` |
+| `component_schema_view` | `[[nodiscard]] auto component_schema_view(const std::string &name) -> std::shared_ptr<const Json>` | `serialization.h` |
 | `list_all_schemas` | `[[nodiscard]] auto list_all_schemas() -> std::vector<Json>` | `serialization.h` |
+| `describe_component_view` | `[[nodiscard]] auto describe_component_view(const std::string &name) -> std::shared_ptr<const Json>` | `serialization.h` |
+| `list_all_schema_views` | `[[nodiscard]] auto list_all_schema_views() -> std::vector<std::shared_ptr<const Json>>` | `serialization.h` |
+
+**只读视图**：`*_view` 入口返回缓存持有的同一份 schema（命中时只做引用计数递增，不做深拷贝），按值入口保持原契约。视图可在任意时长持有——重注册或缓存失效只影响之后的查询，已取得的视图继续指向当时的快照。只读消费端（prompt 构建、代码生成、校验）应优先用视图；需要独立对象或向外交付 `Json` 值的边界仍用按值入口。
 
 `to_yaml` 有 `Widget` 与 `Json` 两个重载；**YAML 只有输出方向，无 `from_yaml`**。
 
@@ -126,6 +131,8 @@ struct JsonPatchOp {
 ```
 
 协议是 **RFC6902 的子集**，仅支持 `replace` / `add` / `remove` 三类操作，以 JSON Pointer 定位。
+
+数组分支按下标对齐生成 `/items/<i>` 形式的路径，越界侧为 `add` / `remove`。实现对下标路径复用同一块缓冲、并在两侧子树相等时跳过拼接；路径文本、补丁顺序与操作类型与逐个拼接完全一致，只省掉重复分配。
 
 **线格式**：`diff` 的返回值是 `std::vector<JsonPatchOp>`，序列化为**一个裸 JSON 数组**，无信封包装。
 
@@ -438,8 +445,11 @@ stdout（`AURORA_LOG_RAW`，无前缀）；失败行以 `[transport-error]` / `[
 | API | 说明 |
 |:---|:---|
 | `component_schema(type)` | 返回完整 JSON schema，含单一 `props` 属性表（声明序、带类型/默认值/枚举等元数据）与 `events`、`children_policy`、`examples` 增强字段 |
+| `component_schema_view(type)` | 同 `component_schema`，返回缓存共享的只读视图（`std::shared_ptr<const Json>`），不做深拷贝 |
 | `list_all_schemas()` | 返回所有已注册组件的完整 schema 列表（`std::vector<Json>`） |
+| `list_all_schema_views()` | 返回全量 schema 的只读视图列表（`std::vector<std::shared_ptr<const Json>>`），与 `list_all_schemas()` 同序 |
 | `describe_component(type)` | 同 `component_schema`，公共别名 |
+| `describe_component_view(type)` | 同 `describe_component`，返回缓存共享的只读视图 |
 | `search_components(keyword)` | 按名称模糊搜索已注册组件 |
 | `list_all_components()` | 返回 `std::vector<std::string>`，仅组件类型名列表 |
 

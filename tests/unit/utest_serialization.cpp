@@ -5,6 +5,8 @@
 ///           重建后经 set_item_builder 挂条目即出内容、TextInput 声明属性随 from_json 回填、
 ///           to_json/from_json 基本往返与未知类型拒绝
 
+#include <cstdint>
+#include <initializer_list>
 #include <memory>
 #include <string>
 #include <vector>
@@ -198,6 +200,62 @@ AURORA_TEST_CASE(same_name_reregister_invalidates_schema_cache) {
     AURORA_TEST_CHECK_FALSE(aurora::serialization::diff(before, after).empty());
     // 再取一次走缓存：与重建结果一致（失效后缓存重新建立且内容稳定）。
     AURORA_TEST_CHECK_TRUE(aurora::serialization::diff(after, aurora::serialization::component_schema(probe)).empty());
+}
+
+AURORA_TEST_CASE(array_diff_reports_index_paths) {
+    // 数组差分按索引对齐：对象内改动落在 "/items/<i>/v"，尾部增删落在 "/items/<i>"。
+    // 路径复用缓冲后文本必须与逐个拼接的形态完全一致。
+    auto make_root = [](std::initializer_list<int> values) -> Json {
+        Json items = Json::array();
+        for (const int v : values) {
+            Json node = Json::object();
+            node.set("v", static_cast<std::int64_t>(v));
+            items.push_back(std::move(node));
+        }
+        Json root = Json::object();
+        root.set("items", std::move(items));
+        return root;
+    };
+
+    const auto changed = aurora::serialization::diff(make_root({1, 2, 3}), make_root({1, 9, 3}));
+    AURORA_TEST_REQUIRE_MSG(changed.size() == 1, "one changed element yields exactly one patch");
+    AURORA_TEST_CHECK_EQ(changed.at(0).op, std::string{"replace"});
+    AURORA_TEST_CHECK_EQ(changed.at(0).path, std::string{"/items/1/v"});
+
+    const auto added = aurora::serialization::diff(make_root({1, 2}), make_root({1, 2, 3}));
+    AURORA_TEST_REQUIRE_MSG(added.size() == 1, "appended element yields exactly one add");
+    AURORA_TEST_CHECK_EQ(added.at(0).op, std::string{"add"});
+    AURORA_TEST_CHECK_EQ(added.at(0).path, std::string{"/items/2"});
+
+    const auto removed = aurora::serialization::diff(make_root({1, 2, 3}), make_root({1, 2}));
+    AURORA_TEST_REQUIRE_MSG(removed.size() == 1, "dropped element yields exactly one remove");
+    AURORA_TEST_CHECK_EQ(removed.at(0).op, std::string{"remove"});
+    AURORA_TEST_CHECK_EQ(removed.at(0).path, std::string{"/items/2"});
+
+    // 相等元素不产出补丁：整表相等时补丁为空。
+    AURORA_TEST_CHECK_TRUE(aurora::serialization::diff(make_root({1, 2, 3}), make_root({1, 2, 3})).empty());
+}
+
+AURORA_TEST_CASE(schema_view_is_shared_and_outlives_invalidation) {
+    // 只读视图命中缓存时与缓存同一对象（不做深拷贝）；重注册后新查询拿到新内容，
+    // 已取得的旧视图继续指向当时的快照。
+    auto &registry = aurora::serialization::WidgetRegistry::instance();
+    const std::string probe = "SchemaViewProbe";
+    registry.register_factory(probe, [](const Json &) -> Result<std::shared_ptr<Widget>> {
+        return std::static_pointer_cast<Widget>(std::make_shared<Chip>());
+    });
+
+    const auto first = aurora::serialization::component_schema_view(probe);
+    const auto second = aurora::serialization::component_schema_view(probe);
+    AURORA_TEST_CHECK_TRUE(first.get() == second.get());
+    AURORA_TEST_CHECK_TRUE(aurora::serialization::diff(*first, aurora::serialization::component_schema(probe)).empty());
+
+    registry.register_factory(probe, [](const Json &) -> Result<std::shared_ptr<Widget>> {
+        return std::static_pointer_cast<Widget>(std::make_shared<Skeleton>());
+    });
+    const auto third = aurora::serialization::component_schema_view(probe);
+    AURORA_TEST_CHECK_FALSE(third.get() == first.get());
+    AURORA_TEST_CHECK_FALSE(aurora::serialization::diff(*first, *third).empty());
 }
 
 }  // namespace aurora::test_cases::utest_serialization

@@ -4,6 +4,7 @@
 #include <array>
 #include <cctype>
 #include <map>
+#include <memory>
 #include <string_view>
 #include <tuple>
 
@@ -397,16 +398,21 @@ auto diff_objects(const Json &a, const Json &b, const std::string &path, std::ve
 }
 
 // 数组差异：按索引对齐，越界侧 add/remove，其余递归。
+//
+// 两处成本控制与 `diff_objects` 同形：① 下标路径复用同一块缓冲 `assign(path) + append`，
+// 不再为每个元素拼一次 `path + "/" + to_string(i)` 的临时串；② 两侧都存在时先判子树相等，
+// 相等元素不拼路径、不递归。路径文本与补丁顺序不变。
 auto diff_arrays(const Json &a, const Json &b, const std::string &path, std::vector<JsonPatchOp> &out) -> void {
+    std::string child;
     const std::size_t n = std::max(a.size(), b.size());
     for (std::size_t i = 0; i < n; ++i) {
-        const std::string ip = path + "/" + std::to_string(i);
+        child.assign(path).append(1, '/').append(std::to_string(i));
         if (i >= a.size()) {
-            out.push_back(JsonPatchOp{.op = "add", .path = ip, .value = *b.at(i)});
+            out.push_back(JsonPatchOp{.op = "add", .path = child, .value = *b.at(i)});
         } else if (i >= b.size()) {
-            out.push_back(JsonPatchOp{.op = "remove", .path = ip, .value = Json{}});
-        } else {
-            diff_into(*a.at(i), *b.at(i), ip, out);
+            out.push_back(JsonPatchOp{.op = "remove", .path = child, .value = Json{}});
+        } else if (*a.at(i) != *b.at(i)) {
+            diff_into(*a.at(i), *b.at(i), child, out);
         }
     }
 }
@@ -510,9 +516,10 @@ namespace {
 
 // 缓存访问器：函数内 static 保持惰性构造（文件级对象会触发静态初始化检查），单线程 UI 路径。
 // 提升出函数体的必要性——头文件内联的 `register_factory` 无法跨 TU 访问其他函数体内的 static。
-auto component_schema_cache() -> std::map<std::string, Json> & {
+// 缓存持有共享只读视图：命中查询只做一次引用计数递增，不再深拷贝整份 schema。
+auto component_schema_cache() -> std::map<std::string, std::shared_ptr<const Json>> & {
     // NOLINTNEXTLINE(bugprone-dynamic-static-initializers)
-    static std::map<std::string, Json> cache;
+    static std::map<std::string, std::shared_ptr<const Json>> cache;
     return cache;
 }
 
@@ -520,15 +527,13 @@ auto component_schema_cache() -> std::map<std::string, Json> & {
 
 auto invalidate_component_schema(const std::string &name) -> void { component_schema_cache().erase(name); }
 
-auto component_schema(const std::string &name) -> Json {
-    // 已注册类型的 schema 只由类型名决定（工厂表在注册后固定），而 search/list 会按类型
-    // 反复取同一份；缓存后按值返回拷贝，调用方拿到的仍是独立对象，与逐次重建的输出一致。
-    // 未注册类型不入缓存：其 schema 构建代价低，也避免任意调用名把缓存撑大。
-    // 注册与缓存失效联动：register_factory 同名重注册时会失效本类型的缓存项。
-    auto &cache = component_schema_cache();
-    if (const auto it = cache.find(name); it != cache.end()) {
-        return it->second;
-    }
+namespace {
+
+/// @brief 构建单个组件的 schema（不含缓存判定）。
+/// @param name 组件类型名。
+/// @param registered 回填是否命中已注册工厂。
+/// @return 新建的 schema JSON。
+auto build_component_schema(const std::string &name, bool &registered) -> Json {
     Json w = Json::object();
     w.set("type", name);
     // 稀疏布尔：恒 false 与恒同值的键不再逐控件输出（读取侧 as_or 默认 false 语义不变）。
@@ -544,7 +549,6 @@ auto component_schema(const std::string &name) -> Json {
 
     Json serialized = Json::object();  // serialize_props 实测输出：原生默认值 + 布局公共键
     WidgetDescriptor desc;  // 默认：无描述（未注册类型走既有的空段口径）
-    bool registered = false;
     if (auto inst = WidgetRegistry::instance().make(name, Json::object()); inst) {
         registered = true;
         inst.value()->serialize_props(serialized);
@@ -625,11 +629,36 @@ auto component_schema(const std::string &name) -> Json {
         payload.set("channel", desc.payload_channel);
         w.set("payload", std::move(payload));
     }
-    if (registered) {
-        cache.emplace(name, w);
-    }
     return w;
 }
+
+}  // namespace
+
+/// @brief 组件 schema 的只读视图：缓存持有者共享同一份 JSON，命中时不复制。
+///
+/// 已注册类型的 schema 只由类型名决定（工厂表在注册后固定），而 search/list 会按类型反复取同一份；
+/// 缓存改为持有共享只读视图后，只读调用方不必再付一次整棵树深拷贝。未注册类型不入缓存：其构建
+/// 代价低，也避免任意调用名把缓存撑大。注册与缓存失效联动：同名重注册会失效本类型的缓存项，
+/// 此后新查询拿到新内容，已取得的视图继续指向当时的快照。
+/// @param name 组件类型名。
+/// @return 共享只读视图；命中缓存时与缓存同一对象。
+auto component_schema_view(const std::string &name) -> std::shared_ptr<const Json> {
+    auto &cache = component_schema_cache();
+    if (const auto it = cache.find(name); it != cache.end()) {
+        return it->second;
+    }
+    bool registered = false;
+    auto view = std::make_shared<const Json>(build_component_schema(name, registered));
+    if (registered) {
+        cache.emplace(name, view);
+    }
+    return view;
+}
+
+/// @brief 返回单个组件的 schema（按值，调用方持有独立对象）。
+/// @param name 组件类型名。
+/// @return 组件 schema JSON。
+auto component_schema(const std::string &name) -> Json { return *component_schema_view(name); }
 
 }  // namespace serialization
 
@@ -650,6 +679,14 @@ auto list_all_components() -> std::vector<std::string> {
 auto describe_component(const std::string &name) -> Json {
     serialization::register_core_widgets();
     return serialization::component_schema(name);
+}
+
+/// @brief 返回单个组件 schema 的只读视图（与缓存共享同一份 JSON，不做深拷贝）。
+/// @param name 组件类型名。
+/// @return 共享只读视图；未知类型返回空对象视图。
+auto describe_component_view(const std::string &name) -> std::shared_ptr<const Json> {
+    serialization::register_core_widgets();
+    return serialization::component_schema_view(name);
 }
 
 namespace {
@@ -696,7 +733,18 @@ auto list_all_schemas() -> std::vector<Json> {
     serialization::register_core_widgets();
     std::vector<Json> out;
     for (const std::string &t : serialization::WidgetRegistry::instance().list_types()) {
-        out.push_back(serialization::component_schema(t));
+        out.push_back(*serialization::component_schema_view(t));
+    }
+    return out;
+}
+
+/// @brief 返回所有已注册组件的 schema 只读视图（与 `list_all_schemas` 同序，不复制）。
+/// @return 共享只读视图列表。
+auto list_all_schema_views() -> std::vector<std::shared_ptr<const Json>> {
+    serialization::register_core_widgets();
+    std::vector<std::shared_ptr<const Json>> out;
+    for (const std::string &t : serialization::WidgetRegistry::instance().list_types()) {
+        out.push_back(serialization::component_schema_view(t));
     }
     return out;
 }

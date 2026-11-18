@@ -20,11 +20,11 @@ auto ensure_schemas() -> void {
         return;
     }
     serialization::register_core_widgets();
-    for (const auto &s : list_all_schemas()) {
-        if (s.contains("type") && s.at("type")->is_string()) {
+    for (const auto &s : list_all_schema_views()) {
+        if (s->contains("type") && s->at("type")->is_string()) {
             // 容器类型无法本地确证为顺序容器，operator[] 与 .at() 语义不同（map/json 的 [] 会插入键）
             // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-            schema_cache()[s.at("type")->as_or<std::string>("")] = s;
+            schema_cache()[s->at("type")->as_or<std::string>("")] = *s;
         }
     }
 }

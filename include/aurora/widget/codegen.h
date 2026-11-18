@@ -378,7 +378,8 @@ struct PropDescriptor {
         return found->second;
     }
     std::unordered_map<std::string, PropDescriptor> table{};  // 未命中缓存时新建的描述表（未知类型为空表）
-    const Json schema = describe_component(type);  // 未知类型为空对象
+    const auto schema_view = describe_component_view(type);  // 未知类型为空对象视图
+    const Json &schema = *schema_view;
     const auto *pd_val = schema.at("props");
     if (pd_val != nullptr && pd_val->is_array()) {
         std::size_t idx = 0;

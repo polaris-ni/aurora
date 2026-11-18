@@ -360,6 +360,10 @@ aurora_add_tool(bench_scroll tools/bench/bench_scroll.cpp)
 # 每次解析的堆分配与纳秒、换肤一帧耗时（非 CTest；Headless 后端下才可运行）。
 aurora_add_tool(bench_theme tools/bench/bench_theme.cpp)
 
+# 状态订阅与序列化基准：全量重订阅的单次耗时、大数组差分的耗时与分配数、
+# schema 按值取值与只读视图取值的耗时与分配字节数（非 CTest；分配数是稳定判据）。
+aurora_add_tool(bench_state_serial tools/bench/bench_state_serial.cpp)
+
 # Win32 上屏诊断基准：拆分拖选帧的 paint / GDI blit 成本（非 CTest；无 Win32 后端时直接跳过）。
 aurora_add_tool(bench_win32_present tools/bench/bench_win32_present.cpp)
 
