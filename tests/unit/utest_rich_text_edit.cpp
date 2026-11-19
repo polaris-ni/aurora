@@ -12,6 +12,7 @@
 #include <utility>
 #include <vector>
 
+#include "aurora/core/platform.h"
 #include "aurora/environment/build_context.h"
 #include "aurora/environment/environment.h"
 #include "aurora/event/event.h"
@@ -42,6 +43,16 @@ auto themed_ctx(const Theme &t) -> std::pair<std::shared_ptr<Environment>, Build
     BuildContext ctx;
     ctx.env = env.get();
     return {std::move(env), ctx};
+}
+
+/// @brief 本平台事件侧的主修饰键位：macOS 上是 Command（按物理真值折成 `Meta`），其余是 Ctrl。
+/// @return 该平台的按住位。
+[[nodiscard]] constexpr auto platform_primary_bit() -> ModifierKey {
+#ifdef AURORA_PLATFORM_MACOS
+    return ModifierKey::Meta;
+#else
+    return ModifierKey::Control;
+#endif
 }
 
 }  // namespace

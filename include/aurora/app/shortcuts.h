@@ -41,7 +41,11 @@ struct KeyCombo {
     /// 上盖章），而注册侧从不登记锁定位，若按整字节相等比较，`NumLock` 开着时**任何**未登记该位的
     /// 应用内快捷键恒不匹配——整层静默失效，且与焦点、作用域无关。
     ///
-    /// 口径细则（四条均为刻意决定）：
+    /// **两侧先经 `fold_primary_modifier` 折算**：子集取完后、比较之前，事件侧与注册侧各折一次，
+    /// 于是 macOS 上申报成 `Control` 的组合既命中物理 Ctrl 也命中 Command（⌘），非 macOS 构建折算
+    /// 为恒等、算式逐字节不变。折叠发生在比较前而非改写事件位，物理真值仍留在 `KeyEvent` 里。
+    ///
+    /// 口径细则（五条均为刻意决定）：
     ///  - **仍是「相等」而非「包含」**：`Ctrl+O` 不匹配 `Ctrl+Shift+O`。这是 Qt `QKeySequence` /
     ///    WPF `KeyGesture` / Flutter `SingleActivator` 的共同语义；改成包含会让所有「更具体组合
     ///    优先」的注册表失去区分度。
@@ -51,6 +55,10 @@ struct KeyCombo {
     ///  - **不引入 per-combo 的「要求 NumLock 开 / 关」字段**：当前无任何消费者需要，属扩大 API
     ///    预算。若将来需要，应另立字段并走一次独立的公共 API 变更。
     ///  - **不新增匹配档位 / 枚举参数**：保持单一算式，避免同一字段出现两个真值源。
+    ///  - **macOS 上 `Control` 与 `Meta` 两种申报同解**：折叠把两枚物理位并成一枚主修饰键位，故
+    ///    `{Control, X}` 与 `{Meta, X}` 无法区分（注册序先命中者胜），物理 Ctrl 也读作主修饰键。
+    ///    这是折叠口径的固有代价，与 Qt / GTK 同款；真要区分二者的场景是 OS 级全局热键，那张表
+    ///    按物理位申报、不经折叠（`specification/06-app-platform.md` §8.6）。
     ///
     /// `to_string()` 不列锁定位，与上述「注册侧不可表达」的口径恰好一致，故不在此重复说明。
     ///
@@ -63,8 +71,11 @@ struct KeyCombo {
         if (static_cast<KeyCode>(e.key) != key) {
             return false;
         }
-        return (static_cast<std::uint8_t>(e.modifiers) & AURORA_MODIFIER_PRESSABLE_MASK) ==
-               (static_cast<std::uint8_t>(modifiers) & AURORA_MODIFIER_PRESSABLE_MASK);
+        const std::uint8_t event_bits =
+            static_cast<std::uint8_t>(fold_primary_modifier(e.modifiers)) & AURORA_MODIFIER_PRESSABLE_MASK;
+        const std::uint8_t registered_bits =
+            static_cast<std::uint8_t>(fold_primary_modifier(modifiers)) & AURORA_MODIFIER_PRESSABLE_MASK;
+        return event_bits == registered_bits;
     }
 
     /// @brief 可读文本（如 "Ctrl+Shift+O"），用于菜单显示与调试。

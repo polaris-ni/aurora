@@ -846,11 +846,11 @@ macOS 原生腿以 `runModal` 在调用线程内阻塞到用户作答；桌面�
 - **桌面四腿均已接线（Win32 / macOS / X11 / Wayland）**：X11 / Wayland 两桥落 `src/aurora/window/detail/x11_clipboard.{h,cpp}` 与 `wayland_clipboard.{h,cpp}`，与 Win32 / macOS 共用同一个进程级后端单槽与同一套门面语义，但各自按 selection 语义实现——两桥落 `src/aurora/window/detail/x11_clipboard.{h,cpp}` 与 `wayland_clipboard.{h,cpp}`，与 Win32 共用同一个进程级后端单槽与同一套门面语义，但各自按 selection 语义实现——X11 走 `TARGETS` 协商 + `SelectionRequest` 应答 + ICCCM `INCR` 双向分片，读入侧带墙钟超时（对端挂死不会永久阻塞帧循环）；变更监听靠 XFIXES 扩展，构建期要求 `libXfixes`（缺项 configure 期 FATAL），运行期扩展缺失则 `on_event` 请求 `ContentChanged` 时如实报 `ClipboardListenUnsupported`（XFIXES 事件在 `XEvent` 联合里没有成员，桥按结构体前导布局 `memcpy` 取一份，避免 union 类型双关）。Wayland 走 `wl_data_source` 写侧（非阻塞、逐帧 `tick()` 推进）与 selection 事件读侧；`wl_data_device` 每 seat 唯一，剪贴板桥复用拖放桥创建的那一枚，selection offer 的所有权转交剪贴板桥、MIME 名由拖放桥的转发器按增量送达；变更监听由 selection 事件恒支持。**Wayland 声明所有权需要真实输入事件 serial**（`set_selection` 的协议实参，libwayland 公开 API 不提供「当前 serial」查询）：表面在指针按键与键盘按键路径记录 `last_input_serial`，桥经 hooks 取用；无 serial 时 `set_payload` / `set_offer` 如实报 `ClipboardWriteFailed` 且不声明所有权——不伪造 serial 去赌协议合法性。文本 / 图像 / `clear()` 在 Linux 仍沿既有 `xsel` 路径（口径见上「清空语义」条），富格式与它们落到同一 CLIPBOARD 选择、后写者接管。
 **仍缺位的方向**：wasm 与 Headless 无 OS 剪贴板机制，`Clipboard` 只走内建最小实现，富格式在其上如实报 `ClipboardFormatUnsupported`——「本平台有但本库没实现」与「本平台没有」仍不混谈。
 
-**控件层（`TextInput` / `Text` / `RichTextEdit` 的 Ctrl+C/X/V）**：这些快捷键路径无 `Result` 出口（`on_key_event` 返回 `void`），故失败经 `Diagnostics::warn(msg, where, code)` 上报——桥接 Logger 且进 `Diagnostics::report()` 收集，机器可读，与 `widget.cpp` / `timer.h` 既有口径一致。同时快捷键语义随失败收紧：
+**控件层（`TextInput` / `Text` / `RichTextEdit` 的主修饰键+C/X/V）**：这里的「主修饰键」指 Windows / Linux 的 Ctrl、macOS 的 ⌘，判定只经 `has_primary_modifier`（折算口径见 [`05-event-navigation.md`](05-event-navigation.md) §2.2）。这些快捷键路径无 `Result` 出口（`on_key_event` 返回 `void`），故失败经 `Diagnostics::warn(msg, where, code)` 上报——桥接 Logger 且进 `Diagnostics::report()` 收集，机器可读，与 `widget.cpp` / `timer.h` 既有口径一致。同时快捷键语义随失败收紧：
 
-- **Ctrl+X 只在复制成功后才删选区**：剪贴板写入失败时保留选区与内容（剪切 = 复制 + 删除，复制没成就不该半程提交造成内容丢失）。
-- **Ctrl+V 读失败视为空剪贴板**：不插入任何内容，同时上报 `Diagnostics::warn`。
-- 只读态的降级路径（Ctrl+C/Ctrl+X 仅复制、Ctrl+V 忽略）不变。
+- **主修饰键+X 只在复制成功后才删选区**：剪贴板写入失败时保留选区与内容（剪切 = 复制 + 删除，复制没成就不该半程提交造成内容丢失）。
+- **主修饰键+V 读失败视为空剪贴板**：不插入任何内容，同时上报 `Diagnostics::warn`。
+- 只读态的降级路径（主修饰键+C / 主修饰键+X 仅复制、主修饰键+V 忽略）不变。
 
 **测试侧 memory 后端（不在公共头）**：进程内 memory 后端整体位于 [`tests/framework/clipboard_memory_backend.h`](../../tests/framework/clipboard_memory_backend.h)，经内部接缝 [`clipboard_backend.h`](../../src/aurora/app/detail/clipboard_backend.h) 注册到与平台后端**同一张全通道函数表**——`set_text` / `get_text` / `set_image` / `get_image` / `clear` / `set_payload` / `get_payload` / `set_files` / `get_files` / `set_html` / `get_html` / `set_offer` / `available_formats` 全部由该表承载，不触碰系统剪贴板。公共头不再保留任何 test-only 成员，门面也不再有测试宏分支。
 
@@ -912,7 +912,7 @@ macOS 原生腿以 `runModal` 在调用线程内阻塞到用户作答；桌面�
 
 **命令面板键位**：`CommandPalette` 打开时把自己的作用域压入 `FocusManager`（子树内**唯一**可聚焦控件是搜索框，故左右方向键仍落到搜索框做光标移动、上下方向键不引发焦点跳转）；Enter 经搜索框的提交回调执行选中项；Esc / ↑ / ↓ 经打开期临时注册的快捷键绑定接管（依赖注册表已 `bind_shortcuts`，未接线时这几键不可用，面板以 WARN 提示）。Space 只经文本输入落字，不触发执行。命令清单可经 `to_json()` 序列化并由 MCP 工具面枚举，见 [`08-tooling.md`](08-tooling.md) §7.1。
 
-**`KeyCombo::matches` 的匹配语义：只比可按住的位**。`ModifierKey` 把「可按住的修饰位」（`Shift` / `Control` / `Alt` / `Meta`）与「键盘锁定态位」（`NumLock`）建模在**同一个字节**里，而四个后端都会在事件上盖章锁定位（Win32 读 `GetKeyState(VK_NUMLOCK)` 的 toggle 位、X11 折 `Mod2`、Wayland 查 `XKB_STATE_MODS_LOCKED`、GLFW 键盘路径查 `GLFW_KEY_NUM_LOCK`）。匹配前两侧都先与 `AURORA_MODIFIER_PRESSABLE_MASK` 取子集，锁定态位两侧一律屏蔽——否则 `NumLock` 开着时**任何**未登记该位的应用内快捷键恒不匹配，是整层静默失效（与焦点、作用域无关）。四个配套常量（`event.h`）：
+**`KeyCombo::matches` 的匹配语义：只比可按住的位**。`ModifierKey` 把「可按住的修饰位」（`Shift` / `Control` / `Alt` / `Meta`）与「键盘锁定态位」（`NumLock`）建模在**同一个字节**里，而四个后端都会在事件上盖章锁定位（Win32 读 `GetKeyState(VK_NUMLOCK)` 的 toggle 位、X11 折 `Mod2`、Wayland 查 `XKB_STATE_MODS_LOCKED`、GLFW 键盘路径查 `GLFW_KEY_NUM_LOCK`）。匹配前两侧都先与 `AURORA_MODIFIER_PRESSABLE_MASK` 取子集，锁定态位两侧一律屏蔽——否则 `NumLock` 开着时**任何**未登记该位的应用内快捷键恒不匹配，是整层静默失效（与焦点、作用域无关）。取完子集后、比较之前，两侧各再经一次 `fold_primary_modifier`（折算口径见 [`05-event-navigation.md`](05-event-navigation.md) §2.2），最后**仍按等式**比较：于是 macOS 上以 `Control` 申报的组合同时命中物理 Ctrl 与 ⌘，非 macOS 构建这一段为恒等、算式逐字节不变。四个配套常量（`event.h`）：
 
 | 常量 | 含义 | 纪律 |
 |:---|:---|:---|
@@ -921,11 +921,12 @@ macOS 原生腿以 `runModal` 在调用线程内阻塞到用户作答；桌面�
 
 两者应恒为 `ModifierKey` 全部已定义位的一个**无余划分**（并集全覆盖、交集为 0），该恒等式由 `utest_shortcuts` 的位集自证用例钉住——新增锁定位时那条用例会要求同步。
 
-其余三条口径均为刻意决定，不得顺手改：
+其余四条口径均为刻意决定，不得顺手改：
 
 - **仍是「相等」而非「包含」**：`Ctrl+O` 不匹配 `Ctrl+Shift+O`。这是 Qt `QKeySequence` / WPF `KeyGesture` / Flutter `SingleActivator` 的共同语义；改成包含会让所有「更具体组合优先」的注册表失去区分度。
 - **注册侧的锁定位不可表达**：`KeyCombo{Control | NumLock, K}` 里的锁定位被忽略（等价于 `Control+K`）。`matches` **刻意不加断言、不加日志、不返回 `Result`**——它在每条按键消息上被调用，热路径里的噪声比它想防的错更贵，该口径由 `matches` 的文档注释承担。`to_string()` 不列锁定位，与此恰好一致。
 - **不引入 per-combo 的「要求 NumLock 开 / 关」字段**：当前无任何消费者需要，属扩大 API 预算。若将来需要，应另立字段并走一次独立的公共 API 变更。相应地**不新增匹配档位 / 枚举参数**，保持单一算式，避免同一字段出现两个真值源。
+- **macOS 上 `Control` 与 `Meta` 两种申报同解**：折叠把两枚物理位并成一枚主修饰键位，故 `{Control, X}` 与 `{Meta, X}` 无法区分（注册序先命中者胜），物理 Ctrl 也读作主修饰键。这是折叠口径的固有代价，与 Qt / GTK 同款；真要区分二者的场景是 OS 级全局热键，那张表按物理位申报、不经折叠（§8.6）。
 
 ### 8.6 OS 级全局热键（无焦点时也触发）
 
@@ -937,7 +938,10 @@ macOS 原生腿以 `runModal` 在调用线程内阻塞到用户作答；桌面�
 |:---|:---|:---|
 | 作用域 | 应用内：需窗口有焦点、经键盘事件派发命中 | OS 级：系统范围内，应用无焦点也触发 |
 | 键组合类型 | `KeyCombo`（复用同一类型） | `KeyCombo`（复用同一类型） |
+| 键组合申报口径 | 按**平台主修饰键**申报：`Control` 在 macOS 上读作 ⌘（比较前经 `fold_primary_modifier` 折算，物理 Ctrl 与 ⌘ 同解，见 §8.4） | 按**物理位**申报：`Control` 即 Ctrl、`Meta` 即 ⌘，**不经**折叠（要 ⌘ 就写 `Meta`） |
 | 失败语义 | 无冲突概念 | 被别的进程抢占 / 平台无后端 → `OsHotkeyRegisterFailed` |
+
+**OS 级热键不折叠的理由**：`OsHotkeyRegistry` 交付给 OS 的是系统全局键表里的一条登记——折叠会把今天确实能用的物理 Ctrl 组合静默改写成 ⌘ 组合，还会把跨进程抢占冲突的判定对象从物理键换成另一枚，两者都是可观察的行为变更而非缺陷修复。故本表按物理位申报；应用内组合键的折叠口径见 §8.4。
 
 `ShortcutScope::Global` 的语义**不变**：它仍是「应用内跨焦点作用域」的标记，不因本节新增而改写为 OS 级。
 

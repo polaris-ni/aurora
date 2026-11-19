@@ -156,10 +156,10 @@ auto Text::on_key_event(KeyEvent &e) -> void {
     }
     const Font f = layout_font_;
     const bool shift = (e.modifiers & ModifierKey::Shift) != 0U;  // NOLINT(*-redundant-parentheses)
-    const bool ctrl = (e.modifiers & ModifierKey::Control) != 0U;  // NOLINT(*-redundant-parentheses)
+    const bool primary = has_primary_modifier(e.modifiers);
     const size_t n = cp_count(display_text_);
 
-    if (ctrl && e.key == static_cast<int>(KeyCode::A)) {
+    if (primary && e.key == static_cast<int>(KeyCode::A)) {
         sel_start_ = 0;
         sel_end_ = (n == 0) ? AURORA_NO_SEL : n - 1;  // 含尾：末字符下标 n-1
         caret_ = n;
@@ -167,7 +167,7 @@ auto Text::on_key_event(KeyEvent &e) -> void {
         e.is_handled = true;
         return;
     }
-    if (ctrl && e.key == static_cast<int>(KeyCode::C)) {
+    if (primary && e.key == static_cast<int>(KeyCode::C)) {
         const std::string t = selected_text();
         if (!t.empty()) {
             // 控件层拿不到 Result 的下游消费者，失败只能就地记诊断留痕。

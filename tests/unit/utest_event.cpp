@@ -2,17 +2,65 @@
 /// 目标单元: include/aurora/event/event.h
 /// 测试说明: 各事件结构默认值与 is_handled 标志、ModifierKey 位组合算子、同类型拷贝与多态析构、TouchEvent
 /// 活跃触点统计/按 id 查找/双指几何
+///           另覆盖「平台主修饰键」折算：`fold_primary_modifier` 的逐值表（macOS 把 Command 位并入
+///           Ctrl 位、其余平台逐位恒等、锁定态位不受染），与 `has_primary_modifier` 的判定档
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
+#include "aurora/core/platform.h"
 #include "aurora/event/dispatcher.h"
 #include "aurora/event/event.h"
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_event {
+
+namespace {
+
+/// @brief 修饰位集 → 诊断文本（折算不符时一眼看出差在哪一枚位）。
+/// @param bits 修饰位集的原始值。
+/// @return 以 `|` 连接的位名串；无任何位时为 "None"。
+[[nodiscard]] auto modifier_bits_text(std::uint8_t bits) -> std::string {
+    constexpr std::array<std::pair<std::uint8_t, std::string_view>, 5> names{{
+        {static_cast<std::uint8_t>(ModifierKey::Shift), "Shift"},
+        {static_cast<std::uint8_t>(ModifierKey::Control), "Control"},
+        {static_cast<std::uint8_t>(ModifierKey::Alt), "Alt"},
+        {static_cast<std::uint8_t>(ModifierKey::Meta), "Meta"},
+        {static_cast<std::uint8_t>(ModifierKey::NumLock), "NumLock"},
+    }};
+    std::string out;
+    for (const auto &[bit, name] : names) {
+        if ((bits & bit) != 0U) {
+            if (!out.empty()) {
+                out += '|';
+            }
+            out += name;
+        }
+    }
+    return out.empty() ? std::string{"None"} : out;
+}
+
+/// @brief 本平台期望的取法：两档期望都在表里，选哪档由编译期平台分支决定。
+/// @tparam T 期望值类型（位集或判定结果皆可）。
+/// @param macos 期望（macOS 融合腿）。
+/// @param elsewhere 期望（其余平台恒等腿）。
+/// @return 当前构建应满足的那一档。
+template <typename T>
+[[nodiscard]] constexpr auto platform_expected(T macos, T elsewhere) -> T {
+#ifdef AURORA_PLATFORM_MACOS
+    return macos;
+#else
+    return elsewhere;
+#endif
+}
+
+}  // namespace
 
 AURORA_TEST_CASE(event_defaults_and_handled_flag) {
     const Event base{};
@@ -262,6 +310,91 @@ AURORA_TEST_CASE(click_window_linux_reads_gsettings_or_fallback) {
     const std::uint32_t ms = os_double_click_ms();
     AURORA_TEST_CHECK_TRUE(ms >= 1U);
     AURORA_TEST_CHECK_TRUE(ms <= 10000U);
+}
+
+// 主修饰键折算的逐值表：macOS 把 Command 位（本框架的 `Meta`）并入 Ctrl 位，其余平台逐位恒等。
+// 两档期望都写进同一张表、由编译期分支选档断言，故 Linux / Windows 作业钉的是恒等腿、macOS 作业钉的
+// 是融合腿，两条腿各有真 runner 跑过——不存在「另一档靠 SKIP 蒙绿」的窗口。锁定态位（`NumLock`）
+// 单列两行：它不属主修饰键，折算不得染指。
+AURORA_TEST_CASE(fold_primary_modifier_follows_the_platform_table) {
+    struct Sample {
+        ModifierKey input;  ///< 折算前位集
+        ModifierKey macos;  ///< macOS 期望
+        ModifierKey elsewhere;  ///< 其余平台期望
+    };
+    const std::array<Sample, 10> samples{{
+        Sample{.input = ModifierKey::None, .macos = ModifierKey::None, .elsewhere = ModifierKey::None},
+        Sample{.input = ModifierKey::Control, .macos = ModifierKey::Control, .elsewhere = ModifierKey::Control},
+        Sample{.input = ModifierKey::Meta, .macos = ModifierKey::Control, .elsewhere = ModifierKey::Meta},
+        Sample{.input = ModifierKey::Shift, .macos = ModifierKey::Shift, .elsewhere = ModifierKey::Shift},
+        Sample{.input = ModifierKey::Alt, .macos = ModifierKey::Alt, .elsewhere = ModifierKey::Alt},
+        Sample{.input = ModifierKey::Control | ModifierKey::Meta,
+               .macos = ModifierKey::Control,
+               .elsewhere = ModifierKey::Control | ModifierKey::Meta},
+        Sample{.input = ModifierKey::Shift | ModifierKey::Meta,
+               .macos = ModifierKey::Shift | ModifierKey::Control,
+               .elsewhere = ModifierKey::Shift | ModifierKey::Meta},
+        Sample{.input = ModifierKey::Shift | ModifierKey::Control | ModifierKey::Alt | ModifierKey::Meta,
+               .macos = ModifierKey::Shift | ModifierKey::Control | ModifierKey::Alt,
+               .elsewhere = ModifierKey::Shift | ModifierKey::Control | ModifierKey::Alt | ModifierKey::Meta},
+        Sample{.input = ModifierKey::Meta | ModifierKey::NumLock,
+               .macos = ModifierKey::Control | ModifierKey::NumLock,
+               .elsewhere = ModifierKey::Meta | ModifierKey::NumLock},
+        Sample{.input = ModifierKey::Shift | ModifierKey::NumLock,
+               .macos = ModifierKey::Shift | ModifierKey::NumLock,
+               .elsewhere = ModifierKey::Shift | ModifierKey::NumLock},
+    }};
+
+    for (const auto &s : samples) {
+        const ModifierKey got = fold_primary_modifier(s.input);
+        const ModifierKey want = platform_expected(s.macos, s.elsewhere);
+        AURORA_TEST_CHECK_MSG(got == want,
+                              modifier_bits_text(static_cast<std::uint8_t>(s.input)) + " -> " +
+                                  modifier_bits_text(static_cast<std::uint8_t>(got)) + ", want " +
+                                  modifier_bits_text(static_cast<std::uint8_t>(want)));
+        // 幂等：折两次与折一次同值——`matches` 比较前两侧各折一次，正靠这条不会二次改位。
+        AURORA_TEST_CHECK_EQ(static_cast<std::uint8_t>(fold_primary_modifier(got)), static_cast<std::uint8_t>(got));
+    }
+
+#ifdef AURORA_PLATFORM_MACOS
+    // 融合腿的专属不变量：折算后 ⌘ 位不再单独存在（Control 与 Meta 不同时置位）——同一枚主修饰键
+    // 只有一种表示，比较结果才与位序无关。
+    for (const auto &s : samples) {
+        const auto folded = static_cast<std::uint8_t>(fold_primary_modifier(s.input));
+        AURORA_TEST_CHECK_EQ(folded & static_cast<std::uint8_t>(ModifierKey::Meta), std::uint8_t{0});
+    }
+#endif
+}
+
+// 主修饰键判定（控件编辑判定的唯一入口）：按着的到底算不算本平台那枚键。判定与折算必须同解，
+// 否则控件与注册表会对同一次按键各说各话——故最后一节直接把两式对表逐位比对。
+AURORA_TEST_CASE(has_primary_modifier_reads_the_platform_primary_key) {
+    struct Sample {
+        ModifierKey mods;  ///< 待判定位集
+        bool macos;  ///< macOS 期望
+        bool elsewhere;  ///< 其余平台期望
+    };
+    const std::array<Sample, 8> samples{{
+        Sample{.mods = ModifierKey::None, .macos = false, .elsewhere = false},
+        Sample{.mods = ModifierKey::Control, .macos = true, .elsewhere = true},
+        Sample{.mods = ModifierKey::Meta, .macos = true, .elsewhere = false},
+        Sample{.mods = ModifierKey::Shift, .macos = false, .elsewhere = false},
+        Sample{.mods = ModifierKey::Alt, .macos = false, .elsewhere = false},
+        Sample{.mods = ModifierKey::Shift | ModifierKey::Meta, .macos = true, .elsewhere = false},
+        Sample{.mods = ModifierKey::NumLock, .macos = false, .elsewhere = false},
+        Sample{.mods = ModifierKey::Meta | ModifierKey::NumLock, .macos = true, .elsewhere = false},
+    }};
+    for (const auto &s : samples) {
+        const bool want = platform_expected(s.macos, s.elsewhere);
+        const bool got = has_primary_modifier(s.mods);
+        AURORA_TEST_CHECK_MSG(got == want,
+                              modifier_bits_text(static_cast<std::uint8_t>(s.mods)) + (got ? " is primary" :
+                                                                                        " is not primary") +
+                                  ", want " + (want ? std::string{"primary"} : std::string{"not primary"}));
+        // 两式同源：判定 == 折算后的 Ctrl 位是否置位。
+        AURORA_TEST_CHECK_EQ(got, (static_cast<std::uint8_t>(fold_primary_modifier(s.mods)) &
+                                   static_cast<std::uint8_t>(ModifierKey::Control)) != 0U);
+    }
 }
 
 }  // namespace aurora::test_cases::utest_event

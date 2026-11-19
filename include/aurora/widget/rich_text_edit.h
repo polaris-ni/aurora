@@ -31,12 +31,13 @@ struct StyledChar {
 
 /// @brief 可编辑富文本控件。
 ///
-/// 文档模型为 `vector<StyledChar>`，支持：
-/// - 加粗 / 斜体 / 下划线切换（Ctrl+B / Ctrl+I / Ctrl+U）
+/// 文档模型为 `vector<StyledChar>`，支持（编辑快捷键一律走**主修饰键**——Windows / Linux 的
+/// Ctrl、macOS 的 ⌘，判定口径见 `event/event.h` 的 `has_primary_modifier`）：
+/// - 加粗 / 斜体 / 下划线切换（主修饰键 + B / I / U）
 /// - 字号 / 颜色设置
-/// - 撤销 / 重做（Ctrl+Z / Ctrl+Y），集成 UndoStack
-/// - 光标定位、选区操作（Shift+方向键、Ctrl+A、Home/End）
-/// - 剪贴板（Ctrl+C/X/V）
+/// - 撤销 / 重做（主修饰键 + Z、主修饰键 + Shift + Z 或主修饰键 + Y），集成 UndoStack
+/// - 光标定位、选区操作（Shift + 方向键、主修饰键 + A、Home / End）
+/// - 剪贴板（主修饰键 + C / X / V）
 /// - 序列化：导出为 TextSpan 序列（连续相同样式的字符合并为一个 span）
 ///
 /// 对标 Qt `QTextEdit`、WPF `RichTextBox`。
@@ -340,7 +341,7 @@ class RichTextEdit : public LeafWidget {
     /// @param e 鼠标事件（本地坐标；左键按下消费该事件）。
     auto on_pointer_event(MouseEvent &e) -> void override;
 
-    /// @brief 键盘派发（实现在同名 `.cpp`）：Ctrl 组合键 → 撤销/重做/样式/全选/剪贴板，
+    /// @brief 键盘派发（实现在同名 `.cpp`）：主修饰键组合 → 撤销/重做/样式/全选/剪贴板，
     ///        方向键与 Home/End → 移动/扩选，Backspace/Delete/Enter → 编辑；非 Down 直接放行。
     /// @param e 键盘事件（命中任一处理组即置 `is_handled`）。
     auto on_key_event(KeyEvent &e) -> void override;
@@ -507,12 +508,15 @@ class RichTextEdit : public LeafWidget {
     /// @brief 删除选区但不记 undo（供插入替换等复合操作内部复用），光标落到区间起点。
     auto do_delete_selection_no_undo() -> void;
 
-    /// @brief 处理 Ctrl/Cmd 组合快捷键（撤销/重做/样式/全选/剪贴板）。返回是否命中并处理。
+    /// @brief 处理主修饰键组合编辑键（撤销/重做/样式/全选/剪贴板）。
+    ///
+    /// 主修饰键 = Windows / Linux 的 Ctrl、macOS 的 ⌘，判定经 `has_primary_modifier`（见
+    /// `event/event.h`），本函数只认折算后的那枚位。
     /// @param e 键盘事件（认 Z/Y/B/I/U/A/C/X/V 键码，其余不命中）。
-    /// @param shift true = 带 Shift（Ctrl+Shift+Z 走重做而非撤销）。
-    /// @param n 文档长度（Ctrl+A 全选时据此选中整篇并把光标置尾）。
+    /// @param shift true = 带 Shift（主修饰键+Shift+Z 走重做而非撤销）。
+    /// @param n 文档长度（主修饰键+A 全选时据此选中整篇并把光标置尾）。
     /// @return true = 快捷键命中（调用方标记已处理）；false = 非识别组合，继续后续派发。
-    auto handle_control_shortcut(KeyEvent &e, bool shift, std::size_t n) -> bool;
+    auto handle_editing_shortcut(KeyEvent &e, bool shift, std::size_t n) -> bool;
 
     /// @brief 处理方向键 / Home / End（含 Shift 扩展选区）。返回是否命中。
     /// @param e 键盘事件（←/→/Home/End；RTL 下方向键按逻辑↔视觉反转）。

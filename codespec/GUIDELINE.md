@@ -1114,7 +1114,7 @@ greet.id = "demo.greet";
 greet.title = "Say Hello";
 greet.icon = "chat";
 greet.category = "Demo";
-greet.default_binding = au::KeyCombo{au::ModifierKey::Control, au::KeyCode::H};  // 默认快捷键（可选）
+greet.default_binding = au::KeyCombo{au::ModifierKey::Control, au::KeyCode::H};  // 默认快捷键（可选；Control 读作平台主修饰键：Windows/Linux 为 Ctrl、macOS 为 ⌘）
 greet.action = []() -> void { /* 执行体 */ };
 
 au::Command unavailable;
@@ -1132,14 +1132,14 @@ for (const au::MenuItem &item : app.commands().to_menu_items()) {
     // item.label / item.icon / item.shortcut_text / item.enabled / item.on_click
 }
 
-// ③ 命令面板：Ctrl+K 唤出，模糊检索 + ↑/↓ 导航 + Enter 执行
+// ③ 命令面板：主修饰键+K 唤出（macOS 为 ⌘K），模糊检索 + ↑/↓ 导航 + Enter 执行
 auto palette = std::make_shared<au::CommandPalette>(&app.commands());
-app.shortcuts().add(au::KeyCombo{au::ModifierKey::Control, au::KeyCode::K},
+app.shortcuts().add(au::KeyCombo{au::ModifierKey::Control, au::KeyCode::K},  // Control = 平台主修饰键
                     [palette]() -> void { palette->toggle(); });
 // 面板须进 widget 树（例如 `Stack{ content, palette }` + `StackFit::Expand`）才会渲染与参与命中。
 ```
 
-要点：`bind_shortcuts()` 必须**显式**调用（`run()` 不会自动绑定，否则 `run()` 之后注册的命令会静默失效），且面板的 Esc / ↑ / ↓ 键位依赖它——未接线时面板仍可鼠标操作与 Enter 执行，但键盘导航不可用并会记一条 WARN。`invoke(id)` 求值启用条件后才执行，未启用 / 无 `action` 时返回 `false` 而不静默成功；`remove(id)` / `clear()` 会**连带撤销**对应的快捷键绑定。检索用 `command_fuzzy_score`（不区分大小写的子序列匹配，词首命中与连续命中加权），与 MCP `list_commands` 工具共用同一打分与排序，故 AI 侧检索次序与面板一致。`to_json()` 产出 `{"commands":[…]}` 自描述信封供 AI 工具面枚举。这里的快捷键是**应用内**的（需窗口有焦点、经键盘派发命中）——若需要**应用无焦点时也触发**，用 OS 级全局热键（§43），不要把本节的绑定当全局热键用。可编译样例见 `examples/demos/demo_command_palette.cpp`。
+要点：`bind_shortcuts()` 必须**显式**调用（`run()` 不会自动绑定，否则 `run()` 之后注册的命令会静默失效），且面板的 Esc / ↑ / ↓ 键位依赖它——未接线时面板仍可鼠标操作与 Enter 执行，但键盘导航不可用并会记一条 WARN。`invoke(id)` 求值启用条件后才执行，未启用 / 无 `action` 时返回 `false` 而不静默成功；`remove(id)` / `clear()` 会**连带撤销**对应的快捷键绑定。检索用 `command_fuzzy_score`（不区分大小写的子序列匹配，词首命中与连续命中加权），与 MCP `list_commands` 工具共用同一打分与排序，故 AI 侧检索次序与面板一致。`to_json()` 产出 `{"commands":[…]}` 自描述信封供 AI 工具面枚举。这里的快捷键是**应用内**的（需窗口有焦点、经键盘派发命中）——若需要**应用无焦点时也触发**，用 OS 级全局热键（§43），不要把本节的绑定当全局热键用。`Control` 申报按**平台主修饰键**读：Windows / Linux 为 Ctrl、macOS 为 ⌘（折算口径见 `specification/05-event-navigation.md` §2.2），故 macOS 上物理 Ctrl 与 ⌘ 在应用内组合键中不可区分；OS 级热键按物理位申报，要 ⌘ 就写 `Meta`。可编译样例见 `examples/demos/demo_command_palette.cpp`。
 
 ---
 

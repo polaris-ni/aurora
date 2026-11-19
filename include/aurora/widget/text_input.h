@@ -880,9 +880,9 @@ class TextInput : public LeafWidget, public TextInputProps {
         }
     }
 
-    /// @brief 键盘编辑派发：Ctrl+A/C/X/V 全选/复制/剪切/粘贴（只读降级），Enter 提交，
-    ///        ←/→/Home/End 移动与 Shift 扩选（RTL 下方向键按视觉方向反转），Backspace 删除；
-    ///        非 Down、未聚焦或禁用态直接放行。
+    /// @brief 键盘编辑派发：主修饰键（Windows / Linux 的 Ctrl、macOS 的 ⌘）+ A/C/X/V 全选/复制/剪切/
+    ///        粘贴（只读降级），Enter 提交，←/→/Home/End 移动与 Shift 扩选（RTL 下方向键按视觉方向
+    ///        反转），Backspace 删除；非 Down、未聚焦或禁用态直接放行。
     /// @param e 键盘事件（消费时置 `is_handled`）。
     auto on_key_event(KeyEvent &e) -> void override {  // NOLINT
         if (!enabled() || !is_focused() || e.action != KeyAction::Down) {
@@ -891,10 +891,10 @@ class TextInput : public LeafWidget, public TextInputProps {
         const std::string &v = value_ref();
         const Font f{.size_pt = effective_font_size()};
         const bool shift = (e.modifiers & ModifierKey::Shift) != 0u;  // NOLINT
-        const bool ctrl = (e.modifiers & ModifierKey::Control) != 0u;  // NOLINT
+        const bool primary = has_primary_modifier(e.modifiers);
         const size_t n = cp_count(v);
 
-        if (ctrl && e.key == static_cast<int>(KeyCode::A)) {
+        if (primary && e.key == static_cast<int>(KeyCode::A)) {
             if (n > 0) {
                 sel_start_ = 0;
                 sel_end_ = n - 1;  // 含尾：最后一个字符下标
@@ -907,7 +907,7 @@ class TextInput : public LeafWidget, public TextInputProps {
             e.is_handled = true;
             return;
         }
-        if (ctrl && e.key == static_cast<int>(KeyCode::C)) {
+        if (primary && e.key == static_cast<int>(KeyCode::C)) {
             const std::string t = selected_text();
             // 复制失败是「用户按了复制却没复制上」，控件层无法补救，但必须留痕：Result 只到调用方，
             // 而这条路径的调用方就是控件自己。
@@ -918,8 +918,8 @@ class TextInput : public LeafWidget, public TextInputProps {
             e.is_handled = true;
             return;
         }
-        // Ctrl+X: 剪切（只读态降级为仅复制）
-        if (ctrl && e.key == static_cast<int>(KeyCode::X)) {
+        // 主修饰键+X: 剪切（只读态降级为仅复制）
+        if (primary && e.key == static_cast<int>(KeyCode::X)) {
             const std::string t = selected_text();
             if (!t.empty()) {
                 const auto copied = Clipboard::set_text(t);
@@ -937,8 +937,8 @@ class TextInput : public LeafWidget, public TextInputProps {
             e.is_handled = true;
             return;
         }
-        // Ctrl+V: 粘贴（只读态忽略；超出 max_length 部分截断）
-        if (ctrl && e.key == static_cast<int>(KeyCode::V)) {
+        // 主修饰键+V: 粘贴（只读态忽略；超出 max_length 部分截断）
+        if (primary && e.key == static_cast<int>(KeyCode::V)) {
             if (read_only()) {
                 e.is_handled = true;
                 return;

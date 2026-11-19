@@ -29,6 +29,8 @@
 |:---|:---|:---|
 | `examples/demos/demo_event.cpp` | `demo_event` | 点击命中与派发、高频点击 |
 | `examples/demos/demo_multitouch.cpp` | `demo_multitouch` | 拖拽路由、指针捕获、多点触控原始流、Tab 焦点遍历 |
+| `examples/demos/demo_text_input.cpp` | `demo_text_input` | 主修饰键的文本编辑组合（TC-EVENT-011：⌘A / ⌘C 经系统剪贴板验证） |
+| `examples/demos/demo_command_palette.cpp` | `demo_command_palette` | 应用内快捷键注册（TC-EVENT-011：⌘H / ⌘T 触发命令动作） |
 
 两个载体均将观测结果写入 stderr（分类均为 `demo`），因此**判定依赖 stderr 行数**，运行前须重定向。
 
@@ -291,6 +293,19 @@
 | 操作步骤 | 1. 启动 `./build/demo_command_palette.exe`，保持窗口在前台（纯执行，无预期结果）<br>2. 按一次 `Ctrl+Shift+P` 打开命令面板，关闭面板<br>3. 按一次 `NumLock` 切到开启档（纯执行，无预期结果）<br>4. 不切换焦点、再按一次 `Ctrl+Shift+P`<br>5. 按一次小键盘 `Home` 键（`VK_NUMLOCK` 开启时其上档为导航档），观察焦点落点<br>6. 按一次 `NumLock` 切回关闭档（纯执行，无预期结果）<br>7. 按一次小键盘 `1` 键，观察输入的字符 |
 | 预期结果 | 2. 命令面板打开，作为步骤 4 的对照：同一组合在未切档时即已命中<br>4. 命令面板打开——`KeyCombo::matches` 只比可按住的位，事件上的锁定态位被屏蔽，故 `NumLock` 开着不影响命中<br>5. 焦点落到导航目标；该位随消息流推进，不停留在激活时刻的播种值<br>7. 输入字符为 `1`（NumLock 关闭档），即小键盘数字档随锁定态改变 |
 
+### 2.7 主修饰键组合（macOS）
+
+#### TC-EVENT-011 macOS 主修饰键驱动应用内组合键与文本编辑
+
+| 项目 | 内容 |
+|:---|:---|
+| 用例编号 | TC-EVENT-011 |
+| 测试目的 | 验证应用内快捷键与文本编辑组合键按平台主修饰键命中：macOS 上 ⌘ 触发以 `Control` 申报的命令动作与 ⌘A / ⌘C 编辑判定，动作恰触发一次且物理 Ctrl 与 ⌘ 同解 |
+| 前置条件 | macOS 真机（物理 ⌘ 键可用）；终端可执行 `pbpaste`；两个载体已构建；当前目录可写 |
+| 依赖用例 | 无 |
+| 操作步骤 | 1. 构建载体：`cmake --build build --target demo_text_input demo_command_palette`（纯执行，无预期结果）<br>2. 启动 `./build/demo_text_input`（纯执行，无预期结果）<br>3. 点击预填 `Ada Lovelace` 的第二个输入框使其获得焦点（纯执行，无预期结果）<br>4. 按一次 ⌘A 全选，再按一次 ⌘C 复制，随后关闭窗口（纯执行，无预期结果）<br>5. 在终端执行 `pbpaste` 并比对输出<br>6. 启动 `./build/demo_command_palette`，窗口保持前台（纯执行，无预期结果）<br>7. 按一次 ⌘H，观察状态卡片文本<br>8. 按一次 ⌘T，观察状态卡片文本<br>9. 按一次**物理 Ctrl+H**，观察状态卡片文本<br>10. 按一次 ⌘K，观察命令面板；按 Esc 关闭 |
+| 预期结果 | 5. 输出恰为 `Ada Lovelace`（⌘A 全选 + ⌘C 复制把选区写进了系统剪贴板）<br>7. 状态卡片文本变为 `Executed: Say Hello`（以 `ModifierKey::Control` 申报的命令快捷键由 ⌘H 命中）<br>8. 文本变为 `Executed: Invert Theme`（单次按键动作恰触发一次，不重复叠加）<br>9. 文本回到 `Executed: Say Hello`（折叠把物理 Ctrl 与 ⌘ 折到同一枚主修饰键位，两者同解）<br>10. 面板打开；Esc 后关闭，运行期间无 `ERR` / `FTL` 级日志 |
+
 ## 3 执行记录表
 
 | 用例编号 | 执行日期 | 执行人 | 结果 | 失败步骤号 | 实际现象 | 缺陷编号 | 备注 |
@@ -305,3 +320,4 @@
 | TC-EVENT-008 | 2026-10-02 | Aurora Agent | PASS | | 自动段 12 行输出：10 条 `[PASS]`、1 条 `[SKIP]`、0 条 `[FAIL]`，退出码 0。`WM_SYSKEYDOWN(Alt+A)` 恰 1 条 `KeyEvent`（`action=Down`、`key=KeyCode::A`）；`VK_MENU` 送 0 条、其后字母仍带 `Alt` 位；`VK_F10` 送 0 条；消费开关打开时处理器仍见到 Alt+F4；`WM_SYSKEYUP` 1 条且 `action=Up`。「消费即止 / 未消费回落」那一对为 `[SKIP]`，成因已打印 | | SKIP 的成因经**裸 Win32 对照**实测确认（不经 Aurora、直接 `DefWindowProcA`）：注入 Alt+F4 / Alt+Space / Alt+Enter 均不产生 `WM_SYSCOMMAND`——`DefWindowProcA` 读 `GetKeyState(VK_MENU)` 物理态，`SendMessage` 改不了。故该对语义由 TC-EVENT-009 的真键盘段验收，不以注入通道的空转断言充数。库内判据本体（哪些 vk 进派发）另有单测 `utest_win32_modifiers.syskey_dispatches_all_but_alt_itself_and_f10` / `syskey_exceptions_still_advance_the_modifier_state` 覆盖 |
 | TC-EVENT-009 | 2026-10-03 | WorkBuddy | SKIP | | 未执行：本次只验「载体能否进入人工段」，未按 `Alt+F4`（`Step 1` 提示后 30s 超时，两段判据如实报 `[FAIL]`）——**该 FAIL 是判据在正常工作**（`SC_CLOSE` 收不到），不是缺陷。未在无按键情况下记 PASS | | 成因是前置「控制台会话已解锁且活动」不满足（执行时无人值守），非判据失败。载体可用性已在此确认：`--interactive` 修复前被**静默跳过**（输出 `Skipping the interactive stage`、退出码仍 0），修复后确实进入人工段并打出 `Step 1` 提示 |
 | TC-EVENT-010 |  |  |  |  |  |  |  |
+| TC-EVENT-011 |  |  |  |  |  |  |  |

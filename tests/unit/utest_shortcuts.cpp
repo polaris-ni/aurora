@@ -8,6 +8,9 @@
 ///           ModifierKey 全部已定义位的无余划分（新增锁定位时该用例要求同步）
 ///           另覆盖 `KeyCombo::from` 的反解：与 `to_string` 逐字节往返（全键名 × 全修饰子集）、
 ///           修饰次序不敏感、畸形文本一律回 nullopt 且不回落假有效值
+///           另覆盖「平台主修饰键」折算进匹配算式后的四条口径：macOS 上 ⌘ 满足申报成 Ctrl 的组合、
+///           折叠不把等式放宽成包含、注册表在主修饰键上命中、macOS 上 Ctrl 与 Meta 两种申报同解
+///           （两档期望都由编译期平台分支选定，Linux / Windows 与 macOS 作业各钉一档，无跳过蒙绿）
 
 #include <cstdint>
 #include <string>
@@ -15,6 +18,7 @@
 #include <vector>
 
 #include "aurora/app/shortcuts.h"
+#include "aurora/core/platform.h"
 #include "framework/aurora_test.h"
 
 namespace aurora::test_cases::utest_shortcuts {
@@ -27,6 +31,16 @@ auto key_event(KeyCode k, ModifierKey mods = ModifierKey::None, KeyAction action
     e.action = action;
     e.modifiers = mods;
     return e;
+}
+
+/// @brief 本平台事件侧的主修饰键位：macOS 上是 Command（本框架按物理真值折成 `Meta`），其余是 Ctrl。
+/// @return 该平台的按住位。
+[[nodiscard]] constexpr auto platform_primary_bit() -> ModifierKey {
+#ifdef AURORA_PLATFORM_MACOS
+    return ModifierKey::Meta;
+#else
+    return ModifierKey::Control;
+#endif
 }
 
 }  // namespace
@@ -347,6 +361,103 @@ AURORA_TEST_CASE(key_combo_from_rejects_malformed_text) {
     for (const std::string &text : malformed) {
         AURORA_TEST_CHECK_MSG(!KeyCombo::from(text).has_value(), "should reject: " + text);
     }
+}
+
+// ---------------------------------------------------------------------------
+// 平台主修饰键折算进匹配算式（macOS 的 ⌘ 与 Ctrl 同位）
+//
+// 背景：`ModifierKey` 建的是物理按住位，AppKit 的 Command 按物理真值折成 `Meta`；而用户在
+// 快捷键与文本编辑里申报的是「平台主修饰键」。`matches` 在取完可按住子集后、比较之前对两侧各
+// 折一次（`fold_primary_modifier`），于是同一份 `KeyCombo{Control, O}` 在 Windows/Linux 上命中
+// Ctrl+O、在 macOS 上既命中 ⌘O 也命中 Ctrl+O。非 macOS 构建折算为恒等，算式逐字节不变。
+// ---------------------------------------------------------------------------
+
+AURORA_TEST_CASE(primary_folding_lets_command_satisfy_control_declarations) {
+    const KeyCombo combo{ModifierKey::Control, KeyCode::O};
+
+    // 两平台一致：申报 Control 的组合命中物理 Ctrl。
+    AURORA_TEST_CHECK_TRUE(combo.matches(key_event(KeyCode::O, ModifierKey::Control)));
+    // 两平台一致：裸键不匹配带修饰位的申报（折叠不放宽「有没有修饰键」这一档）。
+    AURORA_TEST_CHECK_FALSE(combo.matches(key_event(KeyCode::O)));
+
+#ifdef AURORA_PLATFORM_MACOS
+    // macOS：同一份申报也命中 ⌘，以及两枚物理位同按的形态（折算后并成一枚）。
+    AURORA_TEST_CHECK_TRUE(combo.matches(key_event(KeyCode::O, ModifierKey::Meta)));
+    AURORA_TEST_CHECK_TRUE(combo.matches(key_event(KeyCode::O, ModifierKey::Control | ModifierKey::Meta)));
+    // 锁定位仍不参与比较：⌘ + NumLock 开着照样命中。
+    AURORA_TEST_CHECK_TRUE(combo.matches(key_event(KeyCode::O, ModifierKey::Meta | ModifierKey::NumLock)));
+#else
+    // 非 macOS：Meta 是独立的一位，不得被读成主修饰键。
+    AURORA_TEST_CHECK_FALSE(combo.matches(key_event(KeyCode::O, ModifierKey::Meta)));
+    AURORA_TEST_CHECK_FALSE(combo.matches(key_event(KeyCode::O, ModifierKey::Control | ModifierKey::Meta)));
+#endif
+}
+
+AURORA_TEST_CASE(primary_folding_does_not_widen_equality_into_containment) {
+    // 折叠只并主修饰键那一枚位，其余位仍要求逐位相等：⌘+Shift+O 不是 Ctrl+O，
+    // 「更具体组合优先」的注册表区分度不因折叠而丢失。
+    const KeyCombo plain{ModifierKey::Control, KeyCode::O};
+    const KeyCombo shifted{ModifierKey::Control | ModifierKey::Shift, KeyCode::O};
+    const KeyCombo meta_shifted{ModifierKey::Meta | ModifierKey::Shift, KeyCode::O};
+
+    AURORA_TEST_CHECK_FALSE(plain.matches(key_event(KeyCode::O, ModifierKey::Meta | ModifierKey::Shift)));
+    AURORA_TEST_CHECK_FALSE(plain.matches(key_event(KeyCode::O, ModifierKey::Control | ModifierKey::Shift)));
+    AURORA_TEST_CHECK_TRUE(shifted.matches(key_event(KeyCode::O, ModifierKey::Control | ModifierKey::Shift)));
+
+#ifdef AURORA_PLATFORM_MACOS
+    // macOS：带 Shift 的两种申报同解，事件侧用哪枚物理位都命中。
+    AURORA_TEST_CHECK_TRUE(shifted.matches(key_event(KeyCode::O, ModifierKey::Meta | ModifierKey::Shift)));
+    AURORA_TEST_CHECK_TRUE(meta_shifted.matches(key_event(KeyCode::O, ModifierKey::Control | ModifierKey::Shift)));
+    AURORA_TEST_CHECK_TRUE(meta_shifted.matches(key_event(KeyCode::O, ModifierKey::Meta | ModifierKey::Shift)));
+#else
+    // 非 macOS：Meta 与 Control 仍严格区分，两种申报各命中各的。
+    AURORA_TEST_CHECK_FALSE(shifted.matches(key_event(KeyCode::O, ModifierKey::Meta | ModifierKey::Shift)));
+    AURORA_TEST_CHECK_FALSE(meta_shifted.matches(key_event(KeyCode::O, ModifierKey::Control | ModifierKey::Shift)));
+    AURORA_TEST_CHECK_TRUE(meta_shifted.matches(key_event(KeyCode::O, ModifierKey::Meta | ModifierKey::Shift)));
+#endif
+}
+
+AURORA_TEST_CASE(registry_fires_on_the_platform_primary_key) {
+    // 注册表形态：同一份申报在主修饰键上命中、执行动作、消费事件（整条 pre-handler 链路）。
+    ShortcutRegistry reg;
+    int fired = 0;
+    reg.add(KeyCombo{ModifierKey::Control, KeyCode::K}, [&fired]() -> void { ++fired; });
+
+    AURORA_TEST_CHECK_TRUE(reg.handle(key_event(KeyCode::K, platform_primary_bit())));
+    AURORA_TEST_CHECK_EQ(fired, 1);
+    // 物理 Ctrl 在两平台都算主修饰键（macOS 上同解，非 macOS 上本就是它）。
+    AURORA_TEST_CHECK_TRUE(reg.handle(key_event(KeyCode::K, ModifierKey::Control)));
+    AURORA_TEST_CHECK_EQ(fired, 2);
+
+    // 禁用后两种物理位都不再命中——折叠不得把「禁用」这条路径带偏。
+    reg.set_enabled(1, false);
+    AURORA_TEST_CHECK_FALSE(reg.handle(key_event(KeyCode::K, platform_primary_bit())));
+    AURORA_TEST_CHECK_EQ(fired, 2);
+}
+
+AURORA_TEST_CASE(control_and_meta_declarations_share_one_slot_on_macos) {
+    // 折叠的代价在此显式钉住：macOS 上 `{Control, O}` 与 `{Meta, O}` 同解，先注册者独占命中
+    // （既有「first matching binding wins」次序不变）；非 macOS 上两种申报仍各管各的。
+    ShortcutRegistry reg;
+    std::vector<std::string> fired;
+    reg.add(KeyCombo{ModifierKey::Control, KeyCode::O}, [&fired]() -> void { fired.emplace_back("control"); });
+    reg.add(KeyCombo{ModifierKey::Meta, KeyCode::O}, [&fired]() -> void { fired.emplace_back("meta"); });
+
+    AURORA_TEST_CHECK_TRUE(reg.handle(key_event(KeyCode::O, platform_primary_bit())));
+#ifdef AURORA_PLATFORM_MACOS
+    AURORA_TEST_CHECK_EQ(fired.size(), std::size_t{1});
+    AURORA_TEST_CHECK_EQ(fired[0], std::string{"control"});
+    // 换另一枚物理位再按一次，命中的仍是先注册那条（不是「另一条终于轮到」）。
+    AURORA_TEST_CHECK_TRUE(reg.handle(key_event(KeyCode::O, ModifierKey::Control)));
+    AURORA_TEST_CHECK_EQ(fired.size(), std::size_t{2});
+    AURORA_TEST_CHECK_EQ(fired[1], std::string{"control"});
+#else
+    AURORA_TEST_CHECK_EQ(fired.size(), std::size_t{1});
+    AURORA_TEST_CHECK_EQ(fired[0], std::string{"control"});
+    AURORA_TEST_CHECK_TRUE(reg.handle(key_event(KeyCode::O, ModifierKey::Meta)));
+    AURORA_TEST_CHECK_EQ(fired.size(), std::size_t{2});
+    AURORA_TEST_CHECK_EQ(fired[1], std::string{"meta"});
+#endif
 }
 
 }  // namespace aurora::test_cases::utest_shortcuts

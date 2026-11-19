@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "aurora/core/image.h"
+#include "aurora/core/platform.h"
 #include "aurora/core/result.h"
 #include "aurora/core/types.h"
 
@@ -65,6 +66,9 @@ enum class MouseAction : std::uint8_t {
 enum class KeyAction : std::uint8_t { Down, Up };
 
 /// @brief 键盘修饰键位（位掩码，可组合）。
+/// @note 建模的是**物理按住位**：macOS 的 Command 在采集层折成 `Meta`（`window/detail/macos_keymap.h`）。
+///       应用内组合键申报的「平台主修饰键」（Windows / Linux 的 Ctrl、macOS 的 ⌘）由本头文件末尾的
+///       `fold_primary_modifier` / `has_primary_modifier` 折算，不往本枚举新增语义位。
 enum class ModifierKey : std::uint8_t {
     None = 0,
     Shift = 1U << 0U,
@@ -108,6 +112,56 @@ inline constexpr std::uint8_t AURORA_MODIFIER_LOCK_MASK = static_cast<std::uint8
 /// @return 交集的原始位掩码；非 0 表示 `b` 落在 `a` 内。
 [[nodiscard]] inline auto operator&(ModifierKey a, ModifierKey b) noexcept -> std::uint8_t {
     return static_cast<std::uint8_t>(a) & static_cast<std::uint8_t>(b);
+}
+
+/// @brief 把「平台主修饰键」折算到 `Control` 位上（组合键匹配与编辑判定的**唯一折算点**）。
+///
+/// `ModifierKey` 建的是**物理按住位**，而用户在快捷键与文本编辑里申报的是**平台主修饰键**：
+/// Windows / Linux 上是 Ctrl，macOS 上是 Command（本框架按物理真值折成 `Meta`，见
+/// `window/detail/macos_keymap.h`）。两者之间这层语义只由本函数承载——除它以外不存在第二处
+/// 「Ctrl 还是 ⌘」的判断，写六处 `& ModifierKey::Control` 就有六处可漂。
+///
+/// 口径细则（四条均为刻意决定）：
+///  - **只折叠，不改写事件**：`KeyEvent::modifiers` 里的物理位逐位不动，折叠只发生在**比较之前**
+///    （`KeyCombo::matches` 两侧各折一次）与**判定之内**（`has_primary_modifier`）。Flutter 每平台
+///    维护两套 `SingleActivator` 表就是这个语义分散的代价，本框架不取。
+///  - **macOS 上 ⌘ 与物理 Ctrl 同解**，`{Control, X}` 与 `{Meta, X}` 两种申报亦同解（注册序先命中者
+///    胜）。这是折叠档的固有代价，与 Qt / GTK 同款取舍；真要区分两者的场景是 OS 级全局热键，
+///    那张表按物理位申报、不经本函数（见 `specification/06-app-platform.md` §8.6）。
+///  - **只增不减**：折叠把两位并成一枚，原先能命中的组合仍命中，不会出现「某条绑定忽然失效」。
+///  - **锁定态位与其它位逐位透传**：`NumLock` 一类不属主修饰键，本函数不碰（`Control | Meta`
+///    都没按时直接原样返回）。
+///
+/// 非 macOS 构建（含 Wasm / Headless / Android）恒等返回——那里的 Ctrl 就是物理 Ctrl，
+/// `Meta` 就是独立的一位，无键可折。
+///
+/// @param mods 待折算的修饰位集（事件侧或申报侧皆可）。
+/// @return 折算后的修饰位集：macOS 上主修饰键一律落在 `Control` 位，其余平台逐位不变。
+[[nodiscard]] constexpr auto fold_primary_modifier(ModifierKey mods) noexcept -> ModifierKey {
+#if defined(AURORA_PLATFORM_MACOS)
+    constexpr std::uint8_t control_bit = static_cast<std::uint8_t>(ModifierKey::Control);
+    constexpr std::uint8_t meta_bit = static_cast<std::uint8_t>(ModifierKey::Meta);
+    constexpr std::uint8_t primary_bits = static_cast<std::uint8_t>(control_bit | meta_bit);
+    const std::uint8_t bits = static_cast<std::uint8_t>(mods);
+    if ((bits & primary_bits) == 0U) {
+        return mods;  // Ctrl 与 ⌘ 都没按：没有任何位可折，逐位原样返回
+    }
+    const std::uint8_t rest = static_cast<std::uint8_t>(bits & static_cast<std::uint8_t>(~primary_bits));
+    return static_cast<ModifierKey>(static_cast<std::uint8_t>(rest | control_bit));
+#else
+    return mods;  // 非 macOS：主修饰键就是物理 Ctrl，无需折算
+#endif
+}
+
+/// @brief 判定修饰位集里是否按着**本平台的主修饰键**（Windows / Linux 为 Ctrl，macOS 为 ⌘）。
+///
+/// 控件与宿主侧「这条编辑快捷键是不是主修饰键组合」的唯一判定入口，算式即
+/// `fold_primary_modifier(mods)` 的 `Control` 位——本函数不再另立一套平台分支，两处永远同解。
+/// @param mods 待判定的修饰位集（通常为 `KeyEvent::modifiers`）。
+/// @return 按着主修饰键为 `true`；macOS 上 ⌘ 与物理 Ctrl 同判为 `true`。
+[[nodiscard]] constexpr auto has_primary_modifier(ModifierKey mods) noexcept -> bool {
+    return (static_cast<std::uint8_t>(fold_primary_modifier(mods)) & static_cast<std::uint8_t>(ModifierKey::Control)) !=
+           0U;
 }
 
 /// @brief 焦点到达方式：决定基类统一焦点环是否画出（specification/05-event-navigation.md §4.4）。

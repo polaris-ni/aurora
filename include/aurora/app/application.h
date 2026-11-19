@@ -324,6 +324,8 @@ class Application {
 
     /// @brief 快捷键注册表：在键盘事件派发到焦点控件前优先匹配（specification/06-app-platform.md §8.4）。
     /// 用法：`app.shortcuts().add(KeyCombo{ModifierKey::Control, KeyCode::O}, []{ open(); })`。
+    /// 申报的 `Control` 位按**平台主修饰键**读：Windows / Linux 上就是 Ctrl，macOS 上 ⌘ 与 Ctrl 同解
+    /// （折算见 `event/event.h` 的 `fold_primary_modifier`）；OS 级热键不走这层折算，见 `os_hotkeys()`。
     /// @return 应用级快捷键注册表引用。
     [[nodiscard]] auto shortcuts() -> ShortcutRegistry & { return shortcuts_; }
 

@@ -55,6 +55,16 @@ auto themed_ctx(const Theme &t) -> std::pair<std::shared_ptr<Environment>, Build
     return {std::move(env), ctx};
 }
 
+/// @brief 本平台事件侧的主修饰键位：macOS 上是 Command（按物理真值折成 `Meta`），其余是 Ctrl。
+/// @return 该平台的按住位。
+[[nodiscard]] constexpr auto platform_primary_bit() -> ModifierKey {
+#ifdef AURORA_PLATFORM_MACOS
+    return ModifierKey::Meta;
+#else
+    return ModifierKey::Control;
+#endif
+}
+
 }  // namespace
 
 /// 探针：把只在库内消费的表态位提到可读位置（`present` 不升公共面）。
@@ -1258,6 +1268,59 @@ AURORA_TEST_CASE(font_size_follows_type_scale_when_unset) {
     const auto [env_d, ctx_d] = themed_ctx(degenerate);
     (void)env_d;
     AURORA_TEST_CHECK_NEAR(TextInputProps{}.font_size(ctx_d), 14.0F, 1e-4F);
+}
+
+// 主修饰键（macOS 的 ⌘ / 其余平台的 Ctrl）驱动同一条编辑判定。本条钉「本平台那枚位」真能全选与
+// 复制，并把「另一枚物理位」的判定档按平台分别证到：macOS 上物理 Ctrl 与 ⌘ 同解，非 macOS 上 Meta
+// 是独立的一位、不认领编辑键。剪贴板走进程内 memory 后端，故全程不碰真实系统剪贴板。
+AURORA_TEST_CASE(primary_modifier_drives_select_all_and_copy) {
+    AURORA_TEST_REQUIRE_TRUE(clipboard_memory::install());
+    auto press = [](KeyCode code, ModifierKey mods) -> KeyEvent {
+        KeyEvent k;
+        k.key = static_cast<int>(code);
+        k.action = KeyAction::Down;
+        k.modifiers = mods;
+        return k;
+    };
+
+    TextInput ti;
+    ti.on_focus_change(true);
+    TextInputEvent seed;
+    seed.text = "abcd";
+    ti.on_text_input(seed);
+
+    // 全选：主修饰键 + A。
+    KeyEvent all = press(KeyCode::A, platform_primary_bit());
+    ti.on_key_event(all);
+    AURORA_TEST_CHECK_TRUE(all.is_handled);
+    AURORA_TEST_CHECK_TRUE(ti.has_selection());
+    AURORA_TEST_CHECK_EQ(ti.selected_text(), std::string{"abcd"});
+
+    // 复制：同一枚主修饰键 + C 把选区交给剪贴板（读回逐字比对）。
+    KeyEvent copy = press(KeyCode::C, platform_primary_bit());
+    ti.on_key_event(copy);
+    AURORA_TEST_CHECK_TRUE(copy.is_handled);
+    AURORA_TEST_CHECK_EQ(Clipboard::get_text().value(), std::string{"abcd"});
+
+    // 另一枚物理位的判定档（新控件，免得上一条的选区把「没反应」伪装成「有反应」）。
+    TextInput other;
+    other.on_focus_change(true);
+    TextInputEvent other_seed;
+    other_seed.text = "abcd";
+    other.on_text_input(other_seed);
+#ifdef AURORA_PLATFORM_MACOS
+    KeyEvent ctrl_all = press(KeyCode::A, ModifierKey::Control);
+    other.on_key_event(ctrl_all);
+    AURORA_TEST_CHECK_TRUE(ctrl_all.is_handled);
+    AURORA_TEST_CHECK_TRUE(other.has_selection());
+#else
+    KeyEvent meta_all = press(KeyCode::A, ModifierKey::Meta);
+    other.on_key_event(meta_all);
+    AURORA_TEST_CHECK_FALSE(meta_all.is_handled);
+    AURORA_TEST_CHECK_FALSE(other.has_selection());
+#endif
+
+    (void)clipboard_memory::remove();
 }
 
 }  // namespace aurora::test_cases::utest_text_input

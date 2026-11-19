@@ -227,11 +227,11 @@ auto RichTextEdit::on_key_event(KeyEvent &e) -> void {
     if (e.action != KeyAction::Down) {
         return;
     }
-    const bool ctrl = (e.modifiers & ModifierKey::Control) != 0U;  // NOLINT(*-redundant-parentheses)
+    const bool primary = has_primary_modifier(e.modifiers);
     const bool shift = (e.modifiers & ModifierKey::Shift) != 0U;  // NOLINT(*-redundant-parentheses)
     const std::size_t n = doc_.size();
 
-    if (ctrl && handle_control_shortcut(e, shift, n)) {
+    if (primary && handle_editing_shortcut(e, shift, n)) {
         e.is_handled = true;
         return;
     }
@@ -244,11 +244,11 @@ auto RichTextEdit::on_key_event(KeyEvent &e) -> void {
     }
 }
 
-auto RichTextEdit::handle_control_shortcut(KeyEvent &e, bool shift, std::size_t n) -> bool {
+auto RichTextEdit::handle_editing_shortcut(KeyEvent &e, bool shift, std::size_t n) -> bool {
     const auto code = static_cast<KeyCode>(e.key);
     switch (code) {
         case KeyCode::Z:
-            // Ctrl+Shift+Z 重做，Ctrl+Z 撤销
+            // 主修饰键+Shift+Z 重做，主修饰键+Z 撤销
             if (shift) {
                 if ((undo_ != nullptr) && undo_->can_redo()) {
                     undo_->redo();
@@ -357,11 +357,11 @@ auto RichTextEdit::handle_move_key(KeyEvent &e, bool shift, std::size_t n) -> bo
         return true;
     }
     if (e.key == static_cast<int>(KeyCode::Home)) {
-        // 行内 Home：跳到当前行首；Ctrl+Home：跳到文档头。
-        const bool ctrl = (e.modifiers & ModifierKey::Control) != 0U;  // NOLINT(*-redundant-parentheses)
+        // 行内 Home：跳到当前行首；主修饰键+Home：跳到文档头。
+        const bool primary = has_primary_modifier(e.modifiers);
         const auto [line_begin, line_end] = line_bounds_for(caret_);
         (void)line_end;  // 行内 Home 仅需行首
-        const std::size_t target = ctrl ? 0U : line_begin;
+        const std::size_t target = primary ? 0U : line_begin;
         caret_ = target;
         if (!shift) {
             sel_start_ = sel_end_ = target;
@@ -373,11 +373,11 @@ auto RichTextEdit::handle_move_key(KeyEvent &e, bool shift, std::size_t n) -> bo
         return true;
     }
     if (e.key == static_cast<int>(KeyCode::End)) {
-        // 行内 End：跳到当前行尾；Ctrl+End：跳到文档尾。
-        const bool ctrl = (e.modifiers & ModifierKey::Control) != 0U;  // NOLINT(*-redundant-parentheses)
+        // 行内 End：跳到当前行尾；主修饰键+End：跳到文档尾。
+        const bool primary = has_primary_modifier(e.modifiers);
         const auto [line_begin, line_end] = line_bounds_for(caret_);
         (void)line_begin;  // 行内 End 仅需行尾
-        const std::size_t target = ctrl ? n : line_end;
+        const std::size_t target = primary ? n : line_end;
         caret_ = target;
         if (!shift) {
             sel_start_ = sel_end_ = target;

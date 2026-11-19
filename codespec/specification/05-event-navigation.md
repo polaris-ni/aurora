@@ -64,6 +64,8 @@ struct Event {
 - **失焦清空、激活播种**：`WM_ACTIVATE` 转非激活与 `WM_KILLFOCUS` 整体清零（未送达的抬起消息不可追），重新取得激活时用一次异步读数播种基线（覆盖「Alt+Tab 切进来时 Alt 已按下」）。因此修饰键**只在持有键盘焦点的那个窗口内计数**——非前台窗口上的物理 Ctrl 不再被别的窗口借读，这恰是 Windows 自身的键盘语义。
 - **`WM_SYSKEY*` 与常规键同路进派发链**：按住 Alt 期间的按键（`WM_SYSKEYDOWN` / `WM_SYSKEYUP`）与 `WM_KEY*` 走**同一个** `on_key` 通道产出 `KeyEvent`，消费（`is_handled`）即 `return 0`；未消费则原样回落 `DefWindowProcA`——系统菜单、菜单助记键、`Alt+F4` 关闭等原生行为**只在 Aurora 侧不认领时**发生，不会被无条件掐死。修饰态推进**早于**派发（与 `WM_KEY*` 同口径），故「按下 Alt 的那条 `KeyEvent` 自身就带 Alt 位」。**例外（只推进态、不派发）**：`VK_MENU`（Alt 自身，左右都算）与 `VK_F10`（系统菜单键）——它们是修饰/系统语义，发出无意义键码会污染快捷键匹配；判据是纯函数 `detail::syskey_dispatches(int vk)`（`win32_modifiers.h`），可单测直接吃表。**本轮仅 Win32 收敛**：X11 / Wayland / GLFW 侧 Alt 组合是否已作为常规 key press 派发需各自复核，未在本轮统一。文本通道不受影响：Alt 系本就不产 `TextInputEvent`（Windows 不为 Alt 组合发 `WM_CHAR`），故消费方的口径是「无 Alt/Meta 的可打印键走文本通道，带 Alt 的走键码通道」，两边不会重复发送同一字符。
 
+**平台主修饰键 vs 物理位（应用内组合键的唯一折算点）**：`ModifierKey` 建的是**物理按住位**（macOS 的 Command 由采集层折成 `Meta`，见 `src/aurora/window/detail/macos_keymap.h`），而应用内快捷键与文本编辑申报的是**平台主修饰键**——Windows / Linux 上是 Ctrl，macOS 上是 ⌘。这层语义只由 `event.h` 的两枚纯函数承载：`fold_primary_modifier(mods)` 把主修饰位折到 `Control` 位（macOS 上把 `Meta` 并入并清除、其余位逐位透传；非 macOS 构建恒等返回），`has_primary_modifier(mods)` 即「折算后 `Control` 位是否置位」的唯一判定入口——控件与宿主侧不再手写 `& ModifierKey::Control`。折叠**只发生在比较之前与判定之内，不改写 `KeyEvent::modifiers` 的物理位**；代价是 macOS 上物理 Ctrl 与 ⌘ 在应用内组合键中不可区分（`{Control, X}` 与 `{Meta, X}` 同解，注册序先命中者胜，与 Qt / GTK 同款取舍）。OS 级全局热键交付给系统的是物理键表条目，按物理位申报、**不经**本折算（见 [`06-app-platform.md`](06-app-platform.md) §8.6）。
+
 指针类事件（`MouseEvent` / `ScrollEvent`）的修饰键位见 §2.2.2。
 
 ### 2.2.1 连击序号（`MouseEvent::click_count`）
