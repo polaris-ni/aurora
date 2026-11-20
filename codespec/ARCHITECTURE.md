@@ -244,6 +244,7 @@ drain_posted → pump_all_once → on_frame_ → 关闭闸门询问步 poll_clos
 - **多点触控并发（按指针分发）**：`TouchDispatcher`（实例级，由 `Application` 持有）对 `TouchEvent` 按 pointer id 做命中缓存与独立路由——某 pointer id 首按做命中测试并缓存链，活跃期复用缓存链，抬起即清缓存。因此 `draggable` / `long_press` / `pinch` / `rotate` 各自绑定具体指针，支持单指持发 + 多指并发。每次 `TouchEvent` 同时 (1) 向缓存链广播完整 `TouchEvent`（原始流，供 `TouchListener` 修饰回调）、(2) 合成带 `pointer_id` 的 `MouseEvent` 驱动既有点击 / 拖拽手势。
 - **输入法组合只到焦点控件**：`TextCompositionEvent` 与 `TextInputEvent` 同径——不经命中链、不冒泡，仅交给 `FocusManager` 当前焦点控件的 `on_text_composition`（容器误吞即丢字）。组合串由平台桥折算后同步投出，preedit 不进 `value()`（详见 §8.6）。
 - **悬停态基础设施**：`EventDispatcher` 在无捕获 Move 时把新命中链与上次悬停链 diff，对离开 / 进入控件回调 `Widget::on_hover_change(bool)`（默认仅记录 `hover_` 不标脏；需要视觉反馈的控件覆写并追加 `mark_needs_paint`）；`Widget::hovered()` 供 `on_paint` 读取。Win32 宿主经 `TrackMouseEvent(TME_LEAVE)` 在光标离窗时合成远离 Move 清除悬停，否则高亮残留。
+- **指针移动帧内合并**：`WindowHost` 在事件泵入口把 `MouseAction::Move` 收进单一待投递项（只留最新样本、不插值、不补发中间点），帧尾与任何非移动事件之前各冲刷派发一次。不变量：合并只减少同一帧内移动的派发次数，**最终指针位置、按下 / 抬起目标、悬停进出的先后顺序与点击路由必须与逐事件处理逐项一致**——故冲刷必须先于任何非移动事件（保「先移动、后按下」的相对序），且每次派发仍完整走命中测试（命中带副作用，不存在「同控件内跳过重新命中」的旁路）；非移动事件永不进合并槽、不被延后。契约见 `specification/05-event-navigation.md` §3.5，端到端由 `utest_dispatcher` 的帧内合并用例钉住。
 
 ---
 

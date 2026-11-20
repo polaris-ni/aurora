@@ -4,7 +4,7 @@
 |:---|:---|
 | 变更编号 | CHG-081 |
 | 提出日期 | 2026-11-17 |
-| 当前状态 | 实施中 |
+| 当前状态 | 已归档 |
 | 关联需求 | 无 |
 | 影响面 | `src/aurora/app/window_host.cpp`（事件泵的移动暂存与帧尾冲刷）、`src/aurora/event/detail/pointer_move_coalescer.h`（合并槽）；**公共 API 结构与 `aurora_api.json` 无差异** |
 
@@ -31,3 +31,4 @@
 
 - `codespec/specification/05-event-navigation.md`：补帧内合并的投递语义（每帧至多一次、最新位置、非移动事件前冲刷）及其与点击路由的一致性要求。
 - `codespec/ARCHITECTURE.md`：事件分发章节补「移动事件合并」的不变量。
+- 本提案状态流转：已提议 → 实施中 → 已归档
