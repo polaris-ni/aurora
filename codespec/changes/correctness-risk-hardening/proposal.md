@@ -4,7 +4,7 @@
 |:---|:---|
 | 变更编号 | CHG-080 |
 | 提出日期 | 2026-11-16 |
-| 当前状态 | 实施中 |
+| 当前状态 | 已归档 |
 | 关联需求 | 无 |
 | 影响面 | 状态引擎 `src/aurora/state/reactor.cpp` 与 `include/aurora/state/detail/reactor.h`（存活登记 + 析构水位收缩 + DEBUG 观测方法）；渲染 `src/aurora/render/painter.cpp` 与 `include/aurora/render/detail/gamma_lut.h`（透明度整数化助手 + 五处替换）；序列化 `include/aurora/widget/serialization.h` 的 `register_factory`（调用失效入口）与 `src/aurora/widget/serialization.cpp`（缓存提升为文件级 + 失效定义）；字形缓存 `src/aurora/render/glyph_atlas.cpp` 判非缺陷不改码，仅以行为契约用例钉住；测试 `tests/unit/utest_reactor.cpp` / `utest_painter.cpp` / `utest_serialization.cpp` / `utest_glyph_atlas.cpp` 各增用例；文档 `codespec/specification/02-state.md` / `03-layout-render.md` / `04-widget.md` 回写（观测口登记并入状态域文档，六号平台篇无状态引擎章节故不列）。 |
 
@@ -88,11 +88,11 @@
 
 ## 实施步骤
 
-- [ ] 状态引擎：存活登记 + 析构水位收缩 + 轮末兜底 + DEBUG 观测方法（登记并入状态域文档）；`utest_reactor.cpp` 增长会话收敛用例（含零提交段落）。
-- [ ] 渲染口径：`gamma_lut.h` 助手 + 五处替换 + 注释同步；`utest_painter.cpp` 增助手网格用例。
-- [ ] schema 失效：缓存提升为文件级匿名对象 + 头文件外部链接声明 + `register_factory` 调用 + 注释改写；`utest_serialization.cpp` 增重注册用例。
-- [ ] 字形缓存行为契约钉：`utest_glyph_atlas.cpp` 增用例。
-- [ ] 文档回写与 `CHANGELOG.md` 追加 Changed 条目；增量 tidy + format + 全量门禁；状态流转「实施中 → 已归档」。本批不含性能路径变更，不设 bench 回归判据（radial/linear 比值基线自身波动 13%~76%，信噪比不足；性能验证留给后续优化批次）。
+- [x] 状态引擎：存活登记 + 析构水位收缩 + 轮末兜底 + DEBUG 观测方法（登记并入状态域文档）；`utest_reactor.cpp` 增长会话收敛用例（含零提交段落）。
+- [x] 渲染口径：`gamma_lut.h` 助手 + 五处替换 + 注释同步；`utest_painter.cpp` 增助手网格用例。
+- [x] schema 失效：缓存提升为文件级匿名对象 + 头文件外部链接声明 + `register_factory` 调用 + 注释改写；`utest_serialization.cpp` 增重注册用例。
+- [x] 字形缓存行为契约钉：`utest_glyph_atlas.cpp` 增用例。
+- [x] 文档回写与 `CHANGELOG.md` 追加 Changed 条目；增量 tidy + format + 全量门禁；状态流转「实施中 → 已归档」。本批不含性能路径变更，不设 bench 回归判据（radial/linear 比值基线自身波动 13%~76%，信噪比不足；性能验证留给后续优化批次）。
 
 ## 回写落点
 
@@ -101,3 +101,4 @@
 - `codespec/specification/04-widget.md`：schema 缓存失效联动与单线程前提。
 
 根目录 CHANGELOG.md（不属 codespec 树，故不列为回写落点，随批必做）：Changed 条目记 schema 缓存失效语义与观测口新增。
+- 本提案状态流转：已提议 → 实施中 → 已归档

@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <memory>
 #include <stdexcept>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -277,31 +278,151 @@ AURORA_TEST_CASE(reactor_destroyed_terminal_unlinks) {
 
 AURORA_TEST_CASE(epoch_arrays_shrink_to_live_high_water) {
 #ifdef AURORA_ENABLE_DEBUG
-    // 批量创建并逐次提交，把来源戳数组抬过收缩阈值；随后只保留最低 id 的存活节点，
-    // 销毁全部高 id 节点（析构摊还触发收缩）。数组应收敛到存活上界，而非累计创建峰值。
-    constexpr int batch_size = 5000;
+    // 判据①③：批量创建来源与订阅者，提交被多数订阅者共享的最高 id 来源一次，同时把两枚去重戳
+    // 数组抬过收缩阈值；销毁高 id / 高 seq 节点、只保留最低 id 来源与最低 seq 订阅者，两数组应
+    // 收敛到各自存活上界而非累计创建峰值。末尾再提交一次覆盖轮末兜底路径。
+    constexpr int batch_size = 100000;
+    auto &engine = aurora::detail::Engine::instance();
+
     std::vector<std::shared_ptr<Source<int>>> sources;
-    sources.reserve(batch_size);
+    sources.reserve(static_cast<std::size_t>(batch_size));
     for (int i = 0; i < batch_size; ++i) {
         sources.push_back(make_source(i));
     }
-    for (auto &source : sources) {
-        source->assign(source->read() + 1);
-    }
-    auto &engine = aurora::detail::Engine::instance();
-    AURORA_TEST_CHECK_GT(static_cast<int>(engine.seen_source_size()), 4096);
 
-    const auto kept = static_cast<std::size_t>(sources.front()->id());
-    sources.erase(sources.begin() + 1, sources.end());
-    // 析构顺序是标准未指定的（不同标准库实现前向/反向不一），收缩在途中哪一次析构触发
-    // 也随之不同：可能收敛到精确的存活上界，也可能停在下界 4096 以内的中间值。判据钉
-    // 文档契约「size == capacity 且 ≤ max(4096, M+1)」，不钉与实现细节相关的精确值。
-    // 联合判据仍能区分缺陷与修复：收缩前 size 为累计创建峰值（> 4096），无收缩逻辑时
-    // 本断言必红；再提交一次走轮末兜底，确保判据可复现。
+    // rec[0] 订阅最低 id 来源（保留）；rec[1..] 订阅最高 id 来源 sink（撑数组用，随后销毁）。
+    // 提交 sink 一次：mark 遍历其全部观察者，同时撑大来源戳数组（到 sink.id）与观察者戳数组（到最高 seq）。
+    std::shared_ptr<Source<int>> sink = sources.back();
+    auto *sink_ptr = sink.get();
+    auto *keep_ptr = sources.front().get();
+    std::vector<std::shared_ptr<RunRecord>> records;
+    records.reserve(static_cast<std::size_t>(batch_size));
+    auto keep_rec = std::make_shared<RunRecord>([keep_ptr] { (void)keep_ptr->read(); });
+    keep_rec->run_first();
+    records.push_back(std::move(keep_rec));
+    for (int i = 1; i < batch_size; ++i) {
+        auto rec = std::make_shared<RunRecord>([sink_ptr] { (void)sink_ptr->read(); });
+        rec->run_first();
+        records.push_back(std::move(rec));
+    }
+    sink_ptr->assign(sink_ptr->read() + 1);
+
+    AURORA_TEST_CHECK_GT(engine.seen_source_size(), 4096U);
+    AURORA_TEST_CHECK_GT(engine.seen_observer_size(), 4096U);
+
+    const auto kept_src = static_cast<std::size_t>(sources.front()->id());
+    const auto kept_obs = static_cast<std::size_t>(records.front()->seq());
+    records.erase(records.begin() + 1, records.end());  // 高 seq 订阅者析构，释放对 sink 的依赖引用
+    sources.erase(sources.begin() + 1, sources.end());  // 高 id 来源析构（含 sink 的 vector 引用）
+    sink.reset();  // 释放本用例对 sink 的额外所有权，sink 真正析构
+
+    // 再提交保留来源一次走轮末兜底（deliver 后收缩），保留节点仍各自存活，收缩目标不变。
     sources.front()->assign(sources.front()->read() + 1);
-    const std::size_t capacity_bound = std::max<std::size_t>(4096U, kept + 1U);
+
+    const std::size_t src_bound = std::max<std::size_t>(4096U, kept_src + 1U);
+    const std::size_t obs_bound = std::max<std::size_t>(4096U, kept_obs + 1U);
     AURORA_TEST_CHECK_EQ(engine.seen_source_size(), engine.seen_source_capacity());
-    AURORA_TEST_CHECK_LE(engine.seen_source_size(), capacity_bound);
+    AURORA_TEST_CHECK_LE(engine.seen_source_size(), src_bound);
+    AURORA_TEST_CHECK_EQ(engine.seen_observer_size(), engine.seen_observer_capacity());
+    AURORA_TEST_CHECK_LE(engine.seen_observer_size(), obs_bound);
+#else
+    AURORA_TEST_SKIP("epoch-array observation ports are gated by AURORA_ENABLE_DEBUG");
+#endif
+}
+
+AURORA_TEST_CASE(epoch_arrays_shrink_on_destruct_without_commit) {
+#ifdef AURORA_ENABLE_DEBUG
+    // 判据①「纯创建/销毁、零写提交」段落：撑大两数组后销毁高 id / 高 seq 节点期间不再提交，
+    // 收缩只能由析构路径的注销检查完成（析构发生在交付之外，不受在途遍历守卫跳过）。
+    constexpr int batch_size = 100000;
+    auto &engine = aurora::detail::Engine::instance();
+
+    std::vector<std::shared_ptr<Source<int>>> sources;
+    sources.reserve(static_cast<std::size_t>(batch_size));
+    for (int i = 0; i < batch_size; ++i) {
+        sources.push_back(make_source(i));
+    }
+    std::shared_ptr<Source<int>> sink = sources.back();
+    auto *sink_ptr = sink.get();
+    auto *keep_ptr = sources.front().get();
+    std::vector<std::shared_ptr<RunRecord>> records;
+    records.reserve(static_cast<std::size_t>(batch_size));
+    auto keep_rec = std::make_shared<RunRecord>([keep_ptr] { (void)keep_ptr->read(); });
+    keep_rec->run_first();
+    records.push_back(std::move(keep_rec));
+    for (int i = 1; i < batch_size; ++i) {
+        auto rec = std::make_shared<RunRecord>([sink_ptr] { (void)sink_ptr->read(); });
+        rec->run_first();
+        records.push_back(std::move(rec));
+    }
+    sink_ptr->assign(sink_ptr->read() + 1);
+
+    AURORA_TEST_CHECK_GT(engine.seen_source_size(), 4096U);
+    AURORA_TEST_CHECK_GT(engine.seen_observer_size(), 4096U);
+
+    const auto kept_src = static_cast<std::size_t>(sources.front()->id());
+    const auto kept_obs = static_cast<std::size_t>(records.front()->seq());
+    // 销毁期间无任何提交：收缩只能由析构触发的注销检查完成。
+    records.erase(records.begin() + 1, records.end());
+    sources.erase(sources.begin() + 1, sources.end());
+    sink.reset();
+
+    const std::size_t src_bound = std::max<std::size_t>(4096U, kept_src + 1U);
+    const std::size_t obs_bound = std::max<std::size_t>(4096U, kept_obs + 1U);
+    AURORA_TEST_CHECK_EQ(engine.seen_source_size(), engine.seen_source_capacity());
+    AURORA_TEST_CHECK_LE(engine.seen_source_size(), src_bound);
+    AURORA_TEST_CHECK_EQ(engine.seen_observer_size(), engine.seen_observer_capacity());
+    AURORA_TEST_CHECK_LE(engine.seen_observer_size(), obs_bound);
+#else
+    AURORA_TEST_SKIP("epoch-array observation ports are gated by AURORA_ENABLE_DEBUG");
+#endif
+}
+
+AURORA_TEST_CASE(epoch_arrays_capacity_independent_of_cumulative) {
+#ifdef AURORA_ENABLE_DEBUG
+    // 判据③：两档累计创建量（10 万 / 20 万），各只保留最低 id 来源与最低 seq 订阅者，
+    // 两档收缩后的来源戳数组容量都收敛到各自「存活最高身份 + 1」而非各自累计峰值，
+    // 证明容量不随累计创建数增长。
+    auto &engine = aurora::detail::Engine::instance();
+
+    const auto run_one_tier = [&](int batch_size) -> std::tuple<std::size_t, std::size_t, std::size_t> {
+        std::vector<std::shared_ptr<Source<int>>> sources;
+        sources.reserve(static_cast<std::size_t>(batch_size));
+        for (int i = 0; i < batch_size; ++i) {
+            sources.push_back(make_source(i));
+        }
+        std::shared_ptr<Source<int>> sink = sources.back();
+        auto *sink_ptr = sink.get();
+        auto *keep_ptr = sources.front().get();
+        std::vector<std::shared_ptr<RunRecord>> records;
+        records.reserve(static_cast<std::size_t>(batch_size));
+        auto keep_rec = std::make_shared<RunRecord>([keep_ptr] { (void)keep_ptr->read(); });
+        keep_rec->run_first();
+        records.push_back(std::move(keep_rec));
+        for (int i = 1; i < batch_size; ++i) {
+            auto rec = std::make_shared<RunRecord>([sink_ptr] { (void)sink_ptr->read(); });
+            rec->run_first();
+            records.push_back(std::move(rec));
+        }
+        sink_ptr->assign(sink_ptr->read() + 1);
+        const std::size_t peak = engine.seen_source_size();
+        records.erase(records.begin() + 1, records.end());
+        sources.erase(sources.begin() + 1, sources.end());
+        sink.reset();
+        const std::size_t cap = engine.seen_source_size();
+        const std::size_t bound = std::max<std::size_t>(4096U, static_cast<std::size_t>(sources.front()->id()) + 1U);
+        return std::make_tuple(peak, cap, bound);
+    };
+
+    const auto [peak_small, cap_small, bound_small] = run_one_tier(100000);
+    const auto [peak_large, cap_large, bound_large] = run_one_tier(200000);
+    // 两档收缩前均为累计峰值，收缩后均落在各自存活上界内、且远小于各自累计峰值。
+    AURORA_TEST_CHECK_GT(peak_small, bound_small);
+    AURORA_TEST_CHECK_GT(peak_large, bound_large);
+    AURORA_TEST_CHECK_LE(cap_small, bound_small);
+    AURORA_TEST_CHECK_LE(cap_large, bound_large);
+    AURORA_TEST_CHECK_LT(cap_small, peak_small);
+    AURORA_TEST_CHECK_LT(cap_large, peak_large);
 #else
     AURORA_TEST_SKIP("epoch-array observation ports are gated by AURORA_ENABLE_DEBUG");
 #endif
@@ -309,19 +430,37 @@ AURORA_TEST_CASE(epoch_arrays_shrink_to_live_high_water) {
 
 AURORA_TEST_CASE(epoch_arrays_empty_when_no_live_sources) {
 #ifdef AURORA_ENABLE_DEBUG
-    constexpr int batch_size = 5000;
+    // 判据②：存活集合清空后两枚去重戳数组的 size 与 capacity 均归零。
+    constexpr int batch_size = 100000;
+    auto &engine = aurora::detail::Engine::instance();
+
     std::vector<std::shared_ptr<Source<int>>> sources;
-    sources.reserve(batch_size);
+    sources.reserve(static_cast<std::size_t>(batch_size));
     for (int i = 0; i < batch_size; ++i) {
         sources.push_back(make_source(i));
     }
-    for (auto &source : sources) {
-        source->assign(source->read() + 1);
+    std::shared_ptr<Source<int>> sink = sources.back();
+    auto *sink_ptr = sink.get();
+    auto *keep_ptr = sources.front().get();
+    std::vector<std::shared_ptr<RunRecord>> records;
+    records.reserve(static_cast<std::size_t>(batch_size));
+    auto keep_rec = std::make_shared<RunRecord>([keep_ptr] { (void)keep_ptr->read(); });
+    keep_rec->run_first();
+    records.push_back(std::move(keep_rec));
+    for (int i = 1; i < batch_size; ++i) {
+        auto rec = std::make_shared<RunRecord>([sink_ptr] { (void)sink_ptr->read(); });
+        rec->run_first();
+        records.push_back(std::move(rec));
     }
-    auto &engine = aurora::detail::Engine::instance();
-    sources.clear();  // 全部销毁：存活集为空，最后一次析构的检查即收缩到 0
+    sink_ptr->assign(sink_ptr->read() + 1);
+
+    records.clear();  // 全部订阅者析构：观察者存活集清空，并释放对 sink / keep 的依赖引用
+    sources.clear();  // 全部来源 vector 引用释放
+    sink.reset();  // 释放本用例对 sink 的最后所有权：来源存活集清空，最后一次析构检查收缩到 0
     AURORA_TEST_CHECK_EQ(engine.seen_source_size(), 0U);
     AURORA_TEST_CHECK_EQ(engine.seen_source_capacity(), 0U);
+    AURORA_TEST_CHECK_EQ(engine.seen_observer_size(), 0U);
+    AURORA_TEST_CHECK_EQ(engine.seen_observer_capacity(), 0U);
 #else
     AURORA_TEST_SKIP("epoch-array observation ports are gated by AURORA_ENABLE_DEBUG");
 #endif
