@@ -430,4 +430,56 @@ AURORA_TEST_CASE(replay_text_with_different_fonts_stays_unmerged) {
     AURORA_TEST_CHECK_EQ(capture.entries[1].text, std::string{"large"});
 }
 
+AURORA_TEST_CASE(replay_text_with_different_letter_spacing_stays_unmerged) {
+    // 相邻文本仅字距（text_ls）不同时不得合批：`flush_batch` 用 `batch_head` 一份排版 opts，
+    // 忽略字距判等会把第二条按第一条字距绘制，像素偏离逐条基准 —— 可证伪（经变异实测确认转红）。
+    const Font font{.family = "sans-serif", .size_pt = 14.0F, .weight = 400};
+    const Rect first_box = rect_at(4.0F, 4.0F, 110.0F, 24.0F);
+    const Rect second_box = rect_at(4.0F, 30.0F, 110.0F, 24.0F);
+    constexpr int width = 120;
+    constexpr int height = 60;
+
+    render::TextLayoutOpts loose{};
+    loose.letter_spacing = 4.0F;
+
+    // 自证字距差异确实影响像素，否则「两种字距回放一致」可能是空转断言。
+    {
+        Painter a;
+        a.begin(width, height);
+        a.draw_text(first_box, std::string{"text"}, font, Color::black(), render::TextAAMode::Supersample,
+                    render::TextLayoutOpts{});
+        Painter b;
+        b.begin(width, height);
+        b.draw_text(first_box, std::string{"text"}, font, Color::black(), render::TextAAMode::Supersample, loose);
+        AURORA_TEST_CHECK_GT(count_diff_pixels(a, b), 0);
+    }
+
+    DisplayList list;
+    DrawCmd tight = make_text_cmd(list, "tight", first_box, font, Color::black());  // text_ls 默认 0
+    DrawCmd wide = make_text_cmd(list, "wide", second_box, font, Color::black());
+    wide.text_ls = 4.0F;
+    list.push_cmd(tight);
+    list.push_cmd(wide);
+
+    Painter reference;
+    reference.begin(width, height);
+    reference.draw_text(first_box, std::string{"tight"}, font, Color::black(), render::TextAAMode::Supersample,
+                        render::TextLayoutOpts{});
+    reference.draw_text(second_box, std::string{"wide"}, font, Color::black(), render::TextAAMode::Supersample, loose);
+
+    Painter subject;
+    subject.begin(width, height);
+    list.replay(subject);
+
+    AURORA_TEST_REQUIRE_GT(non_transparent_pixels(subject), 0);
+    AURORA_TEST_CHECK_EQ(count_diff_pixels(subject, reference), 0);
+    AURORA_TEST_CHECK_TRUE(subject.to_image().pixels == reference.to_image().pixels);
+
+    SequenceCapture capture;
+    replay_recorded_sequence(list, width, height, capture);
+    AURORA_TEST_REQUIRE_EQ(capture.entries.size(), 2U);
+    AURORA_TEST_CHECK_EQ(capture.entries[0].text, std::string{"tight"});
+    AURORA_TEST_CHECK_EQ(capture.entries[1].text, std::string{"wide"});
+}
+
 }  // namespace aurora::test_cases::utest_display_list
