@@ -58,12 +58,14 @@ class SequenceCapture final : public rhi::RhiBackend {
     struct Entry {
         CmdKind kind = CmdKind::FillRect;  ///< 提交的命令类型
         std::string text;  ///< DrawText 的文本（非文本命令为空）
+        Rect bounds;  ///< 命令原点与尺寸（坐标字段）
     };
 
     [[nodiscard]] auto name() const -> std::string_view override { return "utest_display_list_sequence"; }
 
     auto submit(const DrawCmd &cmd, const rhi::CmdData &data) -> void override {
-        entries.push_back(Entry{.kind = cmd.kind, .text = data.text != nullptr ? *data.text : std::string{}});
+        entries.push_back(
+            Entry{.kind = cmd.kind, .text = data.text != nullptr ? *data.text : std::string{}, .bounds = cmd.bounds});
     }
 
     // 探针后端：命令序列供用例直接读取，故有意保持公开。
@@ -303,6 +305,7 @@ AURORA_TEST_CASE(replay_adjacent_same_style_text_matches_per_command_output) {
     for (std::size_t i = 0; i < count; ++i) {
         AURORA_TEST_CHECK_EQ(capture.entries.at(i).kind, CmdKind::DrawText);
         AURORA_TEST_CHECK_EQ(capture.entries.at(i).text, std::string{texts.at(i)});
+        AURORA_TEST_CHECK_TRUE(capture.entries.at(i).bounds == boxes.at(i));  // 坐标字段逐条一致
     }
 }
 

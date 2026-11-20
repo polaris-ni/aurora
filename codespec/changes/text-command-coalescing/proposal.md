@@ -4,7 +4,7 @@
 |:---|:---|
 | 变更编号 | CHG-083 |
 | 提出日期 | 2026-11-17 |
-| 当前状态 | 实施中 |
+| 当前状态 | 已归档 |
 | 关联需求 | 无 |
 | 影响面 | `src/aurora/render/display_list.cpp`（回放循环对相邻 `DrawText` 的合并与分派）；**公共 API 结构与 `aurora_api.json` 无差异**；`Painter::draw_text_runs` 语义不变，仅新增调用点 |
 
@@ -33,3 +33,4 @@
 
 - `codespec/specification/03-layout-render.md`：补回放阶段文本命令合并的条件与次序约束，说明与 `draw_text_runs` 逐位一致的既有契约。
 - `codespec/ARCHITECTURE.md`：渲染章节补「回放不重排命令」的不变量及其对覆盖顺序的意义。
+- 本提案状态流转：已提议 → 实施中 → 已归档
