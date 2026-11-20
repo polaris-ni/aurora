@@ -4,7 +4,7 @@
 |:---|:---|
 | 变更编号 | CHG-082 |
 | 提出日期 | 2026-11-17 |
-| 当前状态 | 实施中 |
+| 当前状态 | 已归档 |
 | 关联需求 | 无 |
 | 影响面 | `src/aurora/render/painter.cpp`（`begin` 的基底清零）、`include/aurora/render/painter.h`（私有成员与内部访问钩子）、`src/aurora/render/detail/frame_base.h`（内部判定）、`D3D11Surface` / `WgpuWin32Surface` 的 `begin_frame`；**公共 API 签名与 `aurora_api.json` 无差异**，`Painter` 仅增私有成员 |
 
@@ -36,3 +36,4 @@
 - `codespec/specification/03-layout-render.md`：补帧基底契约——清零为默认、不透明全覆盖帧可跳过、强制清零的触发条件。
 - `codespec/ARCHITECTURE.md`：渲染章节补「帧基底与脏区重绘」的边界，明确跳过清零不改变任何可见像素。
 - `codespec/BUILD_OPTIONS.md`：若以缓存变量或 feature 宏控制该路径，在此登记开关名与默认值。
+- 本提案状态流转：已提议 → 实施中 → 已归档

@@ -4,7 +4,7 @@
 |:---|:---|
 | 变更编号 | CHG-086 |
 | 提出日期 | 2026-11-18 |
-| 当前状态 | 实施中 |
+| 当前状态 | 已归档 |
 | 关联需求 | SPEC.PERF.RUNTIME.FRAME-BUDGET.001 |
 | 影响面 | `src/aurora/state/reactor.cpp`、`include/aurora/state/detail/reactor.h`、`include/aurora/state/state.h`、`include/aurora/state/read_only_state.h`（订阅登记）；`src/aurora/widget/serialization.cpp`、`include/aurora/widget/serialization.h`（数组差分与 schema 缓存）；`include/aurora/app/ui_prompt.h`、`include/aurora/app/generate_ui.h`、`include/aurora/widget/codegen.h`、`src/aurora/app/validate_ui.cpp`（只读消费端）；`tools/bench` 下新增基准源与 `cmake/AuroraTools.cmake`（新增基准登记）；`tests/unit/utest_reactor.cpp`、`tests/unit/utest_state.cpp`、`tests/unit/utest_serialization.cpp`；`CHANGELOG.md`；`aurora_api.json`（新增公共查询接口须重生成） |
 
@@ -68,3 +68,4 @@
 - `codespec/specification/02-state.md` §3.4 固定来源订阅：补「手动预登记 → 首跑读依赖」不重复挂接的契约；附录 A.3 依赖剪枝与注册表：补登记唯一性与取消时的观察者摘除闭环。
 - `codespec/specification/08-tooling.md` §2.2 API：补 schema 只读视图入口与失效语义；§2.4 差分补丁协议：补数组分支的路径复用与相等先判（输出不变）；§6 自描述发现 API：补视图入口与按值入口的分工。
 - `codespec/CODING_STANDARDS.md` §6.14 热路径分配纪律：补「缓存命中返回只读视图」与「登记侧保证唯一、热路径不做防御性线性扫描」两条写法。
+- 本提案状态流转：已提议 → 实施中 → 已归档
