@@ -592,6 +592,18 @@ if (AURORA_BUILD_VERIFY_TOOLS)
         list(APPEND _aurora_verify_targets aurora_verify_webview_webview2)
     endif ()
 
+    # ---- WKWebView WebView（macOS）：引擎 + 宿主接线的端到端真机验收 ——
+    # 页面加载与导航态 / 标题 / evaluate 往返 / 双向消息通道 / NSView 子视图几何与显隐
+    # 闭环比对（独立 AppKit 读回）/ 改档后几何再下发 / 快照像素。仅用公共 API；
+    # WKWebView 腿由 AURORA_ENABLE_WEBVIEW ^ APPLE 推导编入，无独立开关。
+    if (APPLE AND AURORA_BACKEND_MACOS AND AURORA_ENABLE_WEBVIEW)
+        aurora_add_verify_probe(aurora_verify_webview_wkwebview
+                "${_aurora_verify_dir}/macos_wkwebview_live_probe.mm"
+                OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED ON)
+        target_compile_options(aurora_verify_webview_wkwebview PRIVATE -fobjc-arc)
+        list(APPEND _aurora_verify_targets aurora_verify_webview_wkwebview)
+    endif ()
+
     # ---- WASAPI 音频（Windows）：真实设备线程 / 格式协商 / 图时钟 / 出声路径真机核对 ----
     # 自动段核对激活/格式契约/时钟推进/缓冲源与推流通路/suspend-resume；--interactive 出声人工段
     # （扫频/双源混音/设备热切换）。需音频后端编译进库（AURORA_ENABLE_AUDIO=ON）。

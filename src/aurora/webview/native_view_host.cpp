@@ -60,7 +60,7 @@ auto to_native_rect(const Rect &window_dips, float scale_factor, const EdgeInset
 }
 
 // 平台引擎工厂的前向声明：仅当对应宏开启时存在（引擎实现源文件内定义）。
-// 本 TU 不引用任何平台符号，故关闭宏的构建（WASM / 未开开关）完全不触碰 WebView2/GTK 头。
+// 本 TU 不引用任何平台符号，故关闭宏的构建（WASM / 未开开关）完全不触碰 WebView2/GTK/WebKit 头。
 #ifdef AURORA_ENABLE_WEBVIEW_WEBVIEW2
 // 已在 `namespace aurora::webview` 内，勿重复开 namespace（否则会嵌套成
 // `aurora::webview::aurora::webview`，导致声明与定义不在同一命名空间）。
@@ -68,6 +68,9 @@ auto create_webview2_engine() -> std::shared_ptr<NativeViewEngine>;
 #endif
 #ifdef AURORA_ENABLE_WEBVIEW_WEBKITGTK
 auto create_webkitgtk_engine() -> std::shared_ptr<NativeViewEngine>;
+#endif
+#ifdef AURORA_ENABLE_WEBVIEW_WKWEBVIEW
+auto create_wkwebview_engine() -> std::shared_ptr<NativeViewEngine>;
 #endif
 
 // 懒安装：进程内首个能力查询时挑一个编译进来的平台实现装上，否则回落 Null 桩——
@@ -93,6 +96,12 @@ auto ensure_engine_installed() -> void {
 #endif
 #ifdef AURORA_ENABLE_WEBVIEW_WEBKITGTK
     if (std::shared_ptr<NativeViewEngine> engine = create_webkitgtk_engine(); engine != nullptr) {
+        install_engine(std::move(engine));
+        return;
+    }
+#endif
+#ifdef AURORA_ENABLE_WEBVIEW_WKWEBVIEW
+    if (std::shared_ptr<NativeViewEngine> engine = create_wkwebview_engine(); engine != nullptr) {
         install_engine(std::move(engine));
         return;
     }

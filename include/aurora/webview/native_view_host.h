@@ -42,7 +42,7 @@
 
 namespace aurora::webview {
 
-/// @brief Web 引擎种类（枚举位按平台实现逐步填充；`Null` 为无引擎的确定性桩）。
+/// @brief Web 引擎种类（三平台引擎腿齐备：WebView2 / WebKitGTK / WKWebView；`Null` 为无引擎的确定性桩）。
 enum class WebViewEngine : std::uint8_t {
     Null,  ///< 无引擎（确定性桩）：恒不可用，供无头 / WASM / CI 走降级路径
     WebView2,  ///< Windows：Microsoft Edge WebView2（系统运行时）

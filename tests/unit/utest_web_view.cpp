@@ -131,16 +131,16 @@ auto stub_bitmap() -> Image {
 /// `availability` 必须可配——降级 slug 的归因就取自它；写死成 `Available` 就等于没测那条分支。
 class StubEngine final : public webview::NativeViewEngine {
   public:
-    StubEngine(bool interactive_caps, bool snapshot_caps, webview::WebViewAvailability availability_caps)
-        : interactive_(interactive_caps), snapshot_(snapshot_caps), availability_(availability_caps) {}
+    StubEngine(bool interactive_caps, bool snapshot_caps, webview::WebViewAvailability availability_caps,
+               webview::WebViewEngine engine_id = webview::WebViewEngine::Null)
+        : interactive_(interactive_caps), snapshot_(snapshot_caps), availability_(availability_caps),
+          engine_id_(engine_id) {}
 
-    [[nodiscard]] auto id() const -> webview::WebViewEngine override { return webview::WebViewEngine::Null; }
+    [[nodiscard]] auto id() const -> webview::WebViewEngine override { return engine_id_; }
 
     [[nodiscard]] auto probe() const -> webview::WebViewCapabilities override {
-        return webview::WebViewCapabilities{.interactive = interactive_,
-                                            .snapshot = snapshot_,
-                                            .engine = webview::WebViewEngine::Null,
-                                            .availability = availability_};
+        return webview::WebViewCapabilities{
+            .interactive = interactive_, .snapshot = snapshot_, .engine = engine_id_, .availability = availability_};
     }
 
     [[nodiscard]] auto create_view(void * /*parent_window*/) -> std::unique_ptr<webview::WebViewSink> override {
@@ -155,6 +155,7 @@ class StubEngine final : public webview::NativeViewEngine {
     bool interactive_;
     bool snapshot_;
     webview::WebViewAvailability availability_;
+    webview::WebViewEngine engine_id_;
 };
 
 /// @brief 装配一个两模式皆可用的桩引擎。
@@ -251,6 +252,23 @@ AURORA_TEST_CASE(null_engine_reports_disabled_availability) {
     AURORA_TEST_CHECK(wv->degraded());
     AURORA_TEST_CHECK_EQ(items.size(), 1U);
     AURORA_TEST_CHECK(has_code(items, "webview-runtime-missing"));
+    webview::install_engine(nullptr);
+}
+
+AURORA_TEST_CASE(wkwebview_engine_identity_flows_through_capability_surface) {
+    // 第三引擎腿（macOS WKWebView）的枚举位经能力面如实透传：进程级裁决与控件读面
+    // 取到同一引擎标识。真机探测归 aurora_verify_webview_wkwebview 探针；此处以桩钉住
+    // 「引擎标识不被控件层吞掉或改写」这条契约（确定性、无 GUI）。
+    webview::install_engine(std::make_shared<StubEngine>(true, true, webview::WebViewAvailability::Available,
+                                                         webview::WebViewEngine::WkWebView));
+    const webview::WebViewCapabilities caps = webview::current_capabilities();
+    AURORA_TEST_CHECK_EQ(static_cast<int>(caps.engine), static_cast<int>(webview::WebViewEngine::WkWebView));
+    AURORA_TEST_CHECK(caps.interactive);
+    AURORA_TEST_CHECK(caps.snapshot);
+    auto wv = std::make_shared<webview::WebView>();
+    AURORA_TEST_CHECK_EQ(static_cast<int>(wv->capabilities().engine),
+                         static_cast<int>(webview::WebViewEngine::WkWebView));
+    AURORA_TEST_CHECK_FALSE(wv->degraded());
     webview::install_engine(nullptr);
 }
 

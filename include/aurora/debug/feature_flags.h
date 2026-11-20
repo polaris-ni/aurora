@@ -47,6 +47,8 @@ struct FeatureFlags {
         false;  ///< AURORA_ENABLE_WEBVIEW_WEBVIEW2：WebView2 原生实现（Windows，PRIVATE 宏，只经本结构查询）。
     bool webview_webkitgtk =
         false;  ///< AURORA_ENABLE_WEBVIEW_WEBKITGTK：WebKitGTK 原生实现（Linux，PRIVATE 宏，只经本结构查询）。
+    bool webview_wkwebview =
+        false;  ///< AURORA_ENABLE_WEBVIEW_WKWEBVIEW：WKWebView 原生实现（macOS，PRIVATE 宏，只经本结构查询）。
 
     /// @brief JSON 导出：键 = 完整宏名（如 "AURORA_BACKEND_WIN32"），值 = bool。
     /// @return JSON 对象，全部字段的键序与本结构字段声明序一致。

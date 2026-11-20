@@ -82,6 +82,9 @@ auto feature_flags() -> FeatureFlags {
 #ifdef AURORA_ENABLE_WEBVIEW_WEBKITGTK
     f.webview_webkitgtk = true;
 #endif
+#ifdef AURORA_ENABLE_WEBVIEW_WKWEBVIEW
+    f.webview_wkwebview = true;
+#endif
 
     return f;
 }
@@ -109,6 +112,7 @@ auto FeatureFlags::to_json() const -> Json {
     j.set("AURORA_ENABLE_WEBVIEW", Json{webview});
     j.set("AURORA_ENABLE_WEBVIEW_WEBVIEW2", Json{webview_webview2});
     j.set("AURORA_ENABLE_WEBVIEW_WEBKITGTK", Json{webview_webkitgtk});
+    j.set("AURORA_ENABLE_WEBVIEW_WKWEBVIEW", Json{webview_wkwebview});
     return j;
 }
 

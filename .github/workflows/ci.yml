@@ -315,8 +315,9 @@ jobs:
             # 三枚图片解码、SQLite、压缩、Tracing（强制连带 Profiling）、WebView 门面一并打开，使这些能力的
             # TU 在 Apple 上至少被编译并跑一遍全量 ctest——此前本腿只按默认值构建，它们在 macOS 上从未进过
             # CI 编译面，能力开关在 Apple 的装配错误（漏链接框架、门控只读平台宏等）只能等本机暴露。
-            # WEBVIEW 在 macOS 没有原生引擎（WEBVIEW2 仅 Windows、WebKitGTK 仅 Linux，跨平台开启即 configure
-            # 期 FATAL），故本腿走的正是「有门面、无引擎即占位降级」那条真实代码路径。
+            # WEBVIEW 的 WKWebView 腿由 ENABLE_WEBVIEW ^ APPLE 推导编入（系统 WebKit 框架直链），
+            # 故本腿覆盖第三引擎腿的真编译链接面；未开 WEBVIEW 的 macOS 作业仍走
+            # 「有门面、无引擎即占位降级」那条真实代码路径。
             # 仍不开：Win32 / D3D11 / X11 / Wayland / WASM 后端与其对位音频腿（跨平台即 FATAL）、
             # wgpu 与 GLFW（后端矩阵的 macos-appkit-glfw 腿负责）、ASan / Coverage（诊断模式改变判据形态）。
             cmake-flags: -G Ninja -DAURORA_ENABLE_AUDIO=ON -DAURORA_ENABLE_IMAGE_JPEG=ON -DAURORA_ENABLE_IMAGE_WEBP=ON -DAURORA_ENABLE_IMAGE_PNG=ON -DAURORA_ENABLE_STORAGE_SQLITE=ON -DAURORA_ENABLE_COMPRESSION=ON -DAURORA_ENABLE_TRACING=ON -DAURORA_ENABLE_WEBVIEW=ON

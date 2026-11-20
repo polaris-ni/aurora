@@ -593,6 +593,18 @@ if (AURORA_ENABLE_WEBVIEW)
         aurora_define_feature(AURORA_ENABLE_WEBVIEW_WEBKITGTK SCOPE PRIVATE)
         aurora_log("WebKitGTK backend enabled (runtime-bound, zero build dependency)")
     endif ()
+    # macOS 对位后端：WKWebView（系统 WebKit 框架，直链——Apple 无「构建机缺 dev 包」问题，
+    # 取 CoreAudio 直链先例；运行期仍判类一次，缺类报 MissingRuntime 降级）。
+    # 由 AURORA_ENABLE_WEBVIEW ^ APPLE 推导注入，无独立 CMake 旋钮（与 WebView2 腿同形）。
+    # OBJCXX 语言已在顶层 CMakeLists 启用（Apple 上 AURORA_BACKEND_MACOS 恒 ON，关闭即 FATAL，
+    # 见上方平台守卫），此处仅标记本 TU 的语言。
+    if (APPLE)
+        aurora_define_feature(AURORA_ENABLE_WEBVIEW_WKWEBVIEW SCOPE PRIVATE)
+        target_link_libraries(aurora PUBLIC "-framework WebKit")
+        set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/src/aurora/webview/engine_wkwebview.cpp"
+                PROPERTIES LANGUAGE OBJCXX)
+        aurora_log("WKWebView backend enabled (system WebKit framework)")
+    endif ()
 endif ()
 
 # ---- 存储 SQLite 后端（记录仓储第三后端，opt-in，默认 OFF） ----

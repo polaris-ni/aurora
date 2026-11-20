@@ -50,6 +50,7 @@ struct FlagKeyPair {
         {.key = "AURORA_ENABLE_WEBVIEW", .field = &FeatureFlags::webview},
         {.key = "AURORA_ENABLE_WEBVIEW_WEBVIEW2", .field = &FeatureFlags::webview_webview2},
         {.key = "AURORA_ENABLE_WEBVIEW_WEBKITGTK", .field = &FeatureFlags::webview_webkitgtk},
+        {.key = "AURORA_ENABLE_WEBVIEW_WKWEBVIEW", .field = &FeatureFlags::webview_wkwebview},
     };
     return AURORA_FLAG_KEY_TABLE;
 }
@@ -80,6 +81,7 @@ AURORA_TEST_CASE(value_initialized_flags_are_all_false) {
     AURORA_TEST_CHECK_FALSE(defaults.webview);
     AURORA_TEST_CHECK_FALSE(defaults.webview_webview2);
     AURORA_TEST_CHECK_FALSE(defaults.webview_webkitgtk);
+    AURORA_TEST_CHECK_FALSE(defaults.webview_wkwebview);
 }
 
 AURORA_TEST_CASE(snapshot_matches_json_per_macro_key) {
