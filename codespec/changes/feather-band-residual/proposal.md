@@ -4,7 +4,7 @@
 |:---|:---|
 | 变更编号 | CHG-085 |
 | 提出日期 | 2026-11-18 |
-| 当前状态 | 实施中 |
+| 当前状态 | 已归档 |
 | 关联需求 | SPEC.PERF.RUNTIME.FRAME-BUDGET.001 |
 | 影响面 | `src/aurora/render/painter.cpp`（`fill_sector` 羽化带、圆角子像素过渡列、`draw_linear_gradient` / `draw_radial_gradient` 过渡带、`draw_shadow` 边缘环、`draw_line` / `stroke_polyline` 羽化带、`composite` 录制态快照）；`tests/unit/utest_painter.cpp` / `utest_painter_primitives.cpp` / `utest_offscreen.cpp` / `utest_display_list.cpp` / `utest_simd_parity.cpp` 与 `tests/support/gpu_golden_scenes.h`；`tests/integration/itest_shadow.cpp`、`tests/integration/itest_gradient.cpp`、`tests/integration/itest_gradient_title_no_fringe.cpp` 的语义覆盖须继续成立；`tools/bench/bench_render.cpp`（须增补扇形与宽描边场景）；`CHANGELOG.md`；`include/aurora/render/display_list.h` 与显示列表回放侧、`tests/unit/utest_rhi.cpp` 及两个 GPU 后端用例**仅在快照方案评审选择扩展命令数据时**纳入，届时按公共头变更处理 |
 
@@ -52,6 +52,8 @@
 
 11. **实施记录**：落地阶段按第 9 条移出三项，剩余两项已实施并自证，快照项留待评审。移出的三项与理由：① `draw_shadow` 边缘环——现有实现已用 `half = sqrt(blur²−dy²)+1` 把每行迭代收进羽化带，余量仅 1px，环内每个像素的 dist 不同、alpha 连续变化，逐像素 `sqrt` 是几何必需，逐位一致下无可批量空间；② `fill_sector` 角向带——径向核心已按行解析批量、角向核心已用径向边垂距批量，剩余 `atan2` 全在真正的角向羽化带内，覆盖度由精确角度决定，无法逐位一致地批量；③ 圆角文本过渡列——safe 区已批量且经 `covers_fully` 复核，过渡列每列 SDF coverage 不同且走 gamma-correct 混合，多列批量会改变量化结果。三项继续硬改只能靠近似公式或放宽容差，违反第 5 条边界，故按第 9 条移出，保留现状描述。已实施两项：`draw_line` / `stroke_polyline` 的平方上界提前剔除（golden 变异转红 10px 漂移、max delta 49 自证）、径向渐变多色标行内区分段推进（新增逐位对照用例；变异索引推进转红 57/45px）。快照项已按第 7 条完成边界评审并落地：确认 DL 快照跨帧存活、两个源（每帧临时 `sub` 与跨帧 `paint_cache_`）均不可借用像素，故快照必须拷贝；`to_image()` 那份拷贝只有共享所有权或移动语义能消除，纯池化只能省分配、不成立。评审选定「临时源移动重载」：新增 `Painter::composite(Painter &&, ...)`，录制态直接把临时源帧缓冲移动进图像池；`paint_cache_` 那条线仍走常量引用版拷贝。新增 `record_composite_rvalue_matches_lvalue_and_drains_source` 对照用例（两路径回放逐位 0 差异 + 源缓冲被掏空）；把实现改回拷贝的注入变异令「掏空」断言转红，证据成立。性能实测（同机、`bench_render` 1280×720 scale=1.0 录制态合成，三轮重复）：移动版 8.33 ms / 常量版 9.27 ms（约 −11%）；新增 `composite_record_move` / `composite_record_copy` 两个基准场景，源取画布同尺寸以放大整帧 memcpy 信号（小源会被固定开销淹没）。性能实测（同机 Debug/AUTO、`bench_render` 1280×720 scale=1.0，暂存实现取基线后恢复）：`stroke_wide_slanted` 6.770 → 4.821 ms（−28.8%），`radial_gradient_multistop` 8.951 → 7.416 ms（−17.1%）；两场景为本轮新增，分别覆盖双斜线羽化外沿与五段非 SIMD 径向渐变。
 
+12. **收尾核实（判据与实施/移出方案的对齐）**：归档前逐条复核判据可证伪性，登记三处措辞与实施/移出方案的偏差——① 判据2 描边：`stroke_polyline` 有既有 golden 基线（`golden_polyline_matches_baseline`，属判据1 覆盖类），`draw_line` 平方上界以 golden 变异转红自证（10px 漂移、max delta 49），未另建独立正交逐像素基准；② 判据4 性能场景：扇形按第 9 条移出故不增 `sector_ring`，宽描边以 `stroke_wide_slanted`（`draw_line` 羽化外沿）覆盖、未单列 `stroke_polyline_wide`（polyline 由 golden 回归覆盖）；③ 判据5 快照：评审选定「临时源移动重载」方案（非共享像素池 / 写时复制），不存在可复用像素池，「多帧复用→内容失效→清池」链在该方案下无对象，改由 `record_composite_rvalue_matches_lvalue_and_drains_source`（录制→回放逐位→掏空源）覆盖。性能实测与全量 `ctest` 门禁因本机 g++ 内存受限（默认并行 OOM）未实跑，留 CI 补验；纯 Python `check_*` 一致性门禁已实跑绿。
+
 ## 验收判据
 
 1. **像素逐位（已有基线的部分）**：`tests/unit/utest_painter_primitives.cpp` 的 `golden_polyline_matches_baseline`、`golden_sector_matches_baseline` 与 `tests/unit/utest_offscreen.cpp` 的像素快照基线，以及 `tests/support/gpu_golden_scenes.h` 覆盖的折线、扇形、文本列、柱状图场景，改动前后逐位 0 差异；`tests/unit/utest_simd_parity.cpp` 的标量 / SSE2 / AVX2 三实现继续逐位一致。若某项确实改变基线，须在实施记录中列出差异像素数、分布与上限，并说明为何属于语义修正；禁止只重生成基线。
@@ -73,3 +75,4 @@
 - `codespec/ARCHITECTURE.md` §8.1 渲染核心：补「批量全覆写区 + 羽化过渡带」双路径不变量与逐位一致要求；§8.3 Scroll 离屏内容缓冲（滑窗）：补录制态合成快照的复用与失效边界；§10 性能检测体系：补原语均值与整帧分位数两套读数口径的分工；§14.6 按改动类型的门禁矩阵：补触及渲染原语时的验证组合（含无 golden 项的自建基准要求）。
 - `codespec/specification/03-layout-render.md` §8.1 Painter：补扇形角向边界（含整圆、`sweep ≥ π` 与跨 ±π 分段）、圆角子像素过渡列、渐变过渡带、阴影边缘环、描边羽化带的边界与取整口径；§8.4 离屏渲染与快照、§8.6 显示列表与 RHI 后端：补录制态合成快照的所有权、生命周期与回放契约。
 - `codespec/CODING_STANDARDS.md` §3.5 golden 基线测试规范：补「无 golden 的原语以测试内独立逐像素基准对照」的写法与适用边界；§6.14 热路径分配纪律：补「几何快路径须可注入变异自证」与「像素基线不得靠重生成掩盖差异」。
+- 本提案状态流转：已提议 → 实施中 → 已归档

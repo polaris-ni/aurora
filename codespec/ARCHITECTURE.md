@@ -458,6 +458,8 @@ Aurora 内置轻量级运行时性能检测体系，提供帧级指标采集、�
 
 **热路径改动的读数纪律**：只接受同机同构建（`AURORA_ENABLE_PROFILING=ON`）的实测改善，`perf_gates.json` 阈值仅在实测稳定通过后才收紧；拿不到稳定读数时把该项列为未完成交付，不以估算或单次读数代替，也不放宽既有阈值。
 
+**原语均值与整帧分位数两套读数口径的分工**：渲染原语级改动（羽化带、渐变分段、描边平方剔除、录制态合成快照）用 `tools/bench/bench_render.cpp` 的单原语场景看**均值**与绘制分项——同码重复测量的波动区间即噪声预算，只接受稳定压过波动的改善；整帧成本（滚动滑窗、离屏缓存复用）用同一文件的 `ScrollBenchHarness` 300 帧 scroll 场景看 **p99 / jitter / full_redraw_frames** 分位数。两套读数不可互相折算，也不得以单原语均值代整帧分位数作结论；扇形、宽描边等无既有基准场景的原语须先增补场景再申报性能，否则只申报逐位一致与变异自证。
+
 ---
 
 ## 11 设计不变量
@@ -665,6 +667,7 @@ CI 配置位于 `.github/workflows/`：
 | 仓库入口 `AGENTS.md` 本身 | `check_agents_size`（> 8 KiB 红灯；超限时把细节下沉 `codespec/`，不得放宽阈值） | 本表（把细则搬回这里） |
 | 版本号 / `CHANGELOG.md` | `check_version_consistency` | `CODING_STANDARDS.md` §7 |
 | 运行时基准结果契约、入库基线、比较载体与夜间编排 | `bench_compare_selftest`（普通 CTest 用例，非一票否决声明）、`utest_bench_result`、`check_workflow_yaml`（标准解析器完整读入且 `env:` 折叠标量值不含注释字符）、`check_declared_gates`（声明数与注册集合无差异）；夜间作业自身不进 CTest | `specification/08-tooling.md`（工具规格章节）、本文件 §10.7 / §14.4、`GUIDELINE.md` §14 |
+| 渲染原语（羽化带 / 渐变分段 / 描边平方剔除 / 录制态合成快照） | golden 逐位回归（`utest_painter_primitives` / `utest_offscreen` / `utest_simd_parity`）；**无既有 golden 的原语须在测试内自建逐像素正交基准**（`count_diff_pixels` 必须为 0，见 `CODING_STANDARDS.md` §6.14）；每项至少注入一次会改变输出的变异并确认转红（「退回逐像素」一类等价改写不算有效变异）；性能申报另跑 `bench_render` 同机实测（均值口径，见本文件 §10.7） | `specification/03-layout-render.md` §8.1 / §8.6 + `CODING_STANDARDS.md` §6.14 + 本文件 §10.7 |
 | 任何代码行为 | 相关 `ctest -R <stem>`、`--target docs` | 本文件 §15 流程表「回写」阶段 |
 | `tests/fuzz/`、模糊测试构建模块与独立工作流 | `check_workflow_yaml`（新增工作流的结构自检与完整解析）、`check_code_doc_sync`（设施目录白名单）、`check_no_cjk_literals`、`format-check`；夜间作业另跑判定脚本与有效性自证，不注册 CTest | `specification/08-tooling.md` §8.2、`BUILD_OPTIONS.md` §2 / §4 |
 | CI 静态检查编排（`tools/check/select_lint_tus.py`、`tools/check/run_clang_tidy.py`、`.github/workflows/`） | `check_change_proposals`、`check_no_cjk_literals`、`check_no_hardcoded_paths`；且**全量出口不得被削弱**——PR / master(+main) 推送 / 每周定时 / 手动触发四类事件下仍须走全量 11-job lint 矩阵；功能分支推送改由作业 8i `lint-incremental`（单 job 增量）覆盖，**不得反向把全量事件降级为增量**（判据见 `BUILD_OPTIONS.md` §4.5、作业编排见 `.github/workflows/ci.yml` 作业 8 / 8p / 8w / 8i / 8win / 8mac） | `BUILD_OPTIONS.md` §4.5 |
