@@ -5,6 +5,8 @@
 /// 布局高度按行计数与自描述元数据、IME 组合输入（preedit 显示 / 上屏落字 / 失焦取消）。
 /// RTL 切片：书写方向 API 往返与不落盘、指针命中逻辑↔视觉镜像、RTL 段右对齐像素、
 /// 选区高亮镜像、聚焦光标落右缘像素
+///           另覆盖「平台主修饰键」驱动编辑判定：样式切换 / 全选 / 文档级 Home·End 与另一枚
+///           物理位的分平台判定档
 
 #include <algorithm>
 #include <memory>
@@ -863,6 +865,63 @@ AURORA_TEST_CASE(inline_home_end_move_within_current_line) {
     press(KeyCode::End, false, true);  // Shift+End：选区 8..12
     AURORA_TEST_CHECK_TRUE(edit.has_selection());
     AURORA_TEST_CHECK_EQ(edit.selected_text(), std::string{"ghij"});
+}
+
+// 主修饰键（macOS 的 ⌘ / 其余平台的 Ctrl）驱动同一条编辑判定：样式切换、全选与文档级 Home / End
+// 都经 `has_primary_modifier`。另一枚物理位的判定档按平台分别钉住——macOS 上物理 Ctrl 与 ⌘ 同解，
+// 非 macOS 上 Meta 是独立的一位、不认领编辑键。
+AURORA_TEST_CASE(primary_modifier_drives_editing_and_document_home_end) {
+    RichTextEdit edit;
+    edit.load_spans({TextSpan{.text = LocalizedString{"abc\ndef"}}});
+    edit.layout(bounded(200.0F, 100.0F), BuildContext{});  // 触发 on_layout 以填充 lines_
+    edit.on_focus_change(true);
+
+    auto press = [](KeyCode code, ModifierKey mods) -> KeyEvent {
+        KeyEvent k;
+        k.key = static_cast<int>(code);
+        k.action = KeyAction::Down;
+        k.modifiers = mods;
+        return k;
+    };
+
+    // 主修饰键 + B 切换加粗。
+    KeyEvent bold = press(KeyCode::B, platform_primary_bit());
+    edit.on_key_event(bold);
+    AURORA_TEST_CHECK_TRUE(bold.is_handled);
+    AURORA_TEST_CHECK_TRUE(edit.current_font().weight >= 700);
+
+    // 主修饰键 + A 全选整篇。
+    KeyEvent all = press(KeyCode::A, platform_primary_bit());
+    edit.on_key_event(all);
+    AURORA_TEST_CHECK_TRUE(all.is_handled);
+    AURORA_TEST_CHECK_EQ(edit.selected_text(), std::string{"abc\ndef"});
+
+    // 主修饰键 + Home / End：跳到文档头 / 尾（非行内）。
+    KeyEvent home = press(KeyCode::Home, platform_primary_bit());
+    edit.on_key_event(home);
+    AURORA_TEST_CHECK_TRUE(home.is_handled);
+    AURORA_TEST_CHECK_EQ(edit.caret(), 0U);
+    KeyEvent end = press(KeyCode::End, platform_primary_bit());
+    edit.on_key_event(end);
+    AURORA_TEST_CHECK_TRUE(end.is_handled);
+    AURORA_TEST_CHECK_EQ(edit.caret(), 7U);
+
+    // 另一枚物理位的判定档（新控件，免得上一条的选区把「没反应」伪装成「有反应」）。
+    RichTextEdit other;
+    other.load_spans({TextSpan{.text = LocalizedString{"abc"}}});
+    other.layout(bounded(200.0F, 60.0F), BuildContext{});
+    other.on_focus_change(true);
+#ifdef AURORA_PLATFORM_MACOS
+    KeyEvent ctrl_all = press(KeyCode::A, ModifierKey::Control);
+    other.on_key_event(ctrl_all);
+    AURORA_TEST_CHECK_TRUE(ctrl_all.is_handled);
+    AURORA_TEST_CHECK_TRUE(other.has_selection());
+#else
+    KeyEvent meta_all = press(KeyCode::A, ModifierKey::Meta);
+    other.on_key_event(meta_all);
+    AURORA_TEST_CHECK_FALSE(meta_all.is_handled);
+    AURORA_TEST_CHECK_FALSE(other.has_selection());
+#endif
 }
 
 }  // namespace aurora::test_cases::utest_rich_text_edit

@@ -4,7 +4,7 @@
 |:---|:---|
 | 变更编号 | CHG-087 |
 | 提出日期 | 2026-11-14 |
-| 当前状态 | 实施中 |
+| 当前状态 | 已归档 |
 | 关联需求 | SPEC.PLATFORM.CONSISTENT-BEHAVIOR.001 |
 | 影响面 | `include/aurora/event/event.h`（新增两枚纯函数）；`include/aurora/app/shortcuts.h`（`KeyCombo::matches` 的匹配算式）；`include/aurora/widget/text_input.h`、`src/aurora/widget/rich_text_edit.cpp`、`src/aurora/widget/text.cpp`（编辑判定的修饰键来源）；`aurora_api.json` 重生成；`tests/unit/utest_shortcuts.cpp` / `utest_text_input.cpp` / `utest_rich_text_edit.cpp` 扩例；`codespec/manual-test/` 一条真机用例；`codespec/specification/05-event-navigation.md` §2.2、`06-app-platform.md` §8.2 / §8.4 / §8.6、`codespec/GUIDELINE.md` 快捷键示例注释 |
 
@@ -32,6 +32,7 @@
 5. **测试**：`utest_shortcuts.cpp` 加折算真值表（逐位幂等、锁定态不受染、非 macOS 恒等）、`matches` 在折叠后仍是等式而非包含（`{Control,O}` 不得命中 `{Control,Shift,O}`）、macOS 专属期望用编译期分支钉住；`utest_text_input.cpp` / `utest_rich_text_edit.cpp` 加「主修饰键 + C / X / V / A / Home / End」编辑路径用例；既有 NumLock 掩码划分自证用例保持绿。
 6. **不落本批**：菜单 `keyEquivalent` 与 ⌘ 字形显示、OS 级热键折叠、拖放修饰键翻译、`KeyEvent::modifiers` 的任何形态改动。
 7. **发布记录**：`CHANGELOG.md` 顶部当前版本段落 `### Fixed` 追加一条，含 macOS 上不可区分物理 Ctrl 与 ⌘ 这一代价的如实登记——该文档不属 codespec 树，按 `AGENTS.md` 硬规则 5 不列为回写落点。
+8. **实施与核实记录**：折算层与消费方接线按第 1–4 条落地：`event.h` 两枚 `constexpr` 纯函数（macOS 编译期分支，非 macOS 恒等），`KeyCombo::matches` 两侧取子集后、比较前各折一次，`TextInput` / `RichTextEdit` / `Text` 的编辑判定改经 `has_primary_modifier`（`RichTextEdit` 的 `handle_control_shortcut` 随之更名 `handle_editing_shortcut`），全仓 `src/aurora/widget/` 与 `include/aurora/widget/` 已无裸 `& ModifierKey::Control`。测试覆盖：`utest_event` 逐值折算表与幂等、`utest_shortcuts` 四条匹配口径与注册表命中、`utest_text_input` 主修饰键全选 / 复制、`utest_rich_text_edit` 样式切换 / 全选 / 文档级 Home·End 与另一枚物理位的分平台判定档；两档期望均由编译期分支选定，非 macOS 腿钉恒等、macOS 腿钉融合。验证：`aurora_api_json` 重生成无差异（生成器不收录自由函数），全量 `ctest --preset ninja-test` 488/488 绿；`TC-EVENT-011` 在 Windows 宿主上按 §1.7 记 `SKIP`（前置 macOS 真机不满足），macOS 真机的系统剪贴板与命令动作仍待实机执行，编译期分支用例由 CI `macos-clang` 作业全量 `ctest` 真跑。
 
 ## 验收判据
 
@@ -48,3 +49,4 @@
 - `codespec/specification/06-app-platform.md` §8.4：`KeyCombo::matches` 的匹配语义四条口径处补折叠；§8.2 控件层剪贴板快捷键表述由「Ctrl+C/X/V」改称主修饰键口径；§8.6 OS 级全局热键的分工表补「按物理位申报，折叠不适用」及理由。
 - `codespec/GUIDELINE.md`：快捷键与命令 `default_binding` 示例处的注释。
 - `codespec/manual-test/`：对应模块追加一条真机用例及其执行记录行。
+- 本提案状态流转：已提议 → 实施中 → 已归档

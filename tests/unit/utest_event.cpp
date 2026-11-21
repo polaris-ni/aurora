@@ -348,10 +348,9 @@ AURORA_TEST_CASE(fold_primary_modifier_follows_the_platform_table) {
     for (const auto &s : samples) {
         const ModifierKey got = fold_primary_modifier(s.input);
         const ModifierKey want = platform_expected(s.macos, s.elsewhere);
-        AURORA_TEST_CHECK_MSG(got == want,
-                              modifier_bits_text(static_cast<std::uint8_t>(s.input)) + " -> " +
-                                  modifier_bits_text(static_cast<std::uint8_t>(got)) + ", want " +
-                                  modifier_bits_text(static_cast<std::uint8_t>(want)));
+        AURORA_TEST_CHECK_MSG(got == want, modifier_bits_text(static_cast<std::uint8_t>(s.input)) + " -> " +
+                                               modifier_bits_text(static_cast<std::uint8_t>(got)) + ", want " +
+                                               modifier_bits_text(static_cast<std::uint8_t>(want)));
         // 幂等：折两次与折一次同值——`matches` 比较前两侧各折一次，正靠这条不会二次改位。
         AURORA_TEST_CHECK_EQ(static_cast<std::uint8_t>(fold_primary_modifier(got)), static_cast<std::uint8_t>(got));
     }
@@ -387,10 +386,9 @@ AURORA_TEST_CASE(has_primary_modifier_reads_the_platform_primary_key) {
     for (const auto &s : samples) {
         const bool want = platform_expected(s.macos, s.elsewhere);
         const bool got = has_primary_modifier(s.mods);
-        AURORA_TEST_CHECK_MSG(got == want,
-                              modifier_bits_text(static_cast<std::uint8_t>(s.mods)) + (got ? " is primary" :
-                                                                                        " is not primary") +
-                                  ", want " + (want ? std::string{"primary"} : std::string{"not primary"}));
+        AURORA_TEST_CHECK_MSG(got == want, modifier_bits_text(static_cast<std::uint8_t>(s.mods)) +
+                                               (got ? " is primary" : " is not primary") + ", want " +
+                                               (want ? std::string{"primary"} : std::string{"not primary"}));
         // 两式同源：判定 == 折算后的 Ctrl 位是否置位。
         AURORA_TEST_CHECK_EQ(got, (static_cast<std::uint8_t>(fold_primary_modifier(s.mods)) &
                                    static_cast<std::uint8_t>(ModifierKey::Control)) != 0U);
